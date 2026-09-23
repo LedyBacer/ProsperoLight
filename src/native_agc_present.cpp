@@ -576,6 +576,18 @@ static void bind_main10_source(agc_command_buffer_t *command, uint8_t *resources
     sceAgcCbSetShRegisterRangeDirect(command, 0x0c, descriptor, 30);
 }
 
+static NativeAgcPerformance agc_performance;
+
+void native_agc_reset_performance()
+{
+    agc_performance = {};
+}
+
+const NativeAgcPerformance &native_agc_performance()
+{
+    return agc_performance;
+}
+
 static int render_frame(int video, int buffer_index, void *target, uint8_t *memory,
                         void *vertex_shader, void *pixel_shader, void *hud_pixel_shader,
                         const void *source, size_t source_bytes, uint32_t pitch,
@@ -585,6 +597,7 @@ static int render_frame(int video, int buffer_index, void *target, uint8_t *memo
                         uint32_t overlay_height, uint32_t overlay_x, uint32_t overlay_y,
                         uint32_t overlay_scale, float overlay_alpha)
 {
+    const uint64_t prepare_started = moonlight::performance_now_us();
     static const uint16_t target_offsets[16] = {0x318, 0x31b, 0x31c, 0x31d, 0x31e, 0x31f,
                                                 0x321, 0x323, 0x324, 0x325, 0x390, 0x398,
                                                 0x3a0, 0x3a8, 0x3b0, 0x3b8};
@@ -798,11 +811,19 @@ static int render_frame(int video, int buffer_index, void *target, uint8_t *memo
     submit.words = words;
     submit.word_count = (uint32_t)(command.up - words);
     *word_count = submit.word_count;
-    flush_gpu_data(memory, SHADER_STATIC_BYTES);
+    moonlight::record_performance_elapsed(agc_performance.prepare, prepare_started);
+    const uint64_t flush_started = moonlight::performance_now_us();
+    // Shader code, linked state and resource tables were published at setup.
+    // Only the combined registers, constants and command bank change per frame.
+    // Flush the whole command bank (including downward-growing indirect data).
+    flush_gpu_data(memory + 0x6800, 0xc000 - 0x6800);
+    moonlight::record_performance_elapsed(agc_performance.cache_flush, flush_started);
     {
+        const uint64_t submit_started = moonlight::performance_now_us();
         int32_t result = sceAgcDriverSubmitDcb(&submit);
         if (result == 0)
             result = sceAgcSuspendPoint();
+        moonlight::record_performance_elapsed(agc_performance.submit, submit_started);
         return result;
     }
 }
@@ -883,9 +904,13 @@ static int wait_for_marker(int64_t marker, unsigned *waits_out)
     {
         for (; waits < max_waits; ++waits)
         {
+            if (PROSPEROLIGHT_PERFORMANCE_DETAIL)
+                ++agc_performance.flip_queries;
             if (sceVideoOutGetFlipStatus(presenter.video, status) == 0 &&
                 (int64_t)status[3] >= marker)
                 break;
+            if (PROSPEROLIGHT_PERFORMANCE_DETAIL)
+                ++agc_performance.flip_sleeps;
             if (presenter.requested_fps > 60u)
                 sceKernelUsleep(PROSPEROLIGHT_FLIP_POLL_US);
             else
@@ -894,6 +919,8 @@ static int wait_for_marker(int64_t marker, unsigned *waits_out)
     }
     if (waits_out)
         *waits_out = waits;
+    if (PROSPEROLIGHT_PERFORMANCE_DETAIL && waits == max_waits)
+        ++agc_performance.flip_timeouts;
     return waits == max_waits ? -5 : 0;
 }
 
@@ -1122,6 +1149,8 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
     if (result != 0 || link_result != 0)
         return result ? result : link_result;
 
+    flush_gpu_data(presenter.shader_memory, SHADER_STATIC_BYTES);
+
     presenter.video = sceVideoOutOpen(0xff, 0, 0, NULL);
     if (presenter.video >= 0 && requested_fps > 60u)
         mode_result =
@@ -1267,11 +1296,13 @@ static int present_frame(const void *source, size_t source_bytes, uint32_t pitch
             result = wait_for_marker(presenter.overlay_marker, NULL);
             if (result != 0)
                 return result;
+            const uint64_t overlay_started = moonlight::performance_now_us();
             refresh_keyboard_surface(
                 presenter.shader_memory + HUD_SURFACE_OFFSET,
                 std::atomic_load_explicit(&keyboard_selected, std::memory_order_relaxed),
                 std::atomic_load_explicit(&keyboard_shifted, std::memory_order_relaxed), hdr);
             flush_gpu_data(presenter.shader_memory + HUD_SURFACE_OFFSET, KEYBOARD_SURFACE_BYTES);
+            moonlight::record_performance_elapsed(agc_performance.overlay, overlay_started);
             presenter.keyboard_generation = generation;
         }
     }
@@ -1282,10 +1313,12 @@ static int present_frame(const void *source, size_t source_bytes, uint32_t pitch
             result = wait_for_marker(presenter.overlay_marker, NULL);
             if (result != 0)
                 return result;
+            const uint64_t overlay_started = moonlight::performance_now_us();
             refresh_hud_surface(presenter.shader_memory + HUD_SURFACE_OFFSET, metrics,
                                 visible_width, visible_height, render_width, render_height,
                                 presenter.scanout_refresh_x100, hdr);
             flush_gpu_data(presenter.shader_memory + HUD_SURFACE_OFFSET, HUD_SURFACE_BYTES);
+            moonlight::record_performance_elapsed(agc_performance.overlay, overlay_started);
         }
     }
     presenter.overlay_kind = draw_keyboard ? 2u : draw_hud ? 1u : 0u;

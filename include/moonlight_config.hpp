@@ -11,7 +11,8 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 #define MOONLIGHT_CONFIG_MAX_HOSTS 8U
@@ -31,34 +32,34 @@ extern "C" {
 #define MOONLIGHT_AUDIO_STEREO 0U
 #define MOONLIGHT_AUDIO_51_SURROUND 1U
 
-typedef struct moonlight_config_host {
-    char address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
-    char name[MOONLIGHT_CONFIG_NAME_SIZE];
-    char unique_id[MOONLIGHT_CONFIG_UNIQUE_ID_SIZE];
-    uint32_t manual;
-} moonlight_config_host_t;
+    typedef struct moonlight_config_host
+    {
+        char address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
+        char name[MOONLIGHT_CONFIG_NAME_SIZE];
+        char unique_id[MOONLIGHT_CONFIG_UNIQUE_ID_SIZE];
+        uint32_t manual;
+    } moonlight_config_host_t;
 
-typedef struct moonlight_config {
-    uint32_t host_count;
-    uint32_t selected_host;
-    uint32_t bitrate_mbps;
-    uint32_t display_area;
-    uint32_t video_codec;
-    uint32_t stream_resolution;
-    uint32_t stream_fps;
-    uint32_t hdr_enabled;
-    uint32_t audio_configuration;
-    moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
-} moonlight_config_t;
+    typedef struct moonlight_config
+    {
+        uint32_t host_count;
+        uint32_t selected_host;
+        uint32_t bitrate_mbps;
+        uint32_t display_area;
+        uint32_t video_codec;
+        uint32_t stream_resolution;
+        uint32_t stream_fps;
+        uint32_t hdr_enabled;
+        uint32_t audio_configuration;
+        moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    } moonlight_config_t;
 
-void moonlight_config_defaults(moonlight_config_t *config);
-bool moonlight_config_load(moonlight_config_t *config);
-bool moonlight_config_save(const moonlight_config_t *config);
-int moonlight_config_upsert_host(moonlight_config_t *config,
-                                 const char *address,
-                                 const char *name,
-                                 const char *unique_id,
-                                 bool manual);
+    void moonlight_config_defaults(moonlight_config_t *config);
+    bool moonlight_config_load(moonlight_config_t *config);
+    bool moonlight_config_save(const moonlight_config_t *config);
+    int moonlight_config_upsert_host(moonlight_config_t *config, const char *address,
+                                     const char *name, const char *unique_id, bool manual);
+    bool moonlight_config_remove_host(moonlight_config_t *config, uint32_t index);
 
 #ifdef __cplusplus
 }

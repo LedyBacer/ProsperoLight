@@ -18,11 +18,41 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ToolTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("llvm-config-18"), "requires LLVM 18 host tools")
+    def test_native_toolchain_is_shared_and_rejects_a_mismatched_compiler(self):
+        environment = os.environ.copy()
+        environment.pop("LLVM_CONFIG", None)
+        environment.pop("PS5_CLANG", None)
+        check = 'set -eu; source tools/native-toolchain.sh; "$PS5_CLANG" -dumpversion'
+        selected = subprocess.run(["bash", "-c", check], cwd=ROOT, env=environment,
+                                  text=True, capture_output=True)
+        self.assertEqual(selected.returncode, 0, selected.stderr)
+        self.assertTrue(selected.stdout.startswith("18."))
+        environment["PS5_CLANG"] = "true"  # Exists, but is not a Clang 18 compiler.
+        rejected = subprocess.run(["bash", "-c", check], cwd=ROOT, env=environment,
+                                  text=True, capture_output=True)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("Clang 18", rejected.stderr)
+        for script in ("build.sh", "build-stream-deps.sh"):
+            self.assertIn('source "$root/tools/native-toolchain.sh"',
+                          (ROOT / "tools" / script).read_text())
+
+    def test_round3_candidates_keep_overlap_and_change_one_variable(self):
+        builder = (ROOT / "tools/build-performance-candidates.sh").read_text()
+        candidates = builder.split("candidates=$'", 1)[1].split("'", 1)[0].split(r"\n")
+        rows = [row.split() for row in candidates]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0][1:], ["0", "0", "0", "1", "500", "0"])
+        self.assertEqual(rows[1][1:-1], rows[0][1:-1])
+        self.assertEqual(rows[1][-1], "1")
+        self.assertEqual(rows[2][1:5], rows[1][1:5])
+        self.assertEqual(rows[2][-2:], ["200", "1"])
+
     def test_release_enables_only_tested_presentation_overlap(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn("PRESENT_OVERLAP ?= 1", makefile)
         self.assertIn("FLIP_POLL_US ?= 500", makefile)
-        for option in ("FEC_SIMD", "OPUS_SIMD", "AUDIO_MAX_BACKLOG_MS",
+        for option in ("FEC_SIMD", "OPUS_SIMD", "AUDIO_MAX_BACKLOG_MS", "PERFORMANCE_DETAIL",
                        "LAN_TELEMETRY", "STREAM_SELF_TEST_FPS",
                        "STREAM_SELF_TEST_RESOLUTION", "VIDEO_OUTPUT_SELF_TEST_FPS",
                        "STOP_ACTIVE_APP_SELF_TEST"):
@@ -72,7 +102,7 @@ class ToolTests(unittest.TestCase):
     def test_stop_refresh_preserves_the_last_application_catalog(self):
         source = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
         start = source.index("void MoonlightApp::FinishStopActiveApp()")
-        end = source.index("void MoonlightApp::RefreshBackend()", start)
+        end = source.index("void MoonlightApp::RefreshBackend(", start)
         stop = source[start:end]
 
         self.assertIn("moonlight_backend_snapshot_t refreshed{};", stop)

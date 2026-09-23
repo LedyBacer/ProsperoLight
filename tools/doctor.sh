@@ -56,7 +56,9 @@ fi
 required bash 'build orchestration'
 required make 'primary build entry point'
 required python3 'metadata, tests, and packaging helpers'
-required_one_of clang 'native host and target compilation' clang-18 clang
+required clang-18 'pinned native target compilation'
+required llvm-config-18 'shared SDK/app LLVM selection (llvm-18-dev)'
+required ld.lld-18 'pinned native linker'
 required_one_of clang++ 'C++ host and target compilation' clang++-18 clang++
 required_one_of clang-format 'format validation' clang-format-18 clang-format
 required_one_of clang-tidy 'static analysis' clang-tidy-18 clang-tidy

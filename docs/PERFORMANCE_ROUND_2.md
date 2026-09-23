@@ -1,5 +1,8 @@
 # Round 2: performance experiments
 
+Next iteration: [Round 3 — sustained 4K120, latency and efficiency](PERFORMANCE_ROUND_3.md)
+contains the proposed follow-up work; it is not an implemented release feature.
+
 Status: **bounded presentation overlap promoted for `01.000.060`** after the
 wired 1080p120 and 4K120 user comparisons below. The user approved publication;
 repeatability and the full codec/HDR/audio matrix remain follow-up work, not

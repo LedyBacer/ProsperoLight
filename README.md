@@ -4,6 +4,12 @@
 
 <h1 align="center">ProsperoLight</h1>
 
+> **Experimental performance beta: [01.000.062](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.062).**
+> Eight-slice decoding, faster input polling and reduced client overhead.
+> Remaining 4K120 stuttering is still under investigation; no locked-120-FPS guarantee.
+> [01.000.060 remains stable](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.060).
+> Please report results and regressions through [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues), using the checklist in the beta release notes.
+
 <p align="center">
   <strong>A native Moonlight client for PlayStation 5 homebrew</strong><br>
   Stream Sunshine applications with hardware video decoding, low-latency input,
@@ -87,7 +93,7 @@ tooling are maintained in this repository.
 | Shell title | `ProsperoLight` |
 | Title ID | `PPSA99002` |
 | Category | Game |
-| Current version | `01.000.060` |
+| Experimental beta / stable | `01.000.062` / `01.000.060` |
 | Version source | [`sce_sys/param.json`](sce_sys/param.json) |
 | Writable data | `/download0` only |
 
@@ -157,7 +163,7 @@ Build from Linux, WSL, or a Linux CI runner. On Ubuntu, Debian, or WSL:
 ```bash
 sudo apt update
 sudo apt install curl git make pkg-config python3 python3-venv tar unzip wget \
-  clang-18 clang-format-18 clang-tidy-18 lld-18
+  clang-18 clang-format-18 clang-tidy-18 llvm-18-dev lld-18 cmake
 ```
 
 The build downloads and verifies its public PS5 Payload SDK, zlib, GoogleTest,
@@ -283,6 +289,12 @@ behavior.
 
 Pairing credentials and settings are title-scoped. Installing under a different
 title ID intentionally requires pairing again.
+
+To forget an old PC, select it on **PCs**, choose **Remove PC**, then press Cross
+again to confirm. This works while the PC is offline and removes only that saved
+entry; it does not revoke pairing on the host or affect other saved PCs. Use
+**Refresh** or **Add PC** to find and pair with the replacement host. A host
+advertising itself on the network may appear again after refresh.
 
 > [!TIP]
 > For the smoothest 90 or 120 FPS result, choose the resolution, frame rate,

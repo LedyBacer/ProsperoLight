@@ -13,25 +13,28 @@
 
 #include <pthread.h>
 
-namespace Rml {
+namespace Rml
+{
 class ElementDocument;
 }
 
-class MoonlightApp {
-public:
-    enum class Command {
+class MoonlightApp
+{
+  public:
+    enum class Command
+    {
         None,
         StartStream
     };
 
-    bool Initialize(Rml::ElementDocument* document);
+    bool Initialize(Rml::ElementDocument *document);
     void Poll();
-    void HandleInput(const radio_input_event_t& event);
+    void HandleInput(const radio_input_event_t &event);
     Command TakeCommand();
     void Shutdown();
-    const char* SelectedAppName() const;
+    const char *SelectedAppName() const;
     int SelectedAppId() const;
-    const char* SelectedHostAddress() const;
+    const char *SelectedHostAddress() const;
     unsigned BitrateKbps() const;
     unsigned DisplayArea() const;
     unsigned VideoCodec() const;
@@ -39,21 +42,23 @@ public:
     unsigned StreamFps() const;
     unsigned HdrEnabled() const;
     unsigned AudioConfiguration() const;
-    void ShowStreamError(const char* message);
+    void ShowStreamError(const char *message);
 
-private:
-    enum class Screen {
+  private:
+    enum class Screen
+    {
         Hosts,
         Games,
         Settings,
         Count
     };
 
-    Rml::ElementDocument* document_ = nullptr;
+    Rml::ElementDocument *document_ = nullptr;
     Screen screen_ = Screen::Hosts;
     unsigned focus_ = 3;
     unsigned bitrate_mbps_ = 20;
     bool confirm_unpair_ = false;
+    bool confirm_remove_ = false;
     bool manual_entry_active_ = false;
     bool initial_discovery_pending_ = false;
     bool pairing_active_ = false;
@@ -92,21 +97,22 @@ private:
     void CycleHost(int direction);
     void Activate();
     void StartManualHostEntry();
-    static void ManualHostResult(const char* text, void* user_data);
-    void AddManualHost(const char* text);
+    static void ManualHostResult(const char *text, void *user_data);
+    void AddManualHost(const char *text);
     void DiscoverHosts();
-    const moonlight_config_host_t* SelectedHost() const;
+    const moonlight_config_host_t *SelectedHost() const;
     void TogglePairing();
+    void RemoveHost();
     void PollPairing();
     void PollHealth();
     void FinishHealthWorker();
-    static void* HealthWorker(void* argument);
+    static void *HealthWorker(void *argument);
     void PollArtwork();
     void FinishArtworkWorker(bool clear_cache);
-    static void* ArtworkWorker(void* argument);
+    static void *ArtworkWorker(void *argument);
     void RequestStopActiveApp();
     void FinishStopActiveApp();
-    void RefreshBackend();
+    void RefreshBackend(bool discover = true);
     void UpdateScreen();
     void UpdateFocus();
     void UpdateHost();

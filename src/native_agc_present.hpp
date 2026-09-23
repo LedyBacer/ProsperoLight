@@ -9,6 +9,17 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "moonlight_performance.hpp"
+
+struct NativeAgcPerformance
+{
+    moonlight::TimingHistogram prepare, cache_flush, submit, overlay;
+    uint64_t flip_queries{}, flip_sleeps{}, flip_timeouts{};
+};
+
+// Reset only after the loading owner stops; read after the video worker joins.
+void native_agc_reset_performance();
+const NativeAgcPerformance &native_agc_performance();
 
 typedef struct native_agc_metrics
 {

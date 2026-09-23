@@ -7,18 +7,14 @@
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+source "$root/tools/native-toolchain.sh"
 fec_simd=${FEC_SIMD:-0}
 opus_simd=${OPUS_SIMD:-0}
 [[ "$fec_simd" =~ ^[01]$ && "$opus_simd" =~ ^[01]$ ]] || {
     echo 'FEC_SIMD and OPUS_SIMD must be 0 or 1' >&2
     exit 2
 }
-if [[ ${1:-} == --ensure ]]; then
-    if [[ -f "$root/build/stream-deps/options" &&
-          $(<"$root/build/stream-deps/options") == "$fec_simd $opus_simd" ]]; then
-        exit 0
-    fi
-elif [[ $# -ne 0 ]]; then
+if [[ $# -gt 1 || ( $# -eq 1 && $1 != --ensure ) ]]; then
     echo 'usage: tools/build-stream-deps.sh [--ensure]' >&2
     exit 2
 fi
@@ -39,6 +35,24 @@ opus_build="$output/opus"
     echo "Run: git submodule update --init --recursive" >&2
     exit 1
 }
+options=$( {
+    printf 'FEC_SIMD=%s OPUS_SIMD=%s\n' "$fec_simd" "$opus_simd"
+    "$cc" --version
+    "$ar" --version
+    sha256sum "$root/tools/native-toolchain.sh" "$root/tools/build-stream-deps.sh" \
+        "$root/tools/setup-native-dependencies.sh" "$cc" \
+        "$("$LLVM_CONFIG" --bindir)/clang" "$("$LLVM_CONFIG" --bindir)/llvm-ar"
+    find "$common/src" "$common/enet" "$common/nanors" \
+        "$mbedtls/include" "$mbedtls/library" "$opus" \
+        "$root/platform/ps5" "$root/src/gamestream" \
+        -type f ! -path '*/.git/*' ! -name .git -print0 \
+        | sort -z | xargs -0 sha256sum
+} | sha256sum | cut -d' ' -f1)
+if [[ ${1:-} == --ensure && -f "$output/options" && $(<"$output/options") == "$options" &&
+      -f "$output/libmoonlight-common-c.a" && -f "$output/libopus.a" &&
+      -f "$output/libmbedtls.a" && -f "$output/libmbedx509.a" && -f "$output/libmbedcrypto.a" ]]; then
+    exit 0
+fi
 [[ "$output" == "$root/build/stream-deps" ]] || exit 1
 rm -rf -- "$output"
 mkdir -p "$output/obj"
@@ -125,7 +139,7 @@ for source in "${sources[@]}"; do
 done
 
 "$ar" rcs "$output/libmoonlight-common-c.a" "${objects[@]}"
-printf '%s %s\n' "$fec_simd" "$opus_simd" > "$output/options"
+printf '%s\n' "$options" > "$output/options"
 printf 'Built %s (%d objects)\n' "$output/libmoonlight-common-c.a" "${#objects[@]}"
 printf 'Built %s\n' "$output/libmbedtls.a"
 printf 'Built %s\n' "$output/libmbedx509.a"

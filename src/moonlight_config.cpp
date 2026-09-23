@@ -385,3 +385,19 @@ update:
     }
     return (int)index;
 }
+
+bool moonlight_config_remove_host(moonlight_config_t *config, uint32_t index)
+{
+    if (!config || index >= config->host_count || config->host_count > MOONLIGHT_CONFIG_MAX_HOSTS)
+        return false;
+    memmove(&config->hosts[index], &config->hosts[index + 1],
+            (config->host_count - index - 1) * sizeof(config->hosts[0]));
+    memset(&config->hosts[--config->host_count], 0, sizeof(config->hosts[0]));
+    if (!config->host_count)
+        config->selected_host = 0;
+    else if (config->selected_host > index)
+        --config->selected_host;
+    else if (config->selected_host >= config->host_count)
+        config->selected_host = config->host_count - 1;
+    return true;
+}

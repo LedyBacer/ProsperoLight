@@ -9,9 +9,42 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
+
+#ifndef PROSPEROLIGHT_PERFORMANCE_DETAIL
+#define PROSPEROLIGHT_PERFORMANCE_DETAIL 0
+#endif
+static_assert(PROSPEROLIGHT_PERFORMANCE_DETAIL == 0 || PROSPEROLIGHT_PERFORMANCE_DETAIL == 1);
 
 namespace moonlight
 {
+// Diagnostic-only, single decoder-worker writer. Stop recording when full;
+// never allocate or write files in the streaming callback.
+struct FrameTrace
+{
+    struct Sample
+    {
+        uint64_t receive_us{}, enqueue_us{}, callback_network_us{}, callback_us{}, pts_us{};
+        uint64_t decode_us{}, ready_us{}, prior_flip_wait_us{}, submit_us{}, completion_us{};
+        uint32_t frame{}, bytes{}, pending{},
+            outcome{}; // 0=incomplete, 1=submitted, 2=stale, 3=decimated
+    };
+    static constexpr size_t capacity = 32768; // About 273 seconds at 120 FPS.
+    std::array<Sample, capacity> samples{};
+    size_t count{}, omitted{};
+
+    Sample *append()
+    {
+        if (count == capacity)
+        {
+            ++omitted;
+            return nullptr;
+        }
+        samples[count] = {};
+        return &samples[count++];
+    }
+};
+
 // Single-writer; read only after that stream worker has joined. Percentiles are
 // 0.5 ms bucket upper bounds, with an exact maximum for the overflow bucket.
 struct TimingHistogram
@@ -46,6 +79,27 @@ struct TimingHistogram
         return max_us;
     }
 };
+
+// Optional host-clock measurements only; never call these GPU timestamps.
+inline uint64_t performance_now_us()
+{
+    if (!PROSPEROLIGHT_PERFORMANCE_DETAIL)
+        return 0;
+    timespec now{};
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return 0;
+    return static_cast<uint64_t>(now.tv_sec) * 1000000u +
+           static_cast<uint64_t>(now.tv_nsec) / 1000u;
+}
+
+inline void record_performance_elapsed(TimingHistogram &timing, uint64_t start_us)
+{
+    if (!PROSPEROLIGHT_PERFORMANCE_DETAIL)
+        return;
+    const uint64_t end_us = performance_now_us();
+    if (start_us && end_us >= start_us)
+        timing.add(end_us - start_us);
+}
 
 inline bool record_reassembly(TimingHistogram &timing, uint64_t receive_us, uint64_t enqueue_us,
                               uint64_t callback_us)

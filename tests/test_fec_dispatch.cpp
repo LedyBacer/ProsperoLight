@@ -5,6 +5,8 @@
  */
 
 #include <array>
+#include <algorithm>
+#include <chrono>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -63,6 +65,33 @@ int main()
             assert(reed_solomon_decode(rs, shards.data(), marks.data(), 12, bytes) == 0);
             for (unsigned s = 0; s < 8; ++s)
                 assert(memcmp(shards[s], original[s].data(), bytes) == 0);
+            if (bytes == 1392 && losses == 4)
+            {
+                std::array<int64_t, 7> timings{};
+                for (auto &time : timings)
+                {
+                    const auto start = std::chrono::steady_clock::now();
+                    for (unsigned iteration = 0; iteration < 2000; ++iteration)
+                    {
+                        for (unsigned s = 0; s < losses; ++s)
+                            memset(shards[s * 3u], 0, bytes);
+                        assert(reed_solomon_decode(rs, shards.data(), marks.data(), 12, bytes) ==
+                               0);
+                    }
+                    time = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::steady_clock::now() - start)
+                               .count() /
+                           2000;
+                    for (unsigned s = 0; s < 8; ++s)
+                        assert(memcmp(shards[s], original[s].data(), bytes) == 0);
+                }
+                std::sort(timings.begin(), timings.end());
+                printf("host_recovery_median_ns=%lld simd=%d path=%s\n",
+                       static_cast<long long>(timings[3]), PROSPEROLIGHT_FEC_SIMD,
+                       ps5_fec_cpu_supports("avx2")    ? "avx2"
+                       : ps5_fec_cpu_supports("ssse3") ? "ssse3"
+                                                       : "scalar");
+            }
         }
         printf("bytes=%d alignment=%zu recovery=PASS\n", bytes, rs->align_size);
         for (auto *shard : shards)

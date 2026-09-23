@@ -11,7 +11,7 @@ Install the compiler, linker, Make, Python, and download/archive tools:
 
 ```bash
 sudo apt update
-sudo apt install clang-18 clang-format-18 clang-tidy-18 cmake curl git lld-18 make \
+sudo apt install clang-18 clang-format-18 clang-tidy-18 llvm-18-dev cmake curl git lld-18 make \
   pkg-config python3 python3-pip python3-venv tar unzip wget
 ```
 
@@ -19,7 +19,12 @@ Confirm the expected compiler exists:
 
 ```bash
 /usr/bin/clang-18 --version
+llvm-config-18 --version
 ```
+
+App and streaming dependency builds select LLVM 18 together; a newer LLVM
+installed alongside it is not selected automatically. Each build writes
+`build/build-provenance.json` with compiler, input and executable hashes.
 
 From the repository root, run the read-only host check:
 

@@ -8,6 +8,7 @@
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+source "$root/tools/native-toolchain.sh"
 format=${1:-Folder}
 format=${format,,}
 case "$format" in folder|ffpkg|ffpfsc|all) ;; *)
@@ -316,6 +317,7 @@ PY
     "$tool" self --inspect --file "$app/sce_module/$name"
 done
 "$tool" self --inspect --file "$app/eboot.bin"
+python3 "$root/tools/write-build-provenance.py" "$app/eboot.bin" "$build/build-provenance.json"
 
 if [[ $format == ffpkg || $format == all ]]; then
     ufs2tool=$(bash "$root/tools/setup-packaging-dependencies.sh" ffpkg)

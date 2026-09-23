@@ -15,6 +15,8 @@
 #include <poll.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <stdatomic.h>
+#include "ps5_network_metrics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,6 +94,24 @@ static int network_result(int result)
     return result;
 }
 
+static _Atomic int metrics_enabled;
+static _Atomic uint64_t metrics[9];
+void ps5_network_metrics_begin(int enabled)
+{
+    atomic_store(&metrics_enabled, 0);
+    for (unsigned i = 0; i < 9; ++i)
+        atomic_store(&metrics[i], 0);
+    atomic_store(&metrics_enabled, enabled);
+}
+ps5_network_metrics_t ps5_network_metrics_read(void)
+{
+    ps5_network_metrics_t result = {
+        atomic_load(&metrics[0]), atomic_load(&metrics[1]), atomic_load(&metrics[2]),
+        atomic_load(&metrics[3]), atomic_load(&metrics[4]), atomic_load(&metrics[5]),
+        atomic_load(&metrics[6]), atomic_load(&metrics[7]), atomic_load(&metrics[8])};
+    return result;
+}
+
 int socket(int domain, int type, int protocol)
 {
     return network_result(sceNetSocket("moonlight", domain, type, protocol));
@@ -141,15 +161,37 @@ ssize_t recvfrom(int socket_id, void *buffer, size_t length, int flags,
                  struct sockaddr *address, socklen_t *address_length)
 {
     flags &= ~MSG_NOSIGNAL;
-    return network_result(sceNetRecvfrom(socket_id, buffer, length, flags,
-                                         address, address_length));
+    int result = network_result(sceNetRecvfrom(socket_id, buffer, length, flags,
+                                               address, address_length));
+    if (atomic_load_explicit(&metrics_enabled, memory_order_relaxed)) {
+        if (result >= 0) {
+            atomic_fetch_add_explicit(&metrics[0], 1, memory_order_relaxed);
+            atomic_fetch_add_explicit(&metrics[1], (uint64_t)result, memory_order_relaxed);
+        } else if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+            atomic_fetch_add_explicit(&metrics[2], 1, memory_order_relaxed);
+        }
+    }
+    return result;
 }
 
 int setsockopt(int socket_id, int level, int option, const void *value,
                socklen_t length)
 {
-    return network_result(sceNetSetsockopt(socket_id, level, option, value,
-                                           length));
+    int result = network_result(sceNetSetsockopt(socket_id, level, option, value, length));
+    if (atomic_load_explicit(&metrics_enabled, memory_order_relaxed) &&
+        level == SOL_SOCKET && option == SO_RCVBUF && value && length == sizeof(int)) {
+        int requested = 0, actual = 0;
+        socklen_t actual_size = sizeof(actual);
+        memcpy(&requested, value, sizeof(requested));
+        atomic_fetch_add(&metrics[5], 1);
+        if (result < 0)
+            atomic_fetch_add(&metrics[6], 1);
+        atomic_store(&metrics[7], requested > 0 ? (uint64_t)requested : 0);
+        atomic_store(&metrics[8], 0);
+        if (result == 0 && sceNetGetsockopt(socket_id, level, option, &actual, &actual_size) == 0)
+            atomic_store(&metrics[8], actual > 0 ? (uint64_t)actual : 0);
+    }
+    return result;
 }
 
 int getsockopt(int socket_id, int level, int option, void *value,
@@ -256,6 +298,7 @@ static short poll_events_from_sce(uint32_t events)
 int ps5_socket_poll(struct pollfd *descriptors, nfds_t count,
                     int timeout_milliseconds)
 {
+    struct sce_net_epoll_event local_events[8] = {0};
     struct sce_net_epoll_event *events;
     int epoll;
     int ready;
@@ -275,7 +318,12 @@ int ps5_socket_poll(struct pollfd *descriptors, nfds_t count,
         return -1;
     }
 
-    events = calloc((size_t)count, sizeof(*events));
+    events = count <= 8 ? local_events : calloc((size_t)count, sizeof(*events));
+    if (atomic_load_explicit(&metrics_enabled, memory_order_relaxed)) {
+        atomic_fetch_add_explicit(&metrics[3], 1, memory_order_relaxed);
+        if (count > 8)
+            atomic_fetch_add_explicit(&metrics[4], 1, memory_order_relaxed);
+    }
     if (!events) {
         errno = ENOMEM;
         return -1;
@@ -283,7 +331,7 @@ int ps5_socket_poll(struct pollfd *descriptors, nfds_t count,
 
     epoll = network_result(sceNetEpollCreate("moonlight-poll", 0));
     if (epoll < 0) {
-        free(events);
+        if (events != local_events) free(events);
         return -1;
     }
 
@@ -298,7 +346,7 @@ int ps5_socket_poll(struct pollfd *descriptors, nfds_t count,
                                               descriptors[index].fd,
                                               &event)) < 0) {
             sceNetEpollDestroy(epoll);
-            free(events);
+            if (events != local_events) free(events);
             return -1;
         }
     }
@@ -322,7 +370,7 @@ int ps5_socket_poll(struct pollfd *descriptors, nfds_t count,
     }
 
     sceNetEpollDestroy(epoll);
-    free(events);
+    if (events != local_events) free(events);
     return ready;
 }
 
@@ -536,7 +584,9 @@ int getaddrinfo(const char *node, const char *service,
     if (!info)
         return EAI_MEMORY;
     address = (struct sockaddr_in *)(info + 1);
+#ifndef __linux__ // Host-only adapter tests use Linux sockaddr_in.
     address->sin_len = sizeof(*address);
+#endif
     address->sin_family = AF_INET;
     address->sin_port = network_port;
     address->sin_addr.s_addr = network_address;

@@ -1,5 +1,58 @@
 # Changelog
 
+## 01.000.062
+
+### Experimental performance beta — help test 4K120
+
+This is a **prerelease**, not a replacement for stable **01.000.060**.
+Improved decode headroom; remaining 4K120 stuttering is under investigation.
+
+- Requests eight slices per frame for increased decoder parallelism. Local HEVC
+  tests confirmed eight slices and lower decode times, including comparable
+  compressed-frame sizes. Gameplay windows included Windows/RDP login transitions:
+  these are promising observations, not a controlled percentage improvement.
+- Shortens input polling to a 2-ms target and accounts for polling work time.
+  This does not establish a measured input-to-photon latency reduction.
+- Enables CPU-feature-checked FEC SIMD and Opus SIMD, with 200-us flip polling.
+- Reduces repeated GPU cache-flush work and avoids heap allocation for common
+  socket polls. Preserves bounded presentation overlap and source ownership.
+- Includes local performance summaries and bounded per-frame timing records for
+  diagnosis. No streamed images, typed text, or automatic remote telemetry.
+- Includes PC removal/re-pairing improvements for changing host software.
+
+Decoder depth stays **one**, worker affinity/priority remain unchanged, every
+decoded picture remains eligible for presentation, and experimental pacing and
+audio-backlog dropping are **off**. No host configuration is modified. Eight
+slices may behave differently with other encoders/codecs; report regressions.
+Higher bitrate is not higher FPS, and sustained 120 FPS is not guaranteed.
+
+### Please report your results
+
+Use [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues) and include:
+
+- PS5 firmware; Sunshine/Vibepollo version; host GPU and driver.
+- Codec/HDR, resolution/FPS, bitrate, stereo/5.1, Ethernet or Wi-Fi.
+- Game and whether this beta is smoother, unchanged, or worse than `.060`.
+- Complete Windows/RDP login first, reconnect, then warm up for 30 seconds and
+  play the same area for two minutes. Return with Select+L1 and close the app.
+  Separate login/menu/teardown time from gameplay. Stop early if unusable.
+- If available, attach `performance-last.json` and `performance-frames.csv` from
+  the app's `/download0/moonlight/` save directory. These are overwritten by the
+  next stream; the console may expose them inside the title's UFS2 `download0.dat`.
+  **Do not upload the entire save image**: it may contain pairing credentials.
+
+### Installation, update and rollback
+
+Title ID stays **PPSA99002**. Choose `PPSA99002.ffpfsc`, or extract
+`PPSA99002.zip` and copy its `PPSA99002/` folder to `/data/homebrew`.
+Do not keep both formats installed. Close the app before replacing files, then
+restart ShadowMountPlus or the console. `SHA256SUMS` covers both downloads.
+Existing pairing/settings are retained. To roll back, replace the beta with
+the corresponding `.060` download and restart ShadowMountPlus or the console.
+
+Local reproduction (ordinary `make` retains conservative development defaults):
+`make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8`.
+
 ## 01.000.060
 
 ### Smoother 4K120 streaming

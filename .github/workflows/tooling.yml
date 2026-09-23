@@ -43,7 +43,7 @@ jobs:
       - name: Install native toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install --yes clang-18 clang-format-18 clang-tidy-18 cmake lld-18 make pkg-config python3-venv tar unzip wget
+          sudo apt-get install --yes clang-18 clang-format-18 clang-tidy-18 llvm-18-dev cmake lld-18 make pkg-config python3-venv tar unzip wget
 
       - name: Read app identity and version
         shell: bash
@@ -78,13 +78,26 @@ jobs:
         run: cd runtime && sha256sum -c libc.prx.sha256
 
       - name: Build compressed release image
-        run: make ffpfsc
+        run: |
+          if [[ "$CONTENT_VERSION" == 01.000.062 ]]; then
+            make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8
+          else
+            make ffpfsc
+          fi
 
       - name: Archive app folder and write release checksums
         run: |
           cd dist
           python3 -m zipfile -c "$TITLE_ID.zip" "$TITLE_ID"
           sha256sum "$TITLE_ID.ffpfsc" "$TITLE_ID.zip" > SHA256SUMS
+
+      - name: Upload build provenance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: prosperolight-provenance-${{ github.sha }}
+          path: build/build-provenance.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -170,6 +183,10 @@ jobs:
           image_name="${IMAGE##*/}"
           archive_name="${ARCHIVE##*/}"
           checksum_name="${CHECKSUM##*/}"
+          release_flags=()
+          if [[ "$GITHUB_REF_NAME" == 01.000.062 ]]; then
+            release_flags=(--prerelease --latest=false)
+          fi
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             while IFS= read -r old_asset; do
               if [[ $old_asset != "$image_name" && $old_asset != "$archive_name" && $old_asset != "$checksum_name" ]]; then
@@ -178,11 +195,11 @@ jobs:
             done < <(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
             gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
             gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "ProsperoLight $GITHUB_REF_NAME" --notes-file release-notes.md
+              --title "ProsperoLight $GITHUB_REF_NAME" --notes-file release-notes.md "${release_flags[@]}"
           else
             gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --notes-file release-notes.md \
-              --title "ProsperoLight $GITHUB_REF_NAME"
+              --title "ProsperoLight $GITHUB_REF_NAME" "${release_flags[@]}"
           fi

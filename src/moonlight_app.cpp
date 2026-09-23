@@ -80,7 +80,7 @@ struct FocusList
 };
 
 const char *const kHostFocus[] = {"nav-hosts",     "nav-games", "nav-settings", "host-card",
-                                  "refresh-hosts", "pair-host", "add-host"};
+                                  "refresh-hosts", "pair-host", "add-host",     "remove-host"};
 const char *const kGameFocus[] = {"nav-hosts",  "nav-games",  "nav-settings", "app-card-0",
                                   "app-card-1", "app-card-2", "app-card-3",   "app-card-4",
                                   "app-card-5", "stop-app",   "back-hosts"};
@@ -436,9 +436,13 @@ void MoonlightApp::PollArtwork()
 
 void MoonlightApp::SetScreen(Screen screen)
 {
+    const bool pending_confirmation = confirm_unpair_ || confirm_remove_;
     screen_ = screen;
     focus_ = screen_ == Screen::Games ? (backend_.app_count ? 3 + selected_app_ % 6 : 10) : 3;
     confirm_unpair_ = false;
+    confirm_remove_ = false;
+    if (pending_confirmation)
+        UpdateHost();
     UpdateScreen();
     if (screen_ == Screen::Games)
         UpdateGames();
@@ -459,6 +463,11 @@ void MoonlightApp::MoveFocus(int direction)
     if (screen_ == Screen::Hosts && confirm_unpair_ && focus_ != 5)
     {
         confirm_unpair_ = false;
+        UpdateHost();
+    }
+    if (screen_ == Screen::Hosts && confirm_remove_ && focus_ != 7)
+    {
+        confirm_remove_ = false;
         UpdateHost();
     }
     UpdateFocus();
@@ -575,6 +584,7 @@ void MoonlightApp::CycleHost(int direction)
         config_.selected_host = (config_.selected_host + 1) % config_.host_count;
     }
     selected_app_ = 0;
+    confirm_remove_ = false;
     (void)moonlight_config_save(&config_);
     RefreshBackend();
 }
@@ -626,8 +636,10 @@ void MoonlightApp::Activate()
         }
         else if (focus_ == 5)
             TogglePairing();
-        else
+        else if (focus_ == 6)
             StartManualHostEntry();
+        else
+            RemoveHost();
         break;
     case Screen::Games:
         if (focus_ >= 3 && focus_ <= 8 && selected_app_ < backend_.app_count)
@@ -871,6 +883,45 @@ void MoonlightApp::TogglePairing()
     }
 }
 
+void MoonlightApp::RemoveHost()
+{
+    if (!SelectedHost())
+        return;
+    if (!confirm_remove_)
+    {
+        confirm_remove_ = true;
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Confirm);
+        SetText(document_, "remove-host-label", "Confirm remove");
+        SetText(document_, "host-action-status",
+                "Press Cross again to forget this PC locally. Pairing on the host is unchanged.");
+        return;
+    }
+
+    moonlight_config_t updated = config_;
+    if (!moonlight_config_remove_host(&updated, config_.selected_host) ||
+        !moonlight_config_save(&updated))
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+        SetText(document_, "host-action-status", "Could not save the updated PC list.");
+        return;
+    }
+    FinishHealthWorker();
+    FinishArtworkWorker(true);
+    config_ = updated;
+    confirm_remove_ = false;
+    confirm_unpair_ = false;
+    selected_app_ = 0;
+    artwork_page_start_ = MOONLIGHT_BACKEND_MAX_APPS;
+    health_ = {};
+    health_due_ms_ = 0;
+    std::memset(&backend_, 0, sizeof(backend_));
+    RefreshBackend(false);
+    UpdateFocus();
+    prosperolight::ui_sound_play(prosperolight::UiSoundCue::Success);
+    SetText(document_, "host-action-status",
+            "PC removed locally. Refresh to discover available PCs again.");
+}
+
 void MoonlightApp::PollPairing()
 {
     if (!pairing_active_)
@@ -969,14 +1020,16 @@ void MoonlightApp::FinishStopActiveApp()
     }
 }
 
-void MoonlightApp::RefreshBackend()
+void MoonlightApp::RefreshBackend(bool discover)
 {
     FinishHealthWorker();
     FinishArtworkWorker(true);
     artwork_page_start_ = MOONLIGHT_BACKEND_MAX_APPS;
     confirm_unpair_ = false;
+    confirm_remove_ = false;
     SetText(document_, "host-action-status", "Discovering Sunshine PCs...");
-    DiscoverHosts();
+    if (discover)
+        DiscoverHosts();
     const moonlight_config_host_t *host = SelectedHost();
     if (!host)
     {
@@ -1038,13 +1091,14 @@ void MoonlightApp::UpdateScreen()
 
 void MoonlightApp::UpdateFocus()
 {
-    const char *const all[] = {
-        "nav-hosts",          "nav-games",         "nav-settings",    "host-card",
-        "refresh-hosts",      "pair-host",         "add-host",        "app-card-0",
-        "app-card-1",         "app-card-2",        "app-card-3",      "app-card-4",
-        "app-card-5",         "stop-app",          "back-hosts",      "setting-codec",
-        "setting-resolution", "setting-framerate", "setting-bitrate", "setting-display-area",
-        "setting-hdr",        "setting-audio"};
+    const char *const all[] = {"nav-hosts",         "nav-games",       "nav-settings",
+                               "host-card",         "refresh-hosts",   "pair-host",
+                               "add-host",          "remove-host",     "app-card-0",
+                               "app-card-1",        "app-card-2",      "app-card-3",
+                               "app-card-4",        "app-card-5",      "stop-app",
+                               "back-hosts",        "setting-codec",   "setting-resolution",
+                               "setting-framerate", "setting-bitrate", "setting-display-area",
+                               "setting-hdr",       "setting-audio"};
     for (const char *id : all)
         SetClass(document_, id, "focused", false);
 
@@ -1087,6 +1141,8 @@ void MoonlightApp::UpdateHost()
     SetClass(document_, "pair-host", "disabled",
              health_.Reconnecting() || backend_.online == 0 ||
                  (!backend_.paired && backend_.current_app_id != 0));
+    SetClass(document_, "remove-host", "disabled", !selected_host);
+    SetText(document_, "remove-host-label", confirm_remove_ ? "Confirm remove" : "Remove PC");
 
     if (!selected_host)
     {

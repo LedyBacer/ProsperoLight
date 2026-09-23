@@ -12,6 +12,7 @@
 #include "moonlight_health.hpp"
 #include "moonlight_physical_input.hpp"
 #include "moonlight_performance.hpp"
+#include "moonlight_tuning.hpp"
 
 #include <gtest/gtest.h>
 
@@ -19,6 +20,43 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+
+TEST(Performance, SliceHeadersAreCountedWithoutReadingTruncatedNals)
+{
+    const uint8_t h264[] = {0, 0, 0, 1, 0x67, 0x42, 0, 0, 1, 0x65, 0x80, 0, 0, 1, 0x41, 0x80};
+    EXPECT_EQ(moonlight::count_video_slices(h264, sizeof(h264), false), 2u);
+    const uint8_t hevc[] = {0, 0, 1, 0x40, 1, 0, 0, 0, 1, 0x26, 1, 0x80, 0, 0, 1, 0x02, 1, 0};
+    EXPECT_EQ(moonlight::count_video_slices(hevc, sizeof(hevc), true), 2u);
+    EXPECT_EQ(moonlight::count_video_slices(nullptr, 99, true), 0u);
+    EXPECT_EQ(moonlight::count_video_slices(hevc + 13, 3, true), 0u);
+}
+
+TEST(Performance, PacerBoundsWaitAndAbandonsBacklog)
+{
+    EXPECT_EQ(moonlight::input_poll_delay(100, 600, 2000), 1500u);
+    EXPECT_EQ(moonlight::input_poll_delay(100, 5000, 2000), 100u);
+    EXPECT_EQ(moonlight::input_poll_delay(100, 50, 2000), 2000u);
+    moonlight::FramePacer p;
+    EXPECT_EQ(p.delay(100000, 120, false), 0u);
+    EXPECT_EQ(p.delay(104000, 120, false), 4333u);
+    EXPECT_EQ(p.delay(105000, 120, true), 0u);
+    EXPECT_EQ(p.delay(200000, 120, false), 0u);
+    EXPECT_EQ(p.delay(201000, 0, false), 0u);
+    // Clock discontinuity must not produce an unbounded sleep.
+    EXPECT_EQ(p.delay(1, 120, false), 0u);
+    p = {};
+    EXPECT_EQ(p.delay(1000000, 120, false, 11988), 0u);
+    EXPECT_EQ(p.delay(1004000, 120, false, 11988), 4341u);
+    // Fractional intervals do not lose a microsecond on each frame.
+    p = {};
+    uint64_t now = 1000000;
+    for (unsigned i = 0; i < 11988; ++i)
+    {
+        EXPECT_EQ(p.delay(now, 120, false, 11988), 0u);
+        now = p.next_us;
+    }
+    EXPECT_EQ(now, 101000000u);
+}
 
 TEST(Performance, BoundedTimingPercentilesIncludeOverflow)
 {
@@ -32,6 +70,14 @@ TEST(Performance, BoundedTimingPercentilesIncludeOverflow)
     EXPECT_EQ(timing.percentile(99), 99499u);
     timing.add(3000000u);
     EXPECT_EQ(timing.percentile(100), 3000000u);
+}
+
+TEST(Performance, ExtraTimingIsDisabledInOrdinaryBuilds)
+{
+    moonlight::TimingHistogram timing;
+    EXPECT_EQ(moonlight::performance_now_us(), 0u);
+    moonlight::record_performance_elapsed(timing, 1u);
+    EXPECT_EQ(timing.count, 0u);
 }
 
 TEST(Performance, RateWindowReflectsRecentSlowdownAndCounterReset)
@@ -463,6 +509,27 @@ TEST(Configuration, UpsertRejectsAHostBeyondCapacity)
 
     EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.99", "Extra", "", false), -1);
     EXPECT_EQ(config.host_count, MOONLIGHT_CONFIG_MAX_HOSTS);
+}
+
+TEST(Configuration, RemovingSelectedHostCompactsAndKeepsTheOtherPC)
+{
+    moonlight_config_t config{};
+    moonlight_config_defaults(&config);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", "Old PC", "old", false), 0);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", "Other PC", "other", true), 1);
+    config.selected_host = 0;
+
+    EXPECT_FALSE(moonlight_config_remove_host(&config, 2));
+    EXPECT_EQ(config.host_count, 2U);
+    ASSERT_TRUE(moonlight_config_remove_host(&config, config.selected_host));
+    ASSERT_EQ(config.host_count, 1U);
+    EXPECT_EQ(config.selected_host, 0U);
+    EXPECT_STREQ(config.hosts[0].address, "192.168.1.20");
+    EXPECT_EQ(config.hosts[0].manual, 1U);
+    EXPECT_EQ(config.hosts[1].address[0], '\0');
+    ASSERT_TRUE(moonlight_config_remove_host(&config, 0));
+    EXPECT_EQ(config.host_count, 0U);
+    EXPECT_EQ(config.selected_host, 0U);
 }
 
 TEST(Configuration, FailedLoadLeavesSafeDefaults)
