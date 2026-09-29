@@ -442,4 +442,4 @@ retain their respective project identities. ProsperoLight is an independent
 homebrew project and is not affiliated with or endorsed by Sony Interactive
 Entertainment, Moonlight, or Sunshine.
 
-This project was developed with assistance from OpenAI Codex, including some original interface artwork. Project maintainers reviewed and validated the resulting code, tests, documentation, dependencies, and generated assets.
+This project was developed with AI assistance from OpenAI and/or Anthropic tools.
