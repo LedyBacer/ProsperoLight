@@ -159,4 +159,4 @@ firmware, loader, or application. Preserve the digest when comparing results.
 The shim, manifests, and emitter may be redistributed under
 GPL-3.0-or-later. No Sony runtime implementation, proprietary SDK binary,
 encryption key, or game file is included. Native external tools retain their
-upstream licenses; see [`NOTICE.md`](../NOTICE.md).
+upstream licenses; see [`THIRD_PARTY_NOTICES.md`](../NOTICE.md).

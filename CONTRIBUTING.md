@@ -18,7 +18,7 @@ Before opening a change:
 Every comment-capable code, script, workflow, tooling configuration, and
 manifest must retain the project copyright and
 `GPL-3.0-or-later` SPDX header. JSON and binary formats cannot carry comments;
-their licensing is covered by `LICENSE` and `NOTICE.md`.
+their licensing is covered by `LICENSE` and `THIRD_PARTY_NOTICES.md`.
 
 Changes to `tooling/native/` must include a deterministic host check and a
 narrowly scoped static-format regression. Loader-visible changes also require
