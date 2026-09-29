@@ -412,6 +412,8 @@ storage. See [Configuration](docs/CONFIGURATION.md).
 
 ## Credits, third-party software, and licenses
 
+Built with the [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk) by John Törnblom (ps5-payload-dev).
+
 ProsperoLight exists thanks to the maintainers and contributors of:
 
 - [Moonlight](https://github.com/moonlight-stream/moonlight-common-c) and
@@ -421,7 +423,7 @@ ProsperoLight exists thanks to the maintainers and contributors of:
   and the [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk) for the
   reproducible native foundation and public target integration;
 - [RmlUi](https://github.com/mikke89/RmlUi),
-  [SDL2](https://github.com/libsdl-org/SDL/tree/SDL2), and
+  [SDL2](https://github.com/libsdl-org/SDL/tree/SDL2) (John Törnblom's [PS5 port](https://github.com/ps5-payload-dev/SDL)), and
   [FreeType](https://freetype.org/) for the launcher interface;
 - [mbedTLS](https://github.com/Mbed-TLS/mbedtls) and
   [Opus](https://github.com/xiph/opus) for secure protocol and audio support;
