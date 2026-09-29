@@ -1,6 +1,8 @@
 /*
  * ps5-native-app-boilerplate - Native FSELF container implementation.
  * Copyright (C) 2026 BlackBearReloaded
+ * Portions derived from SharpProspero (https://github.com/SvenGDK/SharpProspero),
+ * Copyright (C) 2026 SvenGDK, GPL-3.0; translated to C++ and modified.
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Produces and reads deterministic plaintext signed-executable containers.

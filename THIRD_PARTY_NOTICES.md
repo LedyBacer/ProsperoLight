@@ -40,9 +40,9 @@ upstream. The application statically links only the required portions of the
 corresponding libc++ and libc++abi archives; it does not dynamically load the
 complete archives.
 
-The project’s PS5 ELF converter and FSELF writer are independently authored
-GPL-3.0-or-later code. SharpProspero was a useful public format reference during
-development but is not fetched, copied, linked, or required by the build.
+The PS5 ELF converter and FSELF writer in `tooling/native/` are derived from
+[SharpProspero](https://github.com/SvenGDK/SharpProspero), Copyright (C) 2026
+SvenGDK, GPL-3.0, and were translated to C++ and modified by BlackBearReloaded.
 
 ## Host test dependency
 
