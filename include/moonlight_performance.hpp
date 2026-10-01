@@ -18,16 +18,18 @@ static_assert(PROSPEROLIGHT_PERFORMANCE_DETAIL == 0 || PROSPEROLIGHT_PERFORMANCE
 
 namespace moonlight
 {
-// Diagnostic-only, single decoder-worker writer. Stop recording when full;
-// never allocate or write files in the streaming callback.
+// Diagnostic-only. The decode worker appends; a sample then follows its
+// picture to the presentation worker. Stop recording when full; never
+// allocate or write files while streaming.
 struct FrameTrace
 {
     struct Sample
     {
         uint64_t receive_us{}, enqueue_us{}, callback_network_us{}, callback_us{}, pts_us{};
-        uint64_t decode_us{}, ready_us{}, prior_flip_wait_us{}, submit_us{}, completion_us{};
-        uint32_t frame{}, bytes{}, pending{},
-            outcome{}; // 0=incomplete, 1=submitted, 2=stale, 3=decimated
+        uint64_t decode_us{}, ready_us{}, present_wait_us{}, submit_us{}, completion_us{};
+        // 0=incomplete, 1=displayed, 2=superseded before display, 3=refused or abandoned
+        uint32_t frame{}, bytes{}, pending{}, outcome{};
+        uint32_t host_us{};
     };
     static constexpr size_t capacity = 32768; // About 273 seconds at 120 FPS.
     std::array<Sample, capacity> samples{};
@@ -154,15 +156,6 @@ struct RateWindow
         return true;
     }
 };
-
-inline bool drop_stale_presentation(uint64_t age_us, uint32_t fps, int pending_frames,
-                                    uint64_t since_last_flip_us)
-{
-    const uint64_t budget = 2000000u / (fps ? fps : 60u);
-    // Only skip when a newer frame exists; force progress at least every 100 ms.
-    // Compressed frames are still decoded to preserve reference state.
-    return age_us > budget && pending_frames > 0 && since_last_flip_us < 100000u;
-}
 
 inline bool discard_audio_backlog(int pending_ms, uint32_t limit_ms)
 {

@@ -1,5 +1,38 @@
 # Changelog
 
+## 01.000.063
+
+### Development build — decode pipeline and presentation rework
+
+**Not released and not yet validated on a console.** Host tests cover the new
+logic; see [round 4](docs/PERFORMANCE_ROUND_4.md) for what is unverified and for
+the fallback to the `01.000.062` path behind each hardware-dependent change.
+
+- Decoding and presentation run on separate threads. Decoding no longer waits
+  for a flip, and each flip shows the newest decoded picture; the rule that
+  presented one frame every 100 ms while behind is removed.
+- New **Decoder pipeline** setting. Adaptive (default) overlaps frames in
+  Videodec2 only while frames are queued and flushes as soon as it catches up.
+  Classic decodes one frame at a time, as before.
+- New **Decoder CPU cores** setting (5, 4 or 3 physical cores; default 5).
+  Stream threads are kept off the decoder's CPUs, and the video receive thread
+  gets a CPU of its own.
+- New **V-Sync** setting. Off flips immediately and tears.
+- Eight slices per frame above 1080p, four at 1080p.
+- The flip wait uses flip events and no longer waits for a vblank.
+- The overlay separates network, decoded and displayed frame rates, and frames
+  lost to the network from frames discarded because decoding fell behind. Decode
+  time covers the last second (mean, p95, load).
+- `performance-last.json` is schema 3, `performance-frames.csv` is schema 2,
+  and both the summary and five-second windows are also written to klog.
+- Updates moonlight-common-c, adds 50/60/70 Mbps bitrate presets, and caches
+  the FEC CPU feature probe.
+
+Settings and pairings are kept; existing configurations migrate with V-Sync on,
+Adaptive and 5 cores. If the picture shows artifacts, select Classic.
+
+Local build: `make app FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200`.
+
 ## 01.000.062
 
 ### Experimental performance beta — help test 4K120

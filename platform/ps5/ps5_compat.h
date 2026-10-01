@@ -9,17 +9,20 @@
 #include <fcntl.h>
 #include <pthread.h>
 
+#include "ps5_thread_placement.h"
+
 /*
  * The generic FreeBSD path in moonlight-common-c renames every new thread.
  * Calling the PS5 pthread_rename_np export from a newly started thread hangs
- * before its entry point runs, so thread names are intentionally best-effort.
+ * before its entry point runs, so the name is never applied. The hook runs on
+ * the new thread itself, so it places that thread by name instead.
  */
-static inline int ps5_pthread_setname_noop(pthread_t thread, const char *name) {
+static inline int ps5_pthread_setname_place(pthread_t thread, const char *name) {
     (void)thread;
-    (void)name;
+    ps5_thread_placement_apply_name(name);
     return 0;
 }
-#define pthread_setname_np ps5_pthread_setname_noop
+#define pthread_setname_np ps5_pthread_setname_place
 
 /* Portable by default; optional CPUID + XCR0 checked nanors dispatch. */
 #include "ps5_fec_cpu.h"

@@ -25,6 +25,9 @@ typedef struct moonlight_stream_options {
     uint32_t stream_fps;
     uint32_t hdr_enabled;
     uint32_t audio_configuration;
+    uint32_t vsync_enabled;
+    uint32_t decoder_pipeline; /* MOONLIGHT_DECODER_PIPELINE_* */
+    uint32_t decoder_cores;    /* 3-5 physical cores for Videodec2 workers */
 } moonlight_stream_options_t;
 
 typedef struct moonlight_stream_metrics {

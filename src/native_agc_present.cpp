@@ -16,10 +16,16 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #ifndef PROSPEROLIGHT_LAN_TELEMETRY
 #define PROSPEROLIGHT_LAN_TELEMETRY 0
 #endif
+#ifndef PROSPEROLIGHT_GPU_TIMESTAMPS
+#define PROSPEROLIGHT_GPU_TIMESTAMPS 0
+#endif
+static_assert(PROSPEROLIGHT_GPU_TIMESTAMPS == 0 || PROSPEROLIGHT_GPU_TIMESTAMPS == 1,
+              "GPU_TIMESTAMPS must be 0 or 1");
 #ifndef PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS
 #define PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS 0
 #endif
@@ -38,8 +44,8 @@ static_assert(PROSPEROLIGHT_FLIP_POLL_US >= 100 && PROSPEROLIGHT_FLIP_POLL_US <=
 #define TV_SAFE_INSET_Y 36u
 #define FRAMEBUFFER_ALIGNMENT 0x200000u
 #define SHADER_STATIC_BYTES 0x10000u
-#define HUD_WIDTH 672u
-#define HUD_HEIGHT 112u
+#define HUD_WIDTH 832u
+#define HUD_HEIGHT 140u
 #define HUD_X 16u
 #define HUD_Y 16u
 #define HUD_TEXT_X 16u
@@ -75,6 +81,21 @@ static_assert(PROSPEROLIGHT_FLIP_POLL_US >= 100 && PROSPEROLIGHT_FLIP_POLL_US <=
 #define LOADING_PITCH 1920u
 #define LOADING_SURFACE_HEIGHT 1088u
 #define LOADING_VISIBLE_HEIGHT 1080u
+#define VIDEO_OUT_FLIP_MODE_VSYNC 1u
+#define VIDEO_OUT_FLIP_MODE_HSYNC 2u
+// Flip events only wake the waiter early; flip status stays authoritative.
+#define FLIP_EVENT_WAIT_US 2000u
+#define KERNEL_ERROR_ETIMEDOUT UINT32_C(0x8002003c)
+// Two 64-bit GPU clock stamps (99.79 MHz) after the HUD/keyboard surfaces.
+#define GPU_TIMESTAMP_OFFSET 0xcf000u
+#define GPU_TICK_PICOSECONDS UINT64_C(10021)
+
+static_assert(HUD_SURFACE_OFFSET + KEYBOARD_SURFACE_BYTES <= GPU_TIMESTAMP_OFFSET,
+              "overlay surfaces must not overlap the GPU timestamp words");
+static_assert(HUD_SURFACE_BYTES <= KEYBOARD_SURFACE_BYTES,
+              "the HUD shares the keyboard overlay allocation");
+static_assert(GPU_TIMESTAMP_OFFSET + 64u <= SHADER_MEMORY_BYTES,
+              "GPU timestamp words must stay inside shader memory");
 
 static_assert((BASE_OUTPUT_WIDTH - TV_SAFE_INSET_X * 2u) * 9u ==
                   (BASE_OUTPUT_HEIGHT - TV_SAFE_INSET_Y * 2u) * 16u,
@@ -195,6 +216,12 @@ extern "C"
     int sceVideoOutIsFlipPending(int32_t handle);
     int sceVideoOutWaitVblank(int32_t handle);
     int sceVideoOutGetFlipStatus(int32_t handle, void *status);
+    int sceVideoOutAddFlipEvent(void *queue, int32_t handle, void *user_data);
+    int sceVideoOutDeleteFlipEvent(void *queue, int32_t handle);
+    int sceKernelCreateEqueue(void **queue, const char *name);
+    int sceKernelDeleteEqueue(void *queue);
+    int sceKernelWaitEqueue(void *queue, void *event, int count, int *out,
+                            unsigned int *timeout_us);
 
     int32_t sceAgcInit(void *state, uint32_t size);
     int32_t sceAgcCreateShader(void **shader, void *header, void *code);
@@ -215,6 +242,24 @@ extern "C"
     uint32_t sceAgcDriverWaitUntilSafeForRendering(uint32_t **command, uint32_t packet_size,
                                                    uint32_t reserved, uint32_t handle,
                                                    int buffer_index);
+#if PROSPEROLIGHT_GPU_TIMESTAMPS
+    // Same call and arguments as the hardware-validated OpenGL runtime probe:
+    // BOTTOM_OF_PIPE_TS (40) writing the GPU clock (data select 3) with write
+    // confirmation (interrupt select 3).
+    uint32_t *sceAgcCbReleaseMem(void *command, uint8_t event, int16_t cache_action,
+                                 uint64_t reserved0, int8_t reserved1, void *address,
+                                 uint32_t data_select, uint64_t data, uint16_t gds_offset,
+                                 uint16_t gds_size, int8_t interrupt_select, int32_t reserved2);
+#endif
+}
+
+static uint64_t present_now_us(void)
+{
+    timespec now{};
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return 0;
+    return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000) +
+           static_cast<uint64_t>(now.tv_nsec) / UINT64_C(1000);
 }
 
 static void report_agc_receipt(const char *receipt)
@@ -324,62 +369,78 @@ static void overlay_draw_text(uint8_t *luma, uint32_t width, uint32_t height, co
                              HUD_GLYPH_HEIGHT);
 }
 
+static void hud_line(uint8_t *luma, unsigned index, uint8_t value, const char *text)
+{
+    overlay_draw_text(luma, HUD_WIDTH, HUD_HEIGHT, text, HUD_TEXT_X, 4u + HUD_LINE_HEIGHT * index,
+                      value);
+}
+
 static void refresh_hud_surface(uint8_t *surface, const native_agc_metrics_t *metrics,
                                 uint32_t video_width, uint32_t video_height, uint32_t output_width,
                                 uint32_t output_height, uint32_t output_refresh_x100, int hdr)
 {
     uint8_t *luma = surface;
-    char line[96];
-    uint64_t decode_us = metrics->decode_average_us;
-    uint8_t text_luma = hdr ? 143u : 255u;
+    char line[112];
+    const uint8_t text_luma = hdr ? 143u : 255u;
+    const uint64_t decode_us = metrics->decode_average_us;
+    const uint64_t p95_us = metrics->decode_p95_us;
 
     memset(luma, 76, HUD_Y_BYTES);
     memset(surface + HUD_Y_BYTES, 128, HUD_UV_BYTES);
 
-    snprintf(line, sizeof(line), "Video stream: %ux%u %u.%02u FPS (Codec: %s%s)", video_width,
-             video_height, metrics->total_fps_x100 / 100u, metrics->total_fps_x100 % 100u,
-             metrics->video_codec ? "HEVC" : "H.264", hdr ? " / HDR" : "");
-    overlay_draw_text(luma, HUD_WIDTH, HUD_HEIGHT, line, HUD_TEXT_X, 4, text_luma);
-    snprintf(line, sizeof(line), "Decoder: SceVideodec2 hardware / Output: %ux%u @ %u.%02u Hz",
-             output_width, output_height, output_refresh_x100 / 100u, output_refresh_x100 % 100u);
-    overlay_draw_text(luma, HUD_WIDTH, HUD_HEIGHT, line, HUD_TEXT_X, 4 + HUD_LINE_HEIGHT,
-                      text_luma);
-    snprintf(line, sizeof(line), "Incoming frame rate from network: %u.%02u FPS",
-             metrics->incoming_fps_x100 / 100u, metrics->incoming_fps_x100 % 100u);
-    overlay_draw_text(luma, HUD_WIDTH, HUD_HEIGHT, line, HUD_TEXT_X, 4 + HUD_LINE_HEIGHT * 2u,
-                      text_luma);
-    snprintf(line, sizeof(line), "Rendering frame rate: %u.%02u FPS",
+    snprintf(line, sizeof(line), "Video stream: %ux%u %u.%02u FPS (Codec: %s%s) / slices %u of %u",
+             video_width, video_height, metrics->incoming_fps_x100 / 100u,
+             metrics->incoming_fps_x100 % 100u, metrics->video_codec ? "HEVC" : "H.264",
+             hdr ? " / HDR" : "", metrics->slices_observed, metrics->slices_requested);
+    hud_line(luma, 0, text_luma, line);
+    snprintf(line, sizeof(line), "Output: %ux%u @ %u.%02u Hz / V-Sync %s", output_width,
+             output_height, output_refresh_x100 / 100u, output_refresh_x100 % 100u,
+             metrics->vsync_enabled ? "on" : "off (tearing)");
+    hud_line(luma, 1, text_luma, line);
+    if (metrics->pipeline_depth > 1u)
+        snprintf(line, sizeof(line), "Decoder: Videodec2 adaptive x%u / %u cores (mask 0x%llx)",
+                 metrics->pipeline_depth, metrics->decoder_cores,
+                 (unsigned long long)metrics->decoder_cpu_mask);
+    else
+        snprintf(line, sizeof(line), "Decoder: Videodec2 classic / %u cores (mask 0x%llx)",
+                 metrics->decoder_cores, (unsigned long long)metrics->decoder_cpu_mask);
+    hud_line(luma, 2, text_luma, line);
+    snprintf(line, sizeof(line),
+             "Decode (last second): %llu.%02llu ms avg / %llu.%02llu ms p95 / load %u%%",
+             (unsigned long long)(decode_us / 1000u),
+             (unsigned long long)((decode_us % 1000u) / 10u), (unsigned long long)(p95_us / 1000u),
+             (unsigned long long)((p95_us % 1000u) / 10u), metrics->decoder_load_permille / 10u);
+    hud_line(luma, 3, text_luma, line);
+    snprintf(line, sizeof(line),
+             "Frame rate: network %u.%02u / decoded %u.%02u / displayed %u.%02u FPS",
+             metrics->incoming_fps_x100 / 100u, metrics->incoming_fps_x100 % 100u,
+             metrics->decoded_fps_x100 / 100u, metrics->decoded_fps_x100 % 100u,
              metrics->rendering_fps_x100 / 100u, metrics->rendering_fps_x100 % 100u);
-    overlay_draw_text(luma, HUD_WIDTH, HUD_HEIGHT, line, HUD_TEXT_X, 4 + HUD_LINE_HEIGHT * 3u,
-                      text_luma);
+    hud_line(luma, 4, text_luma, line);
     snprintf(line, sizeof(line), "Frames dropped by your network connection: %u.%02u%%",
              metrics->network_drop_percent_x100 / 100u, metrics->network_drop_percent_x100 % 100u);
-    overlay_draw_text(luma, HUD_WIDTH, HUD_HEIGHT, line, HUD_TEXT_X, 4 + HUD_LINE_HEIGHT * 4u,
-                      text_luma);
+    hud_line(luma, 5, text_luma, line);
+    snprintf(line, sizeof(line), "Frames dropped by decoder backlog: %u.%02u%% / not displayed: %u",
+             metrics->decoder_drop_percent_x100 / 100u, metrics->decoder_drop_percent_x100 % 100u,
+             metrics->not_displayed);
+    hud_line(luma, 6, text_luma, line);
     if (metrics->rtt_valid)
         snprintf(line, sizeof(line), "Average network latency: %u ms (variance: %u ms)",
                  metrics->rtt_ms, metrics->rtt_variance_ms);
     else
         snprintf(line, sizeof(line), "Average network latency: N/A");
-    overlay_draw_text(luma, HUD_WIDTH, HUD_HEIGHT, line, HUD_TEXT_X, 4 + HUD_LINE_HEIGHT * 5u,
-                      text_luma);
+    hud_line(luma, 7, text_luma, line);
     snprintf(line, sizeof(line), "Host processing latency min/max/average: %u.%u/%u.%u/%u.%u ms",
              metrics->host_min_tenths_ms / 10u, metrics->host_min_tenths_ms % 10u,
              metrics->host_max_tenths_ms / 10u, metrics->host_max_tenths_ms % 10u,
              metrics->host_average_tenths_ms / 10u, metrics->host_average_tenths_ms % 10u);
-    overlay_draw_text(luma, HUD_WIDTH, HUD_HEIGHT, line, HUD_TEXT_X, 4 + HUD_LINE_HEIGHT * 6u,
-                      text_luma);
-    snprintf(line, sizeof(line),
-             "Decode: %llu.%02llu ms / Queue avg/max: %llu.%02llu/%llu.%02llu ms / skipped: %u",
-             (unsigned long long)(decode_us / 1000u),
-             (unsigned long long)((decode_us % 1000u) / 10u),
-             (unsigned long long)(metrics->queue_delay_average_us / 1000u),
+    hud_line(luma, 8, text_luma, line);
+    snprintf(line, sizeof(line), "Queue: %u frames now / avg %llu.%02llu ms / max %llu.%02llu ms",
+             metrics->pending_frames, (unsigned long long)(metrics->queue_delay_average_us / 1000u),
              (unsigned long long)((metrics->queue_delay_average_us % 1000u) / 10u),
              (unsigned long long)(metrics->queue_delay_max_us / 1000u),
-             (unsigned long long)((metrics->queue_delay_max_us % 1000u) / 10u),
-             metrics->stale_presentation_drops);
-    overlay_draw_text(luma, HUD_WIDTH, HUD_HEIGHT, line, HUD_TEXT_X, 4 + HUD_LINE_HEIGHT * 7u,
-                      text_luma);
+             (unsigned long long)((metrics->queue_delay_max_us % 1000u) / 10u));
+    hud_line(luma, 9, text_luma, line);
 }
 
 static void overlay_fill_rect(uint8_t *luma, uint32_t width, uint32_t height, uint32_t x,
@@ -593,10 +654,13 @@ static int render_frame(int video, int buffer_index, void *target, uint8_t *memo
                         const void *source, size_t source_bytes, uint32_t pitch,
                         uint32_t surface_height, uint32_t visible_width, uint32_t visible_height,
                         uint32_t output_width, uint32_t output_height, int64_t render_marker,
-                        uint32_t *word_count, int hdr, int draw_overlay, uint32_t overlay_width,
-                        uint32_t overlay_height, uint32_t overlay_x, uint32_t overlay_y,
-                        uint32_t overlay_scale, float overlay_alpha)
+                        uint32_t flip_mode, bool *submitted, uint32_t *word_count, int hdr,
+                        int draw_overlay, uint32_t overlay_width, uint32_t overlay_height,
+                        uint32_t overlay_x, uint32_t overlay_y, uint32_t overlay_scale,
+                        float overlay_alpha)
 {
+    if (submitted)
+        *submitted = false;
     const uint64_t prepare_started = moonlight::performance_now_us();
     static const uint16_t target_offsets[16] = {0x318, 0x31b, 0x31c, 0x31d, 0x31e, 0x31f,
                                                 0x321, 0x323, 0x324, 0x325, 0x390, 0x398,
@@ -721,6 +785,18 @@ static int render_frame(int video, int buffer_index, void *target, uint8_t *memo
     sceAgcDriverWaitUntilSafeForRendering(&command.up,
                                           sceAgcDriverGetWaitRenderingPacketSizeInDwords(), 0,
                                           (uint32_t)video, buffer_index);
+#if PROSPEROLIGHT_GPU_TIMESTAMPS
+    {
+        // Zero, then write back, before submission: a dirty CPU line evicted
+        // later must not overwrite the GPU's stamps.
+        auto *stamps = reinterpret_cast<volatile uint64_t *>(memory + GPU_TIMESTAMP_OFFSET);
+        stamps[0] = stamps[1] = 0;
+        flush_gpu_data(memory + GPU_TIMESTAMP_OFFSET, 64);
+        if (!sceAgcCbReleaseMem(&command, 40, 0, 0, 0, memory + GPU_TIMESTAMP_OFFSET, 3, 0, 0, 0, 3,
+                                0))
+            return -9;
+    }
+#endif
 
     {
         agc_register_t *link_cx = (agc_register_t *)(memory + 0x5000);
@@ -806,7 +882,12 @@ static int render_frame(int video, int buffer_index, void *target, uint8_t *memo
                           (size_t)overlay_width * overlay_height / 2u, hud_pixel_cb);
         sceAgcDcbDrawIndexAuto(&command, 4, 2);
     }
-    sceAgcDcbSetFlip(&command, (uint32_t)video, buffer_index, 1, render_marker);
+#if PROSPEROLIGHT_GPU_TIMESTAMPS
+    if (!sceAgcCbReleaseMem(&command, 40, 0, 0, 0, memory + GPU_TIMESTAMP_OFFSET + 8u, 3, 0, 0, 0,
+                            3, 0))
+        return -9;
+#endif
+    sceAgcDcbSetFlip(&command, (uint32_t)video, buffer_index, flip_mode, render_marker);
 
     submit.words = words;
     submit.word_count = (uint32_t)(command.up - words);
@@ -821,6 +902,8 @@ static int render_frame(int video, int buffer_index, void *target, uint8_t *memo
     {
         const uint64_t submit_started = moonlight::performance_now_us();
         int32_t result = sceAgcDriverSubmitDcb(&submit);
+        if (submitted)
+            *submitted = result == 0;
         if (result == 0)
             result = sceAgcSuspendPoint();
         moonlight::record_performance_elapsed(agc_performance.submit, submit_started);
@@ -851,6 +934,8 @@ typedef struct native_agc_presenter
     int64_t overlay_marker;
     const void *pending_source;
     int64_t pending_marker;
+    void *flip_queue;
+    uint32_t pending_flip_mode;
     uint8_t overlay_kind;
     uint8_t hdr;
     uint8_t ready;
@@ -878,6 +963,8 @@ static native_agc_presenter_t presenter = {
     .overlay_marker = 0,
     .pending_source = nullptr,
     .pending_marker = 0,
+    .flip_queue = nullptr,
+    .pending_flip_mode = 0,
     .overlay_kind = 0,
     .hdr = 0,
     .ready = 0,
@@ -889,40 +976,142 @@ static std::atomic<int> keyboard_enabled = 0;
 static std::atomic<uint32_t> keyboard_selected = 0;
 static std::atomic<int> keyboard_shifted = 0;
 static std::atomic<uint32_t> keyboard_generation = 0;
+static std::atomic<uint32_t> requested_flip_mode = VIDEO_OUT_FLIP_MODE_VSYNC;
+static std::atomic<int> hsync_rejected = 0;
 
+static uint32_t effective_flip_mode(void)
+{
+    return std::atomic_load_explicit(&hsync_rejected, std::memory_order_relaxed)
+               ? VIDEO_OUT_FLIP_MODE_VSYNC
+               : std::atomic_load_explicit(&requested_flip_mode, std::memory_order_relaxed);
+}
+
+void native_agc_set_vsync(int enabled)
+{
+    std::atomic_store_explicit(&requested_flip_mode,
+                               enabled ? VIDEO_OUT_FLIP_MODE_VSYNC : VIDEO_OUT_FLIP_MODE_HSYNC,
+                               std::memory_order_relaxed);
+}
+
+int native_agc_vsync_active(void)
+{
+    return effective_flip_mode() == VIDEO_OUT_FLIP_MODE_VSYNC;
+}
+
+int native_agc_flip_events_active(void)
+{
+    return presenter.flip_queue != nullptr;
+}
+
+static void open_flip_events(void)
+{
+    void *queue = nullptr;
+    const int create_result = sceKernelCreateEqueue(&queue, "prosperolight-flip");
+    int add_result = -1;
+    char receipt[160];
+
+    if (create_result == 0 && queue)
+    {
+        add_result = sceVideoOutAddFlipEvent(queue, presenter.video, nullptr);
+        if (add_result == 0)
+            presenter.flip_queue = queue;
+        else
+            (void)sceKernelDeleteEqueue(queue);
+    }
+    snprintf(receipt, sizeof(receipt), "Native flip events: create=%08x add=%08x active=%u",
+             (uint32_t)create_result, (uint32_t)add_result, presenter.flip_queue ? 1u : 0u);
+    report_agc_receipt(receipt);
+}
+
+static void close_flip_events(void)
+{
+    if (!presenter.flip_queue)
+        return;
+    if (presenter.video >= 0)
+        (void)sceVideoOutDeleteFlipEvent(presenter.flip_queue, presenter.video);
+    (void)sceKernelDeleteEqueue(presenter.flip_queue);
+    presenter.flip_queue = nullptr;
+}
+
+// Flip status is authoritative. A flip event only wakes the waiter early: an
+// event wait that does not find the flip complete (a stale, missed, coalesced
+// or failing event) is always followed by one short sleep before the queue is
+// tried again, so no queue behaviour can turn this into a spin or a false
+// timeout. No vblank waits: a vblank can wake before VideoOut publishes flip
+// status, costing a refresh.
 static int wait_for_marker(int64_t marker, unsigned *waits_out)
 {
-    // Keep the HFR timeout at ~100 ms when comparing polling intervals.
-    const unsigned max_waits =
-        presenter.requested_fps > 60u
-            ? (100000u + PROSPEROLIGHT_FLIP_POLL_US - 1u) / PROSPEROLIGHT_FLIP_POLL_US
-            : 200u;
+    const uint64_t budget_us = presenter.requested_fps > 60u ? 100000u : 500000u;
+    const unsigned max_polls = static_cast<unsigned>(budget_us / PROSPEROLIGHT_FLIP_POLL_US);
+    const unsigned max_waits = presenter.flip_queue ? max_polls * 2u : max_polls;
     uint64_t status[16] = {};
     unsigned waits = 0;
+    bool timed_out = false;
+    bool use_queue = presenter.flip_queue != nullptr;
 
     if (marker > 0 && presenter.video >= 0)
     {
-        for (; waits < max_waits; ++waits)
+        const uint64_t started = present_now_us();
+        for (;;)
         {
             if (PROSPEROLIGHT_PERFORMANCE_DETAIL)
                 ++agc_performance.flip_queries;
             if (sceVideoOutGetFlipStatus(presenter.video, status) == 0 &&
                 (int64_t)status[3] >= marker)
                 break;
+            const uint64_t now = present_now_us();
+            if (waits >= max_waits || (started && now >= started + budget_us))
+            {
+                timed_out = true;
+                break;
+            }
+            ++waits;
             if (PROSPEROLIGHT_PERFORMANCE_DETAIL)
                 ++agc_performance.flip_sleeps;
-            if (presenter.requested_fps > 60u)
-                sceKernelUsleep(PROSPEROLIGHT_FLIP_POLL_US);
+            if (use_queue)
+            {
+                uint64_t event[4] = {};
+                int count = 0;
+                unsigned int timeout = FLIP_EVENT_WAIT_US;
+                const int result =
+                    sceKernelWaitEqueue(presenter.flip_queue, event, 1, &count, &timeout);
+                if (result == 0 && count > 0)
+                    ++agc_performance.flip_event_wakeups;
+                else if (result != 0 && (uint32_t)result != KERNEL_ERROR_ETIMEDOUT)
+                    ++agc_performance.flip_event_errors;
+                use_queue = false;
+            }
             else
-                sceVideoOutWaitVblank(presenter.video);
+            {
+                sceKernelUsleep(PROSPEROLIGHT_FLIP_POLL_US);
+                use_queue = presenter.flip_queue != nullptr;
+            }
         }
     }
     if (waits_out)
         *waits_out = waits;
-    if (PROSPEROLIGHT_PERFORMANCE_DETAIL && waits == max_waits)
+    if (timed_out)
         ++agc_performance.flip_timeouts;
-    return waits == max_waits ? -5 : 0;
+    return timed_out ? -5 : 0;
 }
+
+#if PROSPEROLIGHT_GPU_TIMESTAMPS
+static void record_gpu_timestamps(void)
+{
+    if (!presenter.shader_memory)
+        return;
+    flush_gpu_data(presenter.shader_memory + GPU_TIMESTAMP_OFFSET, 64);
+    const auto *stamps =
+        reinterpret_cast<const volatile uint64_t *>(presenter.shader_memory + GPU_TIMESTAMP_OFFSET);
+    const uint64_t start = stamps[0], end = stamps[1];
+    if (!start || end < start)
+    {
+        ++agc_performance.gpu_samples_invalid;
+        return;
+    }
+    agc_performance.gpu_render.add((end - start) * GPU_TICK_PICOSECONDS / UINT64_C(1000000));
+}
+#endif
 
 int native_agc_wait_source_idle(const void *source)
 {
@@ -933,9 +1122,25 @@ int native_agc_wait_source_idle(const void *source)
 
 int native_agc_finish_frame(void)
 {
-    const int result = wait_for_marker(presenter.pending_marker, NULL);
+    const bool pending = presenter.pending_marker > 0;
+    int result = wait_for_marker(presenter.pending_marker, NULL);
+    if (result != 0 && pending && presenter.pending_flip_mode == VIDEO_OUT_FLIP_MODE_HSYNC)
+    {
+        // An immediate flip that is never reported: its commands finished long
+        // ago, so stop waiting for it and use V-Sync for the rest of the process.
+        std::atomic_store_explicit(&hsync_rejected, 1, std::memory_order_relaxed);
+        ++agc_performance.vsync_fallbacks;
+        report_agc_receipt("Native AGC immediate flip never completed; using V-Sync");
+        result = 0;
+    }
     if (result == 0)
     {
+#if PROSPEROLIGHT_GPU_TIMESTAMPS
+        if (pending)
+            record_gpu_timestamps();
+#else
+        (void)pending;
+#endif
         presenter.pending_marker = 0;
         presenter.pending_source = nullptr;
     }
@@ -1152,6 +1357,8 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
     flush_gpu_data(presenter.shader_memory, SHADER_STATIC_BYTES);
 
     presenter.video = sceVideoOutOpen(0xff, 0, 0, NULL);
+    if (presenter.video >= 0)
+        open_flip_events();
     if (presenter.video >= 0 && requested_fps > 60u)
         mode_result =
             configure_high_refresh_output(presenter.video, requested_fps, &mode_support_result,
@@ -1322,16 +1529,38 @@ static int present_frame(const void *source, size_t source_bytes, uint32_t pitch
         }
     }
     presenter.overlay_kind = draw_keyboard ? 2u : draw_hud ? 1u : 0u;
+    // Loading frames always wait for vblank; only stream frames may tear.
+    const uint32_t flip_mode = defer_flip ? effective_flip_mode() : VIDEO_OUT_FLIP_MODE_VSYNC;
+    bool submitted = false;
     result = render_frame(presenter.video, (int)buffer_index, target, presenter.shader_memory,
                           presenter.vertex_shader, presenter.pixel_shader,
                           presenter.hud_pixel_shader, source, source_bytes, pitch, surface_height,
                           visible_width, visible_height, render_width, render_height, render_marker,
-                          &words, hdr, draw_overlay, overlay_width, overlay_height, overlay_x,
-                          overlay_y, overlay_scale, overlay_alpha);
+                          flip_mode, &submitted, &words, hdr, draw_overlay, overlay_width,
+                          overlay_height, overlay_x, overlay_y, overlay_scale, overlay_alpha);
+    if (result != 0 && !submitted && flip_mode == VIDEO_OUT_FLIP_MODE_HSYNC)
+    {
+        // Nothing reached the GPU: retire immediate flips for this process.
+        std::atomic_store_explicit(&hsync_rejected, 1, std::memory_order_relaxed);
+        ++agc_performance.vsync_fallbacks;
+        snprintf(receipt, sizeof(receipt), "Native AGC immediate flip rejected: rc=%08x",
+                 (uint32_t)result);
+        report_agc_receipt(receipt);
+        result = render_frame(presenter.video, (int)buffer_index, target, presenter.shader_memory,
+                              presenter.vertex_shader, presenter.pixel_shader,
+                              presenter.hud_pixel_shader, source, source_bytes, pitch,
+                              surface_height, visible_width, visible_height, render_width,
+                              render_height, render_marker, VIDEO_OUT_FLIP_MODE_VSYNC, &submitted,
+                              &words, hdr, draw_overlay, overlay_width, overlay_height, overlay_x,
+                              overlay_y, overlay_scale, overlay_alpha);
+    }
     if (result == 0)
     {
         presenter.pending_source = source;
         presenter.pending_marker = render_marker;
+        presenter.pending_flip_mode = effective_flip_mode() == VIDEO_OUT_FLIP_MODE_HSYNC
+                                          ? flip_mode
+                                          : VIDEO_OUT_FLIP_MODE_VSYNC;
         render_waits = 0;
         if (!defer_flip)
         {
@@ -1554,6 +1783,7 @@ int native_agc_present_shutdown(void)
             (void)sceVideoOutWaitVblank(presenter.video);
         }
     }
+    close_flip_events();
     if (presenter.video >= 0)
         close_result = sceVideoOutClose(presenter.video);
     if (presenter.framebuffer)

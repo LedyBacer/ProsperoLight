@@ -7,34 +7,24 @@
 #include <cstddef>
 #include <cstdint>
 
+// Slices requested above 1080p; 1080p keeps at most four.
 #ifndef VIDEO_SLICES_PER_FRAME
-#define VIDEO_SLICES_PER_FRAME 4
+#define VIDEO_SLICES_PER_FRAME 8
 #endif
+// Videodec2 depth of the adaptive pipeline; the classic pipeline is depth one.
 #ifndef DECODER_PIPELINE_DEPTH
-#define DECODER_PIPELINE_DEPTH 1
-#endif
-#ifndef DECODER_CPU_AFFINITY
-#define DECODER_CPU_AFFINITY 0x3f
+#define DECODER_PIPELINE_DEPTH 3
 #endif
 #ifndef DECODER_CPU_PRIORITY
 #define DECODER_CPU_PRIORITY 700
 #endif
-#ifndef PRESENT_EVERY_N
-#define PRESENT_EVERY_N 1
-#endif
-#ifndef FRAME_PACING
-#define FRAME_PACING 0
-#endif
 #ifndef INPUT_POLL_US
-#define INPUT_POLL_US 4000
+#define INPUT_POLL_US 2000
 #endif
 
 static_assert(VIDEO_SLICES_PER_FRAME >= 1 && VIDEO_SLICES_PER_FRAME <= 8);
-static_assert(DECODER_PIPELINE_DEPTH >= 1 && DECODER_PIPELINE_DEPTH <= 2);
-static_assert(DECODER_CPU_AFFINITY > 0 && (DECODER_CPU_AFFINITY & ~0x3f) == 0);
+static_assert(DECODER_PIPELINE_DEPTH >= 1 && DECODER_PIPELINE_DEPTH <= 3);
 static_assert(DECODER_CPU_PRIORITY >= 700 && DECODER_CPU_PRIORITY <= 767);
-static_assert(PRESENT_EVERY_N == 1 || PRESENT_EVERY_N == 2 || PRESENT_EVERY_N == 4);
-static_assert(FRAME_PACING == 0 || FRAME_PACING == 1);
 static_assert(INPUT_POLL_US >= 1000 && INPUT_POLL_US <= 4000);
 
 namespace moonlight
@@ -67,41 +57,4 @@ inline unsigned count_video_slices(const uint8_t *data, size_t bytes, bool hevc)
     }
     return count;
 }
-
-// One-owner, no extra queue. Cap the wait at one interval; abandon obsolete
-// deadlines rather than sleeping to repay missed slots or catch up in bursts.
-struct FramePacer
-{
-    uint64_t next_us{};
-    unsigned rate{}, remainder{};
-    uint32_t delay(uint64_t now, unsigned fps, bool behind, unsigned refresh_x100 = 0)
-    {
-        if (!fps || fps > 120)
-        {
-            *this = {};
-            return 0;
-        }
-        unsigned selected = fps * 100u;
-        if (refresh_x100 && refresh_x100 < selected)
-            selected = refresh_x100;
-        if (selected < 1000)
-            selected = fps * 100u;
-        if (selected != rate)
-        {
-            *this = {};
-            rate = selected;
-        }
-        const uint64_t numerator = 100000000u + remainder;
-        const uint64_t interval = numerator / rate;
-        remainder = numerator % rate;
-        if (behind || !next_us || now >= next_us || next_us - now > interval)
-        {
-            next_us = now + interval;
-            return 0;
-        }
-        const auto wait = static_cast<uint32_t>(next_us - now);
-        next_us += interval;
-        return wait;
-    }
-};
 } // namespace moonlight

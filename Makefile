@@ -19,13 +19,16 @@ AUDIO_MAX_BACKLOG_MS ?= 0
 PRESENT_OVERLAP ?= 1
 FLIP_POLL_US ?= 500
 PERFORMANCE_DETAIL ?= 0
-VIDEO_SLICES_PER_FRAME ?= 4
-DECODER_PIPELINE_DEPTH ?= 1
-DECODER_CPU_AFFINITY ?= 0x3f
+# Slices above 1080p, adaptive Videodec2 depth (the Classic setting is depth 1).
+VIDEO_SLICES_PER_FRAME ?= 8
+DECODER_PIPELINE_DEPTH ?= 3
 DECODER_CPU_PRIORITY ?= 700
-PRESENT_EVERY_N ?= 1
-FRAME_PACING ?= 0
-INPUT_POLL_US ?= 4000
+INPUT_POLL_US ?= 2000
+# Opt-in experiments: GPU render timestamps, keyframe catch-up after this many
+# queued frames, and reference-frame invalidation instead of keyframes.
+GPU_TIMESTAMPS ?= 0
+CATCHUP_QUEUE_FRAMES ?= 0
+REFERENCE_FRAME_INVALIDATION ?= 0
 APP_DEFINITIONS ?= SDL_MAIN_HANDLED SDL_STATIC_LIB USING_GENERATED_CONFIG_H RMLUI_STATIC_LIB
 APP_DEFINITIONS += PROSPEROLIGHT_LAN_TELEMETRY=$(LAN_TELEMETRY)
 APP_DEFINITIONS += PROSPEROLIGHT_STREAM_SELF_TEST_FPS=$(STREAM_SELF_TEST_FPS)
@@ -40,9 +43,11 @@ APP_DEFINITIONS += PROSPEROLIGHT_FLIP_POLL_US=$(FLIP_POLL_US)
 APP_DEFINITIONS += PROSPEROLIGHT_PERFORMANCE_DETAIL=$(PERFORMANCE_DETAIL)
 APP_DEFINITIONS += VIDEO_SLICES_PER_FRAME=$(VIDEO_SLICES_PER_FRAME)
 APP_DEFINITIONS += DECODER_PIPELINE_DEPTH=$(DECODER_PIPELINE_DEPTH)
-APP_DEFINITIONS += DECODER_CPU_AFFINITY=$(DECODER_CPU_AFFINITY)
 APP_DEFINITIONS += DECODER_CPU_PRIORITY=$(DECODER_CPU_PRIORITY)
-APP_DEFINITIONS += PRESENT_EVERY_N=$(PRESENT_EVERY_N) FRAME_PACING=$(FRAME_PACING) INPUT_POLL_US=$(INPUT_POLL_US)
+APP_DEFINITIONS += INPUT_POLL_US=$(INPUT_POLL_US)
+APP_DEFINITIONS += PROSPEROLIGHT_GPU_TIMESTAMPS=$(GPU_TIMESTAMPS)
+APP_DEFINITIONS += PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES=$(CATCHUP_QUEUE_FRAMES)
+APP_DEFINITIONS += PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION=$(REFERENCE_FRAME_INVALIDATION)
 APP_INCLUDE_PATHS ?= vendor/ps5/sdl/include vendor/ps5/rmlui/include include src src/gamestream platform/ps5 third_party/moonlight-common-c/src third_party/moonlight-common-c/enet/include third_party/moonlight-common-c/nanors third_party/moonlight-common-c/nanors/deps third_party/moonlight-common-c/nanors/deps/obl third_party/mbedtls/include third_party/opus/include
 APP_STATIC_ARCHIVES ?= vendor/ps5/sdl/lib/libSDL2.a vendor/ps5/rmlui/lib/librmlui.a vendor/ps5/freetype/lib/libfreetype.a build/stream-deps/libmoonlight-common-c.a build/stream-deps/libopus.a build/stream-deps/libmbedtls.a build/stream-deps/libmbedx509.a build/stream-deps/libmbedcrypto.a vendor/ps5/sdk/lib/libunwind.a vendor/ps5/sdk/lib/libcxx.a vendor/ps5/sdk/lib/libcxxabi.a
 APP_RUNTIME_MODULES ?=
@@ -112,6 +117,7 @@ test-unit: $(HOST_UNIT_TEST) $(HOST_RUNTIME_TEST)
 
 $(HOST_UNIT_TEST): tests/test_prosperolight.cpp include/moonlight_config.hpp \
 		include/moonlight_performance.hpp include/moonlight_tuning.hpp \
+		include/moonlight_pipeline.hpp \
 		include/native_agc_output.hpp \
 		include/moonlight_health.hpp \
 		include/moonlight_physical_input.hpp \
@@ -159,27 +165,28 @@ performance-round3-candidates:
 .PHONY: test-performance-guards
 test-performance-guards:
 	@mkdir -p build/tests
-	@for n in 1 2 4; do $(HOST_CXX) $(HOST_TEST_CXXFLAGS) -Wno-unused-function -Wno-missing-field-initializers \
-		-DDECODER_PIPELINE_DEPTH=2 -Iinclude -Isrc -Iplatform/ps5 \
-		-DPRESENT_EVERY_N=$$n \
+	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Wno-unused-function -Wno-missing-field-initializers \
+		-Iinclude -Isrc -Iplatform/ps5 \
 		-Ithird_party/opus/include -Ithird_party/mbedtls/include -Ithird_party/moonlight-common-c/src \
-		tests/test_decoder_pipeline.cpp $(HOST_TEST_LDFLAGS) -o build/tests/decoder_pipeline && \
-		build/tests/decoder_pipeline || exit 1; done
+		tests/test_decoder_pipeline.cpp $(HOST_TEST_LDFLAGS) -o build/tests/decoder_pipeline
+	@build/tests/decoder_pipeline
 	@clang -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fvisibility=hidden \
 		tests/test_socket_metrics.c -Wl,--gc-sections -o build/tests/socket_metrics
 	@build/tests/socket_metrics
+	@clang -std=c11 -D_DEFAULT_SOURCE -DPS5_THREAD_PLACEMENT_HOST_TEST -O2 -Wall -Wextra -Werror \
+		tests/test_thread_placement.c -o build/tests/thread_placement
+	@build/tests/thread_placement
 	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -Wno-unused-function -Iinclude -Isrc \
 		tests/test_presentation_lifetime.cpp $(HOST_TEST_LDFLAGS) -o build/tests/presentation_lifetime
 	@build/tests/presentation_lifetime
-	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -Wno-unused-function -Wno-missing-field-initializers \
+	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Wno-unused-function -Wno-missing-field-initializers \
 		-DVIDEO_SLICES_PER_FRAME=$(VIDEO_SLICES_PER_FRAME) \
 		-DDECODER_PIPELINE_DEPTH=$(DECODER_PIPELINE_DEPTH) \
-		-DDECODER_CPU_AFFINITY=$(DECODER_CPU_AFFINITY) -DDECODER_CPU_PRIORITY=$(DECODER_CPU_PRIORITY) \
-		-DPRESENT_EVERY_N=$(PRESENT_EVERY_N) -DFRAME_PACING=$(FRAME_PACING) -DINPUT_POLL_US=$(INPUT_POLL_US) \
+		-DDECODER_CPU_PRIORITY=$(DECODER_CPU_PRIORITY) -DINPUT_POLL_US=$(INPUT_POLL_US) \
 		-Iinclude -Isrc -Iplatform/ps5 -Ithird_party/opus/include -Ithird_party/mbedtls/include \
 		-Ithird_party/moonlight-common-c/src \
 		tests/test_performance_summary.cpp $(HOST_TEST_LDFLAGS) -o build/tests/performance_summary
-	@build/tests/performance_summary | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["schema"]==2 and r["present_overlap"]==1 and r["presented"]==95 and r["refresh_x100"]==11988 and r["client_refresh_x100"]==11988; t=r["timings_us"]; assert t["decode"]["count"]==100 and t["decode"]["mean"]==3000; assert t["receive_to_enqueue"]["mean"]==3000 and r["reassembly_invalid_samples"]==1; assert len(t)==19; assert r["performance_detail"]==1 and r["stream_bytes"]==123456 and r["flip_queries"]==7 and r["flip_sleeps"]==3; assert t["agc_prepare"]["mean"]==150 and t["agc_cache_flush"]["mean"]==50 and t["agc_submit"]["mean"]==250 and t["flush"]["mean"]==1250 and t["completion_wait"]["mean"]==500; print("Performance JSON / partial-write failure checks PASS")'
+	@build/tests/performance_summary | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["schema"]==3 and r["present_overlap"]==1 and r["presented"]==95 and r["refresh_x100"]==11988 and r["client_refresh_x100"]==11988; t=r["timings_us"]; assert t["decode"]["count"]==100 and t["decode"]["mean"]==3000; assert t["receive_to_enqueue"]["mean"]==3000 and r["reassembly_invalid_samples"]==1; assert len(t)==20; assert r["performance_detail"]==1 and r["stream_bytes"]==123456 and r["flip_queries"]==7 and r["flip_sleeps"]==3; assert t["agc_prepare"]["mean"]==150 and t["agc_cache_flush"]["mean"]==50 and t["agc_submit"]["mean"]==250 and t["flush"]["mean"]==1250 and t["completion_wait"]["mean"]==500 and t["ready_to_present"]["mean"]==100; assert r["decoded"]==99 and r["not_displayed"]==4 and r["network_frame_gaps"]==2 and r["decoder_frame_gaps"]==30; assert r["decoder_mode"]=="adaptive" and r["decoder_pipeline_depth"]==3 and r["decoder_drain"]==1 and r["drain_calls"]==40 and r["decoder_cores"]==5 and r["decoder_cpu_affinity"]==1023; assert r["placement_applied"]==11 and r["placement_failed"]==1 and r["receive_placement_verified"]==1024; assert r["vsync_requested"]==1 and r["vsync_active"]==1 and r["flip_events_active"]==1 and r["flip_event_wakeups"]==2; print("Performance JSON / partial-write failure checks PASS")'
 
 deps: test-deps
 	@printf '%s\n' '==> [deps] Fetching declared native dependencies'

@@ -25,9 +25,11 @@
 #include "moonlight_stream_input.hpp"
 #include "moonlight_stream_keyboard.hpp"
 #include "moonlight_performance.hpp"
+#include "moonlight_pipeline.hpp"
 #include "moonlight_tuning.hpp"
 #include "../platform/ps5/ps5_network_metrics.h"
 #include "../platform/ps5/ps5_fec_cpu.h"
+#include "../platform/ps5/ps5_thread_placement.h"
 #include "lan_http_report.hpp"
 #include "native_agc_present.hpp"
 #include "gamestream/certgen.h"
@@ -37,9 +39,19 @@
 #include "gamestream/gs_log.h"
 #include "../../third_party/moonlight-common-c/src/Limelight.h"
 
-#define PIPELINE_BUFFER_COUNT (DECODER_PIPELINE_DEPTH + 2u)
+// Frame slots cover every picture the deepest pipeline can hold, one waiting
+// for presentation, one on screen, the protected latest output and one spare.
+// Input slots cover every access unit in flight plus the one being copied.
+#define FRAME_SLOT_COUNT 7u
+#define INPUT_SLOT_COUNT 5u
 #define SUBMISSION_QUEUE_CAPACITY 8u
 #define INPUT_SLOT_BYTES 0x800000u
+// Errors at depth above one before the decoder is rebuilt at depth one, and
+// the clean run that forgives earlier ones.
+#define PIPELINE_FAULT_LIMIT 3u
+#define PIPELINE_CLEAN_OUTPUTS 600u
+#define PRESENT_FAILURE_LIMIT 3u
+#define CATCHUP_HOLD_US UINT64_C(250000)
 #define MOONLIGHT_IDENTITY_DIRECTORY "/download0/moonlight"
 #define CONTROLLER_KEEPALIVE_US UINT64_C(1000000)
 #define CONNECTION_SETUP_TIMEOUT_US UINT64_C(20000000)
@@ -73,9 +85,30 @@
 #ifndef PROSPEROLIGHT_FLIP_POLL_US
 #define PROSPEROLIGHT_FLIP_POLL_US 500
 #endif
+#ifndef PROSPEROLIGHT_GPU_TIMESTAMPS
+#define PROSPEROLIGHT_GPU_TIMESTAMPS 0
+#endif
 #ifndef PROSPEROLIGHT_STREAM_SELF_TEST_FPS
 #define PROSPEROLIGHT_STREAM_SELF_TEST_FPS 0
 #endif
+// Opt-in experiments. A sustained queue of this many frames requests a
+// keyframe instead of carrying the delay; zero keeps every frame.
+#ifndef PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES
+#define PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES 0
+#endif
+// Recover from loss by invalidating reference frames instead of a keyframe.
+#ifndef PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION
+#define PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION 0
+#endif
+static_assert(PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES >= 0 && PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES <= 14,
+              "catch-up must act before moonlight-common-c's 15-frame queue overflows");
+static_assert(PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION == 0 ||
+              PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION == 1);
+static_assert(FRAME_SLOT_COUNT >= moonlight::kMaxDecoderDepth + 4u &&
+                  INPUT_SLOT_COUNT >= moonlight::kMaxDecoderDepth + 2u &&
+                  SUBMISSION_QUEUE_CAPACITY > moonlight::kMaxDecoderDepth &&
+                  DECODER_PIPELINE_DEPTH <= moonlight::kMaxDecoderDepth,
+              "slot pools must cover the deepest decoder pipeline");
 
 #define PS5_PAD_BUTTON_L3 0x000002u
 #define PS5_PAD_BUTTON_R3 0x000004u
@@ -142,6 +175,7 @@ extern "C"
     int sceKernelClose(int descriptor);
     int64_t sceKernelWrite(int descriptor, const void *buffer, size_t length);
     int sceKernelRename(const char *from, const char *to);
+    int sceKernelDebugOutText(int channel, const char *text);
 }
 typedef struct notification_request
 {
@@ -480,20 +514,102 @@ static std::atomic<int> connection_terminated;
 static std::atomic<int> connection_error;
 static std::atomic<uint32_t> host_hdr_active;
 static std::atomic<uint32_t> host_hdr_transitions;
+// Bumped whenever queued frames are discarded for decoder backpressure: a
+// moonlight-common-c queue overflow, or a decoder refresh this client asked for.
+static std::atomic<uint32_t> video_recovery_epoch;
+static std::atomic<uint32_t> video_queue_overflows;
+static std::atomic<uint32_t> video_unrecoverable_frames;
 
+typedef struct decoder_resources
+{
+    videodec2_decoder_memory_t memory;
+    void *decoder;
+    int64_t gpu_start, cpu_gpu_start;
+    size_t gpu_size, cpu_gpu_size, cpu_mapping_size;
+} decoder_resources_t;
+
+typedef struct stream_submission
+{
+    uint64_t arrival_us; // local monotonic clock when the decode worker took it
+    uint64_t enqueue_us; // moonlight-common-c clock
+    uint64_t pts_us;
+    int32_t frame;
+    moonlight::FrameTrace::Sample *trace;
+} stream_submission_t;
+
+// One decoded picture on its way to the display.
+typedef struct stream_ready_frame
+{
+    int slot;
+    void *buffer;
+    size_t buffer_size;
+    uint32_t pitch, height;
+    int32_t frame;
+    uint64_t arrival_us, enqueue_us, ready_us;
+    moonlight::FrameTrace::Sample *trace;
+    native_agc_metrics_t hud;
+} stream_ready_frame_t;
+
+// Three owners. "Fixed" fields are written before the workers start. The decode
+// worker owns decoding and its statistics; the presentation worker owns AGC and
+// its statistics. Only `frames`, `mailbox` and `stop_presenting` are shared, and
+// only under `lock`. Aggregates are read after both workers have joined.
 typedef struct native_renderer_state
 {
+    // Fixed.
     const native_video_mode_t *mode;
     uint32_t stream_fps;
     uint32_t client_refresh_x100;
-    void *decoder;
     void *input_memory;
     void *frame_memory;
     size_t input_size;
     size_t frame_size;
+    videodec2_decoder_config_t decoder_config;
+    videodec2_decoder_memory_t decoder_memory;
+    uint32_t pipeline_mode; // MOONLIGHT_DECODER_PIPELINE_*
+    uint32_t requested_depth;
+    uint32_t decoder_cores;
+    uint64_t requested_cpu_mask, decoder_cpu_mask;
+    uint32_t create_attempts;
+    uint64_t process_cpu_mask;
+    moonlight::ThreadLayout layout;
+    uint32_t slices_requested;
+    uint32_t vsync_requested;
+    int main_placement_result;
+
+    // Decode worker.
+    void *decoder;
+    uint32_t pipeline_depth; // effective; one after a fallback
+    bool drain_enabled;
+    bool decoder_needs_reset;
+    bool await_keyframe;
+    bool decoder_lost;
+    uint32_t pipeline_faults; // errors at depth above one since the last clean run
+    uint32_t clean_outputs;
     size_t stream_bytes;
-    uint32_t network_dropped_frames;
-    int32_t last_network_frame;
+    uint32_t access_units;
+    uint32_t fragments;
+    uint32_t decode_calls;
+    uint32_t flush_calls;
+    uint32_t drain_calls;
+    uint32_t drain_faults;
+    uint32_t decoder_recreations;
+    uint32_t decoder_refreshes;
+    uint32_t catchup_refreshes;
+    uint32_t decoded;
+    uint32_t not_displayed;
+    uint32_t decoder_delayed;
+    uint32_t input_sequence;
+    uint64_t copy_total_us;
+    uint64_t copy_max_us;
+    uint64_t decode_total_us;
+    uint64_t decode_max_us;
+    uint64_t flush_total_us;
+    uint64_t flush_max_us;
+    uint64_t callback_to_decode_total_us;
+    uint64_t callback_to_decode_min_us;
+    uint64_t callback_to_decode_max_us;
+    uint32_t ready_calls;
     uint32_t host_latency_frames;
     uint32_t host_latency_min_tenths_ms;
     uint32_t host_latency_max_tenths_ms;
@@ -501,58 +617,51 @@ typedef struct native_renderer_state
     uint32_t rtt_ms;
     uint32_t rtt_variance_ms;
     int rtt_valid;
-    uint32_t access_units;
+    uint64_t first_video_us;
+    uint64_t last_video_us;
+    uint32_t pending_video_high_water;
+    uint32_t reassembly_invalid_samples;
+    uint32_t observed_slices_min, observed_slices_max, observed_slices_last, layout_samples;
+    uint32_t hdr_mismatch_reported;
+    int32_t last_result;
+    stream_submission_t submissions[SUBMISSION_QUEUE_CAPACITY];
+    uint32_t submission_head;
+    uint32_t submission_count;
+    moonlight::DropAttribution drops;
+    moonlight::ArrivalRate arrival;
+    moonlight::RateWindow decoded_rate;
+    moonlight::WindowedTiming decode_window, queue_window;
+    moonlight::CatchUpGuard catchup;
+    moonlight::TimingHistogram copy_timing, decode_timing, queue_timing, reassembly_timing;
+    moonlight::TimingHistogram ready_timing, flush_timing, host_timing;
+
+    // Shared under `lock`.
+    pthread_mutex_t lock;
+    pthread_cond_t wake;
+    moonlight::SlotPool<FRAME_SLOT_COUNT> frames;
+    moonlight::LatestMailbox<stream_ready_frame_t> mailbox;
+    bool stop_presenting;
+
+    // Presentation worker.
     std::atomic<uint32_t> presented;
-    uint32_t fragments;
-    uint32_t decode_calls;
-    uint64_t copy_total_us;
-    uint64_t copy_max_us;
-    uint64_t decode_total_us;
-    uint64_t decode_max_us;
-    uint32_t flush_calls;
-    uint64_t flush_total_us;
-    uint64_t flush_max_us;
+    uint32_t present_errors;
+    uint32_t latency_calls;
     uint64_t present_total_us;
     uint64_t present_max_us;
-    uint64_t callback_to_decode_total_us;
-    uint64_t callback_to_decode_min_us;
-    uint64_t callback_to_decode_max_us;
     uint64_t callback_to_flip_total_us;
     uint64_t callback_to_flip_min_us;
     uint64_t callback_to_flip_max_us;
-    uint64_t submission_arrival_us[SUBMISSION_QUEUE_CAPACITY];
-    uint64_t submission_enqueue_us[SUBMISSION_QUEUE_CAPACITY];
-    uint64_t submission_pts_us[SUBMISSION_QUEUE_CAPACITY];
-    int32_t submission_frame[SUBMISSION_QUEUE_CAPACITY];
-    moonlight::FrameTrace::Sample *submission_trace[SUBMISSION_QUEUE_CAPACITY];
-    uint32_t submission_head;
-    uint32_t submission_count;
-    uint32_t latency_calls;
-    uint32_t ready_calls;
-    uint64_t first_video_us;
-    uint64_t last_video_us;
     uint64_t first_present_us;
     uint64_t last_present_us;
-    uint64_t queue_delay_total_us;
-    uint64_t queue_delay_max_us;
-    uint32_t queue_delay_calls;
-    uint32_t stale_presentation_drops;
-    uint32_t pending_video_high_water;
-    uint32_t reassembly_invalid_samples;
-    uint32_t observed_slices_min, observed_slices_max, layout_samples;
-    uint32_t presentation_decimated, decoder_delayed;
-    bool decoder_needs_reset;
-    moonlight::FramePacer pacer;
-    bool presentation_pending;
-    moonlight::FrameTrace::Sample *pending_trace;
-    uint64_t pending_arrival_us, pending_enqueue_us;
-    moonlight::TimingHistogram copy_timing, decode_timing, queue_timing, reassembly_timing;
-    moonlight::TimingHistogram ready_timing, frame_age_timing, flip_interval_timing;
-    moonlight::TimingHistogram source_wait_timing, flush_timing, present_call_timing;
-    moonlight::TimingHistogram completion_wait_timing, host_timing;
-    moonlight::RateWindow incoming_rate, rendering_rate;
-    int32_t last_result;
-    uint32_t hdr_mismatch_reported;
+    moonlight::RateWindow rendering_rate;
+    moonlight::TimingHistogram frame_age_timing, flip_interval_timing, present_wait_timing;
+    moonlight::TimingHistogram present_call_timing, completion_wait_timing;
+    std::atomic<int32_t> present_result;
+
+    // Worker lifetime, owned by the thread that starts and stops the stream.
+    pthread_t decode_thread, present_thread;
+    bool sync_ready, decode_started, present_started;
+    int decode_placement_result, present_placement_result;
     std::atomic<int> running;
 } native_renderer_state_t;
 
@@ -565,6 +674,119 @@ static bool presentation_faulted;
 
 // One bounded local summary AFTER workers join. No addresses, host identities,
 // key events or payloads; no per-frame file/network I/O. Failure is nonfatal.
+static void log_performance_summary(const char *report, size_t length, bool new_session = true)
+{
+    // Bound each kernel record; never dump the per-frame trace into klog.
+    constexpr size_t chunk_bytes = 384;
+    static unsigned session = 0;
+    if (new_session)
+        ++session;
+    const size_t parts = (length + chunk_bytes - 1) / chunk_bytes;
+    for (size_t offset = 0; offset < length; offset += chunk_bytes)
+    {
+        const size_t count = length - offset < chunk_bytes ? length - offset : chunk_bytes;
+        char line[512];
+        const int prefix = snprintf(line, sizeof(line),
+                                    "[ProsperoLight perf] session=%u part=%zu/%zu json=", session,
+                                    offset / chunk_bytes + 1, parts);
+        if (prefix < 0 || static_cast<size_t>(prefix) + count + 2 > sizeof(line))
+            return;
+        for (size_t i = 0; i < count; ++i)
+            line[prefix + i] = report[offset + i] == '\n' ? ' ' : report[offset + i];
+        line[prefix + count] = '\n';
+        line[prefix + count + 1] = '\0';
+        if (sceKernelDebugOutText(0, line) < 0)
+            return;
+    }
+}
+
+static void log_performance_windows(uint32_t fps)
+{
+#if PROSPEROLIGHT_PERFORMANCE_DETAIL
+    if (!frame_trace.count || !fps)
+        return;
+    // Post-stream aggregation only. At most 300 occupied five-second windows.
+    const uint64_t origin = frame_trace.samples[0].callback_us;
+    const uint64_t budget = (1000000u + fps - 1) / fps;
+    uint64_t prior_receive = 0, prior_flip = 0;
+    size_t index = 0, windows = 0;
+    while (index < frame_trace.count && windows++ < 300)
+    {
+        const auto window = (frame_trace.samples[index].callback_us - origin) / 5000000u;
+        moonlight::TimingHistogram decode{}, host{}, receive{}, queue{}, reassembly{}, flip{};
+        uint64_t bytes = 0, over = 0, pending = 0, presented = 0, wait_max = 0, gaps = 0;
+        uint64_t superseded = 0;
+        const size_t start = index;
+        while (index < frame_trace.count)
+        {
+            const auto &s = frame_trace.samples[index];
+            if ((s.callback_us - origin) / 5000000u != window)
+                break;
+            bytes += s.bytes;
+            decode.add(s.decode_us);
+            over += s.decode_us > budget;
+            superseded += s.outcome == 2u;
+            if (s.host_us)
+                host.add(s.host_us);
+            if (s.pending > pending)
+                pending = s.pending;
+            if (s.present_wait_us > wait_max)
+                wait_max = s.present_wait_us;
+            if (s.receive_us && prior_receive && s.receive_us >= prior_receive)
+                receive.add(s.receive_us - prior_receive);
+            if (s.receive_us)
+                prior_receive = s.receive_us;
+            if (s.receive_us && s.enqueue_us >= s.receive_us)
+                reassembly.add(s.enqueue_us - s.receive_us);
+            if (s.enqueue_us && s.callback_network_us >= s.enqueue_us)
+                queue.add(s.callback_network_us - s.enqueue_us);
+            if (s.completion_us)
+            {
+                ++presented;
+                if (prior_flip && s.completion_us >= prior_flip)
+                    flip.add(s.completion_us - prior_flip);
+                prior_flip = s.completion_us;
+            }
+            if (index && s.frame > frame_trace.samples[index - 1].frame &&
+                s.frame - frame_trace.samples[index - 1].frame > 1)
+                gaps += s.frame - frame_trace.samples[index - 1].frame - 1;
+            ++index;
+        }
+        char row[1024];
+        const int length = snprintf(
+            row, sizeof(row),
+            "{\"kind\":\"window\",\"start_s\":%llu,\"duration_s\":5,\"frames\":%zu,"
+            "\"presented\":%llu,\"not_displayed\":%llu,\"bytes\":%llu,\"gaps\":%llu,"
+            "\"pending_max\":%llu,"
+            "\"decode_mean_us\":%llu,\"decode_p99_upper_us\":%llu,\"decode_max_us\":%llu,"
+            "\"decode_over_budget\":%llu,\"budget_us\":%llu,\"host_count\":%llu,"
+            "\"host_mean_us\":%llu,\"host_max_us\":%llu,\"receive_gap_max_us\":%llu,"
+            "\"reassembly_max_us\":%llu,\"queue_max_us\":%llu,"
+            "\"flip_gap_max_us\":%llu,\"present_wait_max_us\":%llu}",
+            (unsigned long long)(window * 5), index - start, (unsigned long long)presented,
+            (unsigned long long)superseded, (unsigned long long)bytes, (unsigned long long)gaps,
+            (unsigned long long)pending, (unsigned long long)(decode.total_us / decode.count),
+            (unsigned long long)decode.percentile(99), (unsigned long long)decode.max_us,
+            (unsigned long long)over, (unsigned long long)budget, (unsigned long long)host.count,
+            (unsigned long long)(host.count ? host.total_us / host.count : 0),
+            (unsigned long long)host.max_us, (unsigned long long)receive.max_us,
+            (unsigned long long)reassembly.max_us, (unsigned long long)queue.max_us,
+            (unsigned long long)flip.max_us, (unsigned long long)wait_max);
+        if (length > 0 && static_cast<size_t>(length) < sizeof(row))
+            log_performance_summary(row, static_cast<size_t>(length), false);
+    }
+    char end[192];
+    const int length = snprintf(end, sizeof(end),
+                                "{\"kind\":\"windows_end\",\"recorded\":%zu,"
+                                "\"reported\":%zu,\"omitted\":%zu}",
+                                frame_trace.count, index, frame_trace.omitted);
+    if (length > 0 && static_cast<size_t>(length) < sizeof(end))
+        log_performance_summary(end, static_cast<size_t>(length), false);
+#else
+    (void)fps;
+#endif
+}
+
 static bool write_performance_bytes(int descriptor, const char *data, size_t length)
 {
     size_t written = 0;
@@ -583,36 +805,62 @@ static void save_frame_trace()
 #if PROSPEROLIGHT_PERFORMANCE_DETAIL
     constexpr auto temporary = MOONLIGHT_IDENTITY_DIRECTORY "/performance-frames.csv.tmp";
     constexpr auto destination = MOONLIGHT_IDENTITY_DIRECTORY "/performance-frames.csv";
+    // Rows are batched: one write per row cost tens of thousands of system calls.
+    static char batch[65536];
     const int descriptor = sceKernelOpen(temporary, 0x601, 0600);
     if (descriptor < 0)
         return;
-    char row[512];
-    int length = snprintf(row, sizeof(row),
-                          "# schema=1,count=%zu,omitted=%zu\n"
+    size_t used = 0;
+    int length = snprintf(batch, sizeof(batch),
+                          "# schema=2,count=%zu,omitted=%zu\n"
                           "frame,bytes,pending,outcome,receive_us,enqueue_us,callback_network_us,"
-                          "callback_us,pts_us,decode_us,ready_us,prior_flip_wait_us,submit_us,"
-                          "completion_us\n",
+                          "callback_us,pts_us,decode_us,ready_us,present_wait_us,submit_us,"
+                          "completion_us,host_us\n",
                           frame_trace.count, frame_trace.omitted);
-    bool ok = length > 0 && static_cast<size_t>(length) < sizeof(row) &&
-              write_performance_bytes(descriptor, row, static_cast<size_t>(length));
+    bool ok = length > 0 && static_cast<size_t>(length) < sizeof(batch);
+    if (ok)
+        used = static_cast<size_t>(length);
     for (size_t i = 0; ok && i < frame_trace.count; ++i)
     {
         const auto &s = frame_trace.samples[i];
-        length = snprintf(
-            row, sizeof(row), "%u,%u,%u,%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
-            s.frame, s.bytes, s.pending, s.outcome, (unsigned long long)s.receive_us,
-            (unsigned long long)s.enqueue_us, (unsigned long long)s.callback_network_us,
-            (unsigned long long)s.callback_us, (unsigned long long)s.pts_us,
-            (unsigned long long)s.decode_us, (unsigned long long)s.ready_us,
-            (unsigned long long)s.prior_flip_wait_us, (unsigned long long)s.submit_us,
-            (unsigned long long)s.completion_us);
-        ok = length > 0 && static_cast<size_t>(length) < sizeof(row) &&
-             write_performance_bytes(descriptor, row, static_cast<size_t>(length));
+        if (sizeof(batch) - used < 512u)
+        {
+            ok = write_performance_bytes(descriptor, batch, used);
+            used = 0;
+        }
+        length =
+            snprintf(batch + used, sizeof(batch) - used,
+                     "%u,%u,%u,%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u\n", s.frame,
+                     s.bytes, s.pending, s.outcome, (unsigned long long)s.receive_us,
+                     (unsigned long long)s.enqueue_us, (unsigned long long)s.callback_network_us,
+                     (unsigned long long)s.callback_us, (unsigned long long)s.pts_us,
+                     (unsigned long long)s.decode_us, (unsigned long long)s.ready_us,
+                     (unsigned long long)s.present_wait_us, (unsigned long long)s.submit_us,
+                     (unsigned long long)s.completion_us, s.host_us);
+        ok = ok && length > 0 && static_cast<size_t>(length) < sizeof(batch) - used;
+        if (ok)
+            used += static_cast<size_t>(length);
     }
+    if (ok && used)
+        ok = write_performance_bytes(descriptor, batch, used);
     const int closed = sceKernelClose(descriptor);
     if (ok && closed == 0)
         (void)sceKernelRename(temporary, destination);
 #endif
+}
+
+__attribute__((format(printf, 4, 5))) static bool
+report_append(char *report, size_t capacity, size_t *length, const char *format, ...)
+{
+    va_list arguments;
+    const size_t available = capacity - *length;
+    va_start(arguments, format);
+    const int added = vsnprintf(report + *length, available, format, arguments);
+    va_end(arguments);
+    if (added < 0 || static_cast<size_t>(added) >= available)
+        return false;
+    *length += static_cast<size_t>(added);
+    return true;
 }
 
 static void save_performance_summary(const native_renderer_state_t &state,
@@ -621,35 +869,22 @@ static void save_performance_summary(const native_renderer_state_t &state,
 {
     if (!state.mode || !options || !state.access_units)
         return;
-    char report[8192];
+    static char report[12288];
     const auto &agc = native_agc_performance();
     const auto network = ps5_network_metrics_read();
+    const auto placement = ps5_thread_placement_stats();
     uint32_t output_width = 0, output_height = 0, refresh_x100 = 0;
+    size_t length = 0;
     native_agc_output_status(&output_width, &output_height, &refresh_x100);
-    int length = snprintf(
-        report, sizeof(report),
-        "{\n\"schema\":2,\"result\":%d,\"width\":%u,\"height\":%u,\"fps\":%u,"
+    bool ok = report_append(
+        report, sizeof(report), &length,
+        "{\n\"schema\":3,\"result\":%d,\"width\":%u,\"height\":%u,\"fps\":%u,"
         "\"bitrate_kbps\":%u,\"codec\":%u,\"hdr\":%u,\"audio_channels\":%d,"
         "\"output_width\":%u,\"output_height\":%u,\"refresh_x100\":%u,\n"
         "\"client_refresh_x100\":%u,\"reassembly_invalid_samples\":%u,"
         "\"fec_simd\":%d,\"fec_path\":\"%s\",\"opus_simd\":%d,\"audio_backlog_limit_ms\":%d,"
-        "\"requested_slices_per_frame\":%d,\"present_overlap\":%d,\"flip_poll_us\":%d,"
-        "\"performance_detail\":%d,\"stream_bytes\":%llu,\"flush_calls\":%u,"
-        "\"flip_queries\":%llu,\"flip_sleeps\":%llu,\"flip_timeouts\":%llu,"
-        "\"access_units\":%u,\"presented\":%u,\"stale_drops\":%u,"
-        "\"network_frame_gaps\":%u,\"pending_video_high_water\":%u,\n"
-        "\"audio_pending_ms_high_water\":%u,\"audio_ring_frames_high_water\":%u,"
-        "\"audio_catchup_packets\":%u,\"audio_catchup_frames\":%llu,"
-        "\"audio_decode_errors\":%u,\"audio_output_errors\":%u,"
-        "\"audio_ring_overruns\":%u,"
-        "\"decoder_pipeline_depth\":%d,\"decoder_cpu_affinity\":%u,\"decoder_cpu_priority\":%d,"
-        "\"input_poll_us\":%d,\"frame_pacing\":%d,\"present_every_n\":%d,"
-        "\"observed_slices_min\":%u,\"observed_slices_max\":%u,\"layout_samples\":%u,"
-        "\"decoder_delayed\":%u,\"presentation_decimated\":%u,"
-        "\"udp_packets\":%llu,\"udp_bytes\":%llu,\"udp_receive_errors\":%llu,"
-        "\"socket_poll_calls\":%llu,\"socket_heap_polls\":%llu,"
-        "\"rcvbuf_requests\":%llu,\"rcvbuf_failures\":%llu,"
-        "\"last_rcvbuf_requested\":%llu,\"last_rcvbuf_actual\":%llu,\"timings_us\":{\n",
+        "\"requested_slices_per_frame\":%u,\"present_overlap\":%d,\"flip_poll_us\":%d,"
+        "\"performance_detail\":%d,\"stream_bytes\":%llu,\n",
         result, state.mode->visible_width, state.mode->visible_height, state.stream_fps,
         options->bitrate_kbps, state.mode->codec_preference, state.mode->hdr, audio_state.channels,
         output_width, output_height, refresh_x100, state.client_refresh_x100,
@@ -657,25 +892,88 @@ static void save_performance_summary(const native_renderer_state_t &state,
         ps5_fec_cpu_supports("avx2")    ? "avx2"
         : ps5_fec_cpu_supports("ssse3") ? "ssse3"
                                         : "scalar",
-        PROSPEROLIGHT_OPUS_SIMD, PROSPEROLIGHT_AUDIO_MAX_BACKLOG_MS, VIDEO_SLICES_PER_FRAME,
+        PROSPEROLIGHT_OPUS_SIMD, PROSPEROLIGHT_AUDIO_MAX_BACKLOG_MS, state.slices_requested,
         PROSPEROLIGHT_PRESENT_OVERLAP, PROSPEROLIGHT_FLIP_POLL_US, PROSPEROLIGHT_PERFORMANCE_DETAIL,
-        (unsigned long long)state.stream_bytes, state.flush_calls,
-        (unsigned long long)agc.flip_queries, (unsigned long long)agc.flip_sleeps,
-        (unsigned long long)agc.flip_timeouts, state.access_units, state.presented.load(),
-        state.stale_presentation_drops, state.network_dropped_frames,
-        state.pending_video_high_water, audio_state.pending_ms_high_water,
-        audio_state.ring_high_water, audio_state.catchup_packets,
-        (unsigned long long)audio_state.catchup_frames, audio_state.decode_errors,
-        audio_state.output_errors, audio_state.overruns, DECODER_PIPELINE_DEPTH,
-        (unsigned)DECODER_CPU_AFFINITY, DECODER_CPU_PRIORITY, INPUT_POLL_US, FRAME_PACING,
-        PRESENT_EVERY_N, state.observed_slices_min, state.observed_slices_max, state.layout_samples,
-        state.decoder_delayed, state.presentation_decimated, (unsigned long long)network.packets,
-        (unsigned long long)network.bytes, (unsigned long long)network.receive_errors,
-        (unsigned long long)network.poll_calls, (unsigned long long)network.heap_polls,
-        (unsigned long long)network.buffer_requests, (unsigned long long)network.buffer_failures,
-        (unsigned long long)network.last_buffer_requested,
-        (unsigned long long)network.last_buffer_actual);
-    if (length < 0 || static_cast<size_t>(length) >= sizeof(report))
+        (unsigned long long)state.stream_bytes);
+    ok =
+        ok && report_append(
+                  report, sizeof(report), &length,
+                  "\"access_units\":%u,\"decoded\":%u,\"presented\":%u,\"not_displayed\":%u,"
+                  "\"network_frame_gaps\":%llu,\"decoder_frame_gaps\":%llu,\"queue_overflows\":%u,"
+                  "\"decoder_refreshes\":%u,\"catchup_refreshes\":%u,\"unrecoverable_frames\":%u,"
+                  "\"pending_video_high_water\":%u,\n",
+                  state.access_units, state.decoded, state.presented.load(), state.not_displayed,
+                  (unsigned long long)state.drops.network, (unsigned long long)state.drops.decoder,
+                  std::atomic_load_explicit(&video_queue_overflows, std::memory_order_relaxed),
+                  state.decoder_refreshes, state.catchup_refreshes,
+                  std::atomic_load_explicit(&video_unrecoverable_frames, std::memory_order_relaxed),
+                  state.pending_video_high_water);
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"decoder_mode\":\"%s\",\"decoder_pipeline_depth\":%u,"
+             "\"decoder_depth_requested\":%u,\"decoder_drain\":%u,\"drain_calls\":%u,"
+             "\"drain_faults\":%u,\"decoder_recreations\":%u,\"decoder_create_attempts\":%u,"
+             "\"decoder_cores\":%u,\"decoder_cpu_affinity\":%llu,"
+             "\"decoder_cpu_affinity_requested\":%llu,\"decoder_cpu_priority\":%d,"
+             "\"max_dpb_frames\":%d,\"reference_frame_invalidation\":%d,"
+             "\"catchup_queue_frames\":%d,\"flush_calls\":%u,\"decoder_delayed\":%u,"
+             "\"observed_slices_min\":%u,\"observed_slices_max\":%u,\"layout_samples\":%u,\n",
+             state.pipeline_mode == MOONLIGHT_DECODER_PIPELINE_CLASSIC ? "classic" : "adaptive",
+             state.pipeline_depth, state.requested_depth, state.drain_enabled ? 1u : 0u,
+             state.drain_calls, state.drain_faults, state.decoder_recreations,
+             state.create_attempts, state.decoder_cores, (unsigned long long)state.decoder_cpu_mask,
+             (unsigned long long)state.requested_cpu_mask, DECODER_CPU_PRIORITY,
+             state.decoder_config.max_dpb_frames, PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION,
+             PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES, state.flush_calls, state.decoder_delayed,
+             state.observed_slices_min, state.observed_slices_max, state.layout_samples);
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"process_cpu_mask\":%llu,\"receive_cpu_mask\":%llu,\"decode_cpu_mask\":%llu,"
+             "\"present_cpu_mask\":%llu,\"other_cpu_mask\":%llu,\"placement_applied\":%u,"
+             "\"placement_failed\":%u,\"receive_placement_verified\":%llu,"
+             "\"decode_placement_result\":%d,\"present_placement_result\":%d,"
+             "\"main_placement_result\":%d,\"input_poll_us\":%d,\n",
+             (unsigned long long)state.process_cpu_mask, (unsigned long long)state.layout.receive,
+             (unsigned long long)state.layout.decode, (unsigned long long)state.layout.present,
+             (unsigned long long)state.layout.other, placement.applied, placement.failed,
+             (unsigned long long)placement.receive_verified, state.decode_placement_result,
+             state.present_placement_result, state.main_placement_result, INPUT_POLL_US);
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"vsync_requested\":%u,\"vsync_active\":%d,\"vsync_fallbacks\":%llu,"
+             "\"flip_events_active\":%d,\"flip_event_wakeups\":%llu,\"flip_event_errors\":%llu,"
+             "\"flip_queries\":%llu,\"flip_sleeps\":%llu,\"flip_timeouts\":%llu,"
+             "\"present_errors\":%u,\"gpu_timestamps\":%d,\"gpu_samples_invalid\":%llu,\n",
+             state.vsync_requested, native_agc_vsync_active(),
+             (unsigned long long)agc.vsync_fallbacks, native_agc_flip_events_active(),
+             (unsigned long long)agc.flip_event_wakeups, (unsigned long long)agc.flip_event_errors,
+             (unsigned long long)agc.flip_queries, (unsigned long long)agc.flip_sleeps,
+             (unsigned long long)agc.flip_timeouts, state.present_errors,
+             PROSPEROLIGHT_GPU_TIMESTAMPS, (unsigned long long)agc.gpu_samples_invalid);
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"audio_pending_ms_high_water\":%u,\"audio_ring_frames_high_water\":%u,"
+             "\"audio_catchup_packets\":%u,\"audio_catchup_frames\":%llu,"
+             "\"audio_decode_errors\":%u,\"audio_output_errors\":%u,"
+             "\"audio_ring_overruns\":%u,"
+             "\"udp_packets\":%llu,\"udp_bytes\":%llu,\"udp_receive_errors\":%llu,"
+             "\"socket_poll_calls\":%llu,\"socket_heap_polls\":%llu,"
+             "\"rcvbuf_requests\":%llu,\"rcvbuf_failures\":%llu,"
+             "\"last_rcvbuf_requested\":%llu,\"last_rcvbuf_actual\":%llu,\"timings_us\":{\n",
+             audio_state.pending_ms_high_water, audio_state.ring_high_water,
+             audio_state.catchup_packets, (unsigned long long)audio_state.catchup_frames,
+             audio_state.decode_errors, audio_state.output_errors, audio_state.overruns,
+             (unsigned long long)network.packets, (unsigned long long)network.bytes,
+             (unsigned long long)network.receive_errors, (unsigned long long)network.poll_calls,
+             (unsigned long long)network.heap_polls, (unsigned long long)network.buffer_requests,
+             (unsigned long long)network.buffer_failures,
+             (unsigned long long)network.last_buffer_requested,
+             (unsigned long long)network.last_buffer_actual);
+    if (!ok)
         return;
     const struct
     {
@@ -691,7 +989,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
                    {"input_poll_interval", &input_intervals},
                    {"audio_decode", &audio_state.decode_timing},
                    {"audio_output", &audio_state.output_timing},
-                   {"source_slot_wait", &state.source_wait_timing},
+                   {"ready_to_present", &state.present_wait_timing},
                    {"flush", &state.flush_timing},
                    {"present_call", &state.present_call_timing},
                    {"completion_wait", &state.completion_wait_timing},
@@ -699,33 +997,31 @@ static void save_performance_summary(const native_renderer_state_t &state,
                    {"agc_prepare", &agc.prepare},
                    {"agc_cache_flush", &agc.cache_flush},
                    {"agc_submit", &agc.submit},
-                   {"overlay_refresh", &agc.overlay}};
+                   {"overlay_refresh", &agc.overlay},
+                   {"gpu_render", &agc.gpu_render}};
     for (size_t i = 0; i < sizeof(timings) / sizeof(timings[0]); ++i)
     {
         const auto &t = *timings[i].timing;
-        const size_t available = sizeof(report) - static_cast<size_t>(length);
-        const int added =
-            snprintf(report + length, available,
-                     "%s\"%s\":{\"count\":%llu,\"mean\":%llu,\"p95_upper\":%llu,"
-                     "\"p99_upper\":%llu,\"max\":%llu}\n",
-                     i ? "," : "", timings[i].name, (unsigned long long)t.count,
-                     (unsigned long long)(t.count ? t.total_us / t.count : 0),
-                     (unsigned long long)t.percentile(95), (unsigned long long)t.percentile(99),
-                     (unsigned long long)t.max_us);
-        if (added < 0 || static_cast<size_t>(added) >= available)
+        if (!report_append(report, sizeof(report), &length,
+                           "%s\"%s\":{\"count\":%llu,\"mean\":%llu,\"p95_upper\":%llu,"
+                           "\"p99_upper\":%llu,\"max\":%llu}\n",
+                           i ? "," : "", timings[i].name, (unsigned long long)t.count,
+                           (unsigned long long)(t.count ? t.total_us / t.count : 0),
+                           (unsigned long long)t.percentile(95),
+                           (unsigned long long)t.percentile(99), (unsigned long long)t.max_us))
             return;
-        length += added;
     }
-    if (static_cast<size_t>(length) + 4 >= sizeof(report))
+    if (length + 4 >= sizeof(report))
         return;
     memcpy(report + length, "}}\n", 3);
     length += 3;
+    log_performance_summary(report, length);
     constexpr auto temporary = MOONLIGHT_IDENTITY_DIRECTORY "/performance-last.json.tmp";
     constexpr auto destination = MOONLIGHT_IDENTITY_DIRECTORY "/performance-last.json";
     const int descriptor = sceKernelOpen(temporary, 0x601, 0600);
     if (descriptor < 0)
         return;
-    const bool written = write_performance_bytes(descriptor, report, static_cast<size_t>(length));
+    const bool written = write_performance_bytes(descriptor, report, length);
     const int closed = sceKernelClose(descriptor);
     if (written && closed == 0)
         (void)sceKernelRename(temporary, destination);
@@ -915,50 +1211,47 @@ static uint64_t monotonic_us(void)
     return (uint64_t)now.tv_sec * UINT64_C(1000000) + (uint64_t)now.tv_nsec / UINT64_C(1000);
 }
 
-static int finish_stream_presentation(native_renderer_state_t *state)
+static void renderer_sync_init(native_renderer_state_t *state)
 {
-    if (!state->presentation_pending)
-        return 0;
-    const uint64_t wait_started = moonlight::performance_now_us();
-    const int result = native_agc_finish_frame();
-    moonlight::record_performance_elapsed(state->completion_wait_timing, wait_started);
-    if (result != 0)
-    {
-        state->last_result = result;
-        return result;
-    }
-    const uint64_t flipped_us = monotonic_us();
-    if (state->pending_trace)
-        state->pending_trace->completion_us = flipped_us;
-    state->pending_trace = nullptr;
-    if (state->presented != 0)
-        state->flip_interval_timing.add(flipped_us - state->last_present_us);
-    state->last_present_us = flipped_us;
-    const uint64_t flipped_network_us = PltGetMicroseconds();
-    state->frame_age_timing.add(flipped_network_us > state->pending_enqueue_us
-                                    ? flipped_network_us - state->pending_enqueue_us
-                                    : 0);
-    if (state->presented == 0)
-        state->first_present_us = state->last_present_us;
-    const uint64_t elapsed = flipped_us - state->pending_arrival_us;
-    state->callback_to_flip_total_us += elapsed;
-    if (state->latency_calls == 0 || elapsed < state->callback_to_flip_min_us)
-        state->callback_to_flip_min_us = elapsed;
-    if (elapsed > state->callback_to_flip_max_us)
-        state->callback_to_flip_max_us = elapsed;
-    ++state->latency_calls;
-    ++state->presented;
-    state->rendering_rate.update(flipped_us, state->presented);
-    state->presentation_pending = false;
-    return 0;
+    if (state->sync_ready)
+        return;
+    (void)pthread_mutex_init(&state->lock, NULL);
+    (void)pthread_cond_init(&state->wake, NULL);
+    state->sync_ready = true;
 }
 
-static int frame_is_in_pool(const void *frame, const void *pool, size_t stride)
+static void renderer_sync_destroy(native_renderer_state_t *state)
 {
-    for (uint32_t index = 0; index < PIPELINE_BUFFER_COUNT; ++index)
-        if (frame == (const uint8_t *)pool + index * stride)
-            return 1;
-    return 0;
+    if (!state->sync_ready)
+        return;
+    (void)pthread_cond_destroy(&state->wake);
+    (void)pthread_mutex_destroy(&state->lock);
+    state->sync_ready = false;
+}
+
+static void *frame_slot_address(const native_renderer_state_t *state, int slot)
+{
+    return static_cast<uint8_t *>(state->frame_memory) +
+           static_cast<size_t>(slot) * state->frame_size;
+}
+
+static int frame_slot_index(const native_renderer_state_t *state, const void *buffer)
+{
+    const auto *base = static_cast<const uint8_t *>(state->frame_memory);
+    const auto *address = static_cast<const uint8_t *>(buffer);
+
+    if (!buffer || !base || !state->frame_size || address < base)
+        return -1;
+    const size_t offset = static_cast<size_t>(address - base);
+    if (offset % state->frame_size || offset / state->frame_size >= FRAME_SLOT_COUNT)
+        return -1;
+    return static_cast<int>(offset / state->frame_size);
+}
+
+static void fail_stream(int32_t code)
+{
+    connection_error = code;
+    connection_terminated = 1;
 }
 
 static int32_t allocate_direct(size_t size, int protection, int64_t limit, int64_t *start,
@@ -978,95 +1271,331 @@ static void release_direct(void *address, int64_t start, size_t size)
         (void)sceKernelReleaseDirectMemory(start, size);
 }
 
+static decoder_resources_t make_decoder_resources()
+{
+    decoder_resources_t resources{};
+
+    resources.gpu_start = -1;
+    resources.cpu_gpu_start = -1;
+    return resources;
+}
+
+static void release_decoder_resources(decoder_resources_t *resources)
+{
+    release_direct(resources->memory.cpu_gpu, resources->cpu_gpu_start, resources->cpu_gpu_size);
+    release_direct(resources->memory.gpu, resources->gpu_start, resources->gpu_size);
+    if (resources->memory.cpu)
+    {
+        (void)sceKernelReleaseFlexibleMemory(resources->memory.cpu, resources->cpu_mapping_size);
+        (void)sceKernelMunmap(resources->memory.cpu, resources->cpu_mapping_size);
+    }
+    *resources = make_decoder_resources();
+}
+
+// One attempt at a decoder configuration. On failure the caller releases the
+// attempt's memory and may try a more conservative configuration.
+static int32_t create_stream_decoder(decoder_resources_t *resources,
+                                     const videodec2_decoder_config_t *config, int64_t limit)
+{
+    videodec2_decoder_memory_t *memory = &resources->memory;
+    uint8_t mapping_info[0x48] = {};
+    size_t flexible_available = 0;
+    int32_t result;
+
+    memset(memory, 0, sizeof(*memory));
+    memory->size = sizeof(*memory);
+    result = sceVideodec2QueryDecoderMemoryInfo(config, memory);
+    snprintf(notification.message, sizeof(notification.message),
+             "Native embedded query: rc=%08x depth=%u affinity=%llx cpu=%llx gpu=%llx shared=%llx "
+             "frame=%llx align=%x",
+             (uint32_t)result, config->pipeline_depth, (unsigned long long)config->cpu_affinity,
+             (unsigned long long)memory->cpu_size, (unsigned long long)memory->gpu_size,
+             (unsigned long long)memory->cpu_gpu_size, (unsigned long long)memory->max_frame_size,
+             memory->frame_alignment);
+    (void)lan_http_report_text(notification.message);
+    if (result != 0)
+        return result;
+
+    resources->cpu_mapping_size = align_16k((size_t)memory->cpu_size);
+    result = sceKernelAvailableFlexibleMemorySize(&flexible_available);
+    if (result == 0)
+        result = sceKernelMapNamedFlexibleMemory(&memory->cpu, resources->cpu_mapping_size, 0x03, 0,
+                                                 "MoonlightVdecCpu");
+    snprintf(
+        notification.message, sizeof(notification.message),
+        "Native flexible CPU workspace: rc=%08x available=%zx requested=%llx mapped=%zx ptr=%p",
+        (uint32_t)result, flexible_available, (unsigned long long)memory->cpu_size,
+        resources->cpu_mapping_size, memory->cpu);
+    (void)lan_http_report_text(notification.message);
+    if (result != 0)
+    {
+        memory->cpu = NULL;
+        return result;
+    }
+
+    result = sceKernelVirtualQuery(memory->cpu, 0, mapping_info, sizeof(mapping_info));
+    snprintf(notification.message, sizeof(notification.message),
+             "Native flexible CPU query: rc=%08x protection=%x type=%x flags=%x", (uint32_t)result,
+             *(const uint32_t *)(mapping_info + 0x18), *(const uint32_t *)(mapping_info + 0x1c),
+             *(const uint32_t *)(mapping_info + 0x20));
+    (void)lan_http_report_text(notification.message);
+    if (result != 0)
+        return result;
+
+    resources->gpu_size = align_16k((size_t)memory->gpu_size);
+    resources->cpu_gpu_size = align_16k((size_t)memory->cpu_gpu_size);
+    memory->gpu_size = resources->gpu_size;
+    if (resources->cpu_gpu_size != 0)
+        memory->cpu_gpu_size = resources->cpu_gpu_size;
+    result = allocate_direct(resources->gpu_size, 0x32, limit, &resources->gpu_start, &memory->gpu);
+    if (result == 0 && resources->cpu_gpu_size != 0)
+        result = allocate_direct(resources->cpu_gpu_size, 0x33, limit, &resources->cpu_gpu_start,
+                                 &memory->cpu_gpu);
+    if (result == 0)
+        result = sceVideodec2CreateDecoder(config, memory, &resources->decoder);
+    snprintf(notification.message, sizeof(notification.message),
+             "Native zero-copy stage 4: create=%08x decoder=%p depth=%u affinity=%llx gpu=%p/%zx "
+             "shared=%p/%zx",
+             (uint32_t)result, resources->decoder, config->pipeline_depth,
+             (unsigned long long)config->cpu_affinity, memory->gpu, resources->gpu_size,
+             memory->cpu_gpu, resources->cpu_gpu_size);
+    (void)lan_http_report_text(notification.message);
+    if (result != 0)
+        resources->decoder = NULL;
+    return result;
+}
+
 static int moonlight_renderer_setup(int video_format, int width, int height, int redraw_rate,
-                                    void *context, int dr_flags)
+                                    void *context, int dr_flags);
+
+// After a decoder reset every picture it still held is abandoned.
+static void abandon_decoder_pictures(native_renderer_state_t *state)
 {
-    char receipt[256];
+    pthread_mutex_lock(&state->lock);
+    state->frames.release_decoding();
+    pthread_mutex_unlock(&state->lock);
+    for (uint32_t i = 0; i < state->submission_count; ++i)
+    {
+        auto *trace =
+            state->submissions[(state->submission_head + i) % SUBMISSION_QUEUE_CAPACITY].trace;
+        if (trace)
+            trace->outcome = 3;
+    }
+    state->submission_head = state->submission_count = 0;
+}
 
-    auto *state = static_cast<native_renderer_state_t *>(context);
+static void snapshot_hud_metrics(const native_renderer_state_t *state, int pending,
+                                 native_agc_metrics_t *hud)
+{
+    const uint64_t observed =
+        (uint64_t)state->access_units + state->drops.network + state->drops.decoder;
 
-    if (!state || !state->mode || video_format != state->mode->video_format ||
-        width != (int)state->mode->visible_width || height != (int)state->mode->visible_height ||
-        redraw_rate != (int)state->stream_fps || dr_flags != 0)
-        return -1;
+    *hud = {};
+    hud->video_codec = state->mode->codec_preference;
+    hud->incoming_fps_x100 = state->arrival.fps_x100;
+    hud->decoded_fps_x100 = state->decoded_rate.fps_x100;
+    hud->network_drop_percent_x100 =
+        observed ? (uint32_t)(state->drops.network * UINT64_C(10000) / observed) : 0;
+    hud->decoder_drop_percent_x100 =
+        observed ? (uint32_t)(state->drops.decoder * UINT64_C(10000) / observed) : 0;
+    hud->not_displayed = state->not_displayed;
+    hud->rtt_ms = state->rtt_ms;
+    hud->rtt_variance_ms = state->rtt_variance_ms;
+    hud->rtt_valid = state->rtt_valid ? 1u : 0u;
+    hud->host_min_tenths_ms = state->host_latency_min_tenths_ms;
+    hud->host_max_tenths_ms = state->host_latency_max_tenths_ms;
+    hud->host_average_tenths_ms =
+        state->host_latency_frames
+            ? (uint32_t)(state->host_latency_total_tenths_ms / state->host_latency_frames)
+            : 0;
+    hud->decoder_load_permille = state->decode_window.last_load_permille;
+    hud->decode_average_us = state->decode_window.last_mean_us;
+    hud->decode_p95_us = state->decode_window.last_p95_us;
+    hud->queue_delay_average_us = state->queue_window.last_mean_us;
+    hud->queue_delay_max_us = state->queue_window.last_max_us;
+    hud->pending_frames = pending > 0 ? (uint32_t)pending : 0;
+    hud->slices_requested = state->slices_requested;
+    hud->slices_observed = state->observed_slices_last;
+    hud->pipeline_depth = state->pipeline_depth;
+    hud->decoder_cores = state->decoder_cores;
+    hud->vsync_enabled = state->vsync_requested;
+    hud->decoder_cpu_mask = state->decoder_cpu_mask;
+}
 
-    active_renderer = state;
-    active_renderer->last_result = 0;
+// Newest wins: a picture the presenter has not taken yet is replaced, and its
+// slot returns to the decoder.
+static void publish_ready_frame(native_renderer_state_t *state, const stream_ready_frame_t &ready)
+{
+    stream_ready_frame_t displaced{};
+
+    pthread_mutex_lock(&state->lock);
+    state->frames.state[static_cast<size_t>(ready.slot)] =
+        moonlight::SlotPool<FRAME_SLOT_COUNT>::Ready;
+    state->frames.last_output = ready.slot;
+    const bool replaced = state->mailbox.publish(ready, &displaced);
+    if (replaced)
+        state->frames.release(displaced.slot);
+    pthread_cond_signal(&state->wake);
+    pthread_mutex_unlock(&state->lock);
+    if (replaced)
+    {
+        ++state->not_displayed;
+        if (displaced.trace)
+            displaced.trace->outcome = 2;
+    }
+}
+
+static void report_decoder_call(const native_renderer_state_t *state, const char *phase,
+                                int32_t result, int32_t frame_number, int offered,
+                                const videodec2_frame_t &frame, const videodec2_output_t &output)
+{
+    char receipt[512];
+
     snprintf(receipt, sizeof(receipt),
-             "Moonlight callbacks setup: format=%x display=%dx%d fps=%d flags=%x capabilities=%x",
-             video_format, width, height, redraw_rate, dr_flags,
-             CAPABILITY_SLICES_PER_FRAME(VIDEO_SLICES_PER_FRAME));
+             "Moonlight decoder error: phase=%s rc=%08x frame=%d au=%u depth=%u in_flight=%u "
+             "offered=%d accepted=%u valid=%u error=%u pictures=%u output=%ux%u pitch=%u "
+             "pitch_bytes=%u buffer=%llx out_slot=%d",
+             phase, (uint32_t)result, frame_number, state->access_units, state->pipeline_depth,
+             state->submission_count, offered, frame.accepted, output.valid, output.error,
+             output.picture_count, output.width, output.height, output.pitch, output.pitch_bytes,
+             (unsigned long long)output.buffer_size, frame_slot_index(state, output.buffer));
     (void)lan_http_report_text(receipt);
-    return 0;
 }
 
-static void moonlight_renderer_start(void)
+// Accounts for one Decode or Flush call. `offered` is the free slot passed to
+// the call. Videodec2 may write the picture into that slot, or keep it and
+// return a slot it accepted with an earlier access unit; both are handled.
+static int32_t settle_decoder_call(native_renderer_state_t *state, int offered,
+                                   const videodec2_frame_t &frame, const videodec2_output_t &output,
+                                   uint64_t completed_us, int pending)
 {
-#if PROSPEROLIGHT_PERFORMANCE_DETAIL
-    frame_trace.count = frame_trace.omitted = 0;
-#endif
-    stop_connection_animation();
-    native_agc_reset_performance();
-    if (active_renderer)
-        active_renderer->running = 1;
+    using Pool = moonlight::SlotPool<FRAME_SLOT_COUNT>;
+    const native_video_mode_t *mode = state->mode;
+    int output_slot = -1;
+
+    if (output.valid)
+    {
+        output_slot = frame_slot_index(state, output.buffer);
+        pthread_mutex_lock(&state->lock);
+        const bool owned =
+            output_slot >= 0 &&
+            (output_slot == offered ||
+             state->frames.state[static_cast<size_t>(output_slot)] == Pool::Decoding);
+        pthread_mutex_unlock(&state->lock);
+        if (!owned || !state->submission_count || output.codec != mode->codec_type ||
+            output.width != mode->output_width ||
+            (output.height != mode->output_height &&
+             (!mode->alternate_output_height || output.height != mode->alternate_output_height)) ||
+            output.pitch != mode->output_pitch || output.picture_count != 1)
+            return -17;
+        if (mode->hdr && (output.pitch_bytes != mode->output_pitch * sizeof(uint16_t) ||
+                          output.buffer_size == 0 || output.buffer_size > state->frame_size))
+            return -19;
+    }
+    if (frame.accepted && offered != output_slot)
+    {
+        pthread_mutex_lock(&state->lock);
+        state->frames.state[static_cast<size_t>(offered)] = Pool::Decoding;
+        pthread_mutex_unlock(&state->lock);
+    }
+    if (output.valid)
+    {
+        const stream_submission_t submission = state->submissions[state->submission_head];
+        stream_ready_frame_t ready{};
+
+        state->submission_head = (state->submission_head + 1u) % SUBMISSION_QUEUE_CAPACITY;
+        --state->submission_count;
+        const uint64_t elapsed =
+            completed_us > submission.arrival_us ? completed_us - submission.arrival_us : 0;
+        state->ready_timing.add(elapsed);
+        state->callback_to_decode_total_us += elapsed;
+        if (state->ready_calls == 0 || elapsed < state->callback_to_decode_min_us)
+            state->callback_to_decode_min_us = elapsed;
+        if (elapsed > state->callback_to_decode_max_us)
+            state->callback_to_decode_max_us = elapsed;
+        ++state->ready_calls;
+        if (submission.trace)
+            submission.trace->ready_us = elapsed;
+        ++state->decoded;
+        state->decoded_rate.update(completed_us, state->decoded);
+        if (++state->clean_outputs >= PIPELINE_CLEAN_OUTPUTS)
+            state->pipeline_faults = 0;
+        ready.slot = output_slot;
+        ready.buffer = output.buffer;
+        ready.buffer_size = (size_t)output.buffer_size;
+        ready.pitch = output.pitch;
+        ready.height = output.height;
+        ready.frame = submission.frame;
+        ready.arrival_us = submission.arrival_us;
+        ready.enqueue_us = submission.enqueue_us;
+        ready.ready_us = completed_us;
+        ready.trace = submission.trace;
+        snapshot_hud_metrics(state, pending, &ready.hud);
+        publish_ready_frame(state, ready);
+    }
+    pthread_mutex_lock(&state->lock);
+    const unsigned held = state->frames.count(Pool::Decoding);
+    pthread_mutex_unlock(&state->lock);
+    // A slot the decoder holds always belongs to an access unit still in flight.
+    return held > state->submission_count ? -21 : 0;
 }
 
-static void moonlight_renderer_stop(void)
+static int decode_refused(native_renderer_state_t *state, int32_t code,
+                          moonlight::FrameTrace::Sample *trace)
 {
-    if (active_renderer)
-        active_renderer->running = 0;
+    state->last_result = code;
+    if (trace)
+        trace->outcome = 3;
+    if (state->pipeline_depth > 1u)
+    {
+        ++state->pipeline_faults;
+        state->clean_outputs = 0;
+    }
+    return DR_NEED_IDR;
 }
 
-static void moonlight_renderer_cleanup(void)
+// Copies one access unit into decoder input memory and submits it. Returns the
+// status for LiCompleteVideoFrame(); `busy_us` is the time spent in Videodec2.
+static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decode_unit,
+                              uint64_t *busy_us)
 {
-    active_renderer = NULL;
-}
-
-static int moonlight_renderer_submit(PDECODE_UNIT decode_unit)
-{
-    native_renderer_state_t *state = active_renderer;
     videodec2_input_t input = {};
     videodec2_frame_t frame = {};
     videodec2_output_t output = {};
+    moonlight::FrameTrace::Sample *trace = nullptr;
+    const uint64_t arrival_us = monotonic_us();
+    const char *phase = "decode";
     PLENTRY entry;
-    uint32_t slot;
     uint32_t fragment_count = 0;
-    uint8_t *input_slot;
-    void *frame_slot;
-    size_t copied = 0;
-    uint64_t started;
-    uint64_t elapsed;
-    uint64_t callback_arrival_us = monotonic_us();
-    uint64_t network_enqueue_us;
-    uint64_t decode_completed_us;
-    uint64_t output_arrival_us = 0;
-    uint64_t output_enqueue_us = 0;
-    uint64_t output_pts_us = 0;
-    int32_t output_frame = 0;
     uint32_t hdr_active;
     uint32_t hdr_transitions;
-    uint32_t submission_index;
+    size_t copied = 0;
+    uint64_t started;
+    uint64_t completed_us;
+    uint64_t elapsed;
+    uint64_t busy = 0;
     int32_t result;
-    const char *decode_phase = "decode";
-    char receipt[768];
+    char receipt[512];
 
+    if (busy_us)
+        *busy_us = 0;
     if (!state || !decode_unit)
         return DR_NEED_IDR;
     if (!state->running)
         return DR_OK;
+    if (state->await_keyframe)
+    {
+        // The decoder was rebuilt outside a frame: resume only on a keyframe.
+        if (decode_unit->frameType != FRAME_TYPE_IDR)
+            return DR_NEED_IDR;
+        state->await_keyframe = false;
+    }
     if (state->decoder_needs_reset)
     {
-        // Retire GPU reads before resetting decoder-owned reference state.
-        if (finish_stream_presentation(state) != 0)
-            return DR_NEED_IDR;
         const int reset_result = sceVideodec2Reset(state->decoder);
         if (reset_result != 0)
-        {
-            state->last_result = reset_result;
-            return DR_NEED_IDR;
-        }
-        state->submission_count = state->submission_head = 0;
-        state->pacer = {};
+            return decode_refused(state, reset_result, nullptr);
+        abandon_decoder_pictures(state);
     }
     // Every error exit requires reset before consuming the requested IDR.
     state->decoder_needs_reset = true;
@@ -1096,23 +1625,18 @@ static int moonlight_renderer_submit(PDECODE_UNIT decode_unit)
         }
         state->last_result = -20;
         state->running = 0;
-        connection_error = -20;
-        connection_terminated = 1;
+        fail_stream(-20);
         return DR_NEED_IDR;
     }
     if (decode_unit->fullLength <= 0 || (size_t)decode_unit->fullLength > state->input_size ||
         !decode_unit->bufferList)
-    {
-        state->last_result = -12;
-        return DR_NEED_IDR;
-    }
+        return decode_refused(state, -12, nullptr);
 
-    network_enqueue_us =
+    const uint64_t network_enqueue_us =
         decode_unit->enqueueTimeUs ? decode_unit->enqueueTimeUs : PltGetMicroseconds();
-    // Use the upstream clock on both sides of enqueue->callback. This excludes
-    // our copy, decode, and flip wait (previously mislabeled as queue delay).
+    // Use the upstream clock on both sides of enqueue->dequeue. This excludes
+    // our copy, decode, and flip wait.
     const uint64_t callback_network_us = PltGetMicroseconds();
-    moonlight::FrameTrace::Sample *trace = nullptr;
 #if PROSPEROLIGHT_PERFORMANCE_DETAIL
     trace = frame_trace.append();
     if (trace)
@@ -1122,8 +1646,9 @@ static int moonlight_renderer_submit(PDECODE_UNIT decode_unit)
         trace->receive_us = decode_unit->receiveTimeUs;
         trace->enqueue_us = decode_unit->enqueueTimeUs;
         trace->callback_network_us = callback_network_us;
-        trace->callback_us = callback_arrival_us;
+        trace->callback_us = arrival_us;
         trace->pts_us = decode_unit->presentationTimeUs;
+        trace->host_us = static_cast<uint32_t>(decode_unit->frameHostProcessingLatency) * 100u;
     }
 #endif
     if (!moonlight::record_reassembly(state->reassembly_timing, decode_unit->receiveTimeUs,
@@ -1132,10 +1657,7 @@ static int moonlight_renderer_submit(PDECODE_UNIT decode_unit)
     elapsed =
         callback_network_us > network_enqueue_us ? callback_network_us - network_enqueue_us : 0;
     state->queue_timing.add(elapsed);
-    state->queue_delay_total_us += elapsed;
-    if (elapsed > state->queue_delay_max_us)
-        state->queue_delay_max_us = elapsed;
-    ++state->queue_delay_calls;
+    state->queue_window.add(arrival_us, elapsed);
     const int pending_video = LiGetPendingVideoFrames();
     if (trace)
         trace->pending = pending_video > 0 ? static_cast<uint32_t>(pending_video) : 0;
@@ -1143,11 +1665,13 @@ static int moonlight_renderer_submit(PDECODE_UNIT decode_unit)
         state->pending_video_high_water = static_cast<uint32_t>(pending_video);
     if (!state->first_video_us)
         state->first_video_us = network_enqueue_us;
-    else if (decode_unit->frameNumber > state->last_network_frame + 1)
-        state->network_dropped_frames +=
-            (uint32_t)(decode_unit->frameNumber - (state->last_network_frame + 1));
-    state->last_network_frame = decode_unit->frameNumber;
     state->last_video_us = network_enqueue_us;
+    state->drops.observe(
+        decode_unit->frameNumber,
+        std::atomic_load_explicit(&video_recovery_epoch, std::memory_order_relaxed));
+    const bool rate_updated = state->arrival.update(network_enqueue_us, decode_unit->frameNumber);
+    if (!state->access_units || rate_updated)
+        state->rtt_valid = LiGetEstimatedRttInfo(&state->rtt_ms, &state->rtt_variance_ms);
     if (decode_unit->frameHostProcessingLatency)
     {
         uint32_t latency = decode_unit->frameHostProcessingLatency;
@@ -1162,27 +1686,31 @@ static int moonlight_renderer_submit(PDECODE_UNIT decode_unit)
         state->host_latency_total_tenths_ms += latency;
         ++state->host_latency_frames;
     }
-
-    slot = state->access_units % PIPELINE_BUFFER_COUNT;
-    input_slot = (uint8_t *)state->input_memory + slot * state->input_size;
-    frame_slot = (uint8_t *)state->frame_memory + slot * state->frame_size;
-    const uint64_t source_wait_started = moonlight::performance_now_us();
-    result = native_agc_wait_source_idle(frame_slot);
-    moonlight::record_performance_elapsed(state->source_wait_timing, source_wait_started);
-    if (result != 0)
+    if (state->catchup.update(arrival_us, pending_video, PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES,
+                              CATCHUP_HOLD_US))
     {
-        state->last_result = result;
+        // Opt-in bounded catch-up: trade one keyframe for the accumulated delay.
+        ++state->catchup_refreshes;
+        if (trace)
+            trace->outcome = 3;
         return DR_NEED_IDR;
     }
+
+    // In-flight access units never exceed the pipeline depth, so a round-robin
+    // input slot is always one the decoder has finished reading.
+    uint8_t *input_slot = static_cast<uint8_t *>(state->input_memory) +
+                          (state->input_sequence++ % INPUT_SLOT_COUNT) * state->input_size;
+    pthread_mutex_lock(&state->lock);
+    const int offered = state->frames.acquire_free();
+    pthread_mutex_unlock(&state->lock);
+    if (offered < 0)
+        return decode_refused(state, -18, trace);
     started = monotonic_us();
     for (entry = decode_unit->bufferList; entry; entry = entry->next)
     {
         if (!entry->data || entry->length <= 0 ||
             (size_t)entry->length > state->input_size - copied)
-        {
-            state->last_result = -13;
-            return DR_NEED_IDR;
-        }
+            return decode_refused(state, -13, trace);
         memcpy(input_slot + copied, entry->data, (size_t)entry->length);
         copied += (size_t)entry->length;
         ++fragment_count;
@@ -1193,13 +1721,10 @@ static int moonlight_renderer_submit(PDECODE_UNIT decode_unit)
     if (elapsed > state->copy_max_us)
         state->copy_max_us = elapsed;
     if (copied != (size_t)decode_unit->fullLength)
-    {
-        state->last_result = -14;
-        return DR_NEED_IDR;
-    }
+        return decode_refused(state, -14, trace);
 
-    if (PROSPEROLIGHT_PERFORMANCE_DETAIL &&
-        (state->access_units < 8 || state->access_units % 120u == 0))
+    // A cheap header scan on the first frames and twice a second afterwards.
+    if (state->access_units < 8 || state->access_units % 60u == 0)
     {
         const auto slices =
             moonlight::count_video_slices(input_slot, copied, state->mode->codec_type != 1);
@@ -1209,6 +1734,7 @@ static int moonlight_renderer_submit(PDECODE_UNIT decode_unit)
                 state->observed_slices_min = slices;
             if (slices > state->observed_slices_max)
                 state->observed_slices_max = slices;
+            state->observed_slices_last = slices;
             ++state->layout_samples;
         }
     }
@@ -1218,13 +1744,14 @@ static int moonlight_renderer_submit(PDECODE_UNIT decode_unit)
     input.pts = decode_unit->presentationTimeUs;
     input.dts = UINT64_MAX;
     frame.size = sizeof(frame);
-    frame.buffer = frame_slot;
+    frame.buffer = frame_slot_address(state, offered);
     frame.buffer_size = state->frame_size;
     output.size = sizeof(output);
     started = monotonic_us();
     result = sceVideodec2Decode(state->decoder, &input, &frame, &output);
-    decode_completed_us = monotonic_us();
-    elapsed = decode_completed_us - started;
+    completed_us = monotonic_us();
+    elapsed = completed_us - started;
+    busy = elapsed;
     state->decode_total_us += elapsed;
     state->decode_timing.add(elapsed);
     if (trace)
@@ -1233,262 +1760,458 @@ static int moonlight_renderer_submit(PDECODE_UNIT decode_unit)
         state->decode_max_us = elapsed;
     ++state->decode_calls;
     ++state->access_units;
-    const bool rate_updated = state->incoming_rate.update(callback_arrival_us, state->access_units);
-    if (state->access_units == 1u || rate_updated)
-        state->rtt_valid = LiGetEstimatedRttInfo(&state->rtt_ms, &state->rtt_variance_ms);
     state->fragments += fragment_count;
     state->stream_bytes += copied;
+    if (busy_us)
+        *busy_us = busy;
 
     if (result != 0 || output.error)
     {
-        snprintf(receipt, sizeof(receipt),
-                 "Moonlight submit error: phase=%s rc=%08x frame=%d au=%u slot=%u fragments=%u "
-                 "full=%d copied=%zx accepted=%u valid=%u error=%u pictures=%u output=%ux%u "
-                 "pitch=%u ptr=%p current=%p in_pool=%u",
-                 decode_phase, (uint32_t)result, decode_unit->frameNumber, state->access_units,
-                 slot, fragment_count, decode_unit->fullLength, copied, frame.accepted,
-                 output.valid, output.error, output.picture_count, output.width, output.height,
-                 output.pitch, output.buffer, frame_slot,
-                 frame_is_in_pool(output.buffer, state->frame_memory, state->frame_size));
-        (void)lan_http_report_text(receipt);
-        state->last_result = result != 0 ? result : -15;
-        return DR_NEED_IDR;
+        report_decoder_call(state, phase, result, decode_unit->frameNumber, offered, frame, output);
+        return decode_refused(state, result != 0 ? result : -15, trace);
     }
-
     if (state->submission_count == SUBMISSION_QUEUE_CAPACITY)
+        return decode_refused(state, -16, trace);
     {
-        state->last_result = -16;
-        return DR_NEED_IDR;
+        stream_submission_t &submission =
+            state->submissions[(state->submission_head + state->submission_count) %
+                               SUBMISSION_QUEUE_CAPACITY];
+        submission.arrival_us = arrival_us;
+        submission.enqueue_us = network_enqueue_us;
+        submission.pts_us = decode_unit->presentationTimeUs;
+        submission.frame = decode_unit->frameNumber;
+        submission.trace = trace;
+        ++state->submission_count;
     }
-    submission_index =
-        (state->submission_head + state->submission_count) % SUBMISSION_QUEUE_CAPACITY;
-    state->submission_arrival_us[submission_index] = callback_arrival_us;
-    state->submission_enqueue_us[submission_index] = network_enqueue_us;
-    state->submission_pts_us[submission_index] = decode_unit->presentationTimeUs;
-    state->submission_frame[submission_index] = decode_unit->frameNumber;
-    state->submission_trace[submission_index] = trace;
-    ++state->submission_count;
 
-    if (!output.valid && DECODER_PIPELINE_DEPTH == 1)
+    if (!output.valid && state->pipeline_depth == 1u)
     {
+        // Depth one: ask for the picture now, into the same frame buffer.
         memset(&output, 0, sizeof(output));
         output.size = sizeof(output);
         started = monotonic_us();
         result = sceVideodec2Flush(state->decoder, &frame, &output);
-        decode_completed_us = monotonic_us();
-        elapsed = decode_completed_us - started;
+        completed_us = monotonic_us();
+        elapsed = completed_us - started;
+        busy += elapsed;
         state->flush_total_us += elapsed;
         if (PROSPEROLIGHT_PERFORMANCE_DETAIL)
             state->flush_timing.add(elapsed);
         if (elapsed > state->flush_max_us)
             state->flush_max_us = elapsed;
         ++state->flush_calls;
-        decode_phase = "flush";
+        phase = "flush";
+        if (busy_us)
+            *busy_us = busy;
+        if (result != 0 || output.error)
+        {
+            report_decoder_call(state, phase, result, decode_unit->frameNumber, offered, frame,
+                                output);
+            return decode_refused(state, result != 0 ? result : -15, nullptr);
+        }
     }
 
-    // Deeper pipelines retain the submitted input. Do not flush on every AU:
-    // that serializes the decoder and removes the intended overlap.
-    if (!output.valid && !output.error && result == 0 && DECODER_PIPELINE_DEPTH > 1 &&
-        state->submission_count < DECODER_PIPELINE_DEPTH)
+    result = settle_decoder_call(state, offered, frame, output, completed_us, pending_video);
+    if (result == 0 && !output.valid)
     {
-        ++state->decoder_delayed;
-        state->decoder_needs_reset = false;
-        state->last_result = 0;
-        return DR_OK;
+        // Deeper pipelines return the picture with a later access unit, but
+        // never hold more than their depth.
+        if (state->pipeline_depth == 1u || state->submission_count > state->pipeline_depth)
+            result = -17;
+        else
+            ++state->decoder_delayed;
     }
-
-    if (result != 0 || !output.valid || output.error ||
-        !frame_is_in_pool(output.buffer, state->frame_memory, state->frame_size) ||
-        !frame.accepted || output.codec != state->mode->codec_type ||
-        output.width != state->mode->output_width ||
-        (output.height != state->mode->output_height &&
-         (!state->mode->alternate_output_height ||
-          output.height != state->mode->alternate_output_height)) ||
-        output.pitch != state->mode->output_pitch || output.picture_count != 1)
+    if (result != 0)
     {
-        snprintf(receipt, sizeof(receipt),
-                 "Moonlight submit error: phase=%s rc=%08x frame=%d au=%u slot=%u fragments=%u "
-                 "full=%d copied=%zx accepted=%u valid=%u error=%u pictures=%u output=%ux%u "
-                 "pitch=%u ptr=%p current=%p in_pool=%u",
-                 decode_phase, (uint32_t)result, decode_unit->frameNumber, state->access_units,
-                 slot, fragment_count, decode_unit->fullLength, copied, frame.accepted,
-                 output.valid, output.error, output.picture_count, output.width, output.height,
-                 output.pitch, output.buffer, frame_slot,
-                 frame_is_in_pool(output.buffer, state->frame_memory, state->frame_size));
-        (void)lan_http_report_text(receipt);
-        state->last_result = result != 0 ? result : -17;
-        return DR_NEED_IDR;
+        report_decoder_call(state, phase, result, decode_unit->frameNumber, offered, frame, output);
+        return decode_refused(state, result, nullptr);
     }
-    if (state->mode->hdr && (output.pitch_bytes != state->mode->output_pitch * sizeof(uint16_t) ||
-                             output.buffer_size == 0 || output.buffer_size > state->frame_size))
-    {
-        snprintf(receipt, sizeof(receipt),
-                 "Moonlight Main10 layout rejected: frame=%d pitch=%u pitch_bytes=%u buffer=%llx "
-                 "slot=%zx",
-                 decode_unit->frameNumber, output.pitch, output.pitch_bytes,
-                 (unsigned long long)output.buffer_size, state->frame_size);
-        (void)lan_http_report_text(receipt);
-        state->last_result = -19;
-        return DR_NEED_IDR;
-    }
-
-    {
-        native_agc_metrics_t hud_metrics = {};
-        const native_agc_metrics_t *hud = NULL;
-
-        output_arrival_us = state->submission_arrival_us[state->submission_head];
-        output_enqueue_us = state->submission_enqueue_us[state->submission_head];
-        output_pts_us = state->submission_pts_us[state->submission_head];
-        output_frame = state->submission_frame[state->submission_head];
-        trace = state->submission_trace[state->submission_head];
-        state->submission_head = (state->submission_head + 1u) % SUBMISSION_QUEUE_CAPACITY;
-        --state->submission_count;
-
-        elapsed = decode_completed_us - output_arrival_us;
-        state->ready_timing.add(elapsed);
-        state->callback_to_decode_total_us += elapsed;
-        if (state->ready_calls == 0 || elapsed < state->callback_to_decode_min_us)
-            state->callback_to_decode_min_us = elapsed;
-        if (elapsed > state->callback_to_decode_max_us)
-            state->callback_to_decode_max_us = elapsed;
-        ++state->ready_calls;
-        if (trace)
-            trace->ready_us = decode_completed_us - trace->callback_us;
-        if (PRESENT_EVERY_N > 1 && state->presented != 0 &&
-            state->ready_calls % PRESENT_EVERY_N != 0)
-        {
-            ++state->presentation_decimated;
-            if (trace)
-                trace->outcome = 3; // Explicit contention diagnostic, not a stale drop.
-            state->decoder_needs_reset = false;
-            return DR_OK;
-        }
-        // Decode has used a protected pool slot. Retire the prior flip BEFORE
-        // rewriting the single AGC command/constant bank.
-        const uint64_t prior_flip_started = moonlight::performance_now_us();
-        if (finish_stream_presentation(state) != 0)
-            return DR_NEED_IDR;
-        if (trace)
-            trace->prior_flip_wait_us = moonlight::performance_now_us() - prior_flip_started;
-        const uint64_t ready_network_us = PltGetMicroseconds();
-        elapsed = ready_network_us > output_enqueue_us ? ready_network_us - output_enqueue_us : 0;
-
-        if (state->presented != 0 && moonlight::drop_stale_presentation(
-                                         elapsed, state->stream_fps, LiGetPendingVideoFrames(),
-                                         monotonic_us() - state->last_present_us))
-        {
-            ++state->stale_presentation_drops;
-            if (trace)
-                trace->outcome = 2;
-            state->last_result = 0;
-            state->decoder_needs_reset = false;
-            return DR_OK;
-        }
-
-        if (FRAME_PACING)
-        {
-            const auto wait =
-                state->pacer.delay(monotonic_us(), state->stream_fps, LiGetPendingVideoFrames() > 0,
-                                   state->client_refresh_x100);
-            if (wait)
-                sceKernelUsleep(wait);
-        }
-        if (native_agc_hud_enabled())
-        {
-            uint64_t total_frames = (uint64_t)state->access_units + state->network_dropped_frames;
-            hud_metrics.video_codec = state->mode->codec_preference;
-            hud_metrics.total_fps_x100 = state->incoming_rate.fps_x100;
-            hud_metrics.incoming_fps_x100 = state->incoming_rate.fps_x100;
-            hud_metrics.rendering_fps_x100 = state->rendering_rate.fps_x100;
-            hud_metrics.network_drop_percent_x100 =
-                total_frames ? (uint32_t)((uint64_t)state->network_dropped_frames *
-                                          UINT64_C(10000) / total_frames)
-                             : 0;
-            hud_metrics.rtt_ms = state->rtt_ms;
-            hud_metrics.rtt_variance_ms = state->rtt_variance_ms;
-            hud_metrics.rtt_valid = state->rtt_valid;
-            hud_metrics.host_min_tenths_ms = state->host_latency_min_tenths_ms;
-            hud_metrics.host_max_tenths_ms = state->host_latency_max_tenths_ms;
-            hud_metrics.host_average_tenths_ms =
-                state->host_latency_frames
-                    ? (uint32_t)(state->host_latency_total_tenths_ms / state->host_latency_frames)
-                    : 0;
-            hud_metrics.decode_average_us =
-                state->decode_calls ? state->decode_total_us / state->decode_calls : 0;
-            hud_metrics.queue_delay_average_us =
-                state->queue_delay_calls ? state->queue_delay_total_us / state->queue_delay_calls
-                                         : 0;
-            hud_metrics.queue_delay_max_us = state->queue_delay_max_us;
-            hud_metrics.stale_presentation_drops = state->stale_presentation_drops;
-            hud = &hud_metrics;
-        }
-        started = monotonic_us();
-        result =
-            state->mode->hdr
-                ? native_agc_present_main10(output.buffer, (size_t)output.buffer_size, output.pitch,
-                                            output.height, state->mode->visible_width,
-                                            state->mode->visible_height, state->stream_fps, hud)
-                : native_agc_present_nv12(output.buffer, (size_t)output.buffer_size, output.pitch,
-                                          output.height, state->mode->visible_width,
-                                          state->mode->visible_height, state->stream_fps, hud);
-        elapsed = monotonic_us() - started;
-        state->present_total_us += elapsed;
-        if (PROSPEROLIGHT_PERFORMANCE_DETAIL)
-            state->present_call_timing.add(elapsed);
-        if (elapsed > state->present_max_us)
-            state->present_max_us = elapsed;
-        if (result != 0)
-        {
-            state->last_result = result;
-            return DR_NEED_IDR;
-        }
-        state->pending_arrival_us = output_arrival_us;
-        if (trace)
-        {
-            trace->submit_us = monotonic_us();
-            trace->outcome = 1;
-        }
-        state->pending_trace = trace;
-        state->pending_enqueue_us = output_enqueue_us;
-        state->presentation_pending = true;
-        // Complete the first picture for the handoff/watchdog in both modes.
-        if ((!PROSPEROLIGHT_PRESENT_OVERLAP || state->presented == 0) &&
-            finish_stream_presentation(state) != 0)
-            return DR_NEED_IDR;
-        if (PROSPEROLIGHT_LAN_TELEMETRY &&
-            (state->access_units == 1 || state->access_units % 300u == 0u))
-        {
-            snprintf(receipt, sizeof(receipt),
-                     "Moonlight callback progress: submit_frame=%d output_frame=%d "
-                     "output_pts_us=%llu au=%u presented=%u pending=%u present_call_us=%llu "
-                     "queue_us=%llu stale=%u fragments=%u bytes=%zx decoder=%p pool=%p agc=%p "
-                     "in_pool=%u",
-                     decode_unit->frameNumber, output_frame, (unsigned long long)output_pts_us,
-                     state->access_units,
-                     std::atomic_load_explicit(&state->presented, std::memory_order_relaxed),
-                     state->submission_count + (state->presentation_pending ? 1u : 0u),
-                     (unsigned long long)elapsed,
-                     (unsigned long long)(PltGetMicroseconds() - output_enqueue_us),
-                     state->stale_presentation_drops, state->fragments, state->stream_bytes,
-                     output.buffer, state->frame_memory, output.buffer,
-                     frame_is_in_pool(output.buffer, state->frame_memory, state->frame_size));
-            (void)lan_http_report_text(receipt);
-        }
-    }
-
     state->last_result = 0;
     state->decoder_needs_reset = false;
     return DR_OK;
 }
 
+// Depth above one depends on Videodec2 behaviour that only shows at run time.
+// When it misbehaves, rebuild the decoder at depth one (the 01.000.062 path) on
+// the same memory and resume from a keyframe.
+static void fallback_to_classic_decoder(native_renderer_state_t *state, int32_t cause)
+{
+    videodec2_decoder_config_t config = state->decoder_config;
+    const uint32_t previous_depth = state->pipeline_depth;
+    void *decoder = nullptr;
+    char receipt[256];
+    int32_t result = sceVideodec2DeleteDecoder(state->decoder);
+
+    if (result == 0)
+    {
+        state->decoder = nullptr;
+        config.pipeline_depth = 1;
+        result = sceVideodec2CreateDecoder(&config, &state->decoder_memory, &decoder);
+    }
+    if (result == 0)
+    {
+        state->decoder = decoder;
+        result = sceVideodec2Reset(decoder);
+    }
+    snprintf(receipt, sizeof(receipt),
+             "Moonlight decoder fallback: cause=%08x depth=%u->1 rc=%08x decoder=%p",
+             (uint32_t)cause, previous_depth, (uint32_t)result, state->decoder);
+    (void)lan_http_report_text(receipt);
+    abandon_decoder_pictures(state);
+    state->drain_enabled = false;
+    state->pipeline_faults = 0;
+    state->await_keyframe = true;
+    if (result != 0)
+    {
+        state->last_result = result;
+        state->decoder_lost = true;
+        state->running = 0;
+        fail_stream(result);
+        return;
+    }
+    state->decoder_config = config;
+    state->pipeline_depth = 1;
+    state->decoder_needs_reset = false;
+    ++state->decoder_recreations;
+}
+
+// While nothing else is queued, take the pictures the pipeline still holds:
+// depth-one latency when keeping up, overlapped decoding when behind. One
+// picture per Flush call. Returns the time spent in Videodec2.
+static uint64_t drain_decoder(native_renderer_state_t *state)
+{
+    uint64_t spent = 0;
+
+    while (state->running && !state->decoder_needs_reset &&
+           moonlight::should_drain(state->drain_enabled, state->pipeline_depth,
+                                   state->submission_count, LiGetPendingVideoFrames()))
+    {
+        videodec2_frame_t frame = {};
+        videodec2_output_t output = {};
+
+        pthread_mutex_lock(&state->lock);
+        const int offered = state->frames.acquire_free();
+        pthread_mutex_unlock(&state->lock);
+        if (offered < 0)
+            break;
+        frame.size = sizeof(frame);
+        frame.buffer = frame_slot_address(state, offered);
+        frame.buffer_size = state->frame_size;
+        output.size = sizeof(output);
+        const uint64_t started = monotonic_us();
+        int32_t result = sceVideodec2Flush(state->decoder, &frame, &output);
+        const uint64_t completed_us = monotonic_us();
+        const uint64_t elapsed = completed_us - started;
+        spent += elapsed;
+        state->flush_total_us += elapsed;
+        if (PROSPEROLIGHT_PERFORMANCE_DETAIL)
+            state->flush_timing.add(elapsed);
+        if (elapsed > state->flush_max_us)
+            state->flush_max_us = elapsed;
+        ++state->flush_calls;
+        ++state->drain_calls;
+        if (result == 0 && (output.error || !output.valid))
+            result = -22;
+        if (result == 0)
+            result = settle_decoder_call(state, offered, frame, output, completed_us, 0);
+        if (result != 0)
+        {
+            // Flushing mid-stream is not usable on this decoder: stop relying on it.
+            report_decoder_call(state, "drain", result, -1, offered, frame, output);
+            ++state->drain_faults;
+            fallback_to_classic_decoder(state, result);
+            break;
+        }
+    }
+    return spent;
+}
+
+static void *video_decode_thread(void *context)
+{
+    auto *state = static_cast<native_renderer_state_t *>(context);
+
+    if (state->layout.decode)
+        state->decode_placement_result = ps5_thread_affinity_set(state->layout.decode);
+    while (std::atomic_load_explicit(&state->running, std::memory_order_acquire))
+    {
+        VIDEO_FRAME_HANDLE handle = nullptr;
+        PDECODE_UNIT decode_unit = nullptr;
+        uint64_t busy_us = 0;
+
+        if (!LiWaitForNextVideoFrame(&handle, &decode_unit))
+        {
+            // Shutdown or an explicit wake: `running` decides. Never spin.
+            if (std::atomic_load_explicit(&state->running, std::memory_order_acquire))
+                sceKernelUsleep(1000);
+            continue;
+        }
+        const int status = decode_access_unit(state, decode_unit, &busy_us);
+        LiCompleteVideoFrame(handle, status);
+        if (status == DR_NEED_IDR)
+        {
+            // moonlight-common-c discarded its queue with this status.
+            ++state->decoder_refreshes;
+            std::atomic_fetch_add_explicit(&video_recovery_epoch, 1u, std::memory_order_relaxed);
+        }
+        else
+            busy_us += drain_decoder(state);
+        if (state->pipeline_depth > 1u && state->pipeline_faults >= PIPELINE_FAULT_LIMIT)
+            fallback_to_classic_decoder(state, state->last_result);
+        state->decode_window.add(monotonic_us(), busy_us);
+    }
+    return nullptr;
+}
+
+static int submit_presentation(native_renderer_state_t *state, const stream_ready_frame_t &item)
+{
+    native_agc_metrics_t hud = item.hud;
+    const native_video_mode_t *mode = state->mode;
+    const uint64_t started = monotonic_us();
+    const uint64_t waited = started > item.ready_us ? started - item.ready_us : 0;
+
+    hud.rendering_fps_x100 = state->rendering_rate.fps_x100;
+    hud.vsync_enabled = native_agc_vsync_active() ? 1u : 0u;
+    if (PROSPEROLIGHT_PERFORMANCE_DETAIL)
+        state->present_wait_timing.add(waited);
+    if (item.trace)
+        item.trace->present_wait_us = waited;
+    const int result =
+        mode->hdr ? native_agc_present_main10(item.buffer, item.buffer_size, item.pitch,
+                                              item.height, mode->visible_width,
+                                              mode->visible_height, state->stream_fps, &hud)
+                  : native_agc_present_nv12(item.buffer, item.buffer_size, item.pitch, item.height,
+                                            mode->visible_width, mode->visible_height,
+                                            state->stream_fps, &hud);
+    const uint64_t finished = monotonic_us();
+    const uint64_t elapsed = finished - started;
+    state->present_total_us += elapsed;
+    if (PROSPEROLIGHT_PERFORMANCE_DETAIL)
+        state->present_call_timing.add(elapsed);
+    if (elapsed > state->present_max_us)
+        state->present_max_us = elapsed;
+    if (result != 0)
+    {
+        std::atomic_store_explicit(&state->present_result, result, std::memory_order_relaxed);
+        return result;
+    }
+    if (item.trace)
+    {
+        item.trace->submit_us = finished;
+        item.trace->outcome = 1;
+    }
+    return 0;
+}
+
+// Waits for the submitted flip; afterwards the GPU no longer reads the slot.
+static int complete_presentation(native_renderer_state_t *state, const stream_ready_frame_t &item)
+{
+    const uint64_t wait_started = moonlight::performance_now_us();
+    const int result = native_agc_finish_frame();
+
+    moonlight::record_performance_elapsed(state->completion_wait_timing, wait_started);
+    if (result != 0)
+    {
+        std::atomic_store_explicit(&state->present_result, result, std::memory_order_relaxed);
+        return result;
+    }
+    const uint64_t flipped_us = monotonic_us();
+    const uint32_t presented =
+        std::atomic_load_explicit(&state->presented, std::memory_order_relaxed);
+    if (item.trace)
+        item.trace->completion_us = flipped_us;
+    if (presented != 0)
+        state->flip_interval_timing.add(flipped_us - state->last_present_us);
+    else
+        state->first_present_us = flipped_us;
+    state->last_present_us = flipped_us;
+    const uint64_t flipped_network_us = PltGetMicroseconds();
+    state->frame_age_timing.add(
+        flipped_network_us > item.enqueue_us ? flipped_network_us - item.enqueue_us : 0);
+    const uint64_t elapsed = flipped_us > item.arrival_us ? flipped_us - item.arrival_us : 0;
+    state->callback_to_flip_total_us += elapsed;
+    if (state->latency_calls == 0 || elapsed < state->callback_to_flip_min_us)
+        state->callback_to_flip_min_us = elapsed;
+    if (elapsed > state->callback_to_flip_max_us)
+        state->callback_to_flip_max_us = elapsed;
+    ++state->latency_calls;
+    std::atomic_store_explicit(&state->presented, presented + 1u, std::memory_order_relaxed);
+    state->rendering_rate.update(flipped_us, presented + 1u);
+    pthread_mutex_lock(&state->lock);
+    state->frames.release(item.slot);
+    pthread_mutex_unlock(&state->lock);
+    if (PROSPEROLIGHT_LAN_TELEMETRY && (presented == 0 || (presented + 1u) % 300u == 0u))
+    {
+        char receipt[256];
+
+        snprintf(receipt, sizeof(receipt),
+                 "Moonlight presentation progress: frame=%d presented=%u slot=%d "
+                 "dequeue_to_flip_us=%llu",
+                 item.frame, presented + 1u, item.slot, (unsigned long long)elapsed);
+        (void)lan_http_report_text(receipt);
+    }
+    return 0;
+}
+
+static void *video_present_thread(void *context)
+{
+    using Pool = moonlight::SlotPool<FRAME_SLOT_COUNT>;
+    auto *state = static_cast<native_renderer_state_t *>(context);
+    stream_ready_frame_t current{};
+    bool flip_pending = false;
+    unsigned failures = 0;
+
+    if (state->layout.present)
+        state->present_placement_result = ps5_thread_affinity_set(state->layout.present);
+    while (failures < PRESENT_FAILURE_LIMIT)
+    {
+        if (flip_pending)
+        {
+            // Retire the flip before choosing the next picture, so the choice is
+            // made as late as possible and the newest decoded frame wins.
+            if (complete_presentation(state, current) != 0)
+            {
+                ++failures;
+                ++state->present_errors;
+                pthread_mutex_lock(&state->lock);
+                const bool stopping = state->stop_presenting;
+                pthread_mutex_unlock(&state->lock);
+                if (stopping)
+                    return nullptr; // Teardown retires or faults the pending flip.
+                continue;
+            }
+            flip_pending = false;
+            failures = 0;
+        }
+        pthread_mutex_lock(&state->lock);
+        while (!state->mailbox.full && !state->stop_presenting)
+            pthread_cond_wait(&state->wake, &state->lock);
+        if (state->stop_presenting || !state->mailbox.take(&current))
+        {
+            pthread_mutex_unlock(&state->lock);
+            return nullptr;
+        }
+        state->frames.state[static_cast<size_t>(current.slot)] = Pool::Presenting;
+        pthread_mutex_unlock(&state->lock);
+        if (submit_presentation(state, current) == 0)
+        {
+            flip_pending = true;
+            continue;
+        }
+        // Nothing reads the picture: return its slot and try the next one.
+        ++failures;
+        ++state->present_errors;
+        pthread_mutex_lock(&state->lock);
+        state->frames.release(current.slot);
+        pthread_mutex_unlock(&state->lock);
+    }
+    // Presentation stopped responding; end the stream instead of spinning.
+    fail_stream(std::atomic_load_explicit(&state->present_result, std::memory_order_relaxed));
+    return nullptr;
+}
+
+static void join_video_workers(native_renderer_state_t *state)
+{
+    state->running = 0;
+    if (state->decode_started)
+    {
+        (void)pthread_join(state->decode_thread, NULL);
+        state->decode_started = false;
+    }
+    if (state->present_started)
+    {
+        pthread_mutex_lock(&state->lock);
+        state->stop_presenting = true;
+        pthread_cond_broadcast(&state->wake);
+        pthread_mutex_unlock(&state->lock);
+        (void)pthread_join(state->present_thread, NULL);
+        state->present_started = false;
+    }
+}
+
+static void moonlight_renderer_start(void);
+static void moonlight_renderer_stop(void);
+static void moonlight_renderer_cleanup(void);
+
+// Pull renderer: moonlight-common-c creates no decoder thread and calls no
+// submit callback; the decode worker takes frames from its queue instead.
 static DECODER_RENDERER_CALLBACKS moonlight_video_callbacks = {
     .setup = moonlight_renderer_setup,
     .start = moonlight_renderer_start,
     .stop = moonlight_renderer_stop,
     .cleanup = moonlight_renderer_cleanup,
-    .submitDecodeUnit = moonlight_renderer_submit,
-    .capabilities = CAPABILITY_SLICES_PER_FRAME(VIDEO_SLICES_PER_FRAME),
+    .submitDecodeUnit = nullptr,
+    .capabilities = CAPABILITY_PULL_RENDERER,
 };
+
+static int moonlight_renderer_setup(int video_format, int width, int height, int redraw_rate,
+                                    void *context, int dr_flags)
+{
+    char receipt[256];
+
+    auto *state = static_cast<native_renderer_state_t *>(context);
+
+    if (!state || !state->mode || video_format != state->mode->video_format ||
+        width != (int)state->mode->visible_width || height != (int)state->mode->visible_height ||
+        redraw_rate != (int)state->stream_fps || dr_flags != 0)
+        return -1;
+
+    active_renderer = state;
+    active_renderer->last_result = 0;
+    snprintf(receipt, sizeof(receipt),
+             "Moonlight callbacks setup: format=%x display=%dx%d fps=%d flags=%x capabilities=%x",
+             video_format, width, height, redraw_rate, dr_flags,
+             (unsigned)moonlight_video_callbacks.capabilities);
+    (void)lan_http_report_text(receipt);
+    return 0;
+}
+
+static void moonlight_renderer_start(void)
+{
+    native_renderer_state_t *state = active_renderer;
+    int result;
+
+#if PROSPEROLIGHT_PERFORMANCE_DETAIL
+    frame_trace.count = frame_trace.omitted = 0;
+#endif
+    stop_connection_animation();
+    native_agc_reset_performance();
+    if (!state)
+        return;
+    renderer_sync_init(state);
+    state->stop_presenting = false;
+    state->running = 1;
+    result = pthread_create(&state->present_thread, NULL, video_present_thread, state);
+    state->present_started = result == 0;
+    if (result == 0)
+    {
+        result = pthread_create(&state->decode_thread, NULL, video_decode_thread, state);
+        state->decode_started = result == 0;
+    }
+    if (result != 0)
+    {
+        state->last_result = result;
+        fail_stream(result);
+    }
+}
+
+static void moonlight_renderer_stop(void)
+{
+    native_renderer_state_t *state = active_renderer;
+
+    if (!state)
+        return;
+    state->running = 0;
+    // Not every moonlight-common-c exit path shuts the frame queue down.
+    if (state->decode_started)
+        LiWakeWaitForVideoFrame();
+}
+
+static void moonlight_renderer_cleanup(void)
+{
+    if (active_renderer)
+        join_video_workers(active_renderer);
+    active_renderer = NULL;
+}
 
 static void audio_ring_drop(ps5_audio_state_t *state, uint32_t frames)
 {
@@ -2603,6 +3326,15 @@ static void connection_log(const char *format, ...)
     length = strlen(message);
     while (length && (message[length - 1] == '\n' || message[length - 1] == '\r'))
         message[--length] = '\0';
+    // The only signal moonlight-common-c gives when it discards its frame queue
+    // because decoding fell behind. Rare lines; never per packet.
+    if (strstr(message, "Video decode unit queue overflow"))
+    {
+        std::atomic_fetch_add_explicit(&video_queue_overflows, 1u, std::memory_order_relaxed);
+        std::atomic_fetch_add_explicit(&video_recovery_epoch, 1u, std::memory_order_relaxed);
+    }
+    else if (strstr(message, "Unrecoverable frame"))
+        std::atomic_fetch_add_explicit(&video_unrecoverable_frames, 1u, std::memory_order_relaxed);
     snprintf(receipt, sizeof(receipt), "Moonlight[C] %s", message);
     (void)lan_http_report_text(receipt);
 }
@@ -2781,7 +3513,8 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         return -5;
     }
     videodec2_decoder_config_t config;
-    videodec2_decoder_memory_t memory = {};
+    decoder_resources_t resources = make_decoder_resources();
+    ps5_thread_placement_t placement = {};
     videodec2_compute_config_t compute_config = {};
     videodec2_compute_memory_t compute_memory = {};
     native_renderer_state_t renderer = {};
@@ -2791,22 +3524,14 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     client_identity_t client_identity;
     gs_server_t gs_server;
     STREAM_CONFIGURATION stream_config;
-    void *decoder = NULL;
     void *compute_queue = NULL;
     void *input_memory = NULL;
     void *frame_memory = NULL;
     int64_t compute_start = -1;
-    int64_t gpu_start = -1;
-    int64_t cpu_gpu_start = -1;
     int64_t input_start = -1;
     int64_t frame_start = -1;
     int64_t direct_memory_limit;
-    size_t cpu_mapping_size = 0;
-    size_t flexible_available = 0;
-    uint8_t cpu_mapping_info[0x48] = {};
     size_t compute_size = 0;
-    size_t gpu_size = 0;
-    size_t cpu_gpu_size = 0;
     size_t input_size = 0;
     size_t frame_size = 0;
     size_t input_pool_size = 0;
@@ -2833,6 +3558,9 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     int reported_error = 0;
     int user_stop = 0;
     uint32_t presented = 0;
+    uint64_t main_cpu_mask = 0;
+    int main_mask_known = 0;
+    int main_mask_changed = 0;
     char stream_error[192] = {};
     uint32_t synthetic_motion_events = 0;
     uint32_t synthetic_motion_errors = 0;
@@ -2854,6 +3582,19 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         find_video_mode(options ? options->video_codec : MOONLIGHT_VIDEO_CODEC_H264,
                         options ? options->stream_resolution : MOONLIGHT_STREAM_RESOLUTION_1080P,
                         options ? options->hdr_enabled : 0u);
+    const bool classic_pipeline =
+        options && options->decoder_pipeline == MOONLIGHT_DECODER_PIPELINE_CLASSIC;
+    const uint32_t requested_depth = classic_pipeline ? 1u : (uint32_t)DECODER_PIPELINE_DEPTH;
+    const uint32_t requested_cores = options && options->decoder_cores
+                                         ? options->decoder_cores
+                                         : MOONLIGHT_DECODER_CORES_DEFAULT;
+    const uint32_t vsync_enabled = !options || options->vsync_enabled ? 1u : 0u;
+    // 1080p keeps its measured four-slice optimum; larger pictures get more.
+    const uint32_t stream_slices =
+        mode ? moonlight::slices_for_resolution(
+                   mode->resolution_preference != MOONLIGHT_STREAM_RESOLUTION_1080P,
+                   VIDEO_SLICES_PER_FRAME, VIDEO_SLICES_PER_FRAME < 4 ? VIDEO_SLICES_PER_FRAME : 4)
+             : 0u;
 
     controller.user_service_result = -1;
     controller.user_result = -1;
@@ -2940,100 +3681,96 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     config.max_level = decoder_max_level(mode, stream_fps);
     config.max_width = (int32_t)mode->max_width;
     config.max_height = (int32_t)mode->max_height;
-    config.max_dpb_frames = 4;
-    config.pipeline_depth = DECODER_PIPELINE_DEPTH;
+    config.max_dpb_frames = PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION ? 6 : 4;
     config.compute_queue = (uint64_t)compute_queue;
-    config.cpu_affinity = DECODER_CPU_AFFINITY;
     config.cpu_priority = DECODER_CPU_PRIORITY;
     config.optimize_progressive = 1;
-    memset(&memory, 0, sizeof(memory));
-    memory.size = sizeof(memory);
-    result = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
-    if (result != 0)
+
+    renderer.pipeline_mode =
+        classic_pipeline ? MOONLIGHT_DECODER_PIPELINE_CLASSIC : MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
+    renderer.requested_depth = requested_depth;
+    renderer.process_cpu_mask = moonlight::kTitleCpuMask;
+    renderer.requested_cpu_mask =
+        moonlight::decoder_cpu_mask(requested_cores, renderer.process_cpu_mask);
+    // Videodec2 accepts or refuses a pipeline depth and a worker mask only at
+    // creation: walk towards the 01.000.062 configuration until one is taken.
+    result = -1;
+    for (uint32_t depth = requested_depth; depth >= 1u && !resources.decoder; --depth)
+        for (unsigned attempt = 0; attempt < 2u && !resources.decoder; ++attempt)
+        {
+            const uint64_t affinity =
+                attempt == 0 ? renderer.requested_cpu_mask : moonlight::kClassicDecoderCpuMask;
+            if (attempt != 0 && affinity == renderer.requested_cpu_mask)
+                continue;
+            config.pipeline_depth = depth;
+            config.cpu_affinity = affinity;
+            ++renderer.create_attempts;
+            result = create_stream_decoder(&resources, &config, direct_memory_limit);
+            if (result != 0)
+                release_decoder_resources(&resources);
+        }
+    if (!resources.decoder)
+    {
+        if (result == 0)
+            result = -1;
         goto done;
+    }
+    renderer.decoder = resources.decoder;
+    renderer.decoder_config = config;
+    renderer.decoder_memory = resources.memory;
+    renderer.pipeline_depth = config.pipeline_depth;
+    renderer.drain_enabled = config.pipeline_depth > 1u;
+    renderer.decoder_cpu_mask = config.cpu_affinity;
+    renderer.decoder_cores = (uint32_t)__builtin_popcountll(config.cpu_affinity) / 2u;
+    renderer.layout =
+        moonlight::plan_thread_layout(renderer.process_cpu_mask, renderer.decoder_cpu_mask);
 
-    snprintf(notification.message, sizeof(notification.message),
-             "Native embedded query: cpu=%llx gpu=%llx shared=%llx frame=%llx align=%x",
-             (unsigned long long)memory.cpu_size, (unsigned long long)memory.gpu_size,
-             (unsigned long long)memory.cpu_gpu_size, (unsigned long long)memory.max_frame_size,
-             memory.frame_alignment);
-    (void)lan_http_report_text(notification.message);
-
-    cpu_mapping_size = align_16k((size_t)memory.cpu_size);
-    result = sceKernelAvailableFlexibleMemorySize(&flexible_available);
-    if (result == 0)
-        result = sceKernelMapNamedFlexibleMemory(&memory.cpu, cpu_mapping_size, 0x03, 0,
-                                                 "MoonlightVdecCpu");
-    snprintf(
-        notification.message, sizeof(notification.message),
-        "Native flexible CPU workspace: rc=%08x available=%zx requested=%llx mapped=%zx ptr=%p",
-        (uint32_t)result, flexible_available, (unsigned long long)memory.cpu_size, cpu_mapping_size,
-        memory.cpu);
-    (void)lan_http_report_text(notification.message);
-    if (result != 0)
-        goto done;
-
-    result = sceKernelVirtualQuery(memory.cpu, 0, cpu_mapping_info, sizeof(cpu_mapping_info));
-    snprintf(notification.message, sizeof(notification.message),
-             "Native flexible CPU query: rc=%08x protection=%x type=%x flags=%x", (uint32_t)result,
-             *(const uint32_t *)(cpu_mapping_info + 0x18),
-             *(const uint32_t *)(cpu_mapping_info + 0x1c),
-             *(const uint32_t *)(cpu_mapping_info + 0x20));
-    (void)lan_http_report_text(notification.message);
-    if (result != 0)
-        goto done;
-
-    gpu_size = align_16k((size_t)memory.gpu_size);
-    cpu_gpu_size = align_16k((size_t)memory.cpu_gpu_size);
     input_size = INPUT_SLOT_BYTES;
-    frame_size = align_16k((size_t)memory.max_frame_size);
-    input_pool_size = input_size * PIPELINE_BUFFER_COUNT;
-    frame_pool_size = frame_size * PIPELINE_BUFFER_COUNT;
-    memory.gpu_size = gpu_size;
-    if (cpu_gpu_size != 0)
-        memory.cpu_gpu_size = cpu_gpu_size;
-    result = allocate_direct(gpu_size, 0x32, direct_memory_limit, &gpu_start, &memory.gpu);
-    if (result == 0)
-        if (cpu_gpu_size != 0)
-            result = allocate_direct(cpu_gpu_size, 0x33, direct_memory_limit, &cpu_gpu_start,
-                                     &memory.cpu_gpu);
-    if (result == 0)
-        result = allocate_direct(input_pool_size, 0x32, direct_memory_limit, &input_start,
-                                 &input_memory);
+    frame_size = align_16k((size_t)resources.memory.max_frame_size);
+    input_pool_size = input_size * INPUT_SLOT_COUNT;
+    frame_pool_size = frame_size * FRAME_SLOT_COUNT;
+    result =
+        allocate_direct(input_pool_size, 0x32, direct_memory_limit, &input_start, &input_memory);
     if (result == 0)
         result = allocate_direct(frame_pool_size, 0x32, direct_memory_limit, &frame_start,
                                  &frame_memory);
     snprintf(notification.message, sizeof(notification.message),
-             "Native zero-copy stage 3: alloc=%08x gpu=%p/%zx shared=%p/%zx input_pool=%p/%zx "
-             "slots=%u/%zx frame_pool=%p/%zx slots=%u/%zx",
-             (uint32_t)result, memory.gpu, gpu_size, memory.cpu_gpu, cpu_gpu_size, input_memory,
-             input_pool_size, PIPELINE_BUFFER_COUNT, input_size, frame_memory, frame_pool_size,
-             PIPELINE_BUFFER_COUNT, frame_size);
+             "Native zero-copy stage 3: alloc=%08x input_pool=%p/%zx slots=%u/%zx "
+             "frame_pool=%p/%zx slots=%u/%zx",
+             (uint32_t)result, input_memory, input_pool_size, INPUT_SLOT_COUNT, input_size,
+             frame_memory, frame_pool_size, FRAME_SLOT_COUNT, frame_size);
     (void)lan_http_report_text(notification.message);
     if (result != 0)
         goto done;
 
-    result = sceVideodec2CreateDecoder(&config, &memory, &decoder);
-    snprintf(notification.message, sizeof(notification.message),
-             "Native zero-copy stage 4: create=%08x decoder=%p", (uint32_t)result, decoder);
-    (void)lan_http_report_text(notification.message);
-    if (result != 0)
-        goto done;
-
-    result = sceVideodec2Reset(decoder);
+    result = sceVideodec2Reset(renderer.decoder);
     snprintf(notification.message, sizeof(notification.message),
              "Native compute zero-copy stage 5: reset=%08x direct_maps=skipped", (uint32_t)result);
     (void)lan_http_report_text(notification.message);
     if (result != 0)
         goto done;
 
-    renderer.decoder = decoder;
     renderer.mode = mode;
     renderer.stream_fps = stream_fps;
     renderer.input_memory = input_memory;
     renderer.frame_memory = frame_memory;
     renderer.input_size = input_size;
     renderer.frame_size = frame_size;
+    renderer.slices_requested = stream_slices;
+    renderer.vsync_requested = vsync_enabled;
+    renderer_sync_init(&renderer);
+    snprintf(notification.message, sizeof(notification.message),
+             "Moonlight pipeline: mode=%s depth=%u/%u drain=%u cores=%u affinity=%llx/%llx "
+             "attempts=%u receive=%llx decode=%llx present=%llx other=%llx slices=%u vsync=%u",
+             classic_pipeline ? "classic" : "adaptive", renderer.pipeline_depth, requested_depth,
+             renderer.drain_enabled ? 1u : 0u, renderer.decoder_cores,
+             (unsigned long long)renderer.decoder_cpu_mask,
+             (unsigned long long)renderer.requested_cpu_mask, renderer.create_attempts,
+             (unsigned long long)renderer.layout.receive,
+             (unsigned long long)renderer.layout.decode,
+             (unsigned long long)renderer.layout.present, (unsigned long long)renderer.layout.other,
+             stream_slices, vsync_enabled);
+    (void)lan_http_report_text(notification.message);
 
     if (std::atomic_load_explicit(&loading.cancel_requested, std::memory_order_relaxed))
     {
@@ -3124,6 +3861,30 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     std::atomic_store_explicit(&host_hdr_transitions, 0u, std::memory_order_relaxed);
     std::atomic_store_explicit(&loading.connection_pending, 1, std::memory_order_release);
     ps5_network_metrics_begin(PROSPEROLIGHT_PERFORMANCE_DETAIL);
+    std::atomic_store_explicit(&video_recovery_epoch, 0u, std::memory_order_relaxed);
+    std::atomic_store_explicit(&video_queue_overflows, 0u, std::memory_order_relaxed);
+    std::atomic_store_explicit(&video_unrecoverable_frames, 0u, std::memory_order_relaxed);
+    moonlight_video_callbacks.capabilities =
+        CAPABILITY_PULL_RENDERER | CAPABILITY_SLICES_PER_FRAME(stream_slices);
+    if (PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION)
+        moonlight_video_callbacks.capabilities |=
+            mode->codec_type == 1u ? CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC
+                                   : CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC;
+    native_agc_set_vsync((int)vsync_enabled);
+    // Keep every stream thread off the decoder's CPUs. New threads inherit the
+    // creator's mask, so narrow this thread first; moonlight-common-c's thread
+    // hook then gives the video receive thread a CPU of its own.
+    placement.receive = renderer.layout.receive;
+    placement.audio = renderer.layout.other;
+    placement.other = renderer.layout.other;
+    ps5_thread_placement_configure(&placement);
+    main_mask_known = ps5_thread_affinity_get(&main_cpu_mask) == 0 && main_cpu_mask != 0;
+    renderer.main_placement_result = -1;
+    if (main_mask_known && renderer.layout.other)
+    {
+        renderer.main_placement_result = ps5_thread_affinity_set(renderer.layout.other);
+        main_mask_changed = renderer.main_placement_result == 0;
+    }
     connection_result = LiStartConnection(
         &gs_server.server_info, &stream_config, &moonlight_connection_callbacks,
         &moonlight_video_callbacks, &moonlight_audio_callbacks, &renderer, 0, NULL, 0);
@@ -3195,16 +3956,21 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     result = first_frame_timed_out               ? GS_IO_ERROR
              : terminated && reported_error != 0 ? reported_error
                                                  : 0;
-
     if (controller_ready)
         ps5_controller_stop(&controller);
     if (physical_input_ready)
         ps5_physical_input_stop(&physical_input);
     LiStopConnection();
     connection_active = 0;
-    if (finish_stream_presentation(&renderer) != 0 && result == 0)
-        result = renderer.last_result;
     // Renderer/audio aggregates are single-writer, so snapshot only after join.
+    if (result != 0 && !first_frame_timed_out)
+    {
+        if (renderer.decoder_lost)
+            gs_error = "The video decoder could not be restarted";
+        else if (result ==
+                 std::atomic_load_explicit(&renderer.present_result, std::memory_order_relaxed))
+            gs_error = "GPU presentation stopped responding";
+    }
     presented = renderer.presented.load();
     live_elapsed_us = renderer.last_present_us > renderer.first_present_us
                           ? renderer.last_present_us - renderer.first_present_us
@@ -3261,6 +4027,26 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
              (unsigned long long)renderer.callback_to_flip_min_us,
              (unsigned long long)renderer.callback_to_flip_max_us, renderer.submission_count);
     (void)lan_http_report_text(notification.message);
+    {
+        const ps5_thread_placement_stats_t placed = ps5_thread_placement_stats();
+
+        snprintf(notification.message, sizeof(notification.message),
+                 "Moonlight live pipeline: depth=%u drain=%u drains=%u drain_faults=%u "
+                 "recreations=%u refreshes=%u overflows=%u decoded=%u not_displayed=%u "
+                 "network_gaps=%llu decoder_gaps=%llu present_errors=%u placed=%u/%u "
+                 "receive=%llx decode=%d present=%d main=%d vsync=%d flip_events=%d",
+                 renderer.pipeline_depth, renderer.drain_enabled ? 1u : 0u, renderer.drain_calls,
+                 renderer.drain_faults, renderer.decoder_recreations, renderer.decoder_refreshes,
+                 std::atomic_load_explicit(&video_queue_overflows, std::memory_order_relaxed),
+                 renderer.decoded, renderer.not_displayed,
+                 (unsigned long long)renderer.drops.network,
+                 (unsigned long long)renderer.drops.decoder, renderer.present_errors,
+                 placed.applied, placed.applied + placed.failed,
+                 (unsigned long long)placed.receive_verified, renderer.decode_placement_result,
+                 renderer.present_placement_result, renderer.main_placement_result,
+                 native_agc_vsync_active(), native_agc_flip_events_active());
+        (void)lan_http_report_text(notification.message);
+    }
 
 done:
     if (result != 0 && !controller.requested_stop)
@@ -3287,8 +4073,6 @@ done:
         LiStopConnection();
     }
     stop_connection_loading();
-    if (finish_stream_presentation(&renderer) != 0 && result == 0)
-        result = renderer.last_result;
     http_clear_interrupt();
     snprintf(
         notification.message, sizeof(notification.message),
@@ -3399,22 +4183,26 @@ done:
     }
     save_performance_summary(renderer, input_intervals, options, result);
     if (renderer.access_units)
+    {
+        log_performance_windows(renderer.stream_fps);
         save_frame_trace();
+    }
+    ps5_thread_placement_clear();
+    if (main_mask_changed)
+        (void)ps5_thread_affinity_set(main_cpu_mask);
+    // Both workers have joined: retire the last flip before touching memory.
     const int source_idle_result = native_agc_finish_frame();
     present_cleanup_result = native_agc_present_shutdown();
-    if (source_idle_result == 0 && decoder)
-        delete_result = sceVideodec2DeleteDecoder(decoder);
+    // A decoder that was never created, or that a fallback already deleted,
+    // leaves nothing to delete.
+    if (source_idle_result == 0)
+        delete_result = renderer.decoder ? sceVideodec2DeleteDecoder(renderer.decoder) : 0;
+    renderer_sync_destroy(&renderer);
     if (source_idle_result == 0 && delete_result == 0)
     {
         release_direct(frame_memory, frame_start, frame_pool_size);
         release_direct(input_memory, input_start, input_pool_size);
-        release_direct(memory.cpu_gpu, cpu_gpu_start, cpu_gpu_size);
-        release_direct(memory.gpu, gpu_start, gpu_size);
-        if (memory.cpu)
-        {
-            (void)sceKernelReleaseFlexibleMemory(memory.cpu, cpu_mapping_size);
-            (void)sceKernelMunmap(memory.cpu, cpu_mapping_size);
-        }
+        release_decoder_resources(&resources);
         if (compute_queue)
             release_compute_result = sceVideodec2ReleaseComputeQueue(compute_queue);
         release_direct(compute_memory.cpu_gpu, compute_start, compute_size);
@@ -3447,8 +4235,7 @@ done:
         metrics->result = result;
         metrics->presented_frames = renderer.presented;
         metrics->access_units = renderer.access_units;
-        metrics->pending_frames =
-            renderer.submission_count + (renderer.presentation_pending ? 1u : 0u);
+        metrics->pending_frames = renderer.submission_count;
         metrics->audio_packets = audio_state.packets;
         metrics->audio_overruns = audio_state.overruns;
         metrics->controller_polls = controller.polls;

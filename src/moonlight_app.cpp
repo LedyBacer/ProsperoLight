@@ -87,7 +87,8 @@ const char *const kGameFocus[] = {"nav-hosts",  "nav-games",  "nav-settings", "a
 const char *const kSettingFocus[] = {
     "nav-hosts",          "nav-games",         "nav-settings",    "setting-codec",
     "setting-resolution", "setting-framerate", "setting-bitrate", "setting-display-area",
-    "setting-hdr",        "setting-audio"};
+    "setting-hdr",        "setting-audio",     "setting-vsync",   "setting-decoder",
+    "setting-cores"};
 
 FocusList FocusFor(unsigned screen)
 {
@@ -141,7 +142,7 @@ void StreamDimensions(unsigned resolution, unsigned &width, unsigned &height)
 
 unsigned NextBitrate(unsigned current)
 {
-    static const unsigned values[] = {20, 40, 80, 100, 150, 200, 300, 400, 500};
+    static const unsigned values[] = {20, 40, 50, 60, 70, 80, 100, 150, 200, 300, 400, 500};
     for (unsigned value : values)
         if (value > current)
             return value;
@@ -726,6 +727,23 @@ void MoonlightApp::Activate()
                                               ? MOONLIGHT_AUDIO_51_SURROUND
                                               : MOONLIGHT_AUDIO_STEREO;
         }
+        else if (focus_ == 10)
+        {
+            config_.vsync_enabled = !config_.vsync_enabled;
+        }
+        else if (focus_ == 11)
+        {
+            config_.decoder_pipeline =
+                config_.decoder_pipeline == MOONLIGHT_DECODER_PIPELINE_CLASSIC
+                    ? MOONLIGHT_DECODER_PIPELINE_ADAPTIVE
+                    : MOONLIGHT_DECODER_PIPELINE_CLASSIC;
+        }
+        else if (focus_ == 12)
+        {
+            config_.decoder_cores = config_.decoder_cores <= MOONLIGHT_DECODER_CORES_MIN
+                                        ? MOONLIGHT_DECODER_CORES_MAX
+                                        : config_.decoder_cores - 1u;
+        }
         (void)moonlight_config_save(&config_);
         prosperolight::ui_sound_play(prosperolight::UiSoundCue::Setting);
         UpdateSettings();
@@ -1098,7 +1116,8 @@ void MoonlightApp::UpdateFocus()
                                "app-card-4",        "app-card-5",      "stop-app",
                                "back-hosts",        "setting-codec",   "setting-resolution",
                                "setting-framerate", "setting-bitrate", "setting-display-area",
-                               "setting-hdr",       "setting-audio"};
+                               "setting-hdr",       "setting-audio",   "setting-vsync",
+                               "setting-decoder",   "setting-cores"};
     for (const char *id : all)
         SetClass(document_, id, "focused", false);
 
@@ -1395,6 +1414,21 @@ void MoonlightApp::UpdateSettings()
                                   : "Enabling selects HEVC Main10 at the current resolution");
     SetText(document_, "setting-audio-value",
             config_.audio_configuration == MOONLIGHT_AUDIO_51_SURROUND ? "5.1 surround" : "Stereo");
+    SetText(document_, "setting-vsync-value", config_.vsync_enabled ? "On" : "Off");
+    SetText(document_, "setting-vsync-help",
+            config_.vsync_enabled ? "On shows whole frames at each display refresh"
+                                  : "Off flips immediately: lower latency, visible tearing");
+    const bool classic = config_.decoder_pipeline == MOONLIGHT_DECODER_PIPELINE_CLASSIC;
+    SetText(document_, "setting-decoder-value", classic ? "Classic" : "Adaptive");
+    SetText(document_, "setting-decoder-help",
+            classic ? "One frame at a time, as in 01.000.062"
+                    : "Overlaps frames only while decoding falls behind");
+    std::snprintf(text, sizeof(text), "%u cores", config_.decoder_cores);
+    SetText(document_, "setting-cores-value", text);
+    SetText(document_, "setting-cores-help",
+            config_.decoder_cores == MOONLIGHT_DECODER_CORES_MIN
+                ? "Classic reservation, as in 01.000.062"
+                : "Reserved for decoding; stream threads use the remaining cores");
     std::snprintf(text, sizeof(text), "%s / %sP%u",
                   config_.hdr_enabled                                 ? "HDR10"
                   : config_.video_codec == MOONLIGHT_VIDEO_CODEC_HEVC ? "HEVC"
@@ -1590,4 +1624,19 @@ unsigned MoonlightApp::HdrEnabled() const
 unsigned MoonlightApp::AudioConfiguration() const
 {
     return config_.audio_configuration;
+}
+
+unsigned MoonlightApp::VsyncEnabled() const
+{
+    return config_.vsync_enabled;
+}
+
+unsigned MoonlightApp::DecoderPipeline() const
+{
+    return config_.decoder_pipeline;
+}
+
+unsigned MoonlightApp::DecoderCores() const
+{
+    return config_.decoder_cores;
 }

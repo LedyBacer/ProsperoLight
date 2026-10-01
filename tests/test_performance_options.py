@@ -19,11 +19,8 @@ class PerformanceOptions(unittest.TestCase):
     def test_compile_time_bounds(self):
         cases = {
             "VIDEO_SLICES_PER_FRAME": (8, 9),
-            "DECODER_PIPELINE_DEPTH": (2, 3),
-            "DECODER_CPU_AFFINITY": (0x3e, 0x80),
+            "DECODER_PIPELINE_DEPTH": (3, 4),
             "DECODER_CPU_PRIORITY": (720, 256),
-            "PRESENT_EVERY_N": (4, 0),
-            "FRAME_PACING": (1, 2),
             "INPUT_POLL_US": (1000, 0),
         }
         for name, values in cases.items():

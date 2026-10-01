@@ -87,9 +87,12 @@ class ToolTests(unittest.TestCase):
         compatibility = (ROOT / "platform/ps5/ps5_compat.h").read_text(
             encoding="utf-8"
         )
+        # The rename is still never issued; the hook places the thread instead.
         self.assertIn(
-            "#define pthread_setname_np ps5_pthread_setname_noop", compatibility
+            "#define pthread_setname_np ps5_pthread_setname_place", compatibility
         )
+        self.assertIn("ps5_thread_placement_apply_name(name);", compatibility)
+        self.assertNotIn("pthread_rename_np(", compatibility)
 
     def test_release_build_disables_blocking_lan_telemetry(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
@@ -141,7 +144,10 @@ class ToolTests(unittest.TestCase):
 
     def test_hdr_overlay_identifies_hdr_on_the_first_line(self):
         source = (ROOT / "src/native_agc_present.cpp").read_text(encoding="utf-8")
-        self.assertIn('metrics->video_codec ? "HEVC" : "H.264", hdr ? " / HDR" : ""', source)
+        first_line = source[source.index('"Video stream: %ux%u %u.%02u FPS (Codec: %s%s)') :]
+        first_line = first_line[: first_line.index("hud_line(luma, 0,")]
+        self.assertIn('metrics->video_codec ? "HEVC" : "H.264"', first_line)
+        self.assertIn('hdr ? " / HDR" : ""', first_line)
 
     def test_selectable_frame_rate_reaches_sunshine_and_decoder(self):
         config = (ROOT / "include/moonlight_config.hpp").read_text(encoding="utf-8")
@@ -354,8 +360,8 @@ class ToolTests(unittest.TestCase):
 
     def test_hdr_frames_wait_for_control_stream_confirmation(self):
         source = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
-        start = source.index("static int moonlight_renderer_submit(")
-        end = source.index("static void audio_ring_drop(", start)
+        start = source.index("static int decode_access_unit(")
+        end = source.index("static void fallback_to_classic_decoder(", start)
         submit = source[start:end]
 
         self.assertIn("(hdr_transitions && !hdr_active)", submit)
@@ -430,7 +436,13 @@ class ToolTests(unittest.TestCase):
         self.assertIn("sceVideoOutVrrUnpegFromFixedRate", presenter)
         self.assertNotIn("VIDEO_OUT_BUS_TYPE_4K_HIGH_REFRESH", presenter)
         self.assertNotIn("sceVideoOutOpen4kHighRefresh", presenter)
-        self.assertIn("if (presenter.requested_fps > 60u)", presenter)
+        self.assertIn("presenter.requested_fps > 60u ? 100000u : 500000u", presenter)
+        # Flip status decides; an event only wakes the waiter early, and no
+        # vblank wait may stand between a completed flip and its observer.
+        self.assertIn("sceKernelWaitEqueue(presenter.flip_queue, event, 1, &count, &timeout)", presenter)
+        wait = presenter[presenter.index("static int wait_for_marker(") :]
+        wait = wait[: wait.index("int native_agc_wait_source_idle(")]
+        self.assertNotIn("sceVideoOutWaitVblank", wait)
         self.assertIn("#define PROSPEROLIGHT_FLIP_POLL_US 500", presenter)
         self.assertIn("sceKernelUsleep(PROSPEROLIGHT_FLIP_POLL_US);", presenter)
         self.assertIn("if (requested_fps == 90u)", presenter)
@@ -470,8 +482,14 @@ class ToolTests(unittest.TestCase):
             presenter.index("sceVideoOutConfigureOutput(handle", presenter.index("configure_high_refresh_output")),
         )
         self.assertIn("state->requested_fps", stream)
-        self.assertIn("state->mode->visible_height, state->stream_fps, hud", stream)
-        self.assertIn("native_agc_wait_source_idle(frame_slot)", stream)
+        self.assertIn("mode->visible_height, state->stream_fps, &hud)", stream)
+        # A frame slot returns to the decoder only after its flip was observed.
+        complete = stream[stream.index("static int complete_presentation(") :]
+        complete = complete[: complete.index("static void *video_present_thread(")]
+        self.assertLess(
+            complete.index("native_agc_finish_frame()"),
+            complete.index("state->frames.release(item.slot);"),
+        )
         self.assertIn("if (!defer_flip)", presenter)
         self.assertIn("result = wait_for_marker(render_marker, &render_waits)", presenter)
         self.assertIn("source == presenter.pending_source ? native_agc_finish_frame() : 0", presenter)
@@ -489,15 +507,22 @@ class ToolTests(unittest.TestCase):
             presenter,
         )
 
-    def test_renderer_bounds_latency_with_enqueue_time_and_stale_presentation_drops(self):
+    def test_renderer_pulls_frames_and_presents_the_newest_picture(self):
         source = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
 
         self.assertIn("decode_unit->enqueueTimeUs", source)
-        self.assertIn("submission_enqueue_us", source)
-        self.assertIn("queue_delay_total_us", source)
-        self.assertIn("stale_presentation_drops", source)
-        self.assertIn("moonlight::drop_stale_presentation", source)
         self.assertIn("LiGetPendingVideoFrames()", source)
+        # Pull renderer: this client owns the decode thread, and no submit
+        # callback may be registered alongside the capability.
+        self.assertIn("LiWaitForNextVideoFrame(&handle, &decode_unit)", source)
+        self.assertIn("LiCompleteVideoFrame(handle, status);", source)
+        self.assertIn(".submitDecodeUnit = nullptr,", source)
+        self.assertIn("CAPABILITY_PULL_RENDERER | CAPABILITY_SLICES_PER_FRAME(stream_slices)", source)
+        # Decoded pictures are never held back by a time rule: the newest
+        # one replaces any picture the presenter has not taken yet.
+        self.assertNotIn("drop_stale_presentation", source)
+        self.assertIn("state->mailbox.publish(ready, &displaced)", source)
+        self.assertIn("moonlight::should_drain(state->drain_enabled, state->pipeline_depth,", source)
         self.assertIn("moonlight::record_reassembly(state->reassembly_timing, decode_unit->receiveTimeUs,", source)
         self.assertIn("decode_unit->enqueueTimeUs, callback_network_us)", source)
         # Threshold/progress behavior is exercised by the host C++ policy test.
@@ -595,11 +620,17 @@ class ToolTests(unittest.TestCase):
         markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
         styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
 
-        self.assertEqual(markup.count('class="button-chrome setting-chrome'), 14)
-        self.assertEqual(markup.count('width="1380" height="88"'), 14)
-        self.assertIn(".setting-row { position: absolute; left: 34px; width: 1380px; height: 88px;", styles)
-        self.assertIn(".setting-row-6 { top: 728px; }", styles)
-        self.assertIn(".settings-note { position: absolute; left: 34px; top: 838px;", styles)
+        self.assertEqual(markup.count('class="button-chrome setting-chrome'), 20)
+        self.assertEqual(markup.count('width="1380" height="88"'), 20)
+        self.assertIn(".setting-chrome { width: 1380px; height: 64px; }", styles)
+        self.assertIn(".setting-row { position: absolute; left: 34px; width: 1380px; height: 64px;", styles)
+        # Ten rows on a 68-pixel pitch end at 840; the note and the footer follow.
+        self.assertIn(".setting-row-9 { top: 776px; }", styles)
+        self.assertIn(".settings-note { position: absolute; left: 34px; top: 850px;", styles)
+        self.assertIn("#controller-footer { position: absolute; left: 0px; top: 1004px;", styles)
+        for setting in ("vsync", "decoder", "cores"):
+            self.assertIn(f'id="setting-{setting}"', markup)
+            self.assertIn(f'id="setting-{setting}-value"', markup)
 
     def test_games_hide_placeholder_catalog_while_initial_refresh_is_pending(self):
         markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")

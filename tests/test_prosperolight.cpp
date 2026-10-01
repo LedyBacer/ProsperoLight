@@ -12,6 +12,7 @@
 #include "moonlight_health.hpp"
 #include "moonlight_physical_input.hpp"
 #include "moonlight_performance.hpp"
+#include "moonlight_pipeline.hpp"
 #include "moonlight_tuning.hpp"
 
 #include <gtest/gtest.h>
@@ -31,31 +32,187 @@ TEST(Performance, SliceHeadersAreCountedWithoutReadingTruncatedNals)
     EXPECT_EQ(moonlight::count_video_slices(hevc + 13, 3, true), 0u);
 }
 
-TEST(Performance, PacerBoundsWaitAndAbandonsBacklog)
+TEST(Performance, InputPollSubtractsWorkAndYieldsAfterAnOverrun)
 {
     EXPECT_EQ(moonlight::input_poll_delay(100, 600, 2000), 1500u);
     EXPECT_EQ(moonlight::input_poll_delay(100, 5000, 2000), 100u);
     EXPECT_EQ(moonlight::input_poll_delay(100, 50, 2000), 2000u);
-    moonlight::FramePacer p;
-    EXPECT_EQ(p.delay(100000, 120, false), 0u);
-    EXPECT_EQ(p.delay(104000, 120, false), 4333u);
-    EXPECT_EQ(p.delay(105000, 120, true), 0u);
-    EXPECT_EQ(p.delay(200000, 120, false), 0u);
-    EXPECT_EQ(p.delay(201000, 0, false), 0u);
-    // Clock discontinuity must not produce an unbounded sleep.
-    EXPECT_EQ(p.delay(1, 120, false), 0u);
-    p = {};
-    EXPECT_EQ(p.delay(1000000, 120, false, 11988), 0u);
-    EXPECT_EQ(p.delay(1004000, 120, false, 11988), 4341u);
-    // Fractional intervals do not lose a microsecond on each frame.
-    p = {};
-    uint64_t now = 1000000;
-    for (unsigned i = 0; i < 11988; ++i)
+}
+
+TEST(Pipeline, DecoderMaskTakesWholeCoresAndLeavesRoomForTheStream)
+{
+    using namespace moonlight;
+    EXPECT_EQ(decoder_cpu_mask(3, kTitleCpuMask), kClassicDecoderCpuMask);
+    EXPECT_EQ(decoder_cpu_mask(4, kTitleCpuMask), 0xffu);
+    EXPECT_EQ(decoder_cpu_mask(5, kTitleCpuMask), 0x3ffu);
+    // Out-of-range requests are clamped, never widened past five cores.
+    EXPECT_EQ(decoder_cpu_mask(0, kTitleCpuMask), kClassicDecoderCpuMask);
+    EXPECT_EQ(decoder_cpu_mask(9, kTitleCpuMask), 0x3ffu);
+    // A smaller allocation keeps two CPUs for receive, decode and presentation.
+    EXPECT_EQ(decoder_cpu_mask(5, 0xffu), 0x3fu);
+    EXPECT_EQ(decoder_cpu_mask(5, 0xfu), 0x3u);
+    // A half-available core is skipped rather than split.
+    EXPECT_EQ(decoder_cpu_mask(3, 0x1ffdu), 0xfcu);
+}
+
+TEST(Pipeline, ThreadLayoutKeepsStreamThreadsOffDecoderCpus)
+{
+    using namespace moonlight;
+    for (unsigned cores = kMinDecoderCores; cores <= kMaxDecoderCores; ++cores)
     {
-        EXPECT_EQ(p.delay(now, 120, false, 11988), 0u);
-        now = p.next_us;
+        const uint64_t decoder = decoder_cpu_mask(cores, kTitleCpuMask);
+        const ThreadLayout layout = plan_thread_layout(kTitleCpuMask, decoder);
+        for (uint64_t mask : {layout.receive, layout.decode, layout.present, layout.other})
+        {
+            EXPECT_NE(mask, 0u);
+            EXPECT_EQ(mask & decoder, 0u);
+            EXPECT_EQ(mask & ~kTitleCpuMask, 0u);
+        }
+        // The receive thread never shares its CPU with another stream thread.
+        EXPECT_EQ(__builtin_popcountll(layout.receive), 1);
+        EXPECT_EQ(layout.receive & (layout.decode | layout.present | layout.other), 0u);
     }
-    EXPECT_EQ(now, 101000000u);
+    const ThreadLayout five = plan_thread_layout(kTitleCpuMask, 0x3ffu);
+    EXPECT_EQ(five.receive, 0x400u);
+    EXPECT_EQ(five.decode, 0x1000u);
+    EXPECT_EQ(five.present, 0x800u);
+    EXPECT_EQ(five.other, 0x1800u);
+    const ThreadLayout three = plan_thread_layout(kTitleCpuMask, kClassicDecoderCpuMask);
+    EXPECT_EQ(three.receive, 0x40u);
+    EXPECT_EQ(three.other, 0x1f80u);
+    // One CPU left is shared; none left means "leave the inherited masks".
+    const ThreadLayout single = plan_thread_layout(0x7u, 0x3u);
+    EXPECT_EQ(single.receive, 0x4u);
+    EXPECT_EQ(single.other, 0x4u);
+    EXPECT_EQ(plan_thread_layout(0x3u, 0x3u).other, 0u);
+}
+
+TEST(Pipeline, SlicesAndDrainFollowResolutionAndBacklog)
+{
+    using namespace moonlight;
+    EXPECT_EQ(slices_for_resolution(false, 8), 4u);
+    EXPECT_EQ(slices_for_resolution(true, 8), 8u);
+    EXPECT_EQ(slices_for_resolution(false, 2, 2), 2u);
+    EXPECT_TRUE(should_drain(true, 3, 1, 0));
+    EXPECT_FALSE(should_drain(true, 3, 1, 1)); // Behind: keep the pipeline full.
+    EXPECT_FALSE(should_drain(true, 3, 0, 0)); // Nothing held.
+    EXPECT_FALSE(should_drain(true, 1, 1, 0)); // Depth one never holds a picture.
+    EXPECT_FALSE(should_drain(false, 3, 1, 0));
+}
+
+TEST(Pipeline, CatchUpNeedsASustainedBacklog)
+{
+    moonlight::CatchUpGuard guard;
+    EXPECT_FALSE(guard.update(1000, 14, 0, 250000)); // Disabled.
+    EXPECT_FALSE(guard.update(1000, 6, 6, 250000));
+    EXPECT_FALSE(guard.update(200000, 7, 6, 250000));
+    EXPECT_FALSE(guard.update(210000, 2, 6, 250000)); // Recovered: start over.
+    EXPECT_FALSE(guard.update(220000, 6, 6, 250000));
+    EXPECT_TRUE(guard.update(470000, 6, 6, 250000));
+    EXPECT_FALSE(guard.update(480000, 6, 6, 250000)); // One request per episode.
+    EXPECT_FALSE(guard.update(100, 6, 6, 250000));    // Clock discontinuity.
+}
+
+TEST(Pipeline, SlotsAreOnlyReusedAfterReleaseAndNeverTheLatestOutput)
+{
+    using Pool = moonlight::SlotPool<4>;
+    Pool pool;
+    EXPECT_EQ(pool.acquire_free(), 0);
+    pool.state[0] = Pool::Decoding;
+    pool.state[1] = Pool::Ready;
+    pool.state[2] = Pool::Presenting;
+    EXPECT_EQ(pool.acquire_free(), 3);
+    pool.state[3] = Pool::Decoding;
+    EXPECT_EQ(pool.acquire_free(), -1);
+    EXPECT_EQ(pool.count(Pool::Decoding), 2u);
+    // The newest picture stays intact until a newer one exists.
+    pool.last_output = 2;
+    pool.release(2);
+    EXPECT_EQ(pool.acquire_free(), -1);
+    pool.release(1);
+    EXPECT_EQ(pool.acquire_free(), 1);
+    pool.last_output = 1;
+    EXPECT_EQ(pool.acquire_free(), 2);
+    // Oldest release first, so a slot rests as long as possible.
+    pool.last_output = -1;
+    EXPECT_EQ(pool.acquire_free(), 2);
+    pool.release_decoding();
+    EXPECT_EQ(pool.count(Pool::Decoding), 0u);
+    EXPECT_EQ(pool.count(Pool::Free), 4u);
+    pool.release(-1);
+    pool.release(4);
+    EXPECT_EQ(pool.count(Pool::Free), 4u);
+}
+
+TEST(Pipeline, MailboxKeepsOnlyTheNewestPicture)
+{
+    moonlight::LatestMailbox<int> mailbox;
+    int out = 0, displaced = 0;
+    EXPECT_FALSE(mailbox.take(&out));
+    EXPECT_FALSE(mailbox.publish(1, &displaced));
+    EXPECT_TRUE(mailbox.publish(2, &displaced));
+    EXPECT_EQ(displaced, 1);
+    EXPECT_TRUE(mailbox.take(&out));
+    EXPECT_EQ(out, 2);
+    EXPECT_FALSE(mailbox.take(&out));
+}
+
+TEST(Pipeline, FrameGapsAreAttributedToTheNetworkOrTheDecoder)
+{
+    moonlight::DropAttribution drops;
+    drops.observe(10, 0);
+    drops.observe(11, 0);
+    drops.observe(14, 0); // Two frames never arrived.
+    EXPECT_EQ(drops.network, 2u);
+    EXPECT_EQ(drops.decoder, 0u);
+    drops.observe(30, 1); // The queue was discarded for decoder backpressure.
+    EXPECT_EQ(drops.network, 2u);
+    EXPECT_EQ(drops.decoder, 15u);
+    drops.observe(31, 1);
+    drops.observe(33, 1);
+    EXPECT_EQ(drops.network, 3u);
+    drops.observe(5, 1); // A restarted numbering is not a gap.
+    EXPECT_EQ(drops.network, 3u);
+    EXPECT_EQ(drops.decoder, 15u);
+}
+
+TEST(Pipeline, ArrivalRateCountsFramesThatWereNeverDecoded)
+{
+    moonlight::ArrivalRate rate;
+    EXPECT_FALSE(rate.update(1000000, 100));
+    EXPECT_FALSE(rate.update(1500000, 160));
+    // Only 3 of 120 frames were dequeued, yet the host sent 120 in a second.
+    EXPECT_TRUE(rate.update(2000000, 220));
+    EXPECT_EQ(rate.fps_x100, 12000u);
+    EXPECT_FALSE(rate.update(1000, 5)); // Restart.
+    EXPECT_EQ(rate.fps_x100, 12000u);
+}
+
+TEST(Pipeline, DecodeWindowReportsLastSecondMeanPercentileAndLoad)
+{
+    moonlight::WindowedTiming window;
+    uint64_t now = 5000000;
+    for (unsigned i = 0; i < 119; ++i)
+    {
+        window.add(now, i < 113 ? 4000u : 9000u);
+        now += 8333;
+    }
+    EXPECT_EQ(window.last_count, 0u); // The first second is still open.
+    now = 5000000 + 1000000;
+    window.add(now, 9000u);
+    EXPECT_EQ(window.last_count, 120u);
+    EXPECT_EQ(window.last_mean_us, (113u * 4000u + 7u * 9000u) / 120u);
+    EXPECT_EQ(window.last_max_us, 9000u);
+    EXPECT_EQ(window.last_p95_us, 9000u);
+    EXPECT_EQ(window.last_load_permille, 515u);
+    // A saturated decoder is reported as fully loaded, never more.
+    for (unsigned i = 0; i < 100; ++i)
+    {
+        now += 10000;
+        window.add(now, 12000u);
+    }
+    EXPECT_EQ(window.last_load_permille, 1000u);
+    EXPECT_EQ(window.last_p95_us, 12000u);
 }
 
 TEST(Performance, BoundedTimingPercentilesIncludeOverflow)
@@ -127,12 +284,8 @@ TEST(Performance, RefreshHintPreservesSelectedRateAndFractionalCadence)
     EXPECT_EQ(moonlight::client_refresh_x100(UINT32_MAX, UINT32_MAX), 6000u);
 }
 
-TEST(Performance, CatchUpPreservesVideoProgressAndAudioThreshold)
+TEST(Performance, AudioBacklogThresholdIsExclusiveAndOptIn)
 {
-    EXPECT_TRUE(moonlight::drop_stale_presentation(30000, 120, 2, 8333));
-    EXPECT_FALSE(moonlight::drop_stale_presentation(30000, 120, 0, 8333));
-    EXPECT_FALSE(moonlight::drop_stale_presentation(30000, 120, 2, 100000));
-    EXPECT_FALSE(moonlight::drop_stale_presentation(16000, 120, 2, 8333));
     EXPECT_FALSE(moonlight::discard_audio_backlog(31, 0));
     EXPECT_FALSE(moonlight::discard_audio_backlog(30, 30));
     EXPECT_FALSE(moonlight::discard_audio_backlog(-1, 30));
@@ -361,6 +514,75 @@ TEST(Configuration, DefaultsMatchLauncherDefaults)
     EXPECT_EQ(config.stream_fps, MOONLIGHT_STREAM_FPS_60);
     EXPECT_EQ(config.hdr_enabled, 0U);
     EXPECT_EQ(config.audio_configuration, MOONLIGHT_AUDIO_STEREO);
+    EXPECT_EQ(config.vsync_enabled, 1U);
+    EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_ADAPTIVE);
+    EXPECT_EQ(config.decoder_cores, MOONLIGHT_DECODER_CORES_DEFAULT);
+}
+
+TEST(Configuration, MigratesVersionFiveAndDefaultsTheNewStreamSettings)
+{
+    struct LegacyConfig
+    {
+        std::uint32_t host_count;
+        std::uint32_t selected_host;
+        std::uint32_t bitrate_mbps;
+        std::uint32_t display_area;
+        std::uint32_t video_codec;
+        std::uint32_t stream_resolution;
+        std::uint32_t stream_fps;
+        std::uint32_t hdr_enabled;
+        std::uint32_t audio_configuration;
+        moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    };
+    struct LegacyFile
+    {
+        std::uint32_t magic;
+        std::uint32_t version;
+        std::uint32_t checksum;
+        std::uint32_t reserved;
+        LegacyConfig config;
+    } file{};
+    auto checksum = [](const void *data, std::size_t size)
+    {
+        const auto *bytes = static_cast<const std::uint8_t *>(data);
+        std::uint32_t value = UINT32_C(2166136261);
+        for (std::size_t index = 0; index < size; ++index)
+            value = (value ^ bytes[index]) * UINT32_C(16777619);
+        return value;
+    };
+
+    file.magic = UINT32_C(0x504c4346);
+    file.version = 5;
+    file.config.host_count = 1;
+    file.config.bitrate_mbps = 80;
+    file.config.display_area = MOONLIGHT_DISPLAY_AREA_FULL;
+    file.config.video_codec = MOONLIGHT_VIDEO_CODEC_HEVC;
+    file.config.stream_resolution = MOONLIGHT_STREAM_RESOLUTION_2160P;
+    file.config.stream_fps = MOONLIGHT_STREAM_FPS_120;
+    file.config.audio_configuration = MOONLIGHT_AUDIO_51_SURROUND;
+    std::snprintf(file.config.hosts[0].address, sizeof(file.config.hosts[0].address),
+                  "192.168.4.20");
+    std::snprintf(file.config.hosts[0].name, sizeof(file.config.hosts[0].name), "Gaming-PC");
+    file.checksum = checksum(&file.config, sizeof(file.config));
+    kernel_read_data = reinterpret_cast<const std::uint8_t *>(&file);
+    kernel_read_size = sizeof(file);
+
+    moonlight_config_t config{};
+    const bool loaded = moonlight_config_load(&config);
+    kernel_read_data = nullptr;
+    kernel_read_size = 0;
+
+    EXPECT_TRUE(loaded);
+    EXPECT_EQ(config.host_count, 1U);
+    EXPECT_STREQ(config.hosts[0].address, "192.168.4.20");
+    EXPECT_STREQ(config.hosts[0].name, "Gaming-PC");
+    EXPECT_EQ(config.bitrate_mbps, 80U);
+    EXPECT_EQ(config.stream_resolution, MOONLIGHT_STREAM_RESOLUTION_2160P);
+    EXPECT_EQ(config.stream_fps, MOONLIGHT_STREAM_FPS_120);
+    EXPECT_EQ(config.audio_configuration, MOONLIGHT_AUDIO_51_SURROUND);
+    EXPECT_EQ(config.vsync_enabled, 1U);
+    EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_ADAPTIVE);
+    EXPECT_EQ(config.decoder_cores, MOONLIGHT_DECODER_CORES_DEFAULT);
 }
 
 TEST(Configuration, MigratesVersionFourAndDefaultsToStereo)

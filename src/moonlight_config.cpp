@@ -12,7 +12,7 @@
 #include <string.h>
 
 #define CONFIG_MAGIC UINT32_C(0x504c4346)
-#define CONFIG_VERSION 5U
+#define CONFIG_VERSION 6U
 #define CONFIG_PATH "/download0/prosperolight-config.bin"
 #define CONFIG_TEMP_PATH "/download0/prosperolight-config.tmp"
 #define OPEN_READ_ONLY 0x0000
@@ -109,6 +109,29 @@ typedef struct legacy_config_file_v4
     legacy_config_v4_t config;
 } legacy_config_file_v4_t;
 
+typedef struct legacy_config_v5
+{
+    uint32_t host_count;
+    uint32_t selected_host;
+    uint32_t bitrate_mbps;
+    uint32_t display_area;
+    uint32_t video_codec;
+    uint32_t stream_resolution;
+    uint32_t stream_fps;
+    uint32_t hdr_enabled;
+    uint32_t audio_configuration;
+    moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+} legacy_config_v5_t;
+
+typedef struct legacy_config_file_v5
+{
+    uint32_t magic;
+    uint32_t version;
+    uint32_t checksum;
+    uint32_t reserved;
+    legacy_config_v5_t config;
+} legacy_config_file_v5_t;
+
 extern "C"
 {
     int sceKernelOpen(const char *path, int flags, uint16_t mode);
@@ -199,11 +222,15 @@ void moonlight_config_defaults(moonlight_config_t *config)
     config->stream_fps = MOONLIGHT_STREAM_FPS_60;
     config->hdr_enabled = 0;
     config->audio_configuration = MOONLIGHT_AUDIO_STEREO;
+    config->vsync_enabled = 1;
+    config->decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
+    config->decoder_cores = MOONLIGHT_DECODER_CORES_DEFAULT;
 }
 
 bool moonlight_config_load(moonlight_config_t *config)
 {
     config_file_t file;
+    legacy_config_file_v5_t legacy_v5;
     legacy_config_file_v4_t legacy_v4;
     legacy_config_file_v3_t legacy_v3;
     legacy_config_file_v2_t legacy_v2;
@@ -219,6 +246,22 @@ bool moonlight_config_load(moonlight_config_t *config)
         file.config.host_count <= MOONLIGHT_CONFIG_MAX_HOSTS)
     {
         *config = file.config;
+    }
+    else if (read_exact(CONFIG_PATH, &legacy_v5, sizeof(legacy_v5)) &&
+             legacy_v5.magic == CONFIG_MAGIC && legacy_v5.version == 5U &&
+             legacy_v5.checksum == checksum(&legacy_v5.config, sizeof(legacy_v5.config)) &&
+             legacy_v5.config.host_count <= MOONLIGHT_CONFIG_MAX_HOSTS)
+    {
+        config->host_count = legacy_v5.config.host_count;
+        config->selected_host = legacy_v5.config.selected_host;
+        config->bitrate_mbps = legacy_v5.config.bitrate_mbps;
+        config->display_area = legacy_v5.config.display_area;
+        config->video_codec = legacy_v5.config.video_codec;
+        config->stream_resolution = legacy_v5.config.stream_resolution;
+        config->stream_fps = legacy_v5.config.stream_fps;
+        config->hdr_enabled = legacy_v5.config.hdr_enabled;
+        config->audio_configuration = legacy_v5.config.audio_configuration;
+        memcpy(config->hosts, legacy_v5.config.hosts, sizeof(config->hosts));
     }
     else if (read_exact(CONFIG_PATH, &legacy_v4, sizeof(legacy_v4)) &&
              legacy_v4.magic == CONFIG_MAGIC && legacy_v4.version == 4U &&
@@ -301,6 +344,13 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->hdr_enabled = 0;
     if (config->audio_configuration > MOONLIGHT_AUDIO_51_SURROUND)
         config->audio_configuration = MOONLIGHT_AUDIO_STEREO;
+    if (config->vsync_enabled > 1U)
+        config->vsync_enabled = 1;
+    if (config->decoder_pipeline > MOONLIGHT_DECODER_PIPELINE_CLASSIC)
+        config->decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
+    if (config->decoder_cores < MOONLIGHT_DECODER_CORES_MIN ||
+        config->decoder_cores > MOONLIGHT_DECODER_CORES_MAX)
+        config->decoder_cores = MOONLIGHT_DECODER_CORES_DEFAULT;
     if (config->hdr_enabled)
         config->video_codec = MOONLIGHT_VIDEO_CODEC_HEVC;
     return true;

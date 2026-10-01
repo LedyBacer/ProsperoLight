@@ -42,6 +42,9 @@ class MoonlightApp
     unsigned StreamFps() const;
     unsigned HdrEnabled() const;
     unsigned AudioConfiguration() const;
+    unsigned VsyncEnabled() const;
+    unsigned DecoderPipeline() const;
+    unsigned DecoderCores() const;
     void ShowStreamError(const char *message);
 
   private:

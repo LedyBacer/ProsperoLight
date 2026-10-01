@@ -14,7 +14,10 @@
 struct NativeAgcPerformance
 {
     moonlight::TimingHistogram prepare, cache_flush, submit, overlay;
+    moonlight::TimingHistogram gpu_render; // GPU_TIMESTAMPS builds only
     uint64_t flip_queries{}, flip_sleeps{}, flip_timeouts{};
+    uint64_t flip_event_wakeups{}, flip_event_errors{}, vsync_fallbacks{};
+    uint64_t gpu_samples_invalid{};
 };
 
 // Reset only after the loading owner stops; read after the video worker joins.
@@ -24,20 +27,30 @@ const NativeAgcPerformance &native_agc_performance();
 typedef struct native_agc_metrics
 {
     uint32_t video_codec;
-    uint32_t total_fps_x100;
-    uint32_t incoming_fps_x100;
-    uint32_t rendering_fps_x100;
+    uint32_t incoming_fps_x100;  // host send rate, including frames never decoded
+    uint32_t decoded_fps_x100;   // decoder outputs
+    uint32_t rendering_fps_x100; // completed flips, filled by the presentation owner
     uint32_t network_drop_percent_x100;
+    uint32_t decoder_drop_percent_x100; // discarded by queue overflow or refresh
+    uint32_t not_displayed;             // decoded but superseded before display
     uint32_t rtt_ms;
     uint32_t rtt_variance_ms;
     uint32_t rtt_valid;
     uint32_t host_min_tenths_ms;
     uint32_t host_max_tenths_ms;
     uint32_t host_average_tenths_ms;
-    uint32_t stale_presentation_drops;
-    uint64_t decode_average_us;
+    uint32_t decoder_load_permille;
+    uint64_t decode_average_us; // last full one-second window
+    uint64_t decode_p95_us;
     uint64_t queue_delay_average_us;
     uint64_t queue_delay_max_us;
+    uint32_t pending_frames;
+    uint32_t slices_requested;
+    uint32_t slices_observed;
+    uint32_t pipeline_depth;
+    uint32_t decoder_cores;
+    uint32_t vsync_enabled;
+    uint64_t decoder_cpu_mask;
 } native_agc_metrics_t;
 
 int native_agc_present_nv12(const void *source, size_t source_bytes, uint32_t pitch,
@@ -59,6 +72,11 @@ void native_agc_set_hud_enabled(int enabled);
 int native_agc_hud_enabled(void);
 void native_agc_set_keyboard_state(int enabled, uint32_t selected, int shifted);
 void native_agc_set_tv_safe_area(int enabled);
+// V-Sync off flips at the next hsync (tearing). Applies to the next submission;
+// a rejected immediate flip falls back to V-Sync for the rest of the process.
+void native_agc_set_vsync(int enabled);
+int native_agc_vsync_active(void);
+int native_agc_flip_events_active(void);
 int native_agc_present_shutdown(void);
 
 #endif

@@ -118,6 +118,9 @@ struct LauncherSelection
     unsigned stream_fps = MOONLIGHT_STREAM_FPS_60;
     unsigned hdr_enabled = 0;
     unsigned audio_configuration = MOONLIGHT_AUDIO_STEREO;
+    unsigned vsync_enabled = 1;
+    unsigned decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
+    unsigned decoder_cores = MOONLIGHT_DECODER_CORES_DEFAULT;
 };
 
 struct alignas(std::max_align_t) AllocationHeader
@@ -1092,6 +1095,9 @@ MoonlightApp::Command RunLauncher(LauncherSelection *selection, const char *stre
                 selection->stream_fps = app.StreamFps();
                 selection->hdr_enabled = app.HdrEnabled();
                 selection->audio_configuration = app.AudioConfiguration();
+                selection->vsync_enabled = app.VsyncEnabled();
+                selection->decoder_pipeline = app.DecoderPipeline();
+                selection->decoder_cores = app.DecoderCores();
             }
             running = false;
         }
@@ -1161,6 +1167,9 @@ int main()
         options.stream_fps = selection.stream_fps;
         options.hdr_enabled = selection.hdr_enabled;
         options.audio_configuration = selection.audio_configuration;
+        options.vsync_enabled = selection.vsync_enabled;
+        options.decoder_pipeline = selection.decoder_pipeline;
+        options.decoder_cores = selection.decoder_cores;
         (void)moonlight_stream_run(&options, &metrics);
         std::snprintf(stream_error, sizeof(stream_error), "%s", metrics.error);
         sceKernelUsleep(100000);

@@ -117,6 +117,7 @@ sources=(
     "$root"/src/gamestream/*.c
     "$root/platform/ps5/ps5_entropy.c"
     "$root/platform/ps5/ps5_sockets.c"
+    "$root/platform/ps5/ps5_thread_placement.c"
 )
 objects=()
 index=0

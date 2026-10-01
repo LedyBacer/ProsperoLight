@@ -18,4 +18,5 @@ uint32_t *sceAgcDcbSetUcRegistersIndirect(void *command, const void *registers, 
 uint32_t *sceAgcCbSetShRegisterRangeDirect(void *command, uint32_t offset, const uint32_t *values, uint32_t count) { (void)command; (void)offset; (void)values; (void)count; return 0; }
 uint32_t *sceAgcDcbDrawIndexAuto(void *command, uint32_t count, uint64_t modifier) { (void)command; (void)count; (void)modifier; return 0; }
 uint32_t *sceAgcDcbSetFlip(void *command, uint32_t handle, int buffer, uint32_t mode, int64_t argument) { (void)command; (void)handle; (void)buffer; (void)mode; (void)argument; return 0; }
+uint32_t *sceAgcCbReleaseMem(void *command, uint8_t event, int16_t cache_action, uint64_t reserved0, int8_t reserved1, void *address, uint32_t data_select, uint64_t data, uint16_t gds_offset, uint16_t gds_size, int8_t interrupt_select, int32_t reserved2) { (void)command; (void)event; (void)cache_action; (void)reserved0; (void)reserved1; (void)address; (void)data_select; (void)data; (void)gds_offset; (void)gds_size; (void)interrupt_select; (void)reserved2; return 0; }
 int32_t sceAgcSuspendPoint(void) { return -1; }

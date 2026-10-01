@@ -31,6 +31,11 @@ extern "C"
 #define MOONLIGHT_STREAM_FPS_120 120U
 #define MOONLIGHT_AUDIO_STEREO 0U
 #define MOONLIGHT_AUDIO_51_SURROUND 1U
+#define MOONLIGHT_DECODER_PIPELINE_ADAPTIVE 0U
+#define MOONLIGHT_DECODER_PIPELINE_CLASSIC 1U
+#define MOONLIGHT_DECODER_CORES_MIN 3U
+#define MOONLIGHT_DECODER_CORES_DEFAULT 5U
+#define MOONLIGHT_DECODER_CORES_MAX 5U
 
     typedef struct moonlight_config_host
     {
@@ -51,6 +56,9 @@ extern "C"
         uint32_t stream_fps;
         uint32_t hdr_enabled;
         uint32_t audio_configuration;
+        uint32_t vsync_enabled;
+        uint32_t decoder_pipeline;
+        uint32_t decoder_cores;
         moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
     } moonlight_config_t;
 

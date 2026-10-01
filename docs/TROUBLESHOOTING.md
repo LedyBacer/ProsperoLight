@@ -204,3 +204,37 @@ backing allocation must preserve the runtime's 32-byte alignment guarantee.
 
 Keep a positive `downloadDataSize` in `sce_sys/param.json`, rebuild, and stage the
 new generated directory. Do not attempt to write to `/app0`.
+
+## Collecting performance metrics through klog
+
+Start a klog capture before testing and leave it connected until after returning
+from the stream with Select+L1. ProsperoLight emits its performance summary after
+the streaming workers stop, with no per-frame kernel logging during gameplay.
+Filter for `[ProsperoLight perf]`. Each record includes a session number and
+`part=N/total`; concatenate the text after `json=` in part order to recover the
+JSON summary. Session numbers restart when the app restarts. Missing parts mean
+the capture is incomplete. Login/reconnection streams produce separate summaries.
+
+The summary includes configuration, decode/presentation timing distributions,
+network counters, and audio statistics, but no host identity, credentials, or
+typed text. The existing `performance-last.json` remains a local backup; detailed
+`performance-frames.csv` stays local to avoid flooding klog. Kernel logging is
+best-effort and does not depend on save-file access. Do not share entire save images.
+
+Detailed probe builds also emit `kind=window` JSON records after the summary,
+grouped into five-second windows relative to the first frame. Each new record
+starts at `part=1`; all share the stream's session number. They include decode
+mean/p99/max and over-budget counts, host-reported timing, frame bytes/gaps,
+frames displayed and superseded, pending frames, reassembly/queue maxima, and
+arrival/flip gaps. These are CPU observations, not GPU timestamps or
+input-to-photon latency. The last window may be partial; empty windows are not
+emitted. `kind=windows_end` reports recorded/reported/omitted sample counts.
+Collection stops at 32,768 frames (about 273 seconds at 120 FPS); logging is
+capped at 300 occupied windows.
+
+## The picture shows artifacts or the stream stutters after an update
+
+Open Settings and change **Decoder pipeline** to Classic, then **Decoder CPU
+cores** to 3. That is the `01.000.062` decode path. If V-Sync is Off, tearing is
+expected; turn it On. Report which setting made the difference together with
+`performance-last.json` or the klog summary.
