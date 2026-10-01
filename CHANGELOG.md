@@ -1,37 +1,74 @@
 # Changelog
 
-## 01.000.064
+## 01.000.070
 
-### Development build — decode pipeline and presentation rework
+### Experimental performance beta — new decode and presentation threads
 
-**Not released and not yet validated on a console.** Host tests cover the new
-logic; see [round 4](docs/PERFORMANCE_ROUND_4.md) for what is unverified and for
-the fallback to the `01.000.062` path behind each hardware-dependent change.
+This is a **prerelease**, not a replacement for stable **01.000.060**. It
+supersedes beta 01.000.062.
 
-- Decoding and presentation run on separate threads. Decoding no longer waits
-  for a flip, and each flip shows the newest decoded picture; the rule that
-  presented one frame every 100 ms while behind is removed.
-- New **Decoder pipeline** setting. Adaptive (default) overlaps frames in
-  Videodec2 only while frames are queued and flushes as soon as it catches up.
-  Classic decodes one frame at a time, as before.
-- New **Decoder CPU cores** setting (5, 4 or 3 physical cores; default 5).
-  Stream threads are kept off the decoder's CPUs, and the video receive thread
-  gets a CPU of its own.
-- New **V-Sync** setting. Off flips immediately and tears.
-- Eight slices per frame above 1080p, four at 1080p.
-- The flip wait uses flip events and no longer waits for a vblank.
+- Decoding and presentation now run on separate threads. Decoding no longer
+  waits for a flip, and every display refresh shows the newest decoded frame.
+- A stream that outruns the decoder keeps playing at the decoder's pace. The
+  rule that showed one frame every 100 ms once decoding fell behind is removed.
+- Stream threads are kept off the CPUs reserved for the decoder, and the video
+  receive thread has a CPU of its own.
+- The flip wait uses flip events instead of polling or waiting for a vblank.
 - The overlay separates network, decoded and displayed frame rates, and frames
-  lost to the network from frames discarded because decoding fell behind. Decode
-  time covers the last second (mean, p95, load).
-- `performance-last.json` is schema 3, `performance-frames.csv` is schema 2,
-  and both the summary and five-second windows are also written to klog.
-- Updates moonlight-common-c, adds 50/60/70 Mbps bitrate presets, and caches
-  the FEC CPU feature probe.
+  lost on the network from frames discarded because decoding fell behind.
+  Decode time covers the last second (mean, 95th percentile and load).
+- New settings: **V-Sync** (Off flips immediately and tears), **Decoder
+  pipeline** (Classic by default; Adaptive is experimental) and **Decoder CPU
+  cores** (3 by default; 4 and 5 are experimental).
+- Bitrate presets gain 50, 60 and 70 Mbps.
+- A failed stream now says whether the connection was lost while streaming or
+  never completed, with the stage and the error code.
+- moonlight-common-c is updated, and the performance summary is also written
+  to klog.
 
-Settings and pairings are kept; existing configurations migrate with V-Sync on,
-Adaptive and 5 cores. If the picture shows artifacts, select Classic.
+### Know the bitrate limit
 
-Local build: `make app FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200`.
+The PS5 decoder, not the network, limits the usable bitrate, and this beta
+does not raise that limit. Measured at 4K HEVC: smooth up to 80 Mbps at
+120 FPS and about 115 Mbps at 90 or 60 FPS; above 100 Mbps at 120 FPS and
+145 Mbps at 90 FPS the stream freezes about once a second. The table and chart
+are under [Bitrate limits](https://github.com/blackbearreloaded/ProsperoLight#bitrate-limits).
+
+### What was tested
+
+Run on one PS5 with one NVENC host at 4K, 120 FPS, HEVC SDR, with both decoder
+pipelines. 1440p, 1080p, 60 and 90 FPS, HDR, H.264 and V-Sync Off use the same
+code but were not re-run on a console for this beta. The Adaptive pipeline had
+one defect fixed after its last console run; leave it on Classic unless you
+want to help test it.
+
+### Please report your results
+
+Use [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues) and include:
+
+- PS5 firmware; Sunshine/Vibepollo version; host GPU and driver.
+- Codec/HDR, resolution/FPS, bitrate, stereo/5.1, Ethernet or Wi-Fi.
+- The three new settings, and whether this beta is smoother, unchanged, or
+  worse than `.062` or `.060` in the same game.
+- With the overlay on (Select+R1): the "Decoder", "Decode (last second)" and
+  both "Frames dropped" lines.
+- If available, attach `performance-last.json` and `performance-frames.csv` from
+  the app's `/download0/moonlight/` save directory. These are overwritten by the
+  next stream; the console may expose them inside the title's UFS2 `download0.dat`.
+  **Do not upload the entire save image**: it may contain pairing credentials.
+
+### Installation, update and rollback
+
+Title ID stays **PPSA99002**. Choose `PPSA99002.ffpfsc`, or extract
+`PPSA99002.zip` and copy its `PPSA99002/` folder to `/data/homebrew`.
+Do not keep both formats installed. Close the app before replacing files, then
+restart ShadowMountPlus or the console. `SHA256SUMS` covers both downloads.
+Existing pairing and settings are retained. To roll back, replace the beta with
+the corresponding `.062` or `.060` download and restart ShadowMountPlus or the
+console.
+
+Local reproduction:
+`make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8`.
 
 ## 01.000.062
 

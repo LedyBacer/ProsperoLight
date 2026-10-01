@@ -234,7 +234,9 @@ capped at 300 occupied windows.
 
 ## The picture shows artifacts or the stream stutters after an update
 
-Open Settings and change **Decoder pipeline** to Classic, then **Decoder CPU
-cores** to 3. That is the `01.000.062` decode path. If V-Sync is Off, tearing is
-expected; turn it On. Report which setting made the difference together with
-`performance-last.json` or the klog summary.
+If **Decoder pipeline** is Adaptive or **Decoder CPU cores** is 4 or 5, open
+Settings and return them to Classic and 3: those are the defaults and the
+`01.000.062` decoder configuration. If V-Sync is Off, tearing is expected; turn
+it On. Freezes about once a second at a high bitrate are the decoder's limit:
+see [Bitrate limits](../README.md#bitrate-limits). Report which setting made
+the difference together with `performance-last.json` or the klog summary.

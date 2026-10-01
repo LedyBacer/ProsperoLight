@@ -4,9 +4,10 @@
 
 <h1 align="center">ProsperoLight</h1>
 
-> **Experimental performance beta: [01.000.062](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.062).**
-> Eight-slice decoding, faster input polling and reduced client overhead.
-> Remaining 4K120 stuttering is still under investigation; no locked-120-FPS guarantee.
+> **Experimental performance beta: [01.000.070](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.070).**
+> Decoding and presentation now run on separate threads: a stream that outruns the decoder
+> keeps playing at the decoder's pace instead of dropping to one frame every 100 ms.
+> The PS5 decoder still limits how much bitrate is usable: see [Bitrate limits](#bitrate-limits).
 > [01.000.060 remains stable](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.060).
 > Please report results and regressions through [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues), using the checklist in the beta release notes.
 
@@ -33,9 +34,9 @@ Demo available by clicking the image below.
 
 - Native PS5 hardware streaming through VideoDec2 and AGC at 1080p, 1440p,
   and 2160p, with independently selectable 60, 90, and 120 FPS stream targets.
-- Smoother 4K120 presentation with bounded decode/presentation overlap: a wired
-  HEVC test reduced stale-frame skips from 24.3% to zero. See the
-  [before/after measurements and limits](docs/PERFORMANCE_ROUND_2.md#release-checkpoint--01000060).
+- Decoding and presentation on separate threads: a late flip never holds back
+  decoding, and every display refresh shows the newest decoded frame. See the
+  [measured bitrate limits](#bitrate-limits) before raising the bitrate.
 - H.264 High, HEVC Main, and HEVC Main10 HDR10 support at every available
   resolution.
 - Low-latency DualSense, physical USB keyboard and mouse, controller-driven
@@ -58,6 +59,44 @@ presented by AGC without copying decoded pixels through a CPU framebuffer.
 > for consoles you own with an already configured, compatible homebrew loader.
 > This repository does not include an exploit, proprietary Sony SDK, system
 > module, encryption key, firmware file, or game asset.
+
+## Bitrate limits
+
+> [!WARNING]
+> **A higher bitrate is not always better.** The PS5 video decoder takes longer
+> for larger frames. Past the limits below it cannot keep up: latency grows,
+> then the stream freezes about once a second. At 4K and 120 FPS, set
+> **80 Mbps or lower**.
+
+![4K HEVC bitrate limits by frame rate: smooth up to 80 Mbps at 120 FPS, 115 Mbps at 90 and 60 FPS](docs/images/bitrate-limits.svg)
+
+| 4K HEVC stream | Smooth up to | Freezes above | Recommended setting |
+| --- | --- | --- | --- |
+| 120 FPS | 80 Mbps | 100 Mbps | **80 Mbps** or lower |
+| 90 FPS | 115 Mbps | 145 Mbps | **100 Mbps** or lower |
+| 60 FPS | 115 Mbps | about 190 Mbps (extrapolated) | **100 Mbps**; 150 Mbps is not measured |
+| 1440p and 1080p, any frame rate | at least the 4K values | not measured yet | as for 4K |
+
+- **The numbers are the bitrate the host actually delivers.** The setting is a
+  ceiling the encoder only reaches in busy scenes. One session at the 80 Mbps
+  setting carried 24 Mbps; one at 300 Mbps carried about 160 Mbps.
+- **Why there is a limit.** A 4K HEVC frame takes about 3.7 ms plus 45 µs per
+  kilobyte to decode (5.5 ms plus 29 µs per kilobyte above roughly 105 KB). At
+  120 FPS it must finish within 8.3 ms, which allows about 100 KB per frame:
+  100 Mbps. A lower frame rate leaves more time per frame, so the limit rises.
+- **What happens above it.** Frames wait in a queue, adding up to 0.15 s of
+  delay. When 15 frames are waiting they are all discarded and a keyframe is
+  requested. At the 300 Mbps setting this happened 13 times in 17 seconds, and
+  the decoder still only managed 90 FPS.
+- **How to tell.** With the overlay on (`Select + R1`), "Frames dropped by
+  decoder backlog" rises and "Decode (last second)" shows a load near 100%.
+  "Frames dropped by your network connection" is a different problem.
+- The 300, 400 and 500 Mbps presets are beyond the 4K decoder at every frame rate.
+
+Measured on a PS5 with HEVC SDR and eight slices per frame, decoding one frame
+at a time (the default). HDR, H.264 and the lower resolutions are not measured
+yet. `python3 tools/plot-bitrate-limits.py` redraws the chart from the model;
+[round 4](docs/PERFORMANCE_ROUND_4.md) has the measurements.
 
 ## Project foundation
 
@@ -93,8 +132,7 @@ tooling are maintained in this repository.
 | Shell title | `ProsperoLight` |
 | Title ID | `PPSA99002` |
 | Category | Game |
-| Experimental beta / stable | `01.000.062` / `01.000.060` |
-| In development | `01.000.064` ([round 4](docs/PERFORMANCE_ROUND_4.md), unreleased) |
+| Experimental beta / stable | `01.000.070` / `01.000.060` |
 | Version source | [`sce_sys/param.json`](sce_sys/param.json) |
 | Writable data | `/download0` only |
 
@@ -117,8 +155,8 @@ tooling are maintained in this repository.
   presented through the PS5's native 3840x2160 119.88 Hz output path.
 - Select bitrate presets up to 500 Mbps. The best setting depends on the host,
   encoder, network, and selected codec rather than link speed alone.
-- Choose V-Sync, the decoder pipeline (Adaptive or Classic), and how many CPU
-  cores decoding may use (development `01.000.064`).
+- Choose V-Sync, the decoder pipeline (Classic, or the experimental Adaptive),
+  and how many CPU cores decoding may use.
 - Enable HEVC Main10 HDR10 output at any available resolution and frame-rate
   selection when the Sunshine host advertises support.
 - Decode Moonlight Opus audio and output selectable 48 kHz stereo or 5.1
@@ -305,7 +343,8 @@ advertising itself on the network may appear again after refresh.
 > them after returning to the launcher, stop the active application first and
 > then launch it again so Sunshine creates a fresh capture/encoder session.
 > Tune bitrate upward case by case; a higher value can reduce smoothness at
-> 4K or high frame rates even when the network link is fast.
+> 4K or high frame rates even when the network link is fast. The decoder's
+> measured limits are under [Bitrate limits](#bitrate-limits).
 
 ## Controls
 

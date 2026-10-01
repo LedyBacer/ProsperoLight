@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -601,6 +602,22 @@ class ToolTests(unittest.TestCase):
         self.assertIn('awk -v version="$GITHUB_REF_NAME"', workflow)
         self.assertEqual(workflow.count("--notes-file release-notes.md"), 2)
         self.assertNotIn(".ffpkg", workflow)
+
+    def test_readme_bitrate_limits_match_the_measured_model(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools/plot-bitrate-limits.py"), "--check"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("120 FPS: smooth up to 80 Mbps, limit 100 Mbps (measured", result.stdout)
+        self.assertIn(" 90 FPS: smooth up to 115 Mbps, limit 145 Mbps (measured", result.stdout)
+        self.assertIn(" 60 FPS: smooth up to 115 Mbps, limit 190 Mbps (extrapolated", result.stdout)
+        self.assertIn("> [!WARNING]", readme)
+        self.assertIn("](docs/images/bitrate-limits.svg)", readme)
+        self.assertIn("| 120 FPS | 80 Mbps | 100 Mbps | **80 Mbps** or lower |", readme)
+        self.assertIn("| 90 FPS | 115 Mbps | 145 Mbps | **100 Mbps** or lower |", readme)
+        self.assertIn("| 60 FPS | 115 Mbps | about 190 Mbps (extrapolated) |", readme)
 
     def test_readme_tracks_identity_and_stream_shortcuts(self):
         configured = json.loads(

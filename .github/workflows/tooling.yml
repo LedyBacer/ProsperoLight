@@ -79,11 +79,15 @@ jobs:
 
       - name: Build compressed release image
         run: |
-          if [[ "$CONTENT_VERSION" == 01.000.062 ]]; then
-            make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8
-          else
-            make ffpfsc
-          fi
+          # Performance betas ship with the measured flag set.
+          case "$CONTENT_VERSION" in
+            01.000.062|01.000.070)
+              make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8
+              ;;
+            *)
+              make ffpfsc
+              ;;
+          esac
 
       - name: Archive app folder and write release checksums
         run: |
@@ -184,9 +188,11 @@ jobs:
           archive_name="${ARCHIVE##*/}"
           checksum_name="${CHECKSUM##*/}"
           release_flags=()
-          if [[ "$GITHUB_REF_NAME" == 01.000.062 ]]; then
-            release_flags=(--prerelease --latest=false)
-          fi
+          case "$GITHUB_REF_NAME" in
+            01.000.062|01.000.070)
+              release_flags=(--prerelease --latest=false)
+              ;;
+          esac
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             while IFS= read -r old_asset; do
               if [[ $old_asset != "$image_name" && $old_asset != "$archive_name" && $old_asset != "$checksum_name" ]]; then

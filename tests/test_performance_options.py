@@ -2,6 +2,7 @@
 # Copyright (C) 2026 BlackBearReloaded
 # SPDX-License-Identifier: GPL-3.0-or-later
 from pathlib import Path
+import json
 import os
 import subprocess
 import unittest
@@ -13,6 +14,9 @@ class PerformanceOptions(unittest.TestCase):
     def test_beta_release_is_opt_in_and_not_latest(self):
         workflow = (ROOT / ".github/workflows/tooling.yml").read_text()
         self.assertIn('release_flags=(--prerelease --latest=false)', workflow)
+        # Both steps select the same beta versions, including the current one.
+        version = json.loads((ROOT / "sce_sys/param.json").read_text())["contentVersion"]
+        self.assertEqual(workflow.count(f"01.000.062|{version})"), 2)
         self.assertEqual(workflow.count('"${release_flags[@]}"'), 2)
         self.assertIn('make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8', workflow)
 
