@@ -1,8 +1,10 @@
 # Performance round 4 — decode pipeline and presentation rework
 
-Status: **development `01.000.064`, host-tested only.** Nothing on this page has
-been validated on a console yet. Every hardware-dependent behaviour has a
-fallback to the `01.000.062` path, listed under [Fallbacks](#fallbacks).
+Status: **development `01.000.064`.** Host-tested, with a first console check on
+two short desktop sessions (see [First console evidence](#first-console-evidence));
+performance under gameplay load is not measured yet. Every hardware-dependent
+behaviour has a fallback to the `01.000.062` path, listed under
+[Fallbacks](#fallbacks).
 
 ## Why
 
@@ -77,15 +79,40 @@ make app FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200
 | A thread cannot be placed | It keeps its inherited mask (`placement_failed`, `*_placement_result`). |
 | Presentation fails three times in a row | The stream ends with "GPU presentation stopped responding". |
 
+## First console evidence
+
+Two desktop sessions on development `01.000.063` (HEVC SDR, 3840x2160 at
+120 FPS, 123 and 421 frames, few frames per second), read from the saved
+schema 3 summaries:
+
+- Videodec2 accepted depth 3 with the five-core mask `0x3ff` on the first
+  attempt.
+- At depth 3, `sceVideodec2Decode` returns without a picture in about 0.1 ms.
+  Every picture was then obtained by the mid-stream flush, which took 5.1 and
+  6.3 ms on average. Across 544 frames there was no decoder error, no failed
+  flush and no decoder rebuild.
+- Every thread placement was applied and read back, including the receive
+  thread on its own CPU.
+- Flip events were delivered once per presented frame, with no flip timeout.
+- Eight slices were observed.
+
+These sessions never fell behind, so the overlapped path has not run yet, and
+the frames were small: the timings say nothing about gameplay.
+
+One defect surfaced: only the first stream of a process connected.
+moonlight-common-c writes a placeholder into the empty submit slot of the
+caller's callback struct, then refuses a pull renderer that has a submit
+callback. The slot is now cleared before every connection.
+
 ## Not yet verified on hardware
 
-- Videodec2 at depth 2 or 3, and whether its output is delayed.
-- A mid-stream HEVC flush keeping reference pictures. H.264 already flushes
-  every frame at depth one; HEVC never needed to. Corruption without a decoder
-  error would not trigger a fallback: switch to Classic if artifacts appear.
-- Worker masks wider than `0x3f`.
-- Flip event delivery, and the immediate flip mode.
-- Any change in decode time, frame rate or latency.
+- Overlapped decoding while frames are queued, and any change in decode time,
+  frame rate or latency under gameplay load.
+- That the picture stays correct after a mid-stream HEVC flush. No decoder
+  error occurred, but corruption without an error would not trigger a
+  fallback: switch to Classic if artifacts appear.
+- A second and later stream in one process (fixed after the first test).
+- Classic, the 4- and 3-core masks, and the immediate flip mode.
 
 ## What to collect from a test
 
