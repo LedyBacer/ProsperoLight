@@ -596,6 +596,8 @@ typedef struct native_renderer_state
     uint32_t drain_faults;
     uint32_t decoder_recreations;
     uint32_t decoder_refreshes;
+    uint32_t decode_errors;
+    int32_t last_decode_error;
     uint32_t catchup_refreshes;
     uint32_t decoded;
     uint32_t not_displayed;
@@ -901,12 +903,14 @@ static void save_performance_summary(const native_renderer_state_t &state,
                   report, sizeof(report), &length,
                   "\"access_units\":%u,\"decoded\":%u,\"presented\":%u,\"not_displayed\":%u,"
                   "\"network_frame_gaps\":%llu,\"decoder_frame_gaps\":%llu,\"queue_overflows\":%u,"
-                  "\"decoder_refreshes\":%u,\"catchup_refreshes\":%u,\"unrecoverable_frames\":%u,"
+                  "\"decoder_refreshes\":%u,\"decode_errors\":%u,\"last_decode_error\":%d,"
+                  "\"catchup_refreshes\":%u,\"unrecoverable_frames\":%u,"
                   "\"pending_video_high_water\":%u,\n",
                   state.access_units, state.decoded, state.presented.load(), state.not_displayed,
                   (unsigned long long)state.drops.network, (unsigned long long)state.drops.decoder,
                   std::atomic_load_explicit(&video_queue_overflows, std::memory_order_relaxed),
-                  state.decoder_refreshes, state.catchup_refreshes,
+                  state.decoder_refreshes, state.decode_errors, (int)state.last_decode_error,
+                  state.catchup_refreshes,
                   std::atomic_load_explicit(&video_unrecoverable_frames, std::memory_order_relaxed),
                   state.pending_video_high_water);
     ok = ok &&
@@ -1545,6 +1549,8 @@ static int decode_refused(native_renderer_state_t *state, int32_t code,
                           moonlight::FrameTrace::Sample *trace)
 {
     state->last_result = code;
+    state->last_decode_error = code;
+    ++state->decode_errors;
     if (trace)
         trace->outcome = 3;
     if (state->pipeline_depth > 1u)
@@ -1878,14 +1884,20 @@ static void fallback_to_classic_decoder(native_renderer_state_t *state, int32_t 
 
 // While nothing else is queued, take the pictures the pipeline still holds:
 // depth-one latency when keeping up, overlapped decoding when behind. One
-// picture per Flush call. Returns the time spent in Videodec2.
+// picture per Flush call. Videodec2 refuses a decode issued between two
+// flushes of one drain (seen on hardware), so a drain that has started runs
+// until the pipeline is empty, even if frames arrive meanwhile. Returns the
+// time spent in Videodec2.
 static uint64_t drain_decoder(native_renderer_state_t *state)
 {
     uint64_t spent = 0;
+    bool draining = false;
 
-    while (state->running && !state->decoder_needs_reset &&
-           moonlight::should_drain(state->drain_enabled, state->pipeline_depth,
-                                   state->submission_count, LiGetPendingVideoFrames()))
+    while (
+        !state->decoder_needs_reset && state->pipeline_depth > 1u && state->submission_count > 0u &&
+        (draining || (state->running &&
+                      moonlight::should_drain(state->drain_enabled, state->pipeline_depth,
+                                              state->submission_count, LiGetPendingVideoFrames()))))
     {
         videodec2_frame_t frame = {};
         videodec2_output_t output = {};
@@ -1894,7 +1906,16 @@ static uint64_t drain_decoder(native_renderer_state_t *state)
         const int offered = state->frames.acquire_free();
         pthread_mutex_unlock(&state->lock);
         if (offered < 0)
+        {
+            // A drain that cannot finish leaves the decoder unable to continue.
+            if (draining)
+            {
+                state->decoder_needs_reset = true;
+                state->await_keyframe = true;
+            }
             break;
+        }
+        draining = true;
         frame.size = sizeof(frame);
         frame.buffer = frame_slot_address(state, offered);
         frame.buffer_size = state->frame_size;
@@ -3601,18 +3622,14 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
                         options ? options->stream_resolution : MOONLIGHT_STREAM_RESOLUTION_1080P,
                         options ? options->hdr_enabled : 0u);
     const bool classic_pipeline =
-        options && options->decoder_pipeline == MOONLIGHT_DECODER_PIPELINE_CLASSIC;
+        !options || options->decoder_pipeline != MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
     const uint32_t requested_depth = classic_pipeline ? 1u : (uint32_t)DECODER_PIPELINE_DEPTH;
     const uint32_t requested_cores = options && options->decoder_cores
                                          ? options->decoder_cores
                                          : MOONLIGHT_DECODER_CORES_DEFAULT;
     const uint32_t vsync_enabled = !options || options->vsync_enabled ? 1u : 0u;
-    // 1080p keeps its measured four-slice optimum; larger pictures get more.
-    const uint32_t stream_slices =
-        mode ? moonlight::slices_for_resolution(
-                   mode->resolution_preference != MOONLIGHT_STREAM_RESOLUTION_1080P,
-                   VIDEO_SLICES_PER_FRAME, VIDEO_SLICES_PER_FRAME < 4 ? VIDEO_SLICES_PER_FRAME : 4)
-             : 0u;
+    // More slices lower the per-kilobyte decode cost at every resolution.
+    const uint32_t stream_slices = VIDEO_SLICES_PER_FRAME;
 
     controller.user_service_result = -1;
     controller.user_result = -1;

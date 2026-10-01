@@ -223,7 +223,7 @@ void moonlight_config_defaults(moonlight_config_t *config)
     config->hdr_enabled = 0;
     config->audio_configuration = MOONLIGHT_AUDIO_STEREO;
     config->vsync_enabled = 1;
-    config->decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
+    config->decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_CLASSIC;
     config->decoder_cores = MOONLIGHT_DECODER_CORES_DEFAULT;
 }
 
@@ -346,8 +346,8 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->audio_configuration = MOONLIGHT_AUDIO_STEREO;
     if (config->vsync_enabled > 1U)
         config->vsync_enabled = 1;
-    if (config->decoder_pipeline > MOONLIGHT_DECODER_PIPELINE_CLASSIC)
-        config->decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
+    if (config->decoder_pipeline > MOONLIGHT_DECODER_PIPELINE_ADAPTIVE)
+        config->decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_CLASSIC;
     if (config->decoder_cores < MOONLIGHT_DECODER_CORES_MIN ||
         config->decoder_cores > MOONLIGHT_DECODER_CORES_MAX)
         config->decoder_cores = MOONLIGHT_DECODER_CORES_DEFAULT;

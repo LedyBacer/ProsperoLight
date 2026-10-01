@@ -119,7 +119,7 @@ struct LauncherSelection
     unsigned hdr_enabled = 0;
     unsigned audio_configuration = MOONLIGHT_AUDIO_STEREO;
     unsigned vsync_enabled = 1;
-    unsigned decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
+    unsigned decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_CLASSIC;
     unsigned decoder_cores = MOONLIGHT_DECODER_CORES_DEFAULT;
 };
 

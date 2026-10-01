@@ -157,14 +157,14 @@
                     <button id="setting-decoder" class="setting-row setting-row-8">
                         <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
                         <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Decoder pipeline</span><span id="setting-decoder-help" class="setting-help">Adaptive overlaps frames only when decoding falls behind</span>
-                        <span id="setting-decoder-value" class="setting-value">Adaptive</span>
+                        <span class="setting-name">Decoder pipeline</span><span id="setting-decoder-help" class="setting-help">Decodes one frame at a time</span>
+                        <span id="setting-decoder-value" class="setting-value">Classic</span>
                     </button>
                     <button id="setting-cores" class="setting-row setting-row-9">
                         <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
                         <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Decoder CPU cores</span><span id="setting-cores-help" class="setting-help">Cores reserved for HEVC/H.264 decoding workers</span>
-                        <span id="setting-cores-value" class="setting-value">5 cores</span>
+                        <span class="setting-name">Decoder CPU cores</span><span id="setting-cores-help" class="setting-help">Reserved for decoding; stream threads use the remaining cores</span>
+                        <span id="setting-cores-value" class="setting-value">3 cores</span>
                     </button>
                     <span id="settings-note" class="settings-note">Stream shortcuts: Select+Triangle keyboard; Select+Square mouse; Select+R1 stats; Select+L1 return.</span>
                 </section>

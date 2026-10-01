@@ -76,13 +76,6 @@ inline ThreadLayout plan_thread_layout(uint64_t process_mask, uint64_t decoder_m
     return layout;
 }
 
-// 1080p keeps the measured four-slice optimum; larger modes use more slices.
-inline unsigned slices_for_resolution(bool larger_than_1080p, unsigned high_resolution_slices,
-                                      unsigned base_slices = 4u)
-{
-    return larger_than_1080p ? high_resolution_slices : base_slices;
-}
-
 // Drain pending decoder output only while nothing else is queued: pipelined
 // throughput when behind, depth-one latency when keeping up.
 inline bool should_drain(bool drain_enabled, unsigned depth, unsigned in_flight, int pending_frames)

@@ -87,12 +87,9 @@ TEST(Pipeline, ThreadLayoutKeepsStreamThreadsOffDecoderCpus)
     EXPECT_EQ(plan_thread_layout(0x3u, 0x3u).other, 0u);
 }
 
-TEST(Pipeline, SlicesAndDrainFollowResolutionAndBacklog)
+TEST(Pipeline, DrainStartsOnlyWhenNothingIsQueued)
 {
     using namespace moonlight;
-    EXPECT_EQ(slices_for_resolution(false, 8), 4u);
-    EXPECT_EQ(slices_for_resolution(true, 8), 8u);
-    EXPECT_EQ(slices_for_resolution(false, 2, 2), 2u);
     EXPECT_TRUE(should_drain(true, 3, 1, 0));
     EXPECT_FALSE(should_drain(true, 3, 1, 1)); // Behind: keep the pipeline full.
     EXPECT_FALSE(should_drain(true, 3, 0, 0)); // Nothing held.
@@ -515,7 +512,7 @@ TEST(Configuration, DefaultsMatchLauncherDefaults)
     EXPECT_EQ(config.hdr_enabled, 0U);
     EXPECT_EQ(config.audio_configuration, MOONLIGHT_AUDIO_STEREO);
     EXPECT_EQ(config.vsync_enabled, 1U);
-    EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_ADAPTIVE);
+    EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_CLASSIC);
     EXPECT_EQ(config.decoder_cores, MOONLIGHT_DECODER_CORES_DEFAULT);
 }
 
@@ -581,7 +578,7 @@ TEST(Configuration, MigratesVersionFiveAndDefaultsTheNewStreamSettings)
     EXPECT_EQ(config.stream_fps, MOONLIGHT_STREAM_FPS_120);
     EXPECT_EQ(config.audio_configuration, MOONLIGHT_AUDIO_51_SURROUND);
     EXPECT_EQ(config.vsync_enabled, 1U);
-    EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_ADAPTIVE);
+    EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_CLASSIC);
     EXPECT_EQ(config.decoder_cores, MOONLIGHT_DECODER_CORES_DEFAULT);
 }
 

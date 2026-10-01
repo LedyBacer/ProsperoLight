@@ -27,6 +27,10 @@ static std::deque<void *> held;
 static unsigned internal_pictures;
 static unsigned resets, flushes, decodes, deletes, creates, submits;
 static bool fail_decode, fail_reset, fail_flush, fail_create, orphan_flush;
+// Seen on hardware: once a flush has returned a picture while others are still
+// held, the decoder refuses to decode until the rest are flushed too.
+static bool flushing;
+static int pending_after_flush = -1; // A frame arriving while a flush blocks.
 static std::atomic<int> pending_frames;
 static int decoder_token, classic_token;
 
@@ -121,6 +125,7 @@ extern "C"
             return -99;
         held.clear();
         internal_pictures = 0;
+        flushing = false;
         return 0;
     }
     int32_t sceVideodec2Decode(void *, videodec2_input_t *, videodec2_frame_t *frame,
@@ -129,6 +134,8 @@ extern "C"
         ++decodes;
         if (fail_decode)
             return -98;
+        if (flushing)
+            return -94;
         if (model == Model::Queued)
         {
             held.push_back(frame->buffer);
@@ -159,6 +166,8 @@ extern "C"
             frame->accepted = 1; // Kept, but belonging to no access unit.
             return 0;
         }
+        if (pending_after_flush >= 0)
+            pending_frames = pending_after_flush;
         if (model == Model::Queued)
         {
             if (!held.empty())
@@ -166,6 +175,7 @@ extern "C"
                 fill_output(output, held.front());
                 held.pop_front();
             }
+            flushing = !held.empty();
             return 0;
         }
         if (internal_pictures)
@@ -174,6 +184,7 @@ extern "C"
             frame->accepted = 1;
             --internal_pictures;
         }
+        flushing = internal_pictures != 0;
         return 0;
     }
     int32_t sceVideodec2DeleteDecoder(void *)
@@ -190,6 +201,7 @@ extern "C"
         assert(config->pipeline_depth == 1);
         held.clear();
         internal_pictures = 0;
+        flushing = false;
         model = Model::SameCall;
         output_depth = 1;
         *decoder = &classic_token;
@@ -243,8 +255,9 @@ static native_renderer_state_t *make_state(unsigned depth, Model decoder_model,
     held.clear();
     internal_pictures = 0;
     resets = flushes = decodes = deletes = creates = submits = 0;
-    fail_decode = fail_reset = fail_flush = fail_create = orphan_flush = false;
+    fail_decode = fail_reset = fail_flush = fail_create = orphan_flush = flushing = false;
     pending_frames = 0;
+    pending_after_flush = -1;
     std::atomic_store(&connection_terminated, 0);
     std::atomic_store(&connection_error, 0);
     return state;
@@ -296,6 +309,40 @@ static void pipelined_then_drained(Model decoder_model)
         assert(state->submission_count == 0 && state->mailbox.item.frame == i + 1);
     }
     assert(state->decoded == 30 && flushes == 12);
+    renderer_sync_destroy(state);
+    delete state;
+}
+
+static void a_started_drain_runs_to_completion(Model decoder_model)
+{
+    DECODE_UNIT unit{};
+    unit.fullLength = sizeof(access_unit);
+    unit.bufferList = &fragment;
+    auto *state = make_state(3, decoder_model, 3);
+    // One frame was waiting, so the first picture stays in the pipeline.
+    pending_frames = 1;
+    assert(decode(state, &unit, 1, FRAME_TYPE_IDR) == DR_OK);
+    assert(drain_decoder(state) == 0 && flushes == 0 && state->submission_count == 1);
+    // Caught up after the second frame: the drain starts with two pictures held,
+    // and the next frame arrives while the first flush is still blocking.
+    pending_frames = 0;
+    assert(decode(state, &unit, 2, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(state->submission_count == 2);
+    pending_after_flush = 1;
+    drain_decoder(state);
+    pending_after_flush = -1;
+    // Both pictures were taken: stopping after the first would have left the
+    // decoder between two flushes, where it refuses the next access unit.
+    assert(flushes == 2 && state->decoded == 2 && state->submission_count == 0 && !flushing);
+    assert(decode(state, &unit, 3, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(resets == 0 && state->pipeline_faults == 0 && state->decode_errors == 0);
+    assert(state->pipeline_depth == 3 && state->decoder_recreations == 0);
+    // The model itself: a decode between two flushes is an error the client counts.
+    pending_frames = 1;
+    assert(decode(state, &unit, 4, FRAME_TYPE_PFRAME) == DR_OK); // 3 and 4 are now held.
+    flushing = true;
+    assert(decode(state, &unit, 5, FRAME_TYPE_PFRAME) == DR_NEED_IDR);
+    assert(state->decode_errors == 1 && state->last_decode_error == -94);
     renderer_sync_destroy(state);
     delete state;
 }
@@ -524,6 +571,8 @@ int main()
     fragment.length = sizeof(access_unit);
     pipelined_then_drained(Model::Queued);
     pipelined_then_drained(Model::SameCall);
+    a_started_drain_runs_to_completion(Model::Queued);
+    a_started_drain_runs_to_completion(Model::SameCall);
     classic_depth_one();
     errors_reset_and_bounded_backlog();
     fallback_to_depth_one();

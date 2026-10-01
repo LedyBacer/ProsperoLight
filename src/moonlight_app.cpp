@@ -734,9 +734,9 @@ void MoonlightApp::Activate()
         else if (focus_ == 11)
         {
             config_.decoder_pipeline =
-                config_.decoder_pipeline == MOONLIGHT_DECODER_PIPELINE_CLASSIC
-                    ? MOONLIGHT_DECODER_PIPELINE_ADAPTIVE
-                    : MOONLIGHT_DECODER_PIPELINE_CLASSIC;
+                config_.decoder_pipeline == MOONLIGHT_DECODER_PIPELINE_ADAPTIVE
+                    ? MOONLIGHT_DECODER_PIPELINE_CLASSIC
+                    : MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
         }
         else if (focus_ == 12)
         {
@@ -1418,17 +1418,17 @@ void MoonlightApp::UpdateSettings()
     SetText(document_, "setting-vsync-help",
             config_.vsync_enabled ? "On shows whole frames at each display refresh"
                                   : "Off flips immediately: lower latency, visible tearing");
-    const bool classic = config_.decoder_pipeline == MOONLIGHT_DECODER_PIPELINE_CLASSIC;
-    SetText(document_, "setting-decoder-value", classic ? "Classic" : "Adaptive");
+    const bool adaptive = config_.decoder_pipeline == MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
+    SetText(document_, "setting-decoder-value", adaptive ? "Adaptive (experimental)" : "Classic");
     SetText(document_, "setting-decoder-help",
-            classic ? "One frame at a time, as in 01.000.062"
-                    : "Overlaps frames only while decoding falls behind");
+            adaptive ? "Overlaps frames while decoding falls behind; may help some hosts"
+                     : "Decodes one frame at a time");
     std::snprintf(text, sizeof(text), "%u cores", config_.decoder_cores);
     SetText(document_, "setting-cores-value", text);
     SetText(document_, "setting-cores-help",
             config_.decoder_cores == MOONLIGHT_DECODER_CORES_MIN
-                ? "Classic reservation, as in 01.000.062"
-                : "Reserved for decoding; stream threads use the remaining cores");
+                ? "Reserved for decoding; stream threads use the remaining cores"
+                : "Experimental: more cores for decoding, fewer for the stream");
     std::snprintf(text, sizeof(text), "%s / %sP%u",
                   config_.hdr_enabled                                 ? "HDR10"
                   : config_.video_codec == MOONLIGHT_VIDEO_CODEC_HEVC ? "HEVC"
