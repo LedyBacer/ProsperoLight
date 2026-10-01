@@ -479,6 +479,45 @@ static void workers_run_and_join()
     delete state;
 }
 
+// moonlight-common-c's own connection preamble: its pull-renderer check, then
+// the placeholder fill, which writes into the caller's struct (linked from the
+// real FakeCallbacks.c).
+extern "C" void fixupMissingCallbacks(PDECODER_RENDERER_CALLBACKS *video,
+                                      PAUDIO_RENDERER_CALLBACKS *audio,
+                                      PCONNECTION_LISTENER_CALLBACKS *listener);
+
+static bool library_accepts_video_callbacks()
+{
+    PDECODER_RENDERER_CALLBACKS video = &moonlight_video_callbacks;
+    PAUDIO_RENDERER_CALLBACKS audio = nullptr;
+    PCONNECTION_LISTENER_CALLBACKS listener = nullptr;
+
+    if ((video->capabilities & CAPABILITY_PULL_RENDERER) && video->submitDecodeUnit)
+        return false; // LiStartConnection() returns -1 here.
+    fixupMissingCallbacks(&video, &audio, &listener);
+    assert(video == &moonlight_video_callbacks);
+    return true;
+}
+
+static void every_connection_of_a_process_is_accepted()
+{
+    for (unsigned connection = 0; connection < 3; ++connection)
+    {
+        const uint32_t slices = connection == 1 ? 4u : 8u;
+        prepare_video_callbacks(slices, false);
+        assert(moonlight_video_callbacks.capabilities ==
+               (CAPABILITY_PULL_RENDERER | CAPABILITY_SLICES_PER_FRAME(slices)));
+        assert(library_accepts_video_callbacks());
+        // The library has now filled the empty submit slot in our struct: left
+        // like this, the next connection would be refused.
+        assert(moonlight_video_callbacks.submitDecodeUnit != nullptr);
+        assert(!library_accepts_video_callbacks());
+    }
+    prepare_video_callbacks(8, true);
+    assert(moonlight_video_callbacks.submitDecodeUnit == nullptr);
+    assert(moonlight_video_callbacks.setup == moonlight_renderer_setup);
+}
+
 int main()
 {
     fragment.data = reinterpret_cast<char *>(access_unit);
@@ -490,5 +529,7 @@ int main()
     fallback_to_depth_one();
     presentation_hands_slots_back();
     workers_run_and_join();
-    puts("Adaptive pipeline / drain / depth-one fallback / reset / slot ownership / workers PASS");
+    every_connection_of_a_process_is_accepted();
+    puts("Adaptive pipeline / drain / depth-one fallback / reset / slot ownership / workers / "
+         "reconnection PASS");
 }

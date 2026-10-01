@@ -165,10 +165,14 @@ performance-round3-candidates:
 .PHONY: test-performance-guards
 test-performance-guards:
 	@mkdir -p build/tests
+	@clang -std=c11 -D_DEFAULT_SOURCE -DUSE_MBEDTLS -O2 -c third_party/moonlight-common-c/src/FakeCallbacks.c \
+		-Ithird_party/moonlight-common-c/src -Ithird_party/moonlight-common-c/enet/include \
+		-Ithird_party/mbedtls/include -o build/tests/fake_callbacks.o
 	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Wno-unused-function -Wno-missing-field-initializers \
 		-Iinclude -Isrc -Iplatform/ps5 \
 		-Ithird_party/opus/include -Ithird_party/mbedtls/include -Ithird_party/moonlight-common-c/src \
-		tests/test_decoder_pipeline.cpp $(HOST_TEST_LDFLAGS) -o build/tests/decoder_pipeline
+		tests/test_decoder_pipeline.cpp build/tests/fake_callbacks.o $(HOST_TEST_LDFLAGS) \
+		-o build/tests/decoder_pipeline
 	@build/tests/decoder_pipeline
 	@clang -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fvisibility=hidden \
 		tests/test_socket_metrics.c -Wl,--gc-sections -o build/tests/socket_metrics

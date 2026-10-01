@@ -517,7 +517,28 @@ class ToolTests(unittest.TestCase):
         self.assertIn("LiWaitForNextVideoFrame(&handle, &decode_unit)", source)
         self.assertIn("LiCompleteVideoFrame(handle, status);", source)
         self.assertIn(".submitDecodeUnit = nullptr,", source)
-        self.assertIn("CAPABILITY_PULL_RENDERER | CAPABILITY_SLICES_PER_FRAME(stream_slices)", source)
+        self.assertIn("CAPABILITY_PULL_RENDERER | CAPABILITY_SLICES_PER_FRAME(slices)", source)
+        # moonlight-common-c writes a placeholder into the empty submit slot of
+        # the caller's struct and refuses a pull renderer that has one, so the
+        # slot is cleared before every connection. The host test links the real
+        # FakeCallbacks.c; these lines pin the library behaviour it mirrors.
+        library = ROOT / "third_party/moonlight-common-c/src"
+        self.assertIn(
+            "(drCallbacks->capabilities & CAPABILITY_PULL_RENDERER) && drCallbacks->submitDecodeUnit)",
+            (library / "Connection.c").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "(*drCallbacks)->submitDecodeUnit = fakeDrSubmitDecodeUnit;",
+            (library / "FakeCallbacks.c").read_text(encoding="utf-8"),
+        )
+        run = source[source.index("int moonlight_stream_run(") :]
+        self.assertLess(
+            run.index("prepare_video_callbacks(stream_slices, mode->codec_type == 1u);"),
+            run.index("connection_result = LiStartConnection("),
+        )
+        prepare = source[source.index("static void prepare_video_callbacks(") :]
+        prepare = prepare[: prepare.index("static int moonlight_renderer_setup(")]
+        self.assertIn("moonlight_video_callbacks.submitDecodeUnit = nullptr;", prepare)
         # Decoded pictures are never held back by a time rule: the newest
         # one replaces any picture the presenter has not taken yet.
         self.assertNotIn("drop_stale_presentation", source)

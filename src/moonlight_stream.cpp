@@ -512,6 +512,7 @@ extern "C"
 static notification_request_t notification;
 static std::atomic<int> connection_terminated;
 static std::atomic<int> connection_error;
+static std::atomic<int> connection_failed_stage;
 static std::atomic<uint32_t> host_hdr_active;
 static std::atomic<uint32_t> host_hdr_transitions;
 // Bumped whenever queued frames are discarded for decoder backpressure: a
@@ -2143,6 +2144,21 @@ static DECODER_RENDERER_CALLBACKS moonlight_video_callbacks = {
     .capabilities = CAPABILITY_PULL_RENDERER,
 };
 
+// moonlight-common-c fills the empty slots of this struct with placeholders
+// on every connection, and refuses a pull renderer that has a submit
+// callback. Restore the pull-renderer form before each LiStartConnection(),
+// or only the first connection of the process succeeds.
+static void prepare_video_callbacks(uint32_t slices, bool h264)
+{
+    moonlight_video_callbacks.submitDecodeUnit = nullptr;
+    moonlight_video_callbacks.capabilities =
+        CAPABILITY_PULL_RENDERER | CAPABILITY_SLICES_PER_FRAME(slices);
+    if (PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION)
+        moonlight_video_callbacks.capabilities |=
+            h264 ? CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC
+                 : CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC;
+}
+
 static int moonlight_renderer_setup(int video_format, int width, int height, int redraw_rate,
                                     void *context, int dr_flags)
 {
@@ -3344,6 +3360,7 @@ static void connection_stage_failed(int stage, int error)
     char receipt[256];
     connection_error = error;
     connection_terminated = 1;
+    std::atomic_store_explicit(&connection_failed_stage, stage, std::memory_order_relaxed);
     snprintf(receipt, sizeof(receipt), "Moonlight connection failed: stage=%d %s error=%08x", stage,
              LiGetStageName(stage), (uint32_t)error);
     (void)lan_http_report_text(receipt);
@@ -3864,12 +3881,8 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     std::atomic_store_explicit(&video_recovery_epoch, 0u, std::memory_order_relaxed);
     std::atomic_store_explicit(&video_queue_overflows, 0u, std::memory_order_relaxed);
     std::atomic_store_explicit(&video_unrecoverable_frames, 0u, std::memory_order_relaxed);
-    moonlight_video_callbacks.capabilities =
-        CAPABILITY_PULL_RENDERER | CAPABILITY_SLICES_PER_FRAME(stream_slices);
-    if (PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION)
-        moonlight_video_callbacks.capabilities |=
-            mode->codec_type == 1u ? CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC
-                                   : CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC;
+    std::atomic_store_explicit(&connection_failed_stage, 0, std::memory_order_relaxed);
+    prepare_video_callbacks(stream_slices, mode->codec_type == 1u);
     native_agc_set_vsync((int)vsync_enabled);
     // Keep every stream thread off the decoder's CPUs. New threads inherit the
     // creator's mask, so narrow this thread first; moonlight-common-c's thread
@@ -4059,10 +4072,18 @@ done:
             snprintf(stream_error, sizeof(stream_error),
                      "Sunshine connected but no video arrived. The session was closed; retry or "
                      "choose another codec.");
+        else if (gs_error && gs_error[0])
+            snprintf(stream_error, sizeof(stream_error), "Stream failed: %s", gs_error);
         else
-            snprintf(stream_error, sizeof(stream_error), "Stream failed: %s",
-                     gs_error && gs_error[0] ? gs_error
-                                             : "Sunshine did not complete the connection");
+        {
+            // No text from the host protocol: name the stage and the code, so a
+            // report from the notification alone is actionable.
+            const int stage =
+                std::atomic_load_explicit(&connection_failed_stage, std::memory_order_relaxed);
+            snprintf(stream_error, sizeof(stream_error),
+                     "Stream failed: Sunshine did not complete the connection (%s, error %d)",
+                     stage > 0 ? LiGetStageName(stage) : "before the first stage", (int)result);
+        }
     }
     if (connection_active)
     {
