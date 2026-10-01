@@ -122,6 +122,7 @@ $(HOST_UNIT_TEST): tests/test_prosperolight.cpp include/moonlight_config.hpp \
 		include/moonlight_health.hpp \
 		include/moonlight_physical_input.hpp \
 		include/moonlight_stream_input.hpp src/moonlight_config.cpp \
+		include/moonlight_discovery.hpp src/moonlight_discovery.cpp \
 		include/lan_http_report.hpp src/lan_http_report.cpp \
 		tools/setup-test-dependencies.sh | test-deps
 	@printf '%s\n' '==> [test-unit] Compiling the host-native GoogleTest binary'
@@ -135,7 +136,8 @@ $(HOST_UNIT_TEST): tests/test_prosperolight.cpp include/moonlight_config.hpp \
 			-c "$$gtest/googletest/src/gtest_main.cc" -o $(@D)/gtest-main.o; \
 		$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Iinclude \
 			-isystem "$$gtest/googletest/include" \
-			tests/test_prosperolight.cpp src/moonlight_config.cpp src/lan_http_report.cpp \
+			tests/test_prosperolight.cpp src/moonlight_config.cpp src/moonlight_discovery.cpp \
+			src/lan_http_report.cpp \
 			$(@D)/gtest-all.o $(@D)/gtest-main.o \
 			$(HOST_TEST_LDFLAGS) -o $@
 
@@ -174,6 +176,11 @@ test-performance-guards:
 		tests/test_decoder_pipeline.cpp build/tests/fake_callbacks.o $(HOST_TEST_LDFLAGS) \
 		-o build/tests/decoder_pipeline
 	@build/tests/decoder_pipeline
+	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Wno-unused-function -Wno-missing-field-initializers \
+		-Iinclude -Isrc -Iplatform/ps5 \
+		-Ithird_party/opus/include -Ithird_party/mbedtls/include -Ithird_party/moonlight-common-c/src \
+		tests/test_controllers.cpp $(HOST_TEST_LDFLAGS) -o build/tests/controllers
+	@build/tests/controllers
 	@clang -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fvisibility=hidden \
 		tests/test_socket_metrics.c -Wl,--gc-sections -o build/tests/socket_metrics
 	@build/tests/socket_metrics
@@ -190,7 +197,7 @@ test-performance-guards:
 		-Iinclude -Isrc -Iplatform/ps5 -Ithird_party/opus/include -Ithird_party/mbedtls/include \
 		-Ithird_party/moonlight-common-c/src \
 		tests/test_performance_summary.cpp $(HOST_TEST_LDFLAGS) -o build/tests/performance_summary
-	@build/tests/performance_summary | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["schema"]==3 and r["present_overlap"]==1 and r["presented"]==95 and r["refresh_x100"]==11988 and r["client_refresh_x100"]==11988; t=r["timings_us"]; assert t["decode"]["count"]==100 and t["decode"]["mean"]==3000; assert t["receive_to_enqueue"]["mean"]==3000 and r["reassembly_invalid_samples"]==1; assert len(t)==20; assert r["performance_detail"]==1 and r["stream_bytes"]==123456 and r["flip_queries"]==7 and r["flip_sleeps"]==3; assert t["agc_prepare"]["mean"]==150 and t["agc_cache_flush"]["mean"]==50 and t["agc_submit"]["mean"]==250 and t["flush"]["mean"]==1250 and t["completion_wait"]["mean"]==500 and t["ready_to_present"]["mean"]==100; assert r["decoded"]==99 and r["not_displayed"]==4 and r["network_frame_gaps"]==2 and r["decoder_frame_gaps"]==30; assert r["decoder_mode"]=="adaptive" and r["decoder_pipeline_depth"]==3 and r["decoder_drain"]==1 and r["drain_calls"]==40 and r["decoder_cores"]==5 and r["decoder_cpu_affinity"]==1023; assert r["placement_applied"]==11 and r["placement_failed"]==1 and r["receive_placement_verified"]==1024; assert r["vsync_requested"]==1 and r["vsync_active"]==1 and r["flip_events_active"]==1 and r["flip_event_wakeups"]==2; print("Performance JSON / partial-write failure checks PASS")'
+	@build/tests/performance_summary | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["schema"]==3 and r["present_overlap"]==1 and r["presented"]==95 and r["refresh_x100"]==11988 and r["client_refresh_x100"]==11988; t=r["timings_us"]; assert t["decode"]["count"]==100 and t["decode"]["mean"]==3000; assert t["receive_to_enqueue"]["mean"]==3000 and r["reassembly_invalid_samples"]==1; assert len(t)==20; assert r["performance_detail"]==1 and r["stream_bytes"]==123456 and r["flip_queries"]==7 and r["flip_sleeps"]==3; assert t["agc_prepare"]["mean"]==150 and t["agc_cache_flush"]["mean"]==50 and t["agc_submit"]["mean"]==250 and t["flush"]["mean"]==1250 and t["completion_wait"]["mean"]==500 and t["ready_to_present"]["mean"]==100; assert r["decoded"]==99 and r["not_displayed"]==4 and r["network_frame_gaps"]==2 and r["decoder_frame_gaps"]==30; assert r["decoder_mode"]=="adaptive" and r["decoder_pipeline_depth"]==3 and r["decoder_drain"]==1 and r["drain_calls"]==40 and r["decoder_cores"]==5 and r["decoder_cpu_affinity"]==1023; assert r["placement_applied"]==11 and r["placement_failed"]==1 and r["receive_placement_verified"]==1024; assert r["vsync_requested"]==1 and r["vsync_active"]==1 and r["flip_events_active"]==1 and r["flip_event_wakeups"]==2; assert r["controllers_peak"]==3 and r["controller_arrivals"]==2 and r["controller_removals"]==1 and r["controller_open_errors"]==4 and r["controller_send_errors"]==5 and r["user_scan_errors"]==6; print("Performance JSON / partial-write failure checks PASS")'
 
 deps: test-deps
 	@printf '%s\n' '==> [deps] Fetching declared native dependencies'

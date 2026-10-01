@@ -9,6 +9,7 @@
 #include "moonlight_stream_input.hpp"
 #include "moonlight_stream_keyboard.hpp"
 #include "moonlight_config.hpp"
+#include "moonlight_discovery.hpp"
 #include "moonlight_health.hpp"
 #include "moonlight_physical_input.hpp"
 #include "moonlight_performance.hpp"
@@ -21,6 +22,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <deque>
+#include <string>
+#include <vector>
 
 TEST(Performance, SliceHeadersAreCountedWithoutReadingTruncatedNals)
 {
@@ -294,6 +298,34 @@ namespace
 const std::uint8_t *kernel_read_data;
 std::size_t kernel_read_size;
 std::size_t kernel_read_offset;
+// Saving fails unless a test captures the file here.
+std::vector<std::uint8_t> *kernel_write_capture;
+
+// Configuration versions 1-6 stored a PC without its port.
+struct LegacyHost
+{
+    char address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
+    char name[MOONLIGHT_CONFIG_NAME_SIZE];
+    char unique_id[MOONLIGHT_CONFIG_UNIQUE_ID_SIZE];
+    std::uint32_t manual;
+};
+
+std::uint32_t ConfigChecksum(const void *data, std::size_t size)
+{
+    const auto *bytes = static_cast<const std::uint8_t *>(data);
+    std::uint32_t value = UINT32_C(2166136261);
+    for (std::size_t index = 0; index < size; ++index)
+        value = (value ^ bytes[index]) * UINT32_C(16777619);
+    return value;
+}
+
+// One mDNS reply waiting on the discovery socket, and where it came from.
+struct MdnsReply
+{
+    std::vector<std::uint8_t> packet;
+    std::uint8_t source[4];
+};
+std::deque<MdnsReply> mdns_replies;
 } // namespace
 
 extern "C"
@@ -301,7 +333,13 @@ extern "C"
     int sceKernelOpen(const char *, int flags, std::uint16_t)
     {
         kernel_read_offset = 0;
-        return flags == 0 && kernel_read_data ? 1 : -1;
+        if (flags != 0)
+        {
+            if (kernel_write_capture)
+                kernel_write_capture->clear();
+            return kernel_write_capture ? 2 : -1;
+        }
+        return kernel_read_data ? 1 : -1;
     }
 
     int sceKernelClose(int)
@@ -320,19 +358,71 @@ extern "C"
         return static_cast<std::int64_t>(count);
     }
 
-    std::int64_t sceKernelWrite(int, const void *, std::size_t)
+    std::int64_t sceKernelWrite(int, const void *buffer, std::size_t length)
     {
-        return -1;
+        if (!kernel_write_capture)
+            return -1;
+        const auto *bytes = static_cast<const std::uint8_t *>(buffer);
+        kernel_write_capture->insert(kernel_write_capture->end(), bytes, bytes + length);
+        return static_cast<std::int64_t>(length);
     }
 
     int sceKernelRename(const char *, const char *)
     {
-        return -1;
+        return kernel_write_capture ? 0 : -1;
     }
 
     int sceKernelUnlink(const char *)
     {
         return -1;
+    }
+
+    // The discovery socket: queued replies arrive at once, then nothing.
+    int sceNetSocket(const char *, int, int, int)
+    {
+        return 3;
+    }
+    int sceNetSocketClose(int)
+    {
+        return 0;
+    }
+    int sceNetSendto(int, const void *, std::size_t length, int, const void *, std::uint32_t)
+    {
+        return static_cast<int>(length);
+    }
+    int sceNetRecvfrom(int, void *buffer, std::size_t length, int, void *address, std::uint32_t *)
+    {
+        if (mdns_replies.empty())
+            return -1;
+        const MdnsReply reply = mdns_replies.front();
+        mdns_replies.pop_front();
+        auto *source = static_cast<std::uint8_t *>(address);
+        source[0] = 16;
+        source[1] = 2; // IPv4
+        std::memcpy(source + 4, reply.source, sizeof(reply.source));
+        const std::size_t size = reply.packet.size() < length ? reply.packet.size() : length;
+        std::memcpy(buffer, reply.packet.data(), size);
+        return static_cast<int>(size);
+    }
+    int sceNetSetsockopt(int, int, int, const void *, std::uint32_t)
+    {
+        return 0;
+    }
+    int sceNetEpollCreate(const char *, int)
+    {
+        return 4;
+    }
+    int sceNetEpollControl(int, int, int, void *)
+    {
+        return 0;
+    }
+    int sceNetEpollWait(int, void *, int, int)
+    {
+        return mdns_replies.empty() ? 0 : 1;
+    }
+    int sceNetEpollDestroy(int)
+    {
+        return 0;
     }
 }
 
@@ -529,7 +619,7 @@ TEST(Configuration, MigratesVersionFiveAndDefaultsTheNewStreamSettings)
         std::uint32_t stream_fps;
         std::uint32_t hdr_enabled;
         std::uint32_t audio_configuration;
-        moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+        LegacyHost hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
     };
     struct LegacyFile
     {
@@ -580,6 +670,122 @@ TEST(Configuration, MigratesVersionFiveAndDefaultsTheNewStreamSettings)
     EXPECT_EQ(config.vsync_enabled, 1U);
     EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_CLASSIC);
     EXPECT_EQ(config.decoder_cores, MOONLIGHT_DECODER_CORES_DEFAULT);
+    EXPECT_EQ(config.hosts[0].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+}
+
+TEST(Configuration, MigratesVersionSixAndGivesSavedPcsTheDefaultPort)
+{
+    struct LegacyConfig
+    {
+        std::uint32_t host_count;
+        std::uint32_t selected_host;
+        std::uint32_t bitrate_mbps;
+        std::uint32_t display_area;
+        std::uint32_t video_codec;
+        std::uint32_t stream_resolution;
+        std::uint32_t stream_fps;
+        std::uint32_t hdr_enabled;
+        std::uint32_t audio_configuration;
+        std::uint32_t vsync_enabled;
+        std::uint32_t decoder_pipeline;
+        std::uint32_t decoder_cores;
+        LegacyHost hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    };
+    struct LegacyFile
+    {
+        std::uint32_t magic;
+        std::uint32_t version;
+        std::uint32_t checksum;
+        std::uint32_t reserved;
+        LegacyConfig config;
+    } file{};
+
+    // The layout written by 01.000.070.
+    static_assert(sizeof(LegacyFile) == 16 + 48 + MOONLIGHT_CONFIG_MAX_HOSTS * 180);
+    file.magic = UINT32_C(0x504c4346);
+    file.version = 6;
+    file.config.host_count = 2;
+    file.config.selected_host = 1;
+    file.config.bitrate_mbps = 80;
+    file.config.display_area = MOONLIGHT_DISPLAY_AREA_FULL;
+    file.config.video_codec = MOONLIGHT_VIDEO_CODEC_HEVC;
+    file.config.stream_resolution = MOONLIGHT_STREAM_RESOLUTION_2160P;
+    file.config.stream_fps = MOONLIGHT_STREAM_FPS_120;
+    file.config.audio_configuration = MOONLIGHT_AUDIO_51_SURROUND;
+    file.config.vsync_enabled = 0;
+    file.config.decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
+    file.config.decoder_cores = 5;
+    std::snprintf(file.config.hosts[0].address, sizeof(file.config.hosts[0].address),
+                  "192.168.4.20");
+    std::snprintf(file.config.hosts[0].name, sizeof(file.config.hosts[0].name), "Gaming-PC");
+    std::snprintf(file.config.hosts[1].address, sizeof(file.config.hosts[1].address),
+                  "192.168.4.21");
+    std::snprintf(file.config.hosts[1].name, sizeof(file.config.hosts[1].name), "Office-PC");
+    std::snprintf(file.config.hosts[1].unique_id, sizeof(file.config.hosts[1].unique_id),
+                  "office-id");
+    file.config.hosts[1].manual = 1;
+    file.checksum = ConfigChecksum(&file.config, sizeof(file.config));
+    kernel_read_data = reinterpret_cast<const std::uint8_t *>(&file);
+    kernel_read_size = sizeof(file);
+
+    moonlight_config_t config{};
+    const bool loaded = moonlight_config_load(&config);
+    kernel_read_data = nullptr;
+    kernel_read_size = 0;
+
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(config.host_count, 2U);
+    EXPECT_EQ(config.selected_host, 1U);
+    EXPECT_EQ(config.bitrate_mbps, 80U);
+    EXPECT_EQ(config.stream_fps, MOONLIGHT_STREAM_FPS_120);
+    EXPECT_EQ(config.audio_configuration, MOONLIGHT_AUDIO_51_SURROUND);
+    EXPECT_EQ(config.vsync_enabled, 0U);
+    EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_ADAPTIVE);
+    EXPECT_EQ(config.decoder_cores, 5U);
+    EXPECT_STREQ(config.hosts[0].address, "192.168.4.20");
+    EXPECT_STREQ(config.hosts[0].name, "Gaming-PC");
+    EXPECT_EQ(config.hosts[0].manual, 0U);
+    EXPECT_EQ(config.hosts[0].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+    EXPECT_STREQ(config.hosts[1].address, "192.168.4.21");
+    EXPECT_STREQ(config.hosts[1].name, "Office-PC");
+    EXPECT_STREQ(config.hosts[1].unique_id, "office-id");
+    EXPECT_EQ(config.hosts[1].manual, 1U);
+    EXPECT_EQ(config.hosts[1].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+}
+
+TEST(Configuration, SavesAndReloadsThePortOfEveryPc)
+{
+    moonlight_config_t saved{};
+    moonlight_config_defaults(&saved);
+    saved.bitrate_mbps = 60;
+    ASSERT_EQ(moonlight_config_upsert_host(&saved, "192.168.1.10", 0, "Default", "one", false), 0);
+    ASSERT_EQ(moonlight_config_upsert_host(&saved, "192.168.1.10", 48989, "Second", "two", true),
+              1);
+    saved.selected_host = 1;
+
+    std::vector<std::uint8_t> written;
+    kernel_write_capture = &written;
+    const bool stored = moonlight_config_save(&saved);
+    kernel_write_capture = nullptr;
+    ASSERT_TRUE(stored);
+    ASSERT_FALSE(written.empty());
+
+    kernel_read_data = written.data();
+    kernel_read_size = written.size();
+    moonlight_config_t config{};
+    const bool loaded = moonlight_config_load(&config);
+    kernel_read_data = nullptr;
+    kernel_read_size = 0;
+
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(config.host_count, 2U);
+    EXPECT_EQ(config.selected_host, 1U);
+    EXPECT_EQ(config.bitrate_mbps, 60U);
+    EXPECT_EQ(config.hosts[0].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+    EXPECT_STREQ(config.hosts[1].address, "192.168.1.10");
+    EXPECT_STREQ(config.hosts[1].name, "Second");
+    EXPECT_EQ(config.hosts[1].http_port, 48989U);
+    EXPECT_EQ(config.hosts[1].manual, 1U);
 }
 
 TEST(Configuration, MigratesVersionFourAndDefaultsToStereo)
@@ -594,7 +800,7 @@ TEST(Configuration, MigratesVersionFourAndDefaultsToStereo)
         std::uint32_t stream_resolution;
         std::uint32_t stream_fps;
         std::uint32_t hdr_enabled;
-        moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+        LegacyHost hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
     };
     struct LegacyFile
     {
@@ -649,7 +855,7 @@ TEST(Configuration, MigratesVersionThreeAndKeepsTheSavedHost)
         std::uint32_t video_codec;
         std::uint32_t stream_resolution;
         std::uint32_t hdr_enabled;
-        moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+        LegacyHost hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
     };
     struct LegacyFile
     {
@@ -704,14 +910,160 @@ TEST(Configuration, UpsertUpdatesAHostByStableIdentity)
     moonlight_config_t config{};
     moonlight_config_defaults(&config);
 
-    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", "Gaming PC", "host-1", false),
-              0);
-    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", "", "host-1", true), 0);
+    EXPECT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 0, "Gaming PC", "host-1", false), 0);
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", 0, "", "host-1", true), 0);
     ASSERT_EQ(config.host_count, 1U);
     EXPECT_STREQ(config.hosts[0].address, "192.168.1.20");
     EXPECT_STREQ(config.hosts[0].name, "Gaming PC");
     EXPECT_STREQ(config.hosts[0].unique_id, "host-1");
     EXPECT_EQ(config.hosts[0].manual, 1U);
+    EXPECT_EQ(config.hosts[0].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+}
+
+TEST(Configuration, OneAddressCanHoldSunshineOnSeveralPorts)
+{
+    moonlight_config_t config{};
+    moonlight_config_defaults(&config);
+
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Desk", "one", false),
+              0);
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "TV", "two", true), 1);
+    // A refresh of either endpoint updates that entry only.
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "TV room", "two", false),
+              1);
+    ASSERT_EQ(config.host_count, 2U);
+    EXPECT_STREQ(config.hosts[0].name, "Desk");
+    EXPECT_EQ(config.hosts[0].http_port, 47989U);
+    EXPECT_STREQ(config.hosts[1].name, "TV room");
+    EXPECT_EQ(config.hosts[1].http_port, 48989U);
+    EXPECT_EQ(config.hosts[1].manual, 1U);
+}
+
+TEST(Configuration, AnUnknownPortKeepsTheSavedOne)
+{
+    moonlight_config_t config{};
+    moonlight_config_defaults(&config);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "Desk", "", true), 0);
+
+    // Discovery without a port record must not add a second, unreachable entry.
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 0, "DESK-PC", "", false), 0);
+    ASSERT_EQ(config.host_count, 1U);
+    EXPECT_EQ(config.hosts[0].http_port, 48989U);
+    EXPECT_STREQ(config.hosts[0].name, "DESK-PC");
+    // A PC seen for the first time without a port gets Sunshine's default.
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.30", 0, "Other", "", false), 1);
+    EXPECT_EQ(config.hosts[1].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+}
+
+TEST(Configuration, APcIsFollowedToItsNewPort)
+{
+    moonlight_config_t config{};
+    moonlight_config_defaults(&config);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Desk", "one", false),
+              0);
+    // Discovery sees the changed port first, without an identity...
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "Desk", "", false), 1);
+    config.selected_host = 1;
+    // ...and the refresh of that endpoint recognises the same Sunshine.
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "Desk", "one", false),
+              0);
+    ASSERT_EQ(config.host_count, 1U);
+    EXPECT_EQ(config.selected_host, 0U);
+    EXPECT_EQ(config.hosts[0].http_port, 48989U);
+    EXPECT_EQ(config.hosts[1].address[0], '\0');
+}
+
+TEST(Configuration, ChangingAPortEditsThatPcOnly)
+{
+    moonlight_config_t config{};
+    moonlight_config_defaults(&config);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 0, "Desk", "one", false), 0);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", 0, "Other", "two", true), 1);
+    config.selected_host = 1;
+
+    EXPECT_EQ(moonlight_config_set_host_port(&config, 0, 48989), 0);
+    ASSERT_EQ(config.host_count, 2U);
+    EXPECT_EQ(config.hosts[0].http_port, 48989U);
+    // The identity belonged to the old port: the next refresh fills it in again.
+    EXPECT_EQ(config.hosts[0].unique_id[0], '\0');
+    EXPECT_STREQ(config.hosts[0].name, "Desk");
+    EXPECT_EQ(config.hosts[1].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+    EXPECT_STREQ(config.hosts[1].unique_id, "two");
+    EXPECT_EQ(config.selected_host, 1U);
+    // Setting the same port again is not a change.
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "", "one", false), 0);
+    EXPECT_EQ(moonlight_config_set_host_port(&config, 0, 48989), 0);
+    EXPECT_STREQ(config.hosts[0].unique_id, "one");
+
+    EXPECT_EQ(moonlight_config_set_host_port(&config, 0, 0), -1);
+    EXPECT_EQ(moonlight_config_set_host_port(&config, 2, 48989), -1);
+    EXPECT_EQ(moonlight_config_set_host_port(nullptr, 0, 48989), -1);
+}
+
+TEST(Configuration, ChangingAPortOntoASavedEndpointMergesThePcs)
+{
+    moonlight_config_t config{};
+    moonlight_config_defaults(&config);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Old", "", false), 0);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "New", "", true), 1);
+    config.selected_host = 0;
+
+    EXPECT_EQ(moonlight_config_set_host_port(&config, 0, 48989), 0);
+    ASSERT_EQ(config.host_count, 1U);
+    EXPECT_EQ(config.selected_host, 0U);
+    EXPECT_STREQ(config.hosts[0].name, "Old");
+    EXPECT_EQ(config.hosts[0].http_port, 48989U);
+    EXPECT_EQ(config.hosts[0].manual, 1U);
+}
+
+TEST(Configuration, HostPortFallsBackToTheDefault)
+{
+    moonlight_config_host_t host{};
+    EXPECT_EQ(moonlight_config_host_port(nullptr), MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+    EXPECT_EQ(moonlight_config_host_port(&host), MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+    host.http_port = 70000;
+    EXPECT_EQ(moonlight_config_host_port(&host), MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+    host.http_port = 1029;
+    EXPECT_EQ(moonlight_config_host_port(&host), 1029U);
+}
+
+TEST(Configuration, ParsesAnAddressWithAnOptionalPort)
+{
+    char address[MOONLIGHT_CONFIG_ADDRESS_SIZE]{};
+    std::uint16_t port = 1;
+
+    ASSERT_TRUE(moonlight_config_parse_endpoint("192.168.1.50", address, &port));
+    EXPECT_STREQ(address, "192.168.1.50");
+    EXPECT_EQ(port, 0U);
+    ASSERT_TRUE(moonlight_config_parse_endpoint("  192.168.001.050:48989 ", address, &port));
+    EXPECT_STREQ(address, "192.168.1.50");
+    EXPECT_EQ(port, 48989U);
+    ASSERT_TRUE(moonlight_config_parse_endpoint("10.0.0.1:65535", address, &port));
+    EXPECT_EQ(port, 65535U);
+
+    for (const char *text :
+         {"", " ", "192.168.1", "192.168.1.256", "192.168.1.50.1",
+          "192.168.1.50:", "192.168.1.50:0", "192.168.1.50:65536", "192.168.1.50:-1",
+          "192.168.1.50 :80", "192.168.1.50:80:1", "192.168.1.50 x", "-1.2.3.4", "a.b.c.d",
+          "1..2.3", "pc.local:80", "192.168.1.50:99999999999999999999"})
+        EXPECT_FALSE(moonlight_config_parse_endpoint(text, address, &port)) << text;
+    EXPECT_FALSE(moonlight_config_parse_endpoint(nullptr, address, &port));
+}
+
+TEST(Configuration, ParsesAPortNumber)
+{
+    std::uint16_t port = 0;
+
+    ASSERT_TRUE(moonlight_config_parse_port("47989", &port));
+    EXPECT_EQ(port, 47989U);
+    ASSERT_TRUE(moonlight_config_parse_port(" 1 ", &port));
+    EXPECT_EQ(port, 1U);
+    ASSERT_TRUE(moonlight_config_parse_port("65535", &port));
+    EXPECT_EQ(port, 65535U);
+    for (const char *text : {"", " ", "0", "65536", "-1", "+80", "80a", "4 7", "0x50", "1e3"})
+        EXPECT_FALSE(moonlight_config_parse_port(text, &port)) << text;
+    EXPECT_FALSE(moonlight_config_parse_port(nullptr, &port));
 }
 
 TEST(Configuration, UpsertRejectsAHostBeyondCapacity)
@@ -722,11 +1074,11 @@ TEST(Configuration, UpsertRejectsAHostBeyondCapacity)
     {
         char address[MOONLIGHT_CONFIG_ADDRESS_SIZE]{};
         std::snprintf(address, sizeof(address), "192.168.1.%u", index + 1);
-        ASSERT_EQ(moonlight_config_upsert_host(&config, address, "PC", "", false),
+        ASSERT_EQ(moonlight_config_upsert_host(&config, address, 0, "PC", "", false),
                   static_cast<int>(index));
     }
 
-    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.99", "Extra", "", false), -1);
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.99", 0, "Extra", "", false), -1);
     EXPECT_EQ(config.host_count, MOONLIGHT_CONFIG_MAX_HOSTS);
 }
 
@@ -734,8 +1086,9 @@ TEST(Configuration, RemovingSelectedHostCompactsAndKeepsTheOtherPC)
 {
     moonlight_config_t config{};
     moonlight_config_defaults(&config);
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", "Old PC", "old", false), 0);
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", "Other PC", "other", true), 1);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 0, "Old PC", "old", false), 0);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", 0, "Other PC", "other", true),
+              1);
     config.selected_host = 0;
 
     EXPECT_FALSE(moonlight_config_remove_host(&config, 2));
@@ -760,6 +1113,199 @@ TEST(Configuration, FailedLoadLeavesSafeDefaults)
     EXPECT_EQ(config.host_count, 0U);
     EXPECT_EQ(config.bitrate_mbps, 20U);
     EXPECT_EQ(config.display_area, MOONLIGHT_DISPLAY_AREA_FULL);
+}
+
+// Builds mDNS replies the way a responder does: the PTR answer names the
+// instance and later records refer back to earlier names by offset.
+struct MdnsPacket
+{
+    std::vector<std::uint8_t> bytes = std::vector<std::uint8_t>(12, 0);
+    int service_offset = -1;
+
+    MdnsPacket()
+    {
+        bytes[2] = 0x84; // response, authoritative
+    }
+    void U16(unsigned value)
+    {
+        bytes.push_back(static_cast<std::uint8_t>(value >> 8));
+        bytes.push_back(static_cast<std::uint8_t>(value));
+    }
+    void Pointer(int offset)
+    {
+        U16(0xc000U | static_cast<unsigned>(offset));
+    }
+    // Writes the labels, then the end of the name or a pointer to its remainder.
+    std::size_t Name(const std::string &name, int pointer = -1)
+    {
+        const std::size_t offset = bytes.size();
+        std::size_t start = 0;
+        while (start < name.size())
+        {
+            std::size_t end = name.find('.', start);
+            if (end == std::string::npos)
+                end = name.size();
+            bytes.push_back(static_cast<std::uint8_t>(end - start));
+            bytes.insert(bytes.end(), name.begin() + static_cast<std::ptrdiff_t>(start),
+                         name.begin() + static_cast<std::ptrdiff_t>(end));
+            start = end + 1;
+        }
+        if (pointer >= 0)
+            Pointer(pointer);
+        else
+            bytes.push_back(0);
+        return offset;
+    }
+    // Type, class, TTL and a length to fill in; returns where the length is.
+    std::size_t Record(unsigned type)
+    {
+        U16(type);
+        U16(1); // class IN
+        U16(0); // TTL, high half
+        U16(120);
+        ++bytes[type == 12 ? 7 : 11]; // PTR is an answer, the rest are additional
+        U16(0);
+        return bytes.size() - 2;
+    }
+    void Close(std::size_t length_at)
+    {
+        const std::size_t length = bytes.size() - length_at - 2;
+        bytes[length_at] = static_cast<std::uint8_t>(length >> 8);
+        bytes[length_at + 1] = static_cast<std::uint8_t>(length);
+    }
+    // PTR _nvstream._tcp.local -> <instance>._nvstream._tcp.local; returns the instance offset.
+    int Ptr(const std::string &instance)
+    {
+        if (service_offset < 0)
+            service_offset = static_cast<int>(Name("_nvstream._tcp.local"));
+        else
+            Pointer(service_offset);
+        const std::size_t length_at = Record(12);
+        const std::size_t target = Name(instance, service_offset);
+        Close(length_at);
+        return static_cast<int>(target);
+    }
+    void SrvBody(unsigned port)
+    {
+        const std::size_t length_at = Record(33);
+        U16(0); // priority
+        U16(0); // weight
+        U16(port);
+        Name("host.local");
+        Close(length_at);
+    }
+    // The port record of an instance named earlier in the packet...
+    void Srv(int instance_offset, unsigned port)
+    {
+        Pointer(instance_offset);
+        SrvBody(port);
+    }
+    // ...or of one spelled out in full.
+    void Srv(const std::string &owner, unsigned port)
+    {
+        Name(owner);
+        SrvBody(port);
+    }
+};
+
+TEST(Discovery, ReadsTheAdvertisedPortOfAnInstance)
+{
+    MdnsPacket packet;
+    packet.Srv(packet.Ptr("GAMING-PC"), 48989);
+    moonlight_discovered_service_t services[MOONLIGHT_DISCOVERY_MAX_SERVICES]{};
+
+    ASSERT_EQ(moonlight_discovery_parse_response(packet.bytes.data(), packet.bytes.size(), services,
+                                                 MOONLIGHT_DISCOVERY_MAX_SERVICES),
+              1U);
+    EXPECT_STREQ(services[0].name, "GAMING-PC");
+    EXPECT_STREQ(services[0].instance, "GAMING-PC._nvstream._tcp.local");
+    EXPECT_EQ(services[0].http_port, 48989U);
+}
+
+TEST(Discovery, AReplyWithoutAPortRecordLeavesThePortUnknown)
+{
+    MdnsPacket packet;
+    packet.Ptr("GAMING-PC");
+    moonlight_discovered_service_t services[MOONLIGHT_DISCOVERY_MAX_SERVICES]{};
+
+    ASSERT_EQ(moonlight_discovery_parse_response(packet.bytes.data(), packet.bytes.size(), services,
+                                                 MOONLIGHT_DISCOVERY_MAX_SERVICES),
+              1U);
+    EXPECT_STREQ(services[0].name, "GAMING-PC");
+    EXPECT_EQ(services[0].http_port, 0U);
+}
+
+TEST(Discovery, SeparatesTwoInstancesOfOnePc)
+{
+    MdnsPacket packet;
+    // Port records may come first and spell their owner in another case.
+    packet.Srv("tv._NVSTREAM._tcp.LOCAL", 48989);
+    packet.Srv("printer._ipp._tcp.local", 631);
+    const int desk = packet.Ptr("Desk");
+    packet.Ptr("TV");
+    packet.Srv(desk, 47989);
+    moonlight_discovered_service_t services[MOONLIGHT_DISCOVERY_MAX_SERVICES]{};
+
+    const std::uint32_t count = moonlight_discovery_parse_response(
+        packet.bytes.data(), packet.bytes.size(), services, MOONLIGHT_DISCOVERY_MAX_SERVICES);
+    ASSERT_EQ(count, 2U);
+    EXPECT_STREQ(services[0].name, "tv");
+    EXPECT_EQ(services[0].http_port, 48989U);
+    EXPECT_STREQ(services[1].name, "Desk");
+    EXPECT_EQ(services[1].http_port, 47989U);
+}
+
+TEST(Discovery, RejectsQueriesAndSurvivesTruncatedReplies)
+{
+    MdnsPacket packet;
+    packet.Srv(packet.Ptr("GAMING-PC"), 48989);
+    moonlight_discovered_service_t services[MOONLIGHT_DISCOVERY_MAX_SERVICES]{};
+
+    for (std::size_t length = 0; length < packet.bytes.size(); ++length)
+    {
+        const std::uint32_t count = moonlight_discovery_parse_response(
+            packet.bytes.data(), length, services, MOONLIGHT_DISCOVERY_MAX_SERVICES);
+        EXPECT_LE(count, 1U) << length;
+        if (count)
+            EXPECT_EQ(services[0].http_port, 0U) << length;
+    }
+    packet.bytes[2] = 0; // a query, not a reply
+    EXPECT_EQ(moonlight_discovery_parse_response(packet.bytes.data(), packet.bytes.size(), services,
+                                                 MOONLIGHT_DISCOVERY_MAX_SERVICES),
+              0U);
+    EXPECT_EQ(moonlight_discovery_parse_response(nullptr, 64, services, 1), 0U);
+}
+
+TEST(Discovery, ListsEveryEndpointOnceWithItsPort)
+{
+    MdnsPacket plain;
+    plain.Ptr("Desk");
+    MdnsPacket with_port;
+    with_port.Srv(with_port.Ptr("Desk"), 48989);
+    MdnsPacket second;
+    second.Srv(second.Ptr("TV"), 50000);
+    MdnsPacket other;
+    other.Ptr("Laptop");
+
+    // The first PC answers twice (the port arrives late) and runs two instances.
+    mdns_replies = {{plain.bytes, {192, 168, 1, 10}},
+                    {with_port.bytes, {192, 168, 1, 10}},
+                    {second.bytes, {192, 168, 1, 10}},
+                    {with_port.bytes, {192, 168, 1, 10}},
+                    {other.bytes, {192, 168, 1, 30}}};
+    moonlight_discovered_host_t hosts[MOONLIGHT_DISCOVERY_MAX_HOSTS]{};
+
+    ASSERT_EQ(moonlight_discover_hosts(hosts, MOONLIGHT_DISCOVERY_MAX_HOSTS), 3U);
+    EXPECT_TRUE(mdns_replies.empty());
+    EXPECT_STREQ(hosts[0].address, "192.168.1.10");
+    EXPECT_STREQ(hosts[0].name, "Desk");
+    EXPECT_EQ(hosts[0].http_port, 48989U);
+    EXPECT_STREQ(hosts[1].address, "192.168.1.10");
+    EXPECT_STREQ(hosts[1].name, "TV");
+    EXPECT_EQ(hosts[1].http_port, 50000U);
+    EXPECT_STREQ(hosts[2].address, "192.168.1.30");
+    EXPECT_STREQ(hosts[2].name, "Laptop");
+    EXPECT_EQ(hosts[2].http_port, 0U);
 }
 
 TEST(HostHealth, DebouncesTransientFailuresAndRecovers)

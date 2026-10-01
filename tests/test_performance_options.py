@@ -4,6 +4,7 @@
 from pathlib import Path
 import json
 import os
+import re
 import subprocess
 import unittest
 
@@ -16,7 +17,10 @@ class PerformanceOptions(unittest.TestCase):
         self.assertIn('release_flags=(--prerelease --latest=false)', workflow)
         # Both steps select the same beta versions, including the current one.
         version = json.loads((ROOT / "sce_sys/param.json").read_text())["contentVersion"]
-        self.assertEqual(workflow.count(f"01.000.062|{version})"), 2)
+        betas = re.findall(r"^ +(01\.000\.062(?:\|[0-9.]+)+)\)$", workflow, re.MULTILINE)
+        self.assertEqual(len(betas), 2)
+        self.assertEqual(betas[0], betas[1])
+        self.assertIn(version, betas[0].split("|"))
         self.assertEqual(workflow.count('"${release_flags[@]}"'), 2)
         self.assertIn('make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8', workflow)
 

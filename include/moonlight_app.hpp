@@ -35,6 +35,7 @@ class MoonlightApp
     const char *SelectedAppName() const;
     int SelectedAppId() const;
     const char *SelectedHostAddress() const;
+    uint16_t SelectedHostPort() const;
     unsigned BitrateKbps() const;
     unsigned DisplayArea() const;
     unsigned VideoCodec() const;
@@ -86,6 +87,7 @@ class MoonlightApp
     MoonlightHealthState health_{};
     moonlight_backend_snapshot_t health_snapshot_{};
     char health_host_[MOONLIGHT_CONFIG_ADDRESS_SIZE]{};
+    uint16_t health_port_ = 0;
     uint64_t health_due_ms_ = 0;
     char artwork_host_[MOONLIGHT_CONFIG_ADDRESS_SIZE]{};
     uint16_t artwork_https_port_ = 0;
@@ -102,6 +104,9 @@ class MoonlightApp
     void StartManualHostEntry();
     static void ManualHostResult(const char *text, void *user_data);
     void AddManualHost(const char *text);
+    void StartPortEntry();
+    static void PortResult(const char *text, void *user_data);
+    void SetHostPort(const char *text);
     void DiscoverHosts();
     const moonlight_config_host_t *SelectedHost() const;
     void TogglePairing();

@@ -79,8 +79,9 @@ struct FocusList
     unsigned count;
 };
 
-const char *const kHostFocus[] = {"nav-hosts",     "nav-games", "nav-settings", "host-card",
-                                  "refresh-hosts", "pair-host", "add-host",     "remove-host"};
+const char *const kHostFocus[] = {"nav-hosts", "nav-games",     "nav-settings",
+                                  "host-card", "refresh-hosts", "pair-host",
+                                  "add-host",  "remove-host",   "port-host"};
 const char *const kGameFocus[] = {"nav-hosts",  "nav-games",  "nav-settings", "app-card-0",
                                   "app-card-1", "app-card-2", "app-card-3",   "app-card-4",
                                   "app-card-5", "stop-app",   "back-hosts"};
@@ -103,15 +104,13 @@ FocusList FocusFor(unsigned screen)
     }
 }
 
-bool NormalizeIpv4(const char *text, char output[MOONLIGHT_CONFIG_ADDRESS_SIZE])
+// The port is shown only when it differs from Sunshine's default.
+void FormatEndpoint(char *output, size_t capacity, const char *address, unsigned port)
 {
-    unsigned a, b, c, d;
-    char extra;
-    if (!text || std::sscanf(text, " %u.%u.%u.%u %c", &a, &b, &c, &d, &extra) != 4 || a > 255 ||
-        b > 255 || c > 255 || d > 255)
-        return false;
-    std::snprintf(output, MOONLIGHT_CONFIG_ADDRESS_SIZE, "%u.%u.%u.%u", a, b, c, d);
-    return true;
+    if (port && port != MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT)
+        std::snprintf(output, capacity, "%s:%u", address, port);
+    else
+        std::snprintf(output, capacity, "%s", address);
 }
 
 const char *CodecName(unsigned codec, unsigned hdr = 0)
@@ -175,6 +174,7 @@ bool MoonlightApp::Initialize(Rml::ElementDocument *document)
     if (host)
     {
         std::snprintf(backend_.host, sizeof(backend_.host), "%s", host->address);
+        backend_.http_port = moonlight_config_host_port(host);
         std::snprintf(backend_.name, sizeof(backend_.name), "%s", host->name);
         if (config_.host_count == 1)
         {
@@ -275,7 +275,8 @@ void MoonlightApp::FinishHealthWorker()
 void *MoonlightApp::HealthWorker(void *argument)
 {
     MoonlightApp *app = static_cast<MoonlightApp *>(argument);
-    const int result = moonlight_backend_refresh(app->health_host_, &app->health_snapshot_);
+    const int result =
+        moonlight_backend_refresh(app->health_host_, app->health_port_, &app->health_snapshot_);
     __atomic_store_n(&app->health_worker_state_, result == 0 ? 2 : 3, __ATOMIC_RELEASE);
     return nullptr;
 }
@@ -298,8 +299,9 @@ void MoonlightApp::PollHealth()
             const moonlight_config_host_t *host = SelectedHost();
             const bool manual = host && host->manual;
             const moonlight_config_t previous_config = config_;
-            const int index = moonlight_config_upsert_host(&config_, backend_.host, backend_.name,
-                                                           backend_.unique_id, manual);
+            const int index =
+                moonlight_config_upsert_host(&config_, backend_.host, backend_.http_port,
+                                             backend_.name, backend_.unique_id, manual);
             if (index >= 0)
             {
                 config_.selected_host = static_cast<uint32_t>(index);
@@ -328,6 +330,7 @@ void MoonlightApp::PollHealth()
         return;
 
     std::snprintf(health_host_, sizeof(health_host_), "%s", SelectedHostAddress());
+    health_port_ = SelectedHostPort();
     std::memset(&health_snapshot_, 0, sizeof(health_snapshot_));
     __atomic_store_n(&health_worker_state_, 1, __ATOMIC_RELEASE);
     if (pthread_create(&health_thread_, nullptr, HealthWorker, this) != 0)
@@ -639,8 +642,10 @@ void MoonlightApp::Activate()
             TogglePairing();
         else if (focus_ == 6)
             StartManualHostEntry();
-        else
+        else if (focus_ == 7)
             RemoveHost();
+        else
+            StartPortEntry();
         break;
     case Screen::Games:
         if (focus_ >= 3 && focus_ <= 8 && selected_app_ < backend_.app_count)
@@ -757,12 +762,17 @@ void MoonlightApp::Activate()
 void MoonlightApp::StartManualHostEntry()
 {
     const moonlight_config_host_t *host = SelectedHost();
-    if (radio_ime_request(host && host->manual ? host->address : "", "Add Sunshine PC",
-                          "IPv4 address, for example 192.168.1.50", ManualHostResult, this))
+    char initial[MOONLIGHT_CONFIG_ADDRESS_SIZE + 8] = "";
+    if (host && host->manual)
+        FormatEndpoint(initial, sizeof(initial), host->address, moonlight_config_host_port(host));
+    if (radio_ime_request(initial, "Add Sunshine PC",
+                          "IPv4 address, for example 192.168.1.50 or 192.168.1.50:48989",
+                          ManualHostResult, this))
     {
         prosperolight::ui_sound_play(prosperolight::UiSoundCue::Confirm);
         manual_entry_active_ = true;
-        SetText(document_, "host-action-status", "Enter the Sunshine PC IPv4 address");
+        SetText(document_, "host-action-status",
+                "Enter the Sunshine PC IPv4 address. Add :port if Sunshine does not use 47989.");
     }
     else
     {
@@ -781,14 +791,23 @@ void MoonlightApp::ManualHostResult(const char *text, void *user_data)
 void MoonlightApp::AddManualHost(const char *text)
 {
     char address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
-    const int index = NormalizeIpv4(text, address)
-                          ? moonlight_config_upsert_host(&config_, address, "Sunshine PC", "", true)
-                          : -1;
+    uint16_t port = 0;
+    const bool valid = moonlight_config_parse_endpoint(text, address, &port);
     manual_entry_active_ = false;
+    if (!valid)
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+        SetText(document_, "host-action-status",
+                "Enter an IPv4 address such as 192.168.1.50, or 192.168.1.50:48989 with a port");
+        return;
+    }
+    // Without a port, a PC already saved at this address keeps the port it has.
+    const int index =
+        moonlight_config_upsert_host(&config_, address, port, "Sunshine PC", "", true);
     if (index < 0)
     {
         prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
-        SetText(document_, "host-action-status", "Enter a valid IPv4 address such as 192.168.1.50");
+        SetText(document_, "host-action-status", "The PC list is full. Remove a PC first.");
         return;
     }
     config_.selected_host = static_cast<uint32_t>(index);
@@ -796,6 +815,68 @@ void MoonlightApp::AddManualHost(const char *text)
     selected_app_ = 0;
     RefreshBackend();
     prosperolight::ui_sound_play(prosperolight::UiSoundCue::Success);
+}
+
+void MoonlightApp::StartPortEntry()
+{
+    const moonlight_config_host_t *host = SelectedHost();
+    if (!host)
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+        SetText(document_, "host-action-status", "Add a Sunshine PC before setting its port");
+        return;
+    }
+    char current[8];
+    std::snprintf(current, sizeof(current), "%u", moonlight_config_host_port(host));
+    if (radio_ime_request_number(current, 5, "Sunshine port", "Sunshine port, 47989 by default",
+                                 PortResult, this))
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Confirm);
+        manual_entry_active_ = true;
+        SetText(document_, "host-action-status",
+                "Enter the Port from Sunshine's Network settings. Leave it empty for 47989.");
+    }
+    else
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+        SetText(document_, "host-action-status", "Text entry is currently unavailable");
+    }
+}
+
+void MoonlightApp::PortResult(const char *text, void *user_data)
+{
+    MoonlightApp *app = static_cast<MoonlightApp *>(user_data);
+    if (app)
+        app->SetHostPort(text);
+}
+
+void MoonlightApp::SetHostPort(const char *text)
+{
+    uint16_t port = MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT;
+    const bool blank = !text || text[std::strspn(text, " \t")] == '\0';
+    manual_entry_active_ = false;
+    if (!SelectedHost() || (!blank && !moonlight_config_parse_port(text, &port)))
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+        SetText(document_, "host-action-status",
+                "Enter a port from 1 to 65535. Sunshine uses 47989 unless it was changed.");
+        return;
+    }
+    // Workers hold the previous endpoint: finish them before it changes.
+    FinishHealthWorker();
+    FinishArtworkWorker(true);
+    const int index = moonlight_config_set_host_port(&config_, config_.selected_host, port);
+    if (index < 0)
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+        SetText(document_, "host-action-status", "Could not change the port of this PC.");
+        return;
+    }
+    config_.selected_host = static_cast<uint32_t>(index);
+    (void)moonlight_config_save(&config_);
+    selected_app_ = 0;
+    prosperolight::ui_sound_play(prosperolight::UiSoundCue::Success);
+    RefreshBackend(false);
 }
 
 void MoonlightApp::DiscoverHosts()
@@ -806,7 +887,8 @@ void MoonlightApp::DiscoverHosts()
     for (uint32_t index = 0; index < count; ++index)
     {
         (void)moonlight_config_upsert_host(&config_, discovered[index].address,
-                                           discovered[index].name, "", false);
+                                           discovered[index].http_port, discovered[index].name, "",
+                                           false);
     }
     if (std::memcmp(&before, &config_, sizeof(config_)) != 0)
         (void)moonlight_config_save(&config_);
@@ -818,6 +900,7 @@ void MoonlightApp::TogglePairing()
     FinishArtworkWorker(true);
     artwork_page_start_ = MOONLIGHT_BACKEND_MAX_APPS;
     const char *host = SelectedHostAddress();
+    const uint16_t port = SelectedHostPort();
     if (!host[0])
     {
         prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
@@ -842,7 +925,7 @@ void MoonlightApp::TogglePairing()
     }
     if (!backend_.paired)
     {
-        const int result = moonlight_backend_pair_start(host);
+        const int result = moonlight_backend_pair_start(host, port);
         if (result != 0)
         {
             prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
@@ -881,7 +964,7 @@ void MoonlightApp::TogglePairing()
 
     confirm_unpair_ = false;
     SetText(document_, "host-action-status", "Unpairing this PS5...");
-    const int result = moonlight_backend_unpair(host, &backend_);
+    const int result = moonlight_backend_unpair(host, port, &backend_);
     health_due_ms_ = SDL_GetTicks64() + health_.Record(backend_.online != 0);
     UpdateHost();
     UpdateGames();
@@ -1007,7 +1090,8 @@ void MoonlightApp::FinishStopActiveApp()
     FinishHealthWorker();
     FinishArtworkWorker(false);
     moonlight_backend_snapshot_t refreshed{};
-    const int result = moonlight_backend_stop_app(SelectedHostAddress(), &refreshed);
+    const int result =
+        moonlight_backend_stop_app(SelectedHostAddress(), SelectedHostPort(), &refreshed);
     if (result == 0 || refreshed.app_count)
     {
         backend_ = refreshed;
@@ -1058,20 +1142,22 @@ void MoonlightApp::RefreshBackend(bool discover)
         return;
     }
     SetText(document_, "host-action-status", "Refreshing Sunshine status...");
-    if (std::strcmp(backend_.host, host->address) != 0)
+    const uint16_t port = moonlight_config_host_port(host);
+    if (std::strcmp(backend_.host, host->address) != 0 || backend_.http_port != port)
     {
         std::memset(&backend_, 0, sizeof(backend_));
         std::snprintf(backend_.host, sizeof(backend_.host), "%s", host->address);
+        backend_.http_port = port;
         health_ = {};
     }
     moonlight_backend_snapshot_t refreshed{};
-    const int result = moonlight_backend_refresh(host->address, &refreshed);
+    const int result = moonlight_backend_refresh(host->address, port, &refreshed);
     const bool success = result == 0 && refreshed.online;
     health_due_ms_ = SDL_GetTicks64() + health_.Record(success);
     if (success)
     {
         backend_ = refreshed;
-        const int index = moonlight_config_upsert_host(&config_, host->address, backend_.name,
+        const int index = moonlight_config_upsert_host(&config_, host->address, port, backend_.name,
                                                        backend_.unique_id, host->manual != 0);
         if (index >= 0)
         {
@@ -1109,15 +1195,20 @@ void MoonlightApp::UpdateScreen()
 
 void MoonlightApp::UpdateFocus()
 {
-    const char *const all[] = {"nav-hosts",         "nav-games",       "nav-settings",
-                               "host-card",         "refresh-hosts",   "pair-host",
-                               "add-host",          "remove-host",     "app-card-0",
-                               "app-card-1",        "app-card-2",      "app-card-3",
-                               "app-card-4",        "app-card-5",      "stop-app",
-                               "back-hosts",        "setting-codec",   "setting-resolution",
-                               "setting-framerate", "setting-bitrate", "setting-display-area",
-                               "setting-hdr",       "setting-audio",   "setting-vsync",
-                               "setting-decoder",   "setting-cores"};
+    const char *const all[] = {"nav-hosts",          "nav-games",
+                               "nav-settings",       "host-card",
+                               "refresh-hosts",      "pair-host",
+                               "add-host",           "remove-host",
+                               "port-host",          "app-card-0",
+                               "app-card-1",         "app-card-2",
+                               "app-card-3",         "app-card-4",
+                               "app-card-5",         "stop-app",
+                               "back-hosts",         "setting-codec",
+                               "setting-resolution", "setting-framerate",
+                               "setting-bitrate",    "setting-display-area",
+                               "setting-hdr",        "setting-audio",
+                               "setting-vsync",      "setting-decoder",
+                               "setting-cores"};
     for (const char *id : all)
         SetClass(document_, id, "focused", false);
 
@@ -1137,8 +1228,11 @@ void MoonlightApp::UpdateHost()
     SetText(document_, "host-name", host_name);
     SetText(document_, "host-detail-title", host_name);
     SetText(document_, "sidebar-host-name", host_name);
-    SetText(document_, "sidebar-host-address",
-            selected_host ? selected_host->address : "No PC selected");
+    char endpoint[MOONLIGHT_CONFIG_ADDRESS_SIZE + 8] = "No PC selected";
+    const unsigned port = moonlight_config_host_port(selected_host);
+    if (selected_host)
+        FormatEndpoint(endpoint, sizeof(endpoint), selected_host->address, port);
+    SetText(document_, "sidebar-host-address", endpoint);
     if (selected_host)
     {
         std::snprintf(text, sizeof(text), "PC %u OF %u / LEFT OR RIGHT TO SWITCH",
@@ -1149,8 +1243,11 @@ void MoonlightApp::UpdateHost()
     {
         SetText(document_, "host-position", "REFRESH DISCOVERY OR ADD A PC");
     }
-    SetText(document_, "host-address", backend_.host);
-    SetText(document_, "host-detail-address", backend_.host);
+    SetText(document_, "host-address", selected_host ? endpoint : backend_.host);
+    SetText(document_, "host-detail-address", selected_host ? endpoint : backend_.host);
+    std::snprintf(text, sizeof(text), "Port %u", port);
+    SetText(document_, "port-host-label", text);
+    SetClass(document_, "port-host", "disabled", !selected_host);
     SetClass(document_, "host-status-dot", "online", backend_.online != 0);
     SetClass(document_, "footer-status-dot", "online", backend_.online != 0);
     SetClass(document_, "host-status", "offline", !backend_.online || !backend_.paired);
@@ -1589,6 +1686,11 @@ const char *MoonlightApp::SelectedHostAddress() const
 {
     const moonlight_config_host_t *host = SelectedHost();
     return host ? host->address : "";
+}
+
+uint16_t MoonlightApp::SelectedHostPort() const
+{
+    return moonlight_config_host_port(SelectedHost());
 }
 
 unsigned MoonlightApp::BitrateKbps() const

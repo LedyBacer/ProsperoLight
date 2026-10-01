@@ -39,10 +39,10 @@ Demo available by clicking the image below.
   [measured bitrate limits](#bitrate-limits) before raising the bitrate.
 - H.264 High, HEVC Main, and HEVC Main10 HDR10 support at every available
   resolution.
-- Low-latency DualSense, physical USB keyboard and mouse, controller-driven
-  mouse mode, and an on-screen password keyboard.
-- Automatic Sunshine discovery, manual-IP fallback, persistent multi-PC
-  pairing, application artwork, and launch/resume/stop controls.
+- Low-latency DualSense input for up to four controllers, physical USB keyboard
+  and mouse, controller-driven mouse mode, and an on-screen password keyboard.
+- Automatic Sunshine discovery, manual address and port entry, persistent
+  multi-PC pairing, application artwork, and launch/resume/stop controls.
 - Persistent stream preferences, edge-to-edge or TV-safe presentation,
   independent frame-rate selection, and bitrate presets from 10 to 500 Mbps.
 - Selectable 48 kHz stereo or 5.1 surround Opus audio, native launcher sound
@@ -133,12 +133,15 @@ tooling are maintained in this repository.
 | Title ID | `PPSA99002` |
 | Category | Game |
 | Experimental beta / stable | `01.000.070` / `01.000.060` |
+| In development, not released | `01.000.071`: up to four controllers, Sunshine port per PC |
 | Version source | [`sce_sys/param.json`](sce_sys/param.json) |
 | Writable data | `/download0` only |
 
 ## Features
 
 - Discover Sunshine hosts on the LAN or add an IPv4 address manually.
+- Reach a Sunshine that does not use the default port 47989: each saved PC has
+  its own port, and a discovered PC uses the port it advertises.
 - Remember up to eight PCs, pairing identities, and stream preferences under
   `/download0` across application restarts.
 - Pair with a two-minute PIN dialog and unpair through explicit two-press
@@ -163,6 +166,8 @@ tooling are maintained in this repository.
   surround through PS5 AudioOut.
 - Forward low-latency DualSense controls, with controller/mouse switching and
   a stream keyboard that works at Windows sign-in.
+- Play with up to four controllers: every user signed in on the PS5 is a
+  separate controller on the PC, and controllers can join or leave mid-stream.
 - Forward a physical USB keyboard and mouse directly to Sunshine during a
   stream, including modifiers, navigation/function keys, five mouse buttons,
   and vertical/horizontal scrolling.
@@ -321,7 +326,8 @@ behavior.
 1. Start Sunshine on a PC connected to the same trusted LAN. Wired Ethernet
    for both the PC and PS5 is strongly recommended.
 2. Open ProsperoLight and choose a discovered PC, or select **Add PC** and enter
-   its IPv4 address.
+   its IPv4 address (see [Sunshine on another port](#sunshine-on-another-port)
+   if Sunshine does not use port 47989).
 3. Select **Pair PC**, then enter the displayed PIN in Sunshine within two
    minutes.
 4. Open **Games**, choose Desktop or another advertised application, and press
@@ -336,6 +342,32 @@ again to confirm. This works while the PC is offline and removes only that saved
 entry; it does not revoke pairing on the host or affect other saved PCs. Use
 **Refresh** or **Add PC** to find and pair with the replacement host. A host
 advertising itself on the network may appear again after refresh.
+
+### Sunshine on another port
+
+Sunshine listens on port 47989 unless its **Port** setting (Configuration →
+Network in the Sunshine web UI) was changed. ProsperoLight keeps one port per
+saved PC:
+
+- A PC found on the network uses the port Sunshine advertises. Nothing needs
+  to be typed.
+- Select a PC on **PCs** and choose **Port** to change its port. An empty entry
+  restores 47989.
+- **Add PC** also accepts an address with a port, for example
+  `192.168.1.50:48989`.
+
+Only this one number is needed: Sunshine derives its other ports from it and
+reports them to ProsperoLight. The same address can be saved more than once
+with different ports, for example for two Sunshine instances on one PC.
+
+### More than one controller
+
+Each user signed in on the PS5 plays with their own controller, up to four.
+The user who started ProsperoLight is the first controller on the PC. To add a
+player, turn on another controller and choose a user for it when the PS5 asks,
+before or during a stream; a notification confirms that the controller joined.
+A controller that is switched off, or whose user signs out, is removed from the
+PC, and the next controller to join takes its place.
 
 > [!TIP]
 > For the smoothest 90 or 120 FPS result, choose the resolution, frame rate,
@@ -380,6 +412,10 @@ advertising itself on the network may appear again after refresh.
 | Square while keyboard is open | Send Backspace |
 | Options while keyboard is open | Send Enter and close the keyboard |
 | Circle while keyboard is open | Close the keyboard |
+
+`Select + R1` and `Select + L1` work on every controller. Mouse mode and the
+stream keyboard belong to the first controller; on the others those two
+shortcuts are ordinary button presses for the game.
 
 The stream keyboard contains every printable US-ASCII character used by
 standard passwords. It is not currently a multilingual or Unicode input

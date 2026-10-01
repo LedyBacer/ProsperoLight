@@ -126,6 +126,7 @@ int main()
     options.bitrate_kbps = 80000;
     moonlight::TimingHistogram input;
     input.add(2000);
+    controller_summary = {3, 2, 1, 4, 5, 6};
     save_performance_summary(state, input, &options, 0);
     assert(saved_report.find("\"requested_slices_per_frame\":8,") != std::string::npos);
     const std::string original = saved_report;

@@ -17,6 +17,8 @@
 #define SCE_SYSMODULE_IME_DIALOG UINT16_C(0x0096)
 #define SCE_COMMON_DIALOG_ALREADY_INITIALIZED UINT32_C(0x80B80002)
 #define IME_TEXT_CHARACTERS 127U
+#define IME_TYPE_DEFAULT 0
+#define IME_TYPE_NUMBER 4
 #define IME_OPTION_NO_AUTO_CAPITALIZATION UINT32_C(0x00000002)
 #define IME_OPTION_PASSWORD UINT32_C(0x00000004)
 #define IME_OPTION_NO_LEARNING UINT32_C(0x00000020)
@@ -73,6 +75,8 @@ static char requested_placeholder[96];
 static char requested_title[64];
 static uint32_t requested_option;
 static int32_t requested_enter_label;
+static int32_t requested_type;
+static uint32_t requested_max_length;
 static uint16_t text_buffer[IME_TEXT_CHARACTERS + 1U];
 static uint16_t placeholder[96];
 static uint16_t title[64];
@@ -206,10 +210,15 @@ bool radio_ime_init(void)
 
 static bool request_with_option(const char *value, const char *dialog_title,
                                 const char *dialog_placeholder, uint32_t option,
-                                int32_t enter_label, radio_ime_result_fn callback, void *user_data)
+                                int32_t enter_label, radio_ime_result_fn callback, void *user_data,
+                                int32_t type = IME_TYPE_DEFAULT,
+                                uint32_t max_length = IME_TEXT_CHARACTERS)
 {
     if (active || requested || !module_loaded)
         return false;
+    requested_type = type;
+    requested_max_length =
+        max_length && max_length < IME_TEXT_CHARACTERS ? max_length : IME_TEXT_CHARACTERS;
     clear_sensitive_text();
     SDL_strlcpy(initial_text, value != NULL ? value : "", sizeof(initial_text));
     SDL_strlcpy(requested_title, dialog_title != NULL ? dialog_title : "Text entry",
@@ -239,6 +248,14 @@ bool radio_ime_request_password(const char *dialog_title, const char *dialog_pla
                                user_data);
 }
 
+bool radio_ime_request_number(const char *value, unsigned max_digits, const char *dialog_title,
+                              const char *dialog_placeholder, radio_ime_result_fn callback,
+                              void *user_data)
+{
+    return request_with_option(value, dialog_title, dialog_placeholder, 0, 2, callback, user_data,
+                               IME_TYPE_NUMBER, max_digits);
+}
+
 bool radio_ime_busy(void)
 {
     return requested || active;
@@ -262,16 +279,23 @@ static void start_requested(void)
     sce_ime_dialog_param_t param{};
 
     param.user_id = user_id;
-    param.type = 0;
+    param.type = requested_type;
     param.enter_label = requested_enter_label;
     param.option = requested_option;
-    param.max_text_length = IME_TEXT_CHARACTERS;
+    param.max_text_length = requested_max_length;
     param.input_text_buffer = text_buffer;
     param.horizontal_alignment = 1;
     param.vertical_alignment = 1;
     param.placeholder = placeholder;
     param.title = title;
     active = sceImeDialogInit(&param, NULL) == 0;
+    if (!active && param.type != IME_TYPE_DEFAULT)
+    {
+        // The number pad was refused: the full keyboard still enters digits.
+        param.type = IME_TYPE_DEFAULT;
+        param.max_text_length = IME_TEXT_CHARACTERS;
+        active = sceImeDialogInit(&param, NULL) == 0;
+    }
     started_at = monotonic_milliseconds();
     requested = false;
     if (!active)

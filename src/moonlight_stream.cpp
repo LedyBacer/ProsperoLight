@@ -128,6 +128,10 @@ static_assert(FRAME_SLOT_COUNT >= moonlight::kMaxDecoderDepth + 4u &&
 #define PS5_PAD_SAMPLE_CAPACITY 64
 #define PS5_PAD_OPEN_ATTEMPTS 20u
 #define PS5_PAD_OPEN_RETRY_US 50000u
+// The console signs in up to four users and each owns one controller. The user
+// who started the app is host controller 0; the others take numbers 1-3.
+#define PS5_EXTRA_PAD_COUNT 3u
+#define PS5_USER_SCAN_US UINT64_C(1000000)
 
 extern "C"
 {
@@ -152,6 +156,7 @@ extern "C"
     int32_t sceSysmoduleUnloadModule(uint32_t id);
     int32_t sceUserServiceInitialize(void *params);
     int32_t sceUserServiceGetInitialUser(int32_t *user_id);
+    int32_t sceUserServiceGetLoginUserIdList(int32_t user_ids[4]);
     int32_t sceUserServiceTerminate(void);
     int32_t scePadInit(void);
     int32_t scePadOpen(int32_t user_id, int32_t port_type, int32_t index, const void *params);
@@ -360,6 +365,16 @@ typedef struct controller_event
     int16_t left_x, left_y, right_x, right_y;
 } controller_event_t;
 
+typedef struct ps5_extra_pad
+{
+    int32_t user_id, handle;
+    int open;      // the slot holds a signed-in user's pad
+    int announced; // the host holds a virtual controller for this pad
+    uint32_t last_raw_buttons;
+    controller_event_t last_event;
+    uint64_t last_event_us;
+} ps5_extra_pad_t;
+
 typedef struct ps5_controller_state
 {
     int32_t user_service_result, user_result, pad_init_result;
@@ -384,8 +399,22 @@ typedef struct ps5_controller_state
     uint32_t keyboard_selected;
     int keyboard_shifted;
     std::atomic<int> requested_stop;
+    // Pads of the other signed-in users and the controllers the host holds.
+    ps5_extra_pad_t extra[PS5_EXTRA_PAD_COUNT];
+    uint16_t active_mask;
+    uint64_t next_user_scan_us;
+    int32_t user_scan_result, extra_open_result;
+    uint32_t user_scans, user_scan_errors, extra_open_errors;
+    uint32_t extra_arrivals, extra_removals, extra_events;
+    uint32_t extra_read_errors, extra_send_errors, peak_controllers;
     ps5_pad_sample_t sample_batch[PS5_PAD_SAMPLE_CAPACITY];
 } ps5_controller_state_t;
+
+// Controller activity of the last stream, for the performance summary.
+typedef struct controller_summary
+{
+    uint32_t peak, arrivals, removals, open_errors, send_errors, scan_errors;
+} controller_summary_t;
 
 typedef struct ps5_keyboard_state
 {
@@ -510,6 +539,7 @@ extern "C"
 }
 
 static notification_request_t notification;
+static controller_summary_t controller_summary;
 static std::atomic<int> connection_terminated;
 static std::atomic<int> connection_error;
 static std::atomic<int> connection_failed_stage;
@@ -958,6 +988,13 @@ static void save_performance_summary(const native_renderer_state_t &state,
              (unsigned long long)agc.flip_queries, (unsigned long long)agc.flip_sleeps,
              (unsigned long long)agc.flip_timeouts, state.present_errors,
              PROSPEROLIGHT_GPU_TIMESTAMPS, (unsigned long long)agc.gpu_samples_invalid);
+    ok = ok && report_append(report, sizeof(report), &length,
+                             "\"controllers_peak\":%u,\"controller_arrivals\":%u,"
+                             "\"controller_removals\":%u,\"controller_open_errors\":%u,"
+                             "\"controller_send_errors\":%u,\"user_scan_errors\":%u,\n",
+                             controller_summary.peak, controller_summary.arrivals,
+                             controller_summary.removals, controller_summary.open_errors,
+                             controller_summary.send_errors, controller_summary.scan_errors);
     ok = ok &&
          report_append(
              report, sizeof(report), &length,
@@ -2911,18 +2948,41 @@ static controller_event_t ps5_controller_map_sample(const ps5_pad_sample_t *samp
     return event;
 }
 
-static void ps5_controller_send(ps5_controller_state_t *state, const controller_event_t *event)
+// Every controller packet names all controllers the host should hold: older
+// hosts add and remove their virtual pads from that mask alone.
+static int ps5_controller_announce(ps5_controller_state_t *state, unsigned number)
 {
     static const uint32_t supported_buttons =
         UP_FLAG | DOWN_FLAG | LEFT_FLAG | RIGHT_FLAG | A_FLAG | B_FLAG | X_FLAG | Y_FLAG | LB_FLAG |
         RB_FLAG | PLAY_FLAG | LS_CLK_FLAG | RS_CLK_FLAG | TOUCHPAD_FLAG;
+    const uint16_t mask = (uint16_t)(state->active_mask | (1u << number));
+    const int result = LiSendControllerArrivalEvent((uint8_t)number, mask, LI_CTYPE_PS,
+                                                    supported_buttons, LI_CCAP_ANALOG_TRIGGERS);
+
+    if (result == 0)
+    {
+        state->active_mask = mask;
+        if ((uint32_t)__builtin_popcount(mask) > state->peak_controllers)
+            state->peak_controllers = (uint32_t)__builtin_popcount(mask);
+    }
+    return result;
+}
+
+static int ps5_controller_withdraw(ps5_controller_state_t *state, unsigned number)
+{
+    state->active_mask = (uint16_t)(state->active_mask & ~(1u << number));
+    return LiSendMultiControllerEvent((short)number, (short)state->active_mask, 0, 0, 0, 0, 0, 0,
+                                      0);
+}
+
+static void ps5_controller_send(ps5_controller_state_t *state, const controller_event_t *event)
+{
     uint64_t now;
     int result;
 
     if (!state->announced)
     {
-        result = LiSendControllerArrivalEvent(0, 1, LI_CTYPE_PS, supported_buttons,
-                                              LI_CCAP_ANALOG_TRIGGERS);
+        result = ps5_controller_announce(state, 0);
         state->arrival_result = result;
         if (result != 0)
         {
@@ -2936,9 +2996,9 @@ static void ps5_controller_send(ps5_controller_state_t *state, const controller_
     if (state->last_event_us != 0 && !memcmp(event, &state->last_event, sizeof(*event)) &&
         now - state->last_event_us < CONTROLLER_KEEPALIVE_US)
         return;
-    result =
-        LiSendMultiControllerEvent(0, 1, event->buttons, event->left_trigger, event->right_trigger,
-                                   event->left_x, event->left_y, event->right_x, event->right_y);
+    result = LiSendMultiControllerEvent(0, (short)state->active_mask, event->buttons,
+                                        event->left_trigger, event->right_trigger, event->left_x,
+                                        event->left_y, event->right_x, event->right_y);
     if (result != 0)
     {
         ++state->send_errors;
@@ -3305,12 +3365,223 @@ static void ps5_controller_poll(ps5_controller_state_t *state)
     }
 }
 
+static void ps5_extra_pad_notify(unsigned index, int connected)
+{
+    snprintf(notification.message, sizeof(notification.message), "ProsperoLight: Controller %u %s.",
+             index + 2u, connected ? "connected" : "disconnected");
+    (void)sceKernelSendNotificationRequest(0, &notification, sizeof(notification), 0);
+    (void)lan_http_report_text(notification.message);
+}
+
+static void ps5_extra_pad_send(ps5_controller_state_t *state, unsigned index,
+                               const controller_event_t *event)
+{
+    ps5_extra_pad_t *pad = &state->extra[index];
+    const unsigned number = index + 1u;
+    uint64_t now;
+
+    if (!pad->announced)
+    {
+        if (ps5_controller_announce(state, number) != 0)
+        {
+            ++state->extra_send_errors;
+            return;
+        }
+        pad->announced = 1;
+        pad->last_event_us = 0;
+        ++state->extra_arrivals;
+        ps5_extra_pad_notify(index, 1);
+    }
+    now = monotonic_us();
+    if (pad->last_event_us != 0 && !memcmp(event, &pad->last_event, sizeof(*event)) &&
+        now - pad->last_event_us < CONTROLLER_KEEPALIVE_US)
+        return;
+    if (LiSendMultiControllerEvent((short)number, (short)state->active_mask, event->buttons,
+                                   event->left_trigger, event->right_trigger, event->left_x,
+                                   event->left_y, event->right_x, event->right_y) != 0)
+    {
+        ++state->extra_send_errors;
+        return;
+    }
+    pad->last_event = *event;
+    pad->last_event_us = now;
+    ++state->extra_events;
+}
+
+// Takes the host's virtual controller away; the pad itself stays open.
+static void ps5_extra_pad_withdraw(ps5_controller_state_t *state, unsigned index, int notify)
+{
+    ps5_extra_pad_t *pad = &state->extra[index];
+
+    if (!pad->announced)
+        return;
+    pad->announced = 0;
+    memset(&pad->last_event, 0, sizeof(pad->last_event));
+    if (ps5_controller_withdraw(state, index + 1u) != 0)
+        ++state->extra_send_errors;
+    ++state->extra_removals;
+    if (notify)
+        ps5_extra_pad_notify(index, 0);
+}
+
+static void ps5_extra_pad_close(ps5_controller_state_t *state, unsigned index)
+{
+    ps5_extra_pad_t *pad = &state->extra[index];
+
+    ps5_extra_pad_withdraw(state, index, 1);
+    if (pad->open)
+        (void)scePadClose(pad->handle);
+    memset(pad, 0, sizeof(*pad));
+}
+
+// A user who signs in gets the lowest free controller number and gives it
+// back when signing out. A pad that cannot be opened is retried at the next scan.
+static void ps5_controller_scan_users(ps5_controller_state_t *state)
+{
+    int32_t users[4] = {-1, -1, -1, -1};
+
+    ++state->user_scans;
+    state->user_scan_result = sceUserServiceGetLoginUserIdList(users);
+    if (state->user_scan_result < 0)
+    {
+        ++state->user_scan_errors;
+        return;
+    }
+    for (unsigned index = 0; index < PS5_EXTRA_PAD_COUNT; ++index)
+    {
+        const ps5_extra_pad_t *pad = &state->extra[index];
+        bool signed_in = false;
+
+        if (!pad->open)
+            continue;
+        for (const int32_t user : users)
+            signed_in = signed_in || user == pad->user_id;
+        if (!signed_in)
+            ps5_extra_pad_close(state, index);
+    }
+    for (const int32_t user : users)
+    {
+        ps5_extra_pad_t *free_pad = NULL;
+        bool known = user <= 0 || user == state->user_id;
+
+        for (unsigned index = 0; index < PS5_EXTRA_PAD_COUNT && !known; ++index)
+        {
+            ps5_extra_pad_t *pad = &state->extra[index];
+
+            if (pad->open)
+                known = pad->user_id == user;
+            else if (!free_pad)
+                free_pad = pad;
+        }
+        if (known || !free_pad)
+            continue;
+        const int32_t handle = scePadOpen(user, 0, 0, NULL);
+        if (handle < 0)
+        {
+            state->extra_open_result = handle;
+            ++state->extra_open_errors;
+            continue;
+        }
+        free_pad->user_id = user;
+        free_pad->handle = handle;
+        free_pad->open = 1;
+    }
+}
+
+static void ps5_extra_pad_poll(ps5_controller_state_t *state, unsigned index)
+{
+    static const uint32_t hud_chord = PS5_PAD_BUTTON_TOUCH_PAD | PS5_PAD_BUTTON_R1;
+    ps5_extra_pad_t *pad = &state->extra[index];
+    ps5_pad_sample_t *sample;
+    controller_event_t event;
+    uint32_t raw_buttons;
+    int intercepted;
+    int count;
+
+    if (!pad->open)
+        return;
+    count = scePadRead(pad->handle, state->sample_batch, PS5_PAD_SAMPLE_CAPACITY);
+    if (count < 0)
+    {
+        ++state->extra_read_errors;
+        return;
+    }
+    if (count == 0)
+    {
+        if (pad->announced)
+            ps5_extra_pad_send(state, index, &pad->last_event);
+        return;
+    }
+    sample = ps5_controller_newest_sample(state, count);
+    if (!sample->connected)
+    {
+        // The controller is off: the host must not keep an idle player.
+        pad->last_raw_buttons = 0;
+        ps5_extra_pad_withdraw(state, index, 1);
+        return;
+    }
+    intercepted = (sample->buttons & PS5_PAD_BUTTON_INTERCEPTED) != 0;
+    raw_buttons = intercepted ? 0 : sample->buttons;
+    // Leaving the stream and the statistics overlay work from every controller;
+    // the mouse and the on-screen keyboard stay with the first one.
+    if (moonlight_stream_disconnect_requested(raw_buttons))
+    {
+        state->requested_stop = 1;
+        return;
+    }
+    if (moonlight_stream_hud_toggle_requested(raw_buttons) &&
+        !moonlight_stream_hud_toggle_requested(pad->last_raw_buttons))
+        native_agc_set_hud_enabled(!native_agc_hud_enabled());
+    if (moonlight_stream_hud_toggle_requested(raw_buttons))
+        sample->buttons &= ~hud_chord;
+    pad->last_raw_buttons = raw_buttons;
+    event = ps5_controller_map_sample(sample, intercepted);
+    ps5_extra_pad_send(state, index, &event);
+}
+
+static void ps5_controllers_poll(ps5_controller_state_t *state)
+{
+    const uint64_t now = monotonic_us();
+
+    ps5_controller_poll(state);
+    if (now >= state->next_user_scan_us)
+    {
+        state->next_user_scan_us = now + PS5_USER_SCAN_US;
+        ps5_controller_scan_users(state);
+    }
+    for (unsigned index = 0; index < PS5_EXTRA_PAD_COUNT; ++index)
+        ps5_extra_pad_poll(state, index);
+}
+
+// The controllers present when the session starts: the launch request names them.
+static int ps5_controller_launch_mask(ps5_controller_state_t *state)
+{
+    int mask = 1;
+
+    ps5_controller_scan_users(state);
+    state->next_user_scan_us = monotonic_us() + PS5_USER_SCAN_US;
+    for (unsigned index = 0; index < PS5_EXTRA_PAD_COUNT; ++index)
+    {
+        const ps5_extra_pad_t *pad = &state->extra[index];
+        int count;
+
+        if (!pad->open)
+            continue;
+        count = scePadRead(pad->handle, state->sample_batch, PS5_PAD_SAMPLE_CAPACITY);
+        if (count > 0 && ps5_controller_newest_sample(state, count)->connected)
+            mask |= 1 << (index + 1u);
+    }
+    return mask;
+}
+
 static void ps5_controller_stop(ps5_controller_state_t *state)
 {
     ps5_controller_release_mouse_buttons(state);
+    for (unsigned index = PS5_EXTRA_PAD_COUNT; index-- > 0;)
+        ps5_extra_pad_withdraw(state, index, 0);
     if (!state->announced)
         return;
-    state->removal_result = LiSendMultiControllerEvent(0, 0, 0, 0, 0, 0, 0, 0, 0);
+    state->removal_result = ps5_controller_withdraw(state, 0);
     if (state->removal_result != 0)
         ++state->send_errors;
     state->announced = 0;
@@ -3319,6 +3590,12 @@ static void ps5_controller_stop(ps5_controller_state_t *state)
 static void ps5_controller_shutdown(ps5_controller_state_t *state)
 {
     native_agc_set_keyboard_state(0, 0, 0);
+    for (unsigned index = 0; index < PS5_EXTRA_PAD_COUNT; ++index)
+    {
+        if (state->extra[index].open)
+            (void)scePadClose(state->extra[index].handle);
+        state->extra[index].open = 0;
+    }
     if (state->handle >= 0)
     {
         (void)scePadClose(state->handle);
@@ -3446,7 +3723,8 @@ static void nvhttp_log_sink(const char *message)
 static int prepare_native_session(client_identity_t *identity, gs_server_t *server,
                                   STREAM_CONFIGURATION *configuration,
                                   const native_video_mode_t *mode, int gamepad_mask,
-                                  const char *host, const char *app_name, int requested_app_id)
+                                  const char *host, uint16_t host_port, const char *app_name,
+                                  int requested_app_id)
 {
     app_entry_t *apps = NULL;
     app_entry_t *app;
@@ -3461,7 +3739,7 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
     if (result != GS_OK)
         return result;
     http_init(identity, 1);
-    result = gs_init(server, identity, host, 47989);
+    result = gs_init(server, identity, host, host_port);
     snprintf(notification.message, sizeof(notification.message),
              "Native NVHTTP serverinfo: rc=%08x paired=%u app=%s https=%u codec=%08x error=%s",
              (uint32_t)result, server->paired, server->app_version, server->https_port,
@@ -3591,6 +3869,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     int session_started = 0;
     int controller_result = -1;
     int controller_ready = 0;
+    int launch_mask = 0;
     int physical_input_ready = 0;
     int first_frame_timed_out = 0;
     int terminated = 0;
@@ -3605,6 +3884,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     uint32_t synthetic_motion_errors = 0;
     uint64_t synthetic_motion_next_us = 0;
     const char *host = options && options->host && options->host[0] ? options->host : "";
+    const uint16_t host_port = options ? options->host_port : 0;
     const char *app_name =
         options && options->app_name && options->app_name[0] ? options->app_name : "Desktop";
     const int app_id = options ? options->app_id : 0;
@@ -3836,12 +4116,16 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     controller_ready = controller_result == 0;
     if (controller_ready && controller.user_id >= 0)
         physical_input_ready = ps5_physical_input_init(&physical_input, controller.user_id) == 0;
+    // Before the loading worker starts reading the first pad on its own thread.
+    if (controller_ready)
+        launch_mask = ps5_controller_launch_mask(&controller);
     snprintf(notification.message, sizeof(notification.message),
              "Moonlight controller init: ready=%d user_service=%08x user=%08x pad_init=%08x "
-             "handle=%08x launch_mask=%x",
+             "handle=%08x launch_mask=%x user_scan=%08x pad_open=%08x",
              controller_ready, (uint32_t)controller.user_service_result,
              (uint32_t)controller.user_result, (uint32_t)controller.pad_init_result,
-             (uint32_t)controller.handle, controller_ready ? 1 : 0);
+             (uint32_t)controller.handle, launch_mask, (uint32_t)controller.user_scan_result,
+             (uint32_t)controller.extra_open_result);
     (void)lan_http_report_text(notification.message);
     if (!controller_ready)
     {
@@ -3873,8 +4157,8 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         moonlight::client_refresh_x100(stream_fps, loading.output_refresh_x100);
     stream_config.clientRefreshRateX100 = (int)renderer.client_refresh_x100;
     identity_initialized = 1;
-    result = prepare_native_session(&client_identity, &gs_server, &stream_config, mode,
-                                    controller_ready ? 1 : 0, host, app_name, app_id);
+    result = prepare_native_session(&client_identity, &gs_server, &stream_config, mode, launch_mask,
+                                    host, host_port, app_name, app_id);
     if (result != GS_OK)
         goto done;
     session_started = 1;
@@ -3969,7 +4253,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
             }
         }
         if (controller_ready)
-            ps5_controller_poll(&controller);
+            ps5_controllers_poll(&controller);
         if (physical_input_ready)
             ps5_physical_input_poll(&physical_input);
         if (std::atomic_load_explicit(&renderer.presented, std::memory_order_relaxed) == 0 &&
@@ -4198,6 +4482,22 @@ done:
         controller.mouse_mode, controller.mouse_toggles, controller.mouse_motion_events,
         controller.mouse_button_events, controller.mouse_scroll_events, controller.mouse_errors);
     (void)lan_http_report_text(notification.message);
+    snprintf(notification.message, sizeof(notification.message),
+             "Moonlight extra controllers: launch_mask=%x peak=%u arrivals=%u removals=%u "
+             "events=%u read_errors=%u send_errors=%u scans=%u scan_errors=%u scan=%08x "
+             "open_errors=%u open=%08x",
+             launch_mask, controller.peak_controllers, controller.extra_arrivals,
+             controller.extra_removals, controller.extra_events, controller.extra_read_errors,
+             controller.extra_send_errors, controller.user_scans, controller.user_scan_errors,
+             (uint32_t)controller.user_scan_result, controller.extra_open_errors,
+             (uint32_t)controller.extra_open_result);
+    (void)lan_http_report_text(notification.message);
+    controller_summary = {controller.peak_controllers,
+                          controller.extra_arrivals,
+                          controller.extra_removals,
+                          controller.extra_open_errors,
+                          controller.send_errors + controller.extra_send_errors,
+                          controller.user_scan_errors};
     ps5_physical_input_shutdown(&physical_input);
     snprintf(notification.message, sizeof(notification.message),
              "Moonlight physical input result: ready=%d keyboard_module=%08x open=%08x handles=%u "

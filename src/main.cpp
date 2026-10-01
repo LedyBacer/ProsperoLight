@@ -109,6 +109,7 @@ static_assert(sizeof(ScePngDecImageInfo) == 16);
 struct LauncherSelection
 {
     char host[MOONLIGHT_CONFIG_ADDRESS_SIZE] = {};
+    std::uint16_t host_port = 0;
     char app_name[64] = {};
     int app_id = 0;
     unsigned bitrate_kbps = 20000;
@@ -1085,6 +1086,7 @@ MoonlightApp::Command RunLauncher(LauncherSelection *selection, const char *stre
             {
                 std::snprintf(selection->host, sizeof(selection->host), "%s",
                               app.SelectedHostAddress());
+                selection->host_port = app.SelectedHostPort();
                 std::snprintf(selection->app_name, sizeof(selection->app_name), "%s",
                               app.SelectedAppName());
                 selection->app_id = app.SelectedAppId();
@@ -1158,6 +1160,7 @@ int main()
         moonlight_stream_options_t options{};
         moonlight_stream_metrics_t metrics{};
         options.host = selection.host;
+        options.host_port = selection.host_port;
         options.app_name = selection.app_name;
         options.app_id = selection.app_id;
         options.bitrate_kbps = selection.bitrate_kbps;

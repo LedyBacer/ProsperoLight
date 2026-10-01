@@ -37,7 +37,7 @@ typedef struct moonlight_backend_snapshot {
     uint32_t online;
     uint32_t paired;
     uint16_t https_port;
-    uint16_t reserved0;
+    uint16_t http_port;
     int current_app_id;
     uint32_t hevc_supported;
     uint32_t main10_supported;
@@ -50,14 +50,15 @@ typedef struct moonlight_backend_snapshot {
     moonlight_backend_app_t apps[MOONLIGHT_BACKEND_MAX_APPS];
 } moonlight_backend_snapshot_t;
 
-int moonlight_backend_refresh(const char *host,
+/* http_port is the PC's Sunshine port; 0 selects the default. */
+int moonlight_backend_refresh(const char *host, uint16_t http_port,
                               moonlight_backend_snapshot_t *snapshot);
-int moonlight_backend_pair_start(const char *host);
+int moonlight_backend_pair_start(const char *host, uint16_t http_port);
 moonlight_backend_pair_state_t moonlight_backend_pair_poll(
     moonlight_backend_snapshot_t *snapshot, char pin[5]);
-int moonlight_backend_unpair(const char *host,
+int moonlight_backend_unpair(const char *host, uint16_t http_port,
                              moonlight_backend_snapshot_t *snapshot);
-int moonlight_backend_stop_app(const char *host,
+int moonlight_backend_stop_app(const char *host, uint16_t http_port,
                                moonlight_backend_snapshot_t *snapshot);
 int moonlight_backend_fetch_app_artwork(const char *host,
                                         uint16_t https_port, int app_id);

@@ -115,12 +115,35 @@ Nothing is installed globally by these optional bootstrappers.
   `RECONNECTING`, not temporarily collapse to an empty catalogue.
 - Verify the same address answers `http://<host>:47989/serverinfo` from another
   LAN client before changing Sunshine or the PS5.
+- If Sunshine's **Port** setting is not 47989, the saved PC must use the same
+  number: select the PC, choose **Port** and enter it, then use that number in
+  the URL above. A PC added by discovery already has the advertised port; a PC
+  added by address has 47989 unless a port was typed as `address:port`. The
+  refresh message names a refused or timed-out connection, which is what a
+  wrong port looks like.
 - PS5 network descriptors must be configured through `libSceNet`. In
   particular, use the platform adapter's `ioctl(FIONBIO)` path; libc `fcntl()`
   handles filesystem descriptors and may reject a network handle before
   `connect()` is attempted.
 - The launcher includes the failed TCP stage and numeric error in its refresh
   message. Preserve that text when reporting a failure.
+
+## A second controller does not reach the PC
+
+- The PS5 gives a controller to a signed-in user. Turn the controller on and
+  choose a user when the PS5 asks; a controller without a user is not visible
+  to ProsperoLight. The notification `Controller 2 connected` confirms that
+  the PC now has it.
+- The first controller is the user who started ProsperoLight. The others get
+  the next free number in the order they join, up to four in total.
+- Sunshine must be able to create another virtual controller. If the first
+  controller works and the second is confirmed on the PS5 but missing on the
+  PC, check Sunshine's log for a failed gamepad allocation and the installed
+  virtual-controller driver.
+- After a stream, `performance-last.json` records `controllers_peak`,
+  `controller_arrivals`, `controller_removals`, `controller_open_errors` and
+  `user_scan_errors`. A peak of 1 with no errors means the PS5 never reported a
+  second signed-in user with a connected controller.
 
 ## Launching a stream stays black before the Connecting screen
 

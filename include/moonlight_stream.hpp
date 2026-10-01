@@ -15,6 +15,7 @@ extern "C" {
 
 typedef struct moonlight_stream_options {
     const char *host;
+    uint16_t host_port; /* Sunshine port of that PC; 0 selects the default */
     const char *app_name;
     int app_id;
     uint32_t bitrate_kbps;

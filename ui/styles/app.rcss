@@ -109,6 +109,7 @@ button.focused > .focused-chrome { display: block; }
 .action-secondary { left: 300px; }
 #add-host { left: 566px; }
 #remove-host { left: 34px; top: 540px; }
+#port-host { top: 540px; }
 .disabled { color: #679bcc; }
 .action-status { position: absolute; left: 34px; top: 546px; width: 820px; height: 40px; color: #84c9ff; font-size: 20px; line-height: 32px; }
 #host-action-status { top: 638px; height: 64px; }

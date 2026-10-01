@@ -12,6 +12,7 @@
 #include <string.h>
 
 #define DNS_PTR 12U
+#define DNS_SRV 33U
 #define DNS_HEADER_SIZE 12U
 #define NET_AF_INET 2
 #define NET_SOCK_DGRAM 2
@@ -142,57 +143,100 @@ static int read_name(const uint8_t *packet, size_t length, size_t *cursor, char 
     return 0;
 }
 
-static int response_name(const uint8_t *packet, size_t length, char name[64])
+static int ascii_ends_with(const char *text, const char *suffix)
 {
-    static const char service[] = "_nvstream._tcp.local";
+    const size_t text_length = strlen(text);
+    const size_t suffix_length = strlen(suffix);
+
+    return text_length >= suffix_length && ascii_equal(text + text_length - suffix_length, suffix);
+}
+
+static moonlight_discovered_service_t *find_service(moonlight_discovered_service_t *services,
+                                                    uint32_t *count, uint32_t capacity,
+                                                    const char *instance)
+{
+    moonlight_discovered_service_t *service;
+    const char *dot = strchr(instance, '.');
+    const size_t label = dot ? (size_t)(dot - instance) : strlen(instance);
+    uint32_t index;
+
+    for (index = 0; index < *count; ++index)
+    {
+        if (ascii_equal(services[index].instance, instance))
+            return &services[index];
+    }
+    if (*count >= capacity)
+        return NULL;
+    service = &services[(*count)++];
+    memset(service, 0, sizeof(*service));
+    snprintf(service->instance, sizeof(service->instance), "%s", instance);
+    if (label)
+        snprintf(service->name, sizeof(service->name), "%.*s", (int)label, instance);
+    else
+        snprintf(service->name, sizeof(service->name), "Sunshine PC");
+    return service;
+}
+
+// Every Sunshine instance in one reply: the PTR answer names it and its SRV
+// record, usually in the additional section, carries the port it listens on.
+uint32_t moonlight_discovery_parse_response(const uint8_t *packet, size_t length,
+                                            moonlight_discovered_service_t *services,
+                                            uint32_t capacity)
+{
+    static const char service_type[] = "_nvstream._tcp.local";
+    static const char instance_suffix[] = "._nvstream._tcp.local";
     char owner[128];
     char target[128];
     size_t cursor = DNS_HEADER_SIZE;
+    uint32_t count = 0;
     uint32_t records;
     uint16_t questions;
     uint32_t index;
 
-    if (length < DNS_HEADER_SIZE || !(read_u16(packet + 2) & 0x8000U))
+    if (!packet || !services || !capacity || length < DNS_HEADER_SIZE ||
+        !(read_u16(packet + 2) & 0x8000U))
         return 0;
     questions = read_u16(packet + 4);
     records = (uint32_t)read_u16(packet + 6) + read_u16(packet + 8) + read_u16(packet + 10);
     for (index = 0; index < questions; ++index)
     {
         if (!read_name(packet, length, &cursor, owner, sizeof(owner)) || cursor + 4 > length)
-            return 0;
+            return count;
         cursor += 4;
     }
     for (index = 0; index < records; ++index)
     {
+        moonlight_discovered_service_t *service;
         uint16_t type;
         uint16_t data_length;
         size_t data_cursor;
+
         if (!read_name(packet, length, &cursor, owner, sizeof(owner)) || cursor + 10 > length)
-            return 0;
+            return count;
         type = read_u16(packet + cursor);
         data_length = read_u16(packet + cursor + 8);
         cursor += 10;
         if (cursor + data_length > length)
-            return 0;
-        if (type == DNS_PTR && ascii_equal(owner, service))
+            return count;
+        if (type == DNS_PTR && ascii_equal(owner, service_type))
         {
-            char *dot;
             data_cursor = cursor;
-            if (!read_name(packet, length, &data_cursor, target, sizeof(target)))
-                return 0;
-            dot = strchr(target, '.');
-            if (dot)
-                *dot = 0;
-            snprintf(name, 64, "%s", target[0] ? target : "Sunshine PC");
-            return 1;
+            if (read_name(packet, length, &data_cursor, target, sizeof(target)) && target[0])
+                (void)find_service(services, &count, capacity, target);
+        }
+        else if (type == DNS_SRV && data_length >= 6 && ascii_ends_with(owner, instance_suffix))
+        {
+            service = find_service(services, &count, capacity, owner);
+            if (service)
+                service->http_port = read_u16(packet + cursor + 4);
         }
         cursor += data_length;
     }
-    return 0;
+    return count;
 }
 
 static int add_host(moonlight_discovered_host_t *hosts, uint32_t *count, uint32_t capacity,
-                    const net_sockaddr_in_t *source, const char *name)
+                    const net_sockaddr_in_t *source, const moonlight_discovered_service_t *service)
 {
     const uint8_t *octets = (const uint8_t *)&source->address;
     char address[64];
@@ -201,14 +245,20 @@ static int add_host(moonlight_discovered_host_t *hosts, uint32_t *count, uint32_
     snprintf(address, sizeof(address), "%u.%u.%u.%u", octets[0], octets[1], octets[2], octets[3]);
     for (index = 0; index < *count; ++index)
     {
-        if (strcmp(hosts[index].address, address) == 0)
+        if (strcmp(hosts[index].address, address) != 0)
+            continue;
+        // A repeated reply may be the first to carry the port.
+        if (!hosts[index].http_port)
+            hosts[index].http_port = service->http_port;
+        if (!service->http_port || hosts[index].http_port == service->http_port)
             return 0;
     }
     if (*count >= capacity)
         return 0;
     snprintf(hosts[*count].address, sizeof(hosts[*count].address), "%s", address);
     snprintf(hosts[*count].name, sizeof(hosts[*count].name), "%s",
-             name && name[0] ? name : "Sunshine PC");
+             service->name[0] ? service->name : "Sunshine PC");
+    hosts[*count].http_port = service->http_port;
     ++*count;
     return 1;
 }
@@ -256,13 +306,19 @@ uint32_t moonlight_discover_hosts(moonlight_discovered_host_t *hosts, uint32_t c
             uint8_t packet[1500];
             net_sockaddr_in_t source;
             uint32_t source_length = sizeof(source);
-            char name[64];
+            moonlight_discovered_service_t services[MOONLIGHT_DISCOVERY_MAX_SERVICES];
+            uint32_t service;
+            uint32_t found;
             int received =
                 sceNetRecvfrom(socket, packet, sizeof(packet), 0, &source, &source_length);
             if (received <= 0)
                 break;
-            if (source.family == NET_AF_INET && response_name(packet, (size_t)received, name))
-                add_host(hosts, &count, capacity, &source, name);
+            if (source.family != NET_AF_INET)
+                continue;
+            found = moonlight_discovery_parse_response(packet, (size_t)received, services,
+                                                       MOONLIGHT_DISCOVERY_MAX_SERVICES);
+            for (service = 0; service < found; ++service)
+                add_host(hosts, &count, capacity, &source, &services[service]);
         }
     }
 

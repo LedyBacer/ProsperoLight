@@ -12,7 +12,7 @@
 #include <string.h>
 
 #define CONFIG_MAGIC UINT32_C(0x504c4346)
-#define CONFIG_VERSION 6U
+#define CONFIG_VERSION 7U
 #define CONFIG_PATH "/download0/prosperolight-config.bin"
 #define CONFIG_TEMP_PATH "/download0/prosperolight-config.tmp"
 #define OPEN_READ_ONLY 0x0000
@@ -28,13 +28,22 @@ typedef struct config_file
     moonlight_config_t config;
 } config_file_t;
 
+// Versions 1-6 stored a PC without its port.
+typedef struct legacy_config_host
+{
+    char address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
+    char name[MOONLIGHT_CONFIG_NAME_SIZE];
+    char unique_id[MOONLIGHT_CONFIG_UNIQUE_ID_SIZE];
+    uint32_t manual;
+} legacy_config_host_t;
+
 typedef struct legacy_config_v1
 {
     uint32_t host_count;
     uint32_t selected_host;
     uint32_t bitrate_mbps;
     uint32_t display_area;
-    moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
 } legacy_config_v1_t;
 
 typedef struct legacy_config_file_v1
@@ -54,7 +63,7 @@ typedef struct legacy_config_v2
     uint32_t display_area;
     uint32_t video_codec;
     uint32_t stream_resolution;
-    moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
 } legacy_config_v2_t;
 
 typedef struct legacy_config_file_v2
@@ -75,7 +84,7 @@ typedef struct legacy_config_v3
     uint32_t video_codec;
     uint32_t stream_resolution;
     uint32_t hdr_enabled;
-    moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
 } legacy_config_v3_t;
 
 typedef struct legacy_config_file_v3
@@ -97,7 +106,7 @@ typedef struct legacy_config_v4
     uint32_t stream_resolution;
     uint32_t stream_fps;
     uint32_t hdr_enabled;
-    moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
 } legacy_config_v4_t;
 
 typedef struct legacy_config_file_v4
@@ -120,7 +129,7 @@ typedef struct legacy_config_v5
     uint32_t stream_fps;
     uint32_t hdr_enabled;
     uint32_t audio_configuration;
-    moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
 } legacy_config_v5_t;
 
 typedef struct legacy_config_file_v5
@@ -131,6 +140,32 @@ typedef struct legacy_config_file_v5
     uint32_t reserved;
     legacy_config_v5_t config;
 } legacy_config_file_v5_t;
+
+typedef struct legacy_config_v6
+{
+    uint32_t host_count;
+    uint32_t selected_host;
+    uint32_t bitrate_mbps;
+    uint32_t display_area;
+    uint32_t video_codec;
+    uint32_t stream_resolution;
+    uint32_t stream_fps;
+    uint32_t hdr_enabled;
+    uint32_t audio_configuration;
+    uint32_t vsync_enabled;
+    uint32_t decoder_pipeline;
+    uint32_t decoder_cores;
+    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+} legacy_config_v6_t;
+
+typedef struct legacy_config_file_v6
+{
+    uint32_t magic;
+    uint32_t version;
+    uint32_t checksum;
+    uint32_t reserved;
+    legacy_config_v6_t config;
+} legacy_config_file_v6_t;
 
 extern "C"
 {
@@ -210,6 +245,22 @@ static void copy_text(char *destination, size_t capacity, const char *source)
     snprintf(destination, capacity, "%s", source ? source : "");
 }
 
+static void copy_legacy_hosts(moonlight_config_t *config, const legacy_config_host_t *hosts)
+{
+    uint32_t index;
+
+    for (index = 0; index < MOONLIGHT_CONFIG_MAX_HOSTS; ++index)
+    {
+        moonlight_config_host_t *host = &config->hosts[index];
+
+        memcpy(host->address, hosts[index].address, sizeof(host->address));
+        memcpy(host->name, hosts[index].name, sizeof(host->name));
+        memcpy(host->unique_id, hosts[index].unique_id, sizeof(host->unique_id));
+        host->manual = hosts[index].manual;
+        host->http_port = 0;
+    }
+}
+
 void moonlight_config_defaults(moonlight_config_t *config)
 {
     if (!config)
@@ -230,6 +281,7 @@ void moonlight_config_defaults(moonlight_config_t *config)
 bool moonlight_config_load(moonlight_config_t *config)
 {
     config_file_t file;
+    legacy_config_file_v6_t legacy_v6;
     legacy_config_file_v5_t legacy_v5;
     legacy_config_file_v4_t legacy_v4;
     legacy_config_file_v3_t legacy_v3;
@@ -247,6 +299,25 @@ bool moonlight_config_load(moonlight_config_t *config)
     {
         *config = file.config;
     }
+    else if (read_exact(CONFIG_PATH, &legacy_v6, sizeof(legacy_v6)) &&
+             legacy_v6.magic == CONFIG_MAGIC && legacy_v6.version == 6U &&
+             legacy_v6.checksum == checksum(&legacy_v6.config, sizeof(legacy_v6.config)) &&
+             legacy_v6.config.host_count <= MOONLIGHT_CONFIG_MAX_HOSTS)
+    {
+        config->host_count = legacy_v6.config.host_count;
+        config->selected_host = legacy_v6.config.selected_host;
+        config->bitrate_mbps = legacy_v6.config.bitrate_mbps;
+        config->display_area = legacy_v6.config.display_area;
+        config->video_codec = legacy_v6.config.video_codec;
+        config->stream_resolution = legacy_v6.config.stream_resolution;
+        config->stream_fps = legacy_v6.config.stream_fps;
+        config->hdr_enabled = legacy_v6.config.hdr_enabled;
+        config->audio_configuration = legacy_v6.config.audio_configuration;
+        config->vsync_enabled = legacy_v6.config.vsync_enabled;
+        config->decoder_pipeline = legacy_v6.config.decoder_pipeline;
+        config->decoder_cores = legacy_v6.config.decoder_cores;
+        copy_legacy_hosts(config, legacy_v6.config.hosts);
+    }
     else if (read_exact(CONFIG_PATH, &legacy_v5, sizeof(legacy_v5)) &&
              legacy_v5.magic == CONFIG_MAGIC && legacy_v5.version == 5U &&
              legacy_v5.checksum == checksum(&legacy_v5.config, sizeof(legacy_v5.config)) &&
@@ -261,7 +332,7 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->stream_fps = legacy_v5.config.stream_fps;
         config->hdr_enabled = legacy_v5.config.hdr_enabled;
         config->audio_configuration = legacy_v5.config.audio_configuration;
-        memcpy(config->hosts, legacy_v5.config.hosts, sizeof(config->hosts));
+        copy_legacy_hosts(config, legacy_v5.config.hosts);
     }
     else if (read_exact(CONFIG_PATH, &legacy_v4, sizeof(legacy_v4)) &&
              legacy_v4.magic == CONFIG_MAGIC && legacy_v4.version == 4U &&
@@ -276,7 +347,7 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->stream_resolution = legacy_v4.config.stream_resolution;
         config->stream_fps = legacy_v4.config.stream_fps;
         config->hdr_enabled = legacy_v4.config.hdr_enabled;
-        memcpy(config->hosts, legacy_v4.config.hosts, sizeof(config->hosts));
+        copy_legacy_hosts(config, legacy_v4.config.hosts);
     }
     else if (read_exact(CONFIG_PATH, &legacy_v3, sizeof(legacy_v3)) &&
              legacy_v3.magic == CONFIG_MAGIC && legacy_v3.version == 3U &&
@@ -290,7 +361,7 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->video_codec = legacy_v3.config.video_codec;
         config->stream_resolution = legacy_v3.config.stream_resolution;
         config->hdr_enabled = legacy_v3.config.hdr_enabled;
-        memcpy(config->hosts, legacy_v3.config.hosts, sizeof(config->hosts));
+        copy_legacy_hosts(config, legacy_v3.config.hosts);
     }
     else if (read_exact(CONFIG_PATH, &legacy_v2, sizeof(legacy_v2)) &&
              legacy_v2.magic == CONFIG_MAGIC && legacy_v2.version == 2U &&
@@ -303,7 +374,7 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->display_area = legacy_v2.config.display_area;
         config->video_codec = legacy_v2.config.video_codec;
         config->stream_resolution = legacy_v2.config.stream_resolution;
-        memcpy(config->hosts, legacy_v2.config.hosts, sizeof(config->hosts));
+        copy_legacy_hosts(config, legacy_v2.config.hosts);
     }
     else
     {
@@ -316,13 +387,14 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->selected_host = legacy.config.selected_host;
         config->bitrate_mbps = legacy.config.bitrate_mbps;
         config->display_area = legacy.config.display_area;
-        memcpy(config->hosts, legacy.config.hosts, sizeof(config->hosts));
+        copy_legacy_hosts(config, legacy.config.hosts);
     }
     for (index = 0; index < config->host_count; ++index)
     {
         config->hosts[index].address[MOONLIGHT_CONFIG_ADDRESS_SIZE - 1] = 0;
         config->hosts[index].name[MOONLIGHT_CONFIG_NAME_SIZE - 1] = 0;
         config->hosts[index].unique_id[MOONLIGHT_CONFIG_UNIQUE_ID_SIZE - 1] = 0;
+        config->hosts[index].http_port = moonlight_config_host_port(&config->hosts[index]);
     }
     if (config->host_count == 0)
         config->selected_host = 0;
@@ -370,11 +442,126 @@ bool moonlight_config_save(const moonlight_config_t *config)
     return write_atomic(&file, sizeof(file));
 }
 
-int moonlight_config_upsert_host(moonlight_config_t *config, const char *address, const char *name,
-                                 const char *unique_id, bool manual)
+uint16_t moonlight_config_host_port(const moonlight_config_host_t *host)
+{
+    return host && host->http_port && host->http_port <= UINT16_MAX
+               ? (uint16_t)host->http_port
+               : (uint16_t)MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT;
+}
+
+static const char *skip_spaces(const char *text)
+{
+    while (*text == ' ' || *text == '\t')
+        ++text;
+    return text;
+}
+
+// Unsigned decimal digits only; NULL when there are none or the value exceeds `maximum`.
+static const char *parse_number(const char *text, unsigned maximum, unsigned *value)
+{
+    const char *cursor = text;
+    unsigned result = 0;
+
+    while (*cursor >= '0' && *cursor <= '9')
+    {
+        result = result * 10U + (unsigned)(*cursor - '0');
+        if (result > maximum)
+            return NULL;
+        ++cursor;
+    }
+    if (cursor == text)
+        return NULL;
+    *value = result;
+    return cursor;
+}
+
+bool moonlight_config_parse_port(const char *text, uint16_t *http_port)
+{
+    unsigned port = 0;
+    const char *cursor;
+
+    if (!text || !http_port)
+        return false;
+    cursor = parse_number(skip_spaces(text), UINT16_MAX, &port);
+    if (!cursor || !port || *skip_spaces(cursor))
+        return false;
+    *http_port = (uint16_t)port;
+    return true;
+}
+
+bool moonlight_config_parse_endpoint(const char *text, char address[MOONLIGHT_CONFIG_ADDRESS_SIZE],
+                                     uint16_t *http_port)
+{
+    unsigned octets[4] = {0, 0, 0, 0};
+    unsigned port = 0;
+    unsigned index;
+    const char *cursor;
+
+    if (!text || !address || !http_port)
+        return false;
+    cursor = skip_spaces(text);
+    for (index = 0; index < 4; ++index)
+    {
+        if (index && *cursor++ != '.')
+            return false;
+        cursor = parse_number(cursor, 255, &octets[index]);
+        if (!cursor)
+            return false;
+    }
+    if (*cursor == ':')
+    {
+        cursor = parse_number(cursor + 1, UINT16_MAX, &port);
+        if (!cursor || !port)
+            return false;
+    }
+    if (*skip_spaces(cursor))
+        return false;
+    snprintf(address, MOONLIGHT_CONFIG_ADDRESS_SIZE, "%u.%u.%u.%u", octets[0], octets[1], octets[2],
+             octets[3]);
+    *http_port = (uint16_t)port;
+    return true;
+}
+
+// Keeps the PC at `index` and folds every other entry for the same endpoint or
+// the same Sunshine identity into it. Returns the PC's index afterwards.
+static uint32_t merge_duplicates(moonlight_config_t *config, uint32_t index)
+{
+    moonlight_config_host_t *host = &config->hosts[index];
+    uint32_t duplicate = 0;
+
+    while (duplicate < config->host_count)
+    {
+        moonlight_config_host_t *other = &config->hosts[duplicate];
+        const bool same_endpoint =
+            duplicate != index && strcmp(other->address, host->address) == 0 &&
+            moonlight_config_host_port(other) == moonlight_config_host_port(host);
+        const bool same_identity = duplicate != index && host->unique_id[0] &&
+                                   other->unique_id[0] &&
+                                   strcmp(other->unique_id, host->unique_id) == 0;
+        if (!same_endpoint && !same_identity)
+        {
+            ++duplicate;
+            continue;
+        }
+        host->manual = host->manual || other->manual;
+        if (config->selected_host == duplicate || config->selected_host == index)
+            config->selected_host = index - (duplicate < index ? 1U : 0U);
+        else if (config->selected_host > duplicate)
+            --config->selected_host;
+        memmove(other, other + 1, (config->host_count - duplicate - 1) * sizeof(*other));
+        memset(&config->hosts[--config->host_count], 0, sizeof(config->hosts[0]));
+        if (duplicate < index)
+            --index;
+        host = &config->hosts[index];
+    }
+    return index;
+}
+
+int moonlight_config_upsert_host(moonlight_config_t *config, const char *address,
+                                 uint16_t http_port, const char *name, const char *unique_id,
+                                 bool manual)
 {
     uint32_t index;
-    uint32_t duplicate;
     char input_address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
     char input_name[MOONLIGHT_CONFIG_NAME_SIZE];
     char input_unique_id[MOONLIGHT_CONFIG_UNIQUE_ID_SIZE];
@@ -390,7 +577,8 @@ int moonlight_config_upsert_host(moonlight_config_t *config, const char *address
         host = &config->hosts[index];
         if ((input_unique_id[0] && host->unique_id[0] &&
              strcmp(host->unique_id, input_unique_id) == 0) ||
-            strcmp(host->address, input_address) == 0)
+            (strcmp(host->address, input_address) == 0 &&
+             (!http_port || moonlight_config_host_port(host) == http_port)))
             goto update;
     }
     if (config->host_count >= MOONLIGHT_CONFIG_MAX_HOSTS)
@@ -401,6 +589,7 @@ int moonlight_config_upsert_host(moonlight_config_t *config, const char *address
 
 update:
     copy_text(host->address, sizeof(host->address), input_address);
+    host->http_port = http_port ? http_port : moonlight_config_host_port(host);
     if (input_name[0])
         copy_text(host->name, sizeof(host->name), input_name);
     else if (!host->name[0])
@@ -408,32 +597,21 @@ update:
     if (input_unique_id[0])
         copy_text(host->unique_id, sizeof(host->unique_id), input_unique_id);
     host->manual = host->manual || manual;
+    return (int)merge_duplicates(config, index);
+}
 
-    duplicate = 0;
-    while (duplicate < config->host_count)
+int moonlight_config_set_host_port(moonlight_config_t *config, uint32_t index, uint16_t http_port)
+{
+    if (!config || index >= config->host_count || config->host_count > MOONLIGHT_CONFIG_MAX_HOSTS ||
+        !http_port)
+        return -1;
+    if (moonlight_config_host_port(&config->hosts[index]) != http_port)
     {
-        moonlight_config_host_t *other = &config->hosts[duplicate];
-        const bool same_address = duplicate != index && strcmp(other->address, host->address) == 0;
-        const bool same_identity = duplicate != index && host->unique_id[0] &&
-                                   other->unique_id[0] &&
-                                   strcmp(other->unique_id, host->unique_id) == 0;
-        if (!same_address && !same_identity)
-        {
-            ++duplicate;
-            continue;
-        }
-        host->manual = host->manual || other->manual;
-        if (config->selected_host == duplicate || config->selected_host == index)
-            config->selected_host = index - (duplicate < index ? 1U : 0U);
-        else if (config->selected_host > duplicate)
-            --config->selected_host;
-        memmove(other, other + 1, (config->host_count - duplicate - 1) * sizeof(*other));
-        --config->host_count;
-        if (duplicate < index)
-            --index;
-        host = &config->hosts[index];
+        // Another port is another Sunshine instance until a refresh says otherwise.
+        config->hosts[index].unique_id[0] = 0;
+        config->hosts[index].http_port = http_port;
     }
-    return (int)index;
+    return (int)merge_duplicates(config, index);
 }
 
 bool moonlight_config_remove_host(moonlight_config_t *config, uint32_t index)

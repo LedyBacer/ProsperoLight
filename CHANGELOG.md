@@ -1,5 +1,33 @@
 # Changelog
 
+## 01.000.071
+
+### Development build — multiple controllers and a Sunshine port per PC
+
+Not released. It adds two features to experimental beta **01.000.070**; the
+01.000.070 notes below still apply.
+
+- **Up to four controllers.** Every user signed in on the PS5 plays with their
+  own controller. The user who started ProsperoLight is the first controller on
+  the PC. Turn on another controller, choose a user for it when the PS5 asks,
+  and it joins as the next one, before or during a stream. A controller that is
+  switched off, or whose user signs out, is removed from the PC.
+- `Select + L1` (leave the stream) and `Select + R1` (statistics) work on every
+  controller. Mouse mode and the stream keyboard stay with the first one.
+- **Sunshine port per PC.** The PCs page has a **Port** button for the selected
+  PC, and **Add PC** accepts `address:port`. Use it when Sunshine's **Port**
+  setting is not 47989. One address can be saved with several ports.
+- A PC found on the network uses the port Sunshine advertises.
+- Saved PCs and settings from earlier versions are kept. Going back to an
+  earlier version resets them; pairing is kept.
+
+### What was tested
+
+Host tests only: controller joining, leaving, numbering and shortcuts against a
+simulated PS5; saved-PC migration, address and port entry, and discovery
+against simulated replies and one reply from a real Sunshine. Neither feature
+has run on a console yet.
+
 ## 01.000.070
 
 ### Experimental performance beta — new decode and presentation threads

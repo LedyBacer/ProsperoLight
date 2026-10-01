@@ -19,6 +19,7 @@ extern "C"
 #define MOONLIGHT_CONFIG_ADDRESS_SIZE 64U
 #define MOONLIGHT_CONFIG_NAME_SIZE 64U
 #define MOONLIGHT_CONFIG_UNIQUE_ID_SIZE 48U
+#define MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT 47989U
 #define MOONLIGHT_DISPLAY_AREA_TV_SAFE 0U
 #define MOONLIGHT_DISPLAY_AREA_FULL 1U
 #define MOONLIGHT_VIDEO_CODEC_H264 0U
@@ -43,6 +44,8 @@ extern "C"
         char name[MOONLIGHT_CONFIG_NAME_SIZE];
         char unique_id[MOONLIGHT_CONFIG_UNIQUE_ID_SIZE];
         uint32_t manual;
+        /* Sunshine's "Port" setting: the HTTP port every other port derives from. */
+        uint32_t http_port;
     } moonlight_config_host_t;
 
     typedef struct moonlight_config
@@ -65,9 +68,22 @@ extern "C"
     void moonlight_config_defaults(moonlight_config_t *config);
     bool moonlight_config_load(moonlight_config_t *config);
     bool moonlight_config_save(const moonlight_config_t *config);
+    /* A PC is one Sunshine endpoint: an address and a port. http_port 0 means
+       the port is not known: a saved PC at that address keeps its port and a
+       new one gets the default. */
     int moonlight_config_upsert_host(moonlight_config_t *config, const char *address,
-                                     const char *name, const char *unique_id, bool manual);
+                                     uint16_t http_port, const char *name, const char *unique_id,
+                                     bool manual);
     bool moonlight_config_remove_host(moonlight_config_t *config, uint32_t index);
+    /* Returns the PC's new index (a PC already saved at that endpoint is merged), or -1. */
+    int moonlight_config_set_host_port(moonlight_config_t *config, uint32_t index,
+                                       uint16_t http_port);
+    uint16_t moonlight_config_host_port(const moonlight_config_host_t *host);
+    /* "192.168.1.50" or "192.168.1.50:48989"; without a port, *http_port is 0. */
+    bool moonlight_config_parse_endpoint(const char *text,
+                                         char address[MOONLIGHT_CONFIG_ADDRESS_SIZE],
+                                         uint16_t *http_port);
+    bool moonlight_config_parse_port(const char *text, uint16_t *http_port);
 
 #ifdef __cplusplus
 }

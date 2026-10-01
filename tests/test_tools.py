@@ -8,6 +8,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -111,12 +112,11 @@ class ToolTests(unittest.TestCase):
 
         self.assertIn("moonlight_backend_snapshot_t refreshed{};", stop)
         self.assertIn(
-            "moonlight_backend_stop_app(SelectedHostAddress(), &refreshed)", stop
+            "moonlight_backend_stop_app(SelectedHostAddress(), SelectedHostPort(), &refreshed)",
+            stop,
         )
         self.assertIn("if (result == 0 || refreshed.app_count)", stop)
-        self.assertNotIn(
-            "moonlight_backend_stop_app(SelectedHostAddress(), &backend_)", stop
-        )
+        self.assertNotIn("&backend_)", stop)
 
     def test_stop_status_renders_before_the_sunshine_request(self):
         source = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
@@ -669,6 +669,82 @@ class ToolTests(unittest.TestCase):
         for setting in ("vsync", "decoder", "cores"):
             self.assertIn(f'id="setting-{setting}"', markup)
             self.assertIn(f'id="setting-{setting}-value"', markup)
+
+    def test_every_sunshine_request_uses_the_port_saved_for_that_pc(self):
+        config = (ROOT / "include/moonlight_config.hpp").read_text(encoding="utf-8")
+        backend = (ROOT / "src/moonlight_backend.cpp").read_text(encoding="utf-8")
+        app = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
+        launcher = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+        client = (ROOT / "src/gamestream/client.c").read_text(encoding="utf-8")
+
+        # One default, in the configuration and in the protocol client.
+        self.assertIn("#define MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT 47989U", config)
+        self.assertIn("server->http_port = http_port ? http_port : 47989;", client)
+        for source in (backend, app, launcher, stream):
+            self.assertNotIn("47989)", source)
+        calls = [line for line in backend.splitlines() if "gs_init(" in line]
+        self.assertEqual(len(calls), 3)
+        for call in calls:
+            self.assertIn("http_port);", call)
+        self.assertIn("result = gs_init(server, identity, host, host_port);", stream)
+        self.assertIn("selection->host_port = app.SelectedHostPort();", launcher)
+        self.assertIn("options.host_port = selection.host_port;", launcher)
+        # The health check and a manual refresh ask the same endpoint.
+        self.assertIn("health_port_ = SelectedHostPort();", app)
+        refresh = app[app.index("void MoonlightApp::RefreshBackend(") :]
+        refresh = refresh[: refresh.index("void MoonlightApp::UpdateScreen()")]
+        self.assertIn("backend_.http_port != port", refresh)
+        self.assertIn("moonlight_backend_refresh(host->address, port, &refreshed)", refresh)
+
+    def test_pcs_page_offers_the_port_of_the_selected_pc(self):
+        markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
+        styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
+        app = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
+
+        self.assertIn('<button id="port-host" class="action-button action-secondary">', markup)
+        self.assertIn('<span id="port-host-label">Port 47989</span>', markup)
+        # Second action row, beside Remove PC and above the status line.
+        self.assertIn(".action-secondary { left: 300px; }", styles)
+        self.assertIn("#remove-host { left: 34px; top: 540px; }", styles)
+        self.assertIn("#port-host { top: 540px; }", styles)
+        self.assertIn("#host-action-status { top: 638px;", styles)
+        focus = app[app.index("const char *const kHostFocus[]") :]
+        focus = focus[: focus.index("};")]
+        self.assertEqual(
+            re.findall(r'"([a-z-]+)"', focus),
+            ["nav-hosts", "nav-games", "nav-settings", "host-card", "refresh-hosts",
+             "pair-host", "add-host", "remove-host", "port-host"],
+        )
+        update_focus = app[app.index("void MoonlightApp::UpdateFocus()") :]
+        update_focus = update_focus[: update_focus.index("void MoonlightApp::UpdateHost()")]
+        self.assertIn('"port-host"', update_focus)
+        activate = app[app.index("case Screen::Hosts:") : app.index("case Screen::Games:")]
+        self.assertLess(activate.index("RemoveHost();"), activate.index("StartPortEntry();"))
+        set_port = app[app.index("void MoonlightApp::SetHostPort(") :]
+        set_port = set_port[: set_port.index("void MoonlightApp::DiscoverHosts()")]
+        # No worker may still be asking the old endpoint when the port changes.
+        self.assertLess(set_port.index("FinishHealthWorker();"),
+                        set_port.index("moonlight_config_set_host_port("))
+        self.assertIn("RefreshBackend(false);", set_port)
+
+    def test_stream_forwards_a_pad_for_every_signed_in_user(self):
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+        run = stream[stream.index("int moonlight_stream_run(") :]
+
+        self.assertIn("#define PS5_EXTRA_PAD_COUNT 3u", stream)
+        self.assertIn("ps5_controllers_poll(&controller);", run)
+        self.assertNotIn("ps5_controller_poll(&controller);", run)
+        # The launch request names the controllers present, and the user list
+        # is read before the loading worker starts polling the first pad.
+        self.assertLess(run.index("launch_mask = ps5_controller_launch_mask(&controller);"),
+                        run.index("result = start_connection_loading(&loading, frame_memory"))
+        session = " ".join(run[run.index("result = prepare_native_session(") :][:240].split())
+        self.assertIn("mode, launch_mask, host, host_port, app_name, app_id);", session)
+        # No packet may claim a fixed set of controllers.
+        self.assertNotIn("LiSendMultiControllerEvent(0, 1,", stream)
+        self.assertNotIn("LiSendControllerArrivalEvent(0, 1,", stream)
+        self.assertEqual(stream.count("LiSendControllerArrivalEvent("), 1)
 
     def test_games_hide_placeholder_catalog_while_initial_refresh_is_pending(self):
         markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
