@@ -3565,6 +3565,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     moonlight::TimingHistogram input_intervals;
     int connection_result = -1;
     int connection_active = 0;
+    int stream_started = 0;
     int identity_initialized = 0;
     int session_started = 0;
     int controller_result = -1;
@@ -3917,6 +3918,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         goto done;
     }
     connection_active = 1;
+    stream_started = 1;
     first_frame_wait_start_us = monotonic_us();
     if (options && options->synthetic_motion)
         synthetic_motion_next_us = monotonic_us();
@@ -4074,6 +4076,12 @@ done:
                      "choose another codec.");
         else if (gs_error && gs_error[0])
             snprintf(stream_error, sizeof(stream_error), "Stream failed: %s", gs_error);
+        else if (stream_started)
+            // The stream ran and then lost its host: not a connection failure.
+            snprintf(stream_error, sizeof(stream_error),
+                     "Stream ended: the connection to Sunshine was lost (error %d). Reconnect to "
+                     "continue.",
+                     (int)result);
         else
         {
             // No text from the host protocol: name the stage and the code, so a
@@ -4082,8 +4090,20 @@ done:
                 std::atomic_load_explicit(&connection_failed_stage, std::memory_order_relaxed);
             snprintf(stream_error, sizeof(stream_error),
                      "Stream failed: Sunshine did not complete the connection (%s, error %d)",
-                     stage > 0 ? LiGetStageName(stage) : "before the first stage", (int)result);
+                     stage > 0 ? LiGetStageName(stage) : "client setup", (int)result);
         }
+    }
+    if (result != 0)
+    {
+        // One bounded line for a klog capture; no host identity or payload.
+        char line[160];
+
+        snprintf(line, sizeof(line),
+                 "[ProsperoLight] stream result=%d started=%d stage=%d user_stop=%d units=%u\n",
+                 (int)result, stream_started,
+                 std::atomic_load_explicit(&connection_failed_stage, std::memory_order_relaxed),
+                 controller.requested_stop.load(), renderer.access_units);
+        (void)sceKernelDebugOutText(0, line);
     }
     if (connection_active)
     {
