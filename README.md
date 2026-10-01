@@ -94,7 +94,7 @@ tooling are maintained in this repository.
 | Title ID | `PPSA99002` |
 | Category | Game |
 | Experimental beta / stable | `01.000.062` / `01.000.060` |
-| In development | `01.000.063` ([round 4](docs/PERFORMANCE_ROUND_4.md), unreleased) |
+| In development | `01.000.064` ([round 4](docs/PERFORMANCE_ROUND_4.md), unreleased) |
 | Version source | [`sce_sys/param.json`](sce_sys/param.json) |
 | Writable data | `/download0` only |
 
@@ -118,7 +118,7 @@ tooling are maintained in this repository.
 - Select bitrate presets up to 500 Mbps. The best setting depends on the host,
   encoder, network, and selected codec rather than link speed alone.
 - Choose V-Sync, the decoder pipeline (Adaptive or Classic), and how many CPU
-  cores decoding may use (development `01.000.063`).
+  cores decoding may use (development `01.000.064`).
 - Enable HEVC Main10 HDR10 output at any available resolution and frame-rate
   selection when the Sunshine host advertises support.
 - Decode Moonlight Opus audio and output selectable 48 kHz stereo or 5.1

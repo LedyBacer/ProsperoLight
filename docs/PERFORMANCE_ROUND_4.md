@@ -1,6 +1,6 @@
 # Performance round 4 — decode pipeline and presentation rework
 
-Status: **development `01.000.063`, host-tested only.** Nothing on this page has
+Status: **development `01.000.064`, host-tested only.** Nothing on this page has
 been validated on a console yet. Every hardware-dependent behaviour has a
 fallback to the `01.000.062` path, listed under [Fallbacks](#fallbacks).
 
