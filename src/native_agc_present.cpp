@@ -223,7 +223,7 @@ extern "C"
     int sceKernelWaitEqueue(void *queue, void *event, int count, int *out,
                             unsigned int *timeout_us);
 
-    int32_t sceAgcInit(void *state, uint32_t size);
+    int32_t sceAgcInit(uint32_t version);
     int32_t sceAgcCreateShader(void **shader, void *header, void *code);
     int32_t sceAgcLinkShaders(void *cx, void *uc, void *reserved, void *vertex_shader,
                               void *pixel_shader, uint32_t primitive_type);
@@ -969,7 +969,6 @@ static native_agc_presenter_t presenter = {
     .hdr = 0,
     .ready = 0,
 };
-static uint64_t agc_state;
 static uint8_t agc_initialized;
 static std::atomic<int> hud_enabled = 1;
 static std::atomic<int> keyboard_enabled = 0;
@@ -1313,7 +1312,7 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
     result = 0;
     if (!agc_initialized)
     {
-        result = sceAgcInit(&agc_state, 8);
+        result = sceAgcInit(8);
         if (result == 0)
             agc_initialized = 1;
     }

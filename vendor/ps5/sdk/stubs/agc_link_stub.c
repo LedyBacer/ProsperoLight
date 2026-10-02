@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-int32_t sceAgcInit(void *state, uint32_t size) { (void)state; (void)size; return -1; }
+int32_t sceAgcInit(uint32_t version) { (void)version; return -1; }
 int32_t sceAgcCreateShader(void **shader, void *header, void *code) { (void)shader; (void)header; (void)code; return -1; }
 int32_t sceAgcLinkShaders(void *cx, void *uc, void *reserved, void *vertex, void *pixel, uint32_t primitive) { (void)cx; (void)uc; (void)reserved; (void)vertex; (void)pixel; (void)primitive; return -1; }
 void *sceAgcGetRegisterDefaults(void) { return 0; }
