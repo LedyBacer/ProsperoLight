@@ -133,23 +133,24 @@ typedef struct legacy_config_file_v5
 } legacy_config_file_v5_t;
 
 typedef struct legacy_config_v6
-    {
-        uint32_t host_count;
-        uint32_t selected_host;
-        uint32_t bitrate_mbps;
-        uint32_t display_area;
-        uint32_t video_codec;
-        uint32_t stream_resolution;
-        uint32_t stream_fps;
-        uint32_t hdr_enabled;
-        uint32_t audio_configuration;
-        uint32_t vsync_enabled;
-        uint32_t decoder_pipeline;
-        uint32_t decoder_cores;
-        moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+{
+    uint32_t host_count;
+    uint32_t selected_host;
+    uint32_t bitrate_mbps;
+    uint32_t display_area;
+    uint32_t video_codec;
+    uint32_t stream_resolution;
+    uint32_t stream_fps;
+    uint32_t hdr_enabled;
+    uint32_t audio_configuration;
+    uint32_t vsync_enabled;
+    uint32_t decoder_pipeline;
+    uint32_t decoder_cores;
+    moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
 } legacy_config_v6_t;
 
-typedef struct legacy_config_file_v6 {
+typedef struct legacy_config_file_v6
+{
     uint32_t magic, version, checksum, reserved;
     legacy_config_v6_t config;
 } legacy_config_file_v6_t;

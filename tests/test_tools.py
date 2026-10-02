@@ -300,7 +300,7 @@ class ToolTests(unittest.TestCase):
     def test_stream_opens_pad_after_decoder_loading_worker_stops(self):
         source = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
         early_loading = source.index(
-            "start_connection_loading(&loading, NULL, 0, mode->hdr, mode->visible_width,"
+            "start_connection_loading(&loading, NULL, 0, profile.hdr, stream_width, stream_height,"
         )
         early_loading_stop = source.index("stop_connection_loading();", early_loading)
         pad_init = source.index("controller_result = ps5_controller_init(&controller)")
@@ -658,15 +658,15 @@ class ToolTests(unittest.TestCase):
         markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
         styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
 
-        self.assertEqual(markup.count('class="button-chrome setting-chrome'), 20)
-        self.assertEqual(markup.count('width="1380" height="88"'), 20)
+        self.assertEqual(markup.count('class="button-chrome setting-chrome'), 22)
+        self.assertEqual(markup.count('width="1380" height="88"'), 22)
         self.assertIn(".setting-chrome { width: 1380px; height: 64px; }", styles)
-        self.assertIn(".setting-row { position: absolute; left: 34px; width: 1380px; height: 64px;", styles)
-        # Ten rows on a 68-pixel pitch end at 840; the note and the footer follow.
-        self.assertIn(".setting-row-9 { top: 776px; }", styles)
+        self.assertIn(".setting-row { position: absolute; left: 34px; width: 1380px; height: 60px;", styles)
+        # Eleven rows on a 61-pixel pitch end at 834; the note and footer follow.
+        self.assertIn(".setting-row-10 { top: 774px; }", styles)
         self.assertIn(".settings-note { position: absolute; left: 34px; top: 850px;", styles)
         self.assertIn("#controller-footer { position: absolute; left: 0px; top: 1004px;", styles)
-        for setting in ("vsync", "decoder", "cores"):
+        for setting in ("chroma", "vsync", "decoder", "cores"):
             self.assertIn(f'id="setting-{setting}"', markup)
             self.assertIn(f'id="setting-{setting}-value"', markup)
 

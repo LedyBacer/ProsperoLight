@@ -86,10 +86,11 @@ const char *const kGameFocus[] = {"nav-hosts",  "nav-games",  "nav-settings", "a
                                   "app-card-1", "app-card-2", "app-card-3",   "app-card-4",
                                   "app-card-5", "stop-app",   "back-hosts"};
 const char *const kSettingFocus[] = {
-    "nav-hosts",          "nav-games",         "nav-settings",    "setting-codec",
-    "setting-resolution", "setting-framerate", "setting-bitrate", "setting-chroma", "setting-display-area",
-    "setting-hdr",        "setting-audio",     "setting-vsync",   "setting-decoder",
-    "setting-cores"};
+    "nav-hosts",       "nav-games",          "nav-settings",
+    "setting-codec",   "setting-resolution", "setting-framerate",
+    "setting-bitrate", "setting-chroma",     "setting-display-area",
+    "setting-hdr",     "setting-audio",      "setting-vsync",
+    "setting-decoder", "setting-cores"};
 
 FocusList FocusFor(unsigned screen)
 {
@@ -117,8 +118,10 @@ bool NormalizeIpv4(const char *text, char output[MOONLIGHT_CONFIG_ADDRESS_SIZE])
 
 const char *CodecName(unsigned codec, unsigned hdr)
 {
-    if (codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE) return "PyroWave";
-    if (hdr) return "HEVC Main10 HDR";
+    if (codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
+        return "PyroWave";
+    if (hdr)
+        return "HEVC Main10 HDR";
     return codec == MOONLIGHT_VIDEO_CODEC_HEVC ? "HEVC Main" : "H.264 High";
 }
 
@@ -654,19 +657,22 @@ void MoonlightApp::Activate()
                         "The selected Sunshine PC does not advertise HEVC support.");
                 break;
             }
-            if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_HEVC && config_.hdr_enabled && !backend_.main10_supported)
+            if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_HEVC && config_.hdr_enabled &&
+                !backend_.main10_supported)
             {
                 prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
                 SetText(document_, "launch-status",
                         "The selected Sunshine PC does not advertise HEVC Main10 HDR support.");
                 break;
             }
-            const auto profile = moonlight::resolve_stream_profile(config_.video_codec, config_.chroma_sampling, config_.hdr_enabled);
+            const auto profile = moonlight::resolve_stream_profile(
+                config_.video_codec, config_.chroma_sampling, config_.hdr_enabled);
             if (profile.decoder_backend == moonlight::DecoderBackend::PyroWaveRadv &&
                 !(backend_.pyrowave_profiles & profile.capability))
             {
                 prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
-                std::snprintf(text, sizeof(text), "Selected PC does not advertise %s", profile.name);
+                std::snprintf(text, sizeof(text), "Selected PC does not advertise %s",
+                              profile.name);
                 SetText(document_, "launch-status", text);
                 break;
             }
@@ -693,7 +699,8 @@ void MoonlightApp::Activate()
         if (focus_ == 3)
         {
             config_.video_codec = (config_.video_codec + 1) % 3;
-            if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_H264) config_.hdr_enabled = 0;
+            if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_H264)
+                config_.hdr_enabled = 0;
         }
         else if (focus_ == 4)
         {
@@ -710,9 +717,11 @@ void MoonlightApp::Activate()
         }
         else if (focus_ == 7)
         {
-            if (config_.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE) return;
+            if (config_.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE)
+                return;
             config_.chroma_sampling = config_.chroma_sampling == MOONLIGHT_CHROMA_420
-                ? MOONLIGHT_CHROMA_444 : MOONLIGHT_CHROMA_420;
+                                          ? MOONLIGHT_CHROMA_444
+                                          : MOONLIGHT_CHROMA_420;
         }
         else if (focus_ == 8)
         {
@@ -722,7 +731,8 @@ void MoonlightApp::Activate()
         }
         else if (focus_ == 9)
         {
-            if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_H264) return;
+            if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_H264)
+                return;
             config_.hdr_enabled = !config_.hdr_enabled;
         }
         else if (focus_ == 10)
@@ -737,7 +747,8 @@ void MoonlightApp::Activate()
         }
         else if (focus_ == 12)
         {
-            if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE) return;
+            if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
+                return;
             config_.decoder_pipeline =
                 config_.decoder_pipeline == MOONLIGHT_DECODER_PIPELINE_ADAPTIVE
                     ? MOONLIGHT_DECODER_PIPELINE_CLASSIC
@@ -745,7 +756,8 @@ void MoonlightApp::Activate()
         }
         else if (focus_ == 13)
         {
-            if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE) return;
+            if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
+                return;
             config_.decoder_cores = config_.decoder_cores <= MOONLIGHT_DECODER_CORES_MIN
                                         ? MOONLIGHT_DECODER_CORES_MAX
                                         : config_.decoder_cores - 1u;
@@ -764,8 +776,8 @@ void MoonlightApp::StartBitrateEntry()
 {
     char value[16];
     std::snprintf(value, sizeof(value), "%u", bitrate_mbps_);
-    if (!radio_ime_request(value, "Video bitrate", "Enter bitrate in Mbps (1-1000)",
-                           BitrateResult, this))
+    if (!radio_ime_request(value, "Video bitrate", "Enter bitrate in Mbps (1-1000)", BitrateResult,
+                           this))
     {
         prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
         SetText(document_, "settings-note", "Text entry is currently unavailable");
@@ -775,19 +787,25 @@ void MoonlightApp::StartBitrateEntry()
 void MoonlightApp::BitrateResult(const char *text, void *user_data)
 {
     MoonlightApp *app = static_cast<MoonlightApp *>(user_data);
-    if (!app) return;
+    if (!app)
+        return;
     unsigned value = 0;
     bool valid = text && *text;
     if (valid)
         for (const char *p = text; *p; ++p)
         {
-            if (*p < '0' || *p > '9' || value > 1000) { valid = false; break; }
+            if (*p < '0' || *p > '9' || value > 1000)
+            {
+                valid = false;
+                break;
+            }
             value = value * 10 + static_cast<unsigned>(*p - '0');
         }
     if (!valid || value < 1 || value > 1000)
     {
         prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
-        SetText(app->document_, "settings-note", "Enter a whole number from 1 to 1000 Mbps; previous value retained");
+        SetText(app->document_, "settings-note",
+                "Enter a whole number from 1 to 1000 Mbps; previous value retained");
         return;
     }
     app->config_.bitrate_mbps = app->bitrate_mbps_ = value;
@@ -1152,15 +1170,20 @@ void MoonlightApp::UpdateScreen()
 
 void MoonlightApp::UpdateFocus()
 {
-    const char *const all[] = {"nav-hosts",         "nav-games",       "nav-settings",
-                               "host-card",         "refresh-hosts",   "pair-host",
-                               "add-host",          "remove-host",     "app-card-0",
-                               "app-card-1",        "app-card-2",      "app-card-3",
-                               "app-card-4",        "app-card-5",      "stop-app",
-                               "back-hosts",        "setting-codec",   "setting-resolution",
-                               "setting-framerate", "setting-bitrate", "setting-chroma", "setting-display-area",
-                               "setting-hdr",       "setting-audio",   "setting-vsync",
-                               "setting-decoder",   "setting-cores"};
+    const char *const all[] = {"nav-hosts",         "nav-games",
+                               "nav-settings",      "host-card",
+                               "refresh-hosts",     "pair-host",
+                               "add-host",          "remove-host",
+                               "app-card-0",        "app-card-1",
+                               "app-card-2",        "app-card-3",
+                               "app-card-4",        "app-card-5",
+                               "stop-app",          "back-hosts",
+                               "setting-codec",     "setting-resolution",
+                               "setting-framerate", "setting-bitrate",
+                               "setting-chroma",    "setting-display-area",
+                               "setting-hdr",       "setting-audio",
+                               "setting-vsync",     "setting-decoder",
+                               "setting-cores"};
     for (const char *id : all)
         SetClass(document_, id, "focused", false);
 
@@ -1423,13 +1446,19 @@ void MoonlightApp::UpdateSettings()
     unsigned width, height;
     StreamDimensions(config_.stream_resolution, width, height);
     SetText(document_, "setting-codec-value", CodecName(config_.video_codec, config_.hdr_enabled));
-    const auto profile = moonlight::resolve_stream_profile(config_.video_codec, config_.chroma_sampling, config_.hdr_enabled);
+    const auto profile = moonlight::resolve_stream_profile(
+        config_.video_codec, config_.chroma_sampling, config_.hdr_enabled);
     const bool pyro = profile.decoder_backend == moonlight::DecoderBackend::PyroWaveRadv;
     std::snprintf(text, sizeof(text), "%s / %u-bit%s", profile.name, profile.bit_depth,
-        pyro && backend_.online && !(backend_.pyrowave_profiles & profile.capability) ? " (PC unsupported)" : "");
+                  pyro && backend_.online && !(backend_.pyrowave_profiles & profile.capability)
+                      ? " (PC unsupported)"
+                      : "");
     SetText(document_, "setting-codec-help", text);
-    SetText(document_, "setting-chroma-value", pyro ? (profile.chroma == MOONLIGHT_CHROMA_444 ? "4:4:4" : "4:2:0") : "4:2:0 (fixed)");
-    SetText(document_, "setting-chroma-help", pyro ? "Cross switches 4:2:0 / 4:4:4" : "VideoDec2 uses 4:2:0; PyroWave preference is retained");
+    SetText(document_, "setting-chroma-value",
+            pyro ? (profile.chroma == MOONLIGHT_CHROMA_444 ? "4:4:4" : "4:2:0") : "4:2:0 (fixed)");
+    SetText(document_, "setting-chroma-help",
+            pyro ? "Cross switches 4:2:0 / 4:4:4"
+                 : "VideoDec2 uses 4:2:0; PyroWave preference is retained");
     std::snprintf(text, sizeof(text), "%u x %u", width, height);
     SetText(document_, "setting-resolution-value", text);
     std::snprintf(text, sizeof(text), "%u FPS", config_.stream_fps);
@@ -1439,8 +1468,10 @@ void MoonlightApp::UpdateSettings()
     std::snprintf(text, sizeof(text), "%u Mbps", bitrate_mbps_);
     SetText(document_, "setting-bitrate-value", text);
     SetText(document_, "setting-hdr-value", config_.hdr_enabled ? "On / HDR10" : "Off / SDR");
-    SetText(document_, "setting-hdr-help", config_.video_codec == MOONLIGHT_VIDEO_CODEC_H264
-        ? "SDR / 8-bit (fixed for H.264)" : config_.hdr_enabled ? "HDR10 / 10-bit / BT.2020 PQ" : "SDR / 8-bit / Rec.709");
+    SetText(document_, "setting-hdr-help",
+            config_.video_codec == MOONLIGHT_VIDEO_CODEC_H264 ? "SDR / 8-bit (fixed for H.264)"
+            : config_.hdr_enabled                             ? "HDR10 / 10-bit / BT.2020 PQ"
+                                                              : "SDR / 8-bit / Rec.709");
     SetText(document_, "setting-audio-value",
             config_.audio_configuration == MOONLIGHT_AUDIO_51_SURROUND ? "5.1 surround" : "Stereo");
     SetText(document_, "setting-vsync-value", config_.vsync_enabled ? "On" : "Off");
@@ -1466,7 +1497,8 @@ void MoonlightApp::UpdateSettings()
                   : config_.stream_resolution == MOONLIGHT_STREAM_RESOLUTION_1440P ? "1440"
                                                                                    : "1080",
                   config_.stream_fps);
-    if (pyro) {
+    if (pyro)
+    {
         SetText(document_, "setting-decoder-value", "RADV GPU");
         SetText(document_, "setting-decoder-help", "PyroWave uses a separate GPU decoder");
         SetText(document_, "setting-cores-value", "Not applicable");

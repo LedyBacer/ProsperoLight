@@ -1,67 +1,103 @@
-# Единая проверка финальной сборки ProsperoLight
+# PyroWave validation report and regression checklist
 
-Это кандидат для вашего ревью. Новые профили и исправленный цветовой тракт ещё не проверялись на PS5. Ранее подтверждены 420 SDR PoC, HUD, выход/повторное подключение и ручной битрейт. Новая версия требует повторной общей проверки.
+## Hardware review
 
-## Запуск и настройки
+A console reviewer tested the integrated client on a PS5 with a 4K120 HDR display
+(firmware 13.60) and Vibepollo 2.0.0. All profiles were checked at 3840×2160,
+120 FPS; games used were Control Resonant and Rocket League. This is manual
+hardware validation, not an automated visual
+accuracy measurement. The reviewer confirmed that all seven profiles work after
+the fixes in `c7d2e17` and `dae3679`:
 
-1. Закройте старый экземпляр через меню PS5. Обновлённый клиент находится в `/data/etaHEN/games/PPSA99018`. Если название не обновилось, обновите библиотеку ShadowMountPlus. Запускайте установленную папку обычным способом.
-2. BacerPC должен остаться сопряжённым и Online. Повторное сопряжение не требуется.
-3. В Settings проверьте цикл Video codec: H.264 → HEVC → PyroWave.
-4. Для H.264 chroma = 4:2:0 fixed, HDR недоступен. При выборе H.264 HDR выключается.
-5. Для HEVC chroma = 4:2:0 fixed; HDR переключается. Для PyroWave доступны оба chroma и SDR/HDR10. Глубина следует HDR и не имеет отдельной строки.
-6. Выберите PyroWave 444, затем HEVC, затем PyroWave: 444 должен восстановиться. Decoder pipeline/cores в PyroWave недоступны, но прежнее значение VideoDec2 сохраняется.
-7. Сохраните PyroWave/444/HDR10/1440p/90/800 Mbps, выбранные audio, V-Sync и VideoDec2 decoder settings. Полностью закройте и запустите приложение. Все настройки и список ПК должны сохраниться. Старый конфиг мигрирует в v7, без удаления hosts/сопряжения.
+| Profile | Reviewer result |
+|---|---|
+| H.264 High / 420 / 8-bit SDR | Working |
+| HEVC Main / 420 / 8-bit SDR | Working |
+| HEVC Main10 / 420 / 10-bit HDR10 | Working |
+| PyroWave / 420 / 8-bit SDR | Working |
+| PyroWave / 444 / 8-bit SDR | Working |
+| PyroWave / 420 / 10-bit HDR10 | Working; HDR colours corrected |
+| PyroWave / 444 / 10-bit HDR10 | Working; HDR colours corrected |
 
-## Основные потоки
+The reviewer separately confirmed the GPU statistics overlay (Touchpad+R1),
+stream exit (Touchpad+L1), on-screen keyboard (Touchpad+Triangle), and mouse mode
+(Touchpad+Square). Earlier reviews confirmed pairing, repeated connections,
+manual bitrate entry and animated 4K120 output.
 
-На Vibepollo 2.0.0 проверьте следующие режимы. Для VideoDec2 сначала используйте 80 Мбит/с, для PyroWave — 500. Техническая возможность ввода 1000 не означает одинаковую производительность кодеков при этом битрейте.
+Two issues discovered during review were corrected:
 
-| № | Кодек | Chroma | Диапазон | Разрешение/FPS | Результат |
-|---|---|---|---|---|---|
-| 1 | H.264 | 420 | SDR | 1080p60 | Не проверено |
-| 2 | H.264 | 420 | SDR | 2160p120 | Не проверено |
-| 3 | HEVC Main | 420 | SDR | 1080p60 | Не проверено |
-| 4 | HEVC Main | 420 | SDR | 2160p120 | Не проверено |
-| 5 | HEVC Main10 | 420 | HDR10 | 2160p60 | Не проверено |
-| 6 | HEVC Main10 | 420 | HDR10 | 2160p120 | Не проверено |
-| 7 | PyroWave | 420 | SDR | 2160p120 | Не проверено |
-| 8 | PyroWave | 444 | SDR | 2160p120 | Не проверено |
-| 9 | PyroWave | 420 | HDR10 | 2160p120 | Не проверено |
-| 10 | PyroWave | 444 | HDR10 | 2160p120 | Не проверено |
+- PyroWave HDR used reversed red/blue scanout packing. The scanout now uses
+  `VK_FORMAT_A2B10G10R10_UNORM_PACK32`, matching PS5 HDR semantics.
+- H.264/HEVC decoded frames but stopped at AGC initialization (`0x8a6c0004`).
+  The presenter and import stub now use the SDK's version ABI, `sceAgcInit(8)`.
+  The reviewer retested and confirmed these profiles working.
 
-В каждом режиме: изображение, звук, стики/кнопки, HUD (тачпад + R1), выход в меню (тачпад + L1), повторное подключение. Откройте экранную клавиатуру (тачпад + Triangle): должны быть видны раскладка и выбранная клавиша; проверьте ввод, Shift, Backspace, Enter и закрытие. Проверьте mouse mode (тачпад + Square), а при наличии — физическую USB-клавиатуру/мышь. Проверьте переключение HEVC HDR → PyroWave SDR → PyroWave HDR → H.264 без перезапуска и без зависшей картинки.
+Quality observations remain relevant: at 500 Mbps, the reviewer preferred
+PyroWave motion but found HEVC HDR clearer on nearly static content. A large
+visual improvement from 444 over 420 was not reported. This change adds supported
+profiles, not a new encoder or rate-control algorithm, and makes no claim that
+PyroWave always outperforms HEVC in image quality.
 
-Дополнительно запустите H.264, HEVC и PyroWave в 1440p90; PyroWave также в 1080p60. Это проверяет разрешения/частоты, не покрытые основной таблицей. Для 90/120 FPS физический HDMI-вывод должен быть 120 Гц; поток 90 FPS остаётся 90 FPS. Для 60 FPS должен выбираться обычный режим.
+H.264/HEVC were checked at 80 Mbps. PyroWave was checked at 80, 500, 600,
+700 and 800 Mbps. The reviewer reported stable playback without observed losses
+at 500–600 Mbps, and some losses at 700–800 Mbps while remaining comfortable to
+use on their network. They preferred PyroWave at 700 Mbps over H.264/HEVC at
+80 Mbps, particularly in motion; this is a subjective comparison at unequal
+bitrates, not an equal-bitrate codec quality benchmark. The reported 0.7–0.8 ms
+HUD latency/timing reading does not establish total input-to-display latency.
+PyroWave → HEVC → PyroWave transitions without restarting the title passed.
+A wired LAN and high bitrate are recommended for PyroWave.
 
-## Изображение и сравнение качества
+The full Cartesian product has not been tested: 1080p/1440p, 60/90 FPS, 1000 Mbps,
+ordinary Sunshine compatibility, USB peripherals, failure injection and a
+controlled long-duration soak require additional reports. No such passes are
+inferred from the profile confirmation.
 
-- Сначала сравните 420 SDR и 444 SDR при одинаковых 4K120/500 Мбит/с: цветной мелкий текст, красные/синие тонкие линии, интерфейс игры и рабочего стола.
-- Повторите сравнение при 800 Мбит/с, затем SDR и HDR при одинаковом chroma/битрейте.
-- Проверьте чёрный/белый, градиенты, насыщенность: чёрный не должен становиться серым, тени/света не должны неожиданно обрезаться. Новая версия согласует limited range с хостом; это отличается от прежнего PoC full range.
-- В HDR телевизор должен показывать HDR и 120 Гц. Проверьте яркие блики, тёмные сцены и цветные детали относительно рабочего HEVC Main10. GPU HUD в HDR использует умеренную яркость.
-- Отдельно оцените неподвижный рабочий стол и движение. Сравнивайте при одинаковом SDR/HDR: прежнее наблюдение «PyroWave лучше в движении, HEVC HDR чётче в статике» пока не объяснено и не объявлено исправленным.
+## Build validation
 
-## Битрейт и устойчивость
+The release process builds and signs the complete RADV client and the optional
+`PYROWAVE=0` VideoDec2-only variant. It runs the repository formatting/static
+analysis, host application tests, performance guards, tooling integration tests
+and scalar/SIMD dependency checks. The accompanying build provenance identifies
+the source commit, definitions, pinned dependencies, patch hashes and eboot hash.
+Refer to the PR for the actual final command results and downloadable artifacts.
 
-Для PyroWave 420 SDR 4K120 последовательно установите 80, 500, 600, 700, 800 и 1000 Мбит/с. Для каждого значения оставьте поток примерно на минуту, а для выбранного рабочего режима — на 10–15 минут.
+## Additional regression checklist
 
-Проверьте выбранное число в UI, сохранение после перезапуска, FPS/очередь/потери в HUD и запишите моменты лагов. Просмотрите stream-start/ANNOUNCE в журнале и host session information: запрос должен содержать соответственно 80000/500000/600000/700000/800000/1000000 kbps. HUD Data показывает фактический входящий поток; он может отличаться от настройки из-за сцены, кадровой частоты и накладных расходов.
+These checks are useful for maintainers and other console configurations:
 
-Числа 0, 1001, отрицательное, дробь, буквы и пустая строка не должны заменять прежний битрейт. Отмена клавиатуры сохраняет значение. Ручной ввод уже проверен ранее, здесь достаточно короткой повторной проверки после миграции.
+1. Preserve an existing configuration and pairing; verify migration from v6 to
+   v7, default 420, retained audio/V-Sync/decoder settings and host entries.
+2. Select H.264, HEVC and PyroWave without restarting the title. H.264 must disable
+   HDR; H.264/HEVC must keep chroma fixed at 420. Switching back to PyroWave must
+   restore its chroma preference. Bit depth follows SDR/HDR, without a new control.
+3. Run H.264 and HEVC SDR at 1080p60 and 2160p120; HEVC HDR at 2160p60/120;
+   all four PyroWave profiles at 2160p120. Also check 1440p90 and PyroWave 1080p60.
+   Observe audio, controller input, HUD, stream exit and reconnect in each case.
+4. Check PyroWave → HEVC HDR → PyroWave SDR → H.264 transitions without restarting.
+5. Enter 80/500/600/700/800/1000 Mbps. Confirm UI, saved config and stream-start
+   bitrate in kbps; compare the host's requested session bitrate. Observed incoming
+   Mbps may differ with scene complexity and protocol overhead. Reject empty,
+   fractional, negative, 0 and 1001 input without replacing the previous value.
+6. Restart after saving codec, resolution, FPS, bitrate, HDR, chroma, audio,
+   V-Sync and decoder preferences. Keep one selected stream running 10–15 minutes.
+7. Check HDR display indication, dark/bright gradients, saturated colours, and
+   equal-bitrate 420/444 comparisons using thin coloured text/edges and motion.
+8. Check V-Sync on/off and TV-safe/edge-to-edge. Platform HSYNC refusal must be
+   logged and fall back to VSYNC. Check keyboard navigation, Shift, Backspace,
+   Enter, mouse clicks/motion and available physical keyboard/mouse devices.
+9. On ordinary Sunshine, verify H.264/HEVC. Unsupported PyroWave must produce a
+   clear error without damaging settings or pairing. Separately check host HDR
+   disabled, SDR display and a mismatched bitstream ID; no silent SDR fallback.
 
-Проверьте V-Sync On/Off и TV safe/Edge to edge в PyroWave. Если платформа отказывает HSYNC, журнал должен явно сообщить возврат к VSYNC — так же, как существующий native presenter. Настройки при этом сохраняются.
+## Logs and reproducibility
 
-## Ошибки и обычный Sunshine
+`/download0/prosperolight-session.log` records stream profiles, negotiation,
+VideoDec2/AGC setup and errors. `/download0/prosperolight-pyrowave.log` records GPU
+profile, output mode, incoming/decoded/presented FPS, timings, loss and backlog.
+The installed test title uses PPSA99018; upstream's normal app identity remains
+PPSA99002. Both packages use the same signed eboot. Pairings and user configuration
+are deliberately not distributed in the archives.
 
-- На обычном Sunshine проверьте H.264/HEVC. Выбор PyroWave должен дать понятную ошибку неподдерживаемого профиля, сохранив сопряжение и настройки.
-- Если можно временно выключить HDR на захватываемом дисплее ПК, запрос PyroWave HDR должен закончиться понятной ошибкой; затем SDR должен запускаться нормально.
-- При выключенном HDR в PS5 или SDR-дисплее HDR-профиль должен выдавать ошибку фактического вывода, без скрытого перехода в SDR. Проверку можно отложить, если она неудобна.
-- Проверка несовпадающего bitstream ID требует другого/модифицированного хоста и не обязательна для первого ревью: код блокирует ID, отличный от 186f0393, до запуска декодера. Фактическая аппаратная проверка этого отказа не проводилась.
-
-## Что прислать по результатам
-
-Достаточно таблицы с прошедшими/непрошедшими режимами и кратких замечаний: профиль, разрешение/FPS, битрейт, V-Sync, характер дефекта и примерное время. При сбое оставьте приложение смонтированным — журнал доступен по FTP:
-
-`/mnt/sandbox/PPSA99018_000/download0/prosperolight-pyrowave.log`
-
-Если будет CE-108255-1, сообщите, появлялось ли изображение, что было нажато перед сбоем, и код ошибки. Я заберу журнал и подготовлю исправления после вашего ревью.
+For an issue report include the build hash, console firmware, host version,
+profile, resolution/FPS, bitrate, V-Sync, failure time, shortcuts used and logs.

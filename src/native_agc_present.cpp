@@ -1087,9 +1087,12 @@ static int wait_for_marker(int64_t marker, unsigned *waits_out)
             }
         }
     }
-    if (timed_out) {
+    if (timed_out)
+    {
         char receipt[240];
-        snprintf(receipt, sizeof(receipt), "Native flip timeout: handle=%08x expected=%lld shown=%lld count=%llu fps=%u budget_us=%llu queue=%u",
+        snprintf(receipt, sizeof(receipt),
+                 "Native flip timeout: handle=%08x expected=%lld shown=%lld count=%llu fps=%u "
+                 "budget_us=%llu queue=%u",
                  (unsigned)presenter.video, (long long)marker, (long long)status[3],
                  (unsigned long long)status[0], presenter.requested_fps,
                  (unsigned long long)budget_us, presenter.flip_queue ? 1u : 0u);
@@ -1202,7 +1205,8 @@ static int configure_launcher_output(int32_t handle)
 int native_videoout_hdr_active(int32_t handle)
 {
     video_output_status_t status = {};
-    if (handle < 0 || sceVideoOutGetOutputStatus(handle, &status) != 0) return -1;
+    if (handle < 0 || sceVideoOutGetOutputStatus(handle, &status) != 0)
+        return -1;
     return status.output_class == 2u || (status.flags & 1u) ? 1 : 0;
 }
 

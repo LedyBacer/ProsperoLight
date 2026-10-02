@@ -19,7 +19,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-PlayStation%205-003791?logo=playstation&amp;logoColor=white" alt="PlayStation 5">
-  <img src="https://img.shields.io/badge/video-H.264%20%7C%20HEVC-70E1DC" alt="H.264 and HEVC">
+  <img src="https://img.shields.io/badge/video-H.264%20%7C%20HEVC%20%7C%20PyroWave-70E1DC" alt="H.264, HEVC and PyroWave">
   <img src="https://img.shields.io/badge/frame%20rate-60%20%7C%2090%20%7C%20120%20FPS-5BBEFF" alt="60, 90, and 120 FPS">
   <img src="https://img.shields.io/badge/audio-Stereo%20%7C%205.1%20Opus-7DD3FC" alt="Stereo and 5.1 Opus audio">
   <img src="https://img.shields.io/badge/UI-RmlUi-5DDFA4" alt="RmlUi">
@@ -32,9 +32,9 @@ Demo available by clicking the image below.
 
 ## Highlights
 
-The PyroWave integration candidate adds explicit codec/chroma/HDR selection and
-manual bitrate entry. See [integration details](docs/PYROWAVE.md) and the pending
-[console regression checklist](docs/PYROWAVE-REGRESSION.md). Existing VideoDec2
+The PyroWave integration adds explicit codec/chroma/HDR selection and
+manual bitrate entry. See [integration details](docs/PYROWAVE.md) and the
+[console validation report and checklist](docs/PYROWAVE-REGRESSION.md). Existing VideoDec2
 bitrate measurements below apply to H.264/HEVC, not the PyroWave GPU decoder.
 
 

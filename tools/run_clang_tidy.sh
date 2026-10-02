@@ -51,11 +51,16 @@ fi
 
 mapfile -d '' app_cpp_sources < <(find "$root/src" -type f \
     \( -name '*.cc' -o -name '*.cpp' \) -print0)
+# Analyze GPU translation units with the same pinned headers as the native build.
+bash "$root/tools/pyrowave/fetch-deps.sh" host >/dev/null
+pyro="$root/.deps/pyrowave"
+pyro_includes=(-I"$pyro/pyrowave" -I"$pyro/Granite/third_party/volk"
+               -I"$pyro/Granite/third_party/khronos/vulkan-headers/include")
 app_cpp_sources+=("$root/tooling/native/app_crt.cpp" "$root/tooling/native/app_cpp_runtime.cpp")
 if (( ${#app_cpp_sources[@]} )); then
     for source in "${app_cpp_sources[@]}"; do
         "$tidy" "$source" --warnings-as-errors='*' -- \
-            -std=c++20 -fexceptions -frtti --target=x86_64-sie-ps5 \
+            -std=c++20 -fexceptions -frtti --target=x86_64-sie-ps5 "${pyro_includes[@]}" \
             -DSDL_MAIN_HANDLED -DSDL_STATIC_LIB -DUSING_GENERATED_CONFIG_H \
             -DRMLUI_STATIC_LIB -I"$root/include" -I"$root/src" \
             -I"$root/src/gamestream" -I"$root/platform/ps5" \

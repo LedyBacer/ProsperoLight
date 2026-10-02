@@ -1,4 +1,4 @@
-Keep Granite errors visible in the benchmark's shipping C API build.
+Keep Granite errors visible in the client's shipping C API build.
 No bitstream, shader or decoder algorithm changes.
 
 diff --git a/pyrowave_c.cpp b/pyrowave_c.cpp
@@ -9,7 +9,7 @@ diff --git a/pyrowave_c.cpp b/pyrowave_c.cpp
  	bool log(const char *, const char *, va_list) override
  	{
 -#ifdef VULKAN_DEBUG
-+#if defined(VULKAN_DEBUG) || defined(PYROWAVE_BENCH_DIAGNOSTICS)
++#if defined(VULKAN_DEBUG) || defined(PROSPEROLIGHT_PYROWAVE_DIAGNOSTICS)
  		return false;
  #else
  		return true;

@@ -3,10 +3,29 @@
 #include <volk.h>
 #include <pyrowave.h>
 #include "../common.hpp"
-#define VK_OK(expr) do { VkResult r_ = (expr); if (r_ != VK_SUCCESS) { log_line("%s: VkResult=%d", #expr, int(r_)); fail(#expr); } } while (0)
-#define PW_OK(expr) do { pyrowave_result r_ = (expr); if (r_ != PYROWAVE_SUCCESS) { log_line("%s: pyrowave_result=%d", #expr, int(r_)); fail(#expr); } } while (0)
+#define VK_OK(expr)                                                                                \
+    do                                                                                             \
+    {                                                                                              \
+        VkResult r_ = (expr);                                                                      \
+        if (r_ != VK_SUCCESS)                                                                      \
+        {                                                                                          \
+            log_line("%s: VkResult=%d", #expr, int(r_));                                           \
+            fail(#expr);                                                                           \
+        }                                                                                          \
+    } while (0)
+#define PW_OK(expr)                                                                                \
+    do                                                                                             \
+    {                                                                                              \
+        pyrowave_result r_ = (expr);                                                               \
+        if (r_ != PYROWAVE_SUCCESS)                                                                \
+        {                                                                                          \
+            log_line("%s: pyrowave_result=%d", #expr, int(r_));                                    \
+            fail(#expr);                                                                           \
+        }                                                                                          \
+    } while (0)
 
-struct VulkanContext {
+struct VulkanContext
+{
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
@@ -15,8 +34,10 @@ struct VulkanContext {
     VkPhysicalDeviceMemoryProperties memory = {};
     VkPhysicalDeviceProperties props = {};
     VkPhysicalDeviceDriverProperties driver = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
-    VkPhysicalDeviceSubgroupProperties subgroup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
-    VkPhysicalDeviceSubgroupSizeControlProperties control = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES};
+    VkPhysicalDeviceSubgroupProperties subgroup = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+    VkPhysicalDeviceSubgroupSizeControlProperties control = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES};
     // All borrowed create-info pointers have context lifetime. Context is never copied.
     VkApplicationInfo app = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
     VkInstanceCreateInfo ici = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
@@ -43,18 +64,21 @@ struct VulkanContext {
     unsigned memory_type(uint32_t bits, VkMemoryPropertyFlags required);
     ~VulkanContext();
 };
-struct Plane {
+struct Plane
+{
     VkImage image = VK_NULL_HANDLE;
     VkDeviceMemory allocation = VK_NULL_HANDLE;
     uint32_t width = 0, height = 0;
 };
-struct Output {
+struct Output
+{
     VulkanContext &c;
     Plane planes[3];
     bool initialized = false;
     pyrowave_gpu_buffers views = {};
     unsigned bit_depth = 8;
-    explicit Output(VulkanContext &ctx, unsigned w, unsigned h, unsigned depth = 8, bool chroma444 = false);
+    explicit Output(VulkanContext &ctx, unsigned w, unsigned h, unsigned depth = 8,
+                    bool chroma444 = false);
     void prepare(VkCommandBuffer cmd);
     void prepare();
     ~Output();

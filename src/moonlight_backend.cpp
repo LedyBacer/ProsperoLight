@@ -78,7 +78,8 @@ int moonlight_backend_refresh(const char *host, moonlight_backend_snapshot_t *sn
     snapshot->https_port = server.https_port;
     snapshot->current_app_id = server.current_game;
     snapshot->hevc_supported = (server.server_codec_mode_support & SCM_MASK_HEVC) != 0;
-    snapshot->pyrowave_profiles = server.server_codec_mode_support &
+    snapshot->pyrowave_profiles =
+        server.server_codec_mode_support &
         (SCM_PYROWAVE | SCM_PYROWAVE_444 | SCM_PYROWAVE_HDR10 | SCM_PYROWAVE_HDR10_444);
     snapshot->main10_supported = (server.server_codec_mode_support & SCM_HEVC_MAIN10) != 0;
     snprintf(snapshot->server_version, sizeof(snapshot->server_version), "%s", server.app_version);

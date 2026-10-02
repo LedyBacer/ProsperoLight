@@ -36,15 +36,18 @@
 #include <string>
 #include <vector>
 
-namespace PyroWaveFraming {
+namespace PyroWaveFraming
+{
 
-enum class Framing {
+enum class Framing
+{
     Records,
     LengthPrefixed,
 };
 
 // A byte range of the input that holds whole records and no padding.
-struct Span {
+struct Span
+{
     size_t offset;
     size_t size;
 };
@@ -52,20 +55,23 @@ struct Span {
 // The part of the frame one RTP packet carried, whether that packet was lost
 // (its bytes are then zero-filled and meaningless), and whether the host
 // flagged it as starting with a record.
-struct Segment {
+struct Segment
+{
     size_t offset;
     size_t size;
     bool lost;
     bool recordStart = false;
 };
 
-struct StreamGeometry {
+struct StreamGeometry
+{
     int width;
     int height;
     bool chroma444;
 };
 
-struct Frame {
+struct Frame
+{
     Framing framing = Framing::Records;
     std::vector<Span> spans;
     // Number of block records passed on (excluding sequence headers and padding)
@@ -84,23 +90,24 @@ constexpr uint32_t k_PaddingMagic = 0xFFFFFFFFu;
 
 // Number of 32x32 blocks a frame of this geometry can index (bitstream spec:
 // five wavelet levels of each component, 4:2:0 omits chroma level 0).
-uint32_t maxBlockCount(const StreamGeometry& geometry);
+uint32_t maxBlockCount(const StreamGeometry &geometry);
 
 // Number of blocks in the coarsest wavelet level (all four bands of every
 // component), which PyroWave indexes first. A frame missing any of them decodes
 // with extreme artifacts.
-uint32_t coarseBlockCount(const StreamGeometry& geometry);
+uint32_t coarseBlockCount(const StreamGeometry &geometry);
 
 // segments must tile [0, size) in order, or be empty for a frame that arrived
 // whole and whose packet boundaries are unknown. criticalPackets is the number
 // of leading packets the host announced as holding the coarsest level, or 0.
-bool parse(const uint8_t* data, size_t size, const std::vector<Segment>& segments,
-           size_t criticalPackets, const StreamGeometry& geometry, Frame& frame, std::string& error);
+bool parse(const uint8_t *data, size_t size, const std::vector<Segment> &segments,
+           size_t criticalPackets, const StreamGeometry &geometry, Frame &frame,
+           std::string &error);
 
-bool parse(const uint8_t* data, size_t size, const std::vector<Segment>& segments,
-           const StreamGeometry& geometry, Frame& frame, std::string& error);
+bool parse(const uint8_t *data, size_t size, const std::vector<Segment> &segments,
+           const StreamGeometry &geometry, Frame &frame, std::string &error);
 
-bool parse(const uint8_t* data, size_t size, const StreamGeometry& geometry,
-           Frame& frame, std::string& error);
+bool parse(const uint8_t *data, size_t size, const StreamGeometry &geometry, Frame &frame,
+           std::string &error);
 
-}
+} // namespace PyroWaveFraming

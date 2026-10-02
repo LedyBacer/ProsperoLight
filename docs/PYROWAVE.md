@@ -1,10 +1,11 @@
-# PyroWave / RADV integration candidate
+# PyroWave / RADV integration
 
 Build the complete client with `make app` (equivalent to `make PYROWAVE=1 app`).
 `make PYROWAVE=0 app` excludes RADV and preserves a VideoDec2-only build.
 PyroWave is selected explicitly in Settings; there is no automatic codec override.
-Hardware qualification of the new profiles is pending. This is not a claim that
-HDR colour accuracy or the entire regression matrix has passed on PS5.
+All seven codec/range/chroma profiles were confirmed working by the console
+reviewer after the HDR packing and AGC initialization fixes. The validation
+report separates these results from untested resolution/bitrate combinations.
 
 ## Settings and profiles
 
@@ -67,7 +68,9 @@ negotiated limited-range Rec.709 SDR or BT.2020 PQ HDR into RGB. PQ remains code
 through the HDR output; there is no tone mapping or CPU image readback.
 
 HDR scanout shares `ps5_videoout_formats.h` with the existing HEVC presenter,
-using its 10-bit BT.2020/PQ VideoOut format with VK_FORMAT_A2B10G10R10_UNORM_PACK32 (red in the low bits). SDR uses BGRA8. Moonlight's setHdrMode
+using its 10-bit BT.2020/PQ VideoOut format with
+`VK_FORMAT_A2B10G10R10_UNORM_PACK32` (red in the low bits). SDR uses BGRA8.
+Moonlight's setHdrMode
 and LiGetHdrMetadata callbacks remain active; HDR host/display mismatch reports
 an error. Physical output HDR status is checked after the initial settling
 windows, using the native presenter's 48-byte VideoOut status ABI.
@@ -88,13 +91,22 @@ swapchain, device and instance are destroyed; an explicit WSI handoff then stops
 the flip thread, unregisters buffers, restores output mode, closes VideoOut and
 releases direct memory before the launcher reacquires the display.
 
-Logs: `/download0/prosperolight-pyrowave.log`. Stream-start and ANNOUNCE logs show
+Logs: `/download0/prosperolight-session.log` contains common session/VD2/AGC
+receipts; `/download0/prosperolight-pyrowave.log` contains GPU timings. Stream-start and ANNOUNCE logs show
 profile, format, resolution, FPS, bitrate, chroma, depth, range, backend and
 bitstream. PyroWave GPU timing stays separate from VideoDec2 decode-load metrics.
 
 ## Console review
 
-See `PYROWAVE-REGRESSION.md`. The earlier 420 SDR PoC, HUD, disconnect/reconnect
-and manual bitrate IME were confirmed by the user. The final profile/config,
-limited-range conversion, HDR, 444, output-mode and transport-cleanup changes
-require the later console review. Compile success does not establish these passes.
+See [validation report and regression checklist](PYROWAVE-REGRESSION.md).
+The console reviewer confirmed all seven profiles, correct PyroWave HDR colours,
+keyboard, mouse, HUD and stream exit. Additional coverage is listed explicitly.
+The AGC presenter uses the same `sceAgcInit(8)` version ABI as RADV and the SDK.
+
+## Network and quality guidance
+
+Use wired LAN for PyroWave and select a high bitrate appropriate to available
+bandwidth. On the reviewed PS5/network, 500–600 Mbps was stable; 700–800 Mbps
+produced occasional reported losses. This is not a universal bandwidth limit.
+Bitrate entry permits 1–1000 Mbps but does not guarantee every setting is suitable
+for every codec/network. Host encoder and rate control are unchanged.

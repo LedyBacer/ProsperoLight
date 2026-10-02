@@ -38,3 +38,6 @@ if [[ $mode == all ]]; then
     fetch PS5_Mesa https://github.com/mihawk-99/PS5_Mesa.git "$PS5_MESA_REV"
     fetch PS5_PayloadSDK https://github.com/mihawk-99/PS5_PayloadSDK.git "$PS5_SDK_REV"
 fi
+
+# Host-only dependency setup is successful without console source fetches.
+exit 0

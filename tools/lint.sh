@@ -23,6 +23,14 @@ for file in "${repository_files[@]}"; do
             ;;
         *.c|*.cc|*.cpp|*.h|*.hpp|*.ld|*.py|*.ps1|*.sh|*.yml|*.yaml|Makefile|.clang-format|.clang-tidy|.env.example)
             header=$(head -n 20 "$file")
+            case "$file" in
+                src/pyrowave/*|tools/pyrowave/*|include/stream_profile.hpp|include/ps5_videoout_formats.h)
+                    # Retain the MIT license of the reused PoC and protocol parser.
+                    grep -Eq 'SPDX-License-Identifier: (MIT|GPL-3.0-or-later)' <<<"$header"
+                    ((checked += 1))
+                    continue
+                    ;;
+            esac
             grep -Fq ps5-native-app-boilerplate <<<"$header"
             grep -Fq 'Copyright (C) 2026 BlackBearReloaded' <<<"$header"
             grep -Fq 'SPDX-License-Identifier: GPL-3.0-or-later' <<<"$header"
