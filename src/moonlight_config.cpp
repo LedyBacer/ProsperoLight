@@ -328,7 +328,7 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->selected_host = 0;
     else if (config->selected_host >= config->host_count)
         config->selected_host = config->host_count - 1;
-    if (config->bitrate_mbps < 1 || config->bitrate_mbps > 500)
+    if (config->bitrate_mbps < 1 || config->bitrate_mbps > 1000)
         config->bitrate_mbps = 20;
     if (config->display_area > MOONLIGHT_DISPLAY_AREA_FULL)
         config->display_area = MOONLIGHT_DISPLAY_AREA_FULL;

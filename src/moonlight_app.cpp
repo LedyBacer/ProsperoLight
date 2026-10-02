@@ -140,15 +140,6 @@ void StreamDimensions(unsigned resolution, unsigned &width, unsigned &height)
     }
 }
 
-unsigned NextBitrate(unsigned current)
-{
-    static const unsigned values[] = {20, 40, 50, 60, 70, 80, 100, 150, 200, 300, 400, 500};
-    for (unsigned value : values)
-        if (value > current)
-            return value;
-    return values[0];
-}
-
 unsigned NextFrameRate(unsigned current)
 {
     switch (current)
@@ -706,8 +697,8 @@ void MoonlightApp::Activate()
         }
         else if (focus_ == 6)
         {
-            bitrate_mbps_ = NextBitrate(bitrate_mbps_);
-            config_.bitrate_mbps = bitrate_mbps_;
+            StartBitrateEntry();
+            return;
         }
         else if (focus_ == 7)
         {
@@ -752,6 +743,43 @@ void MoonlightApp::Activate()
     default:
         break;
     }
+}
+
+void MoonlightApp::StartBitrateEntry()
+{
+    char value[16];
+    std::snprintf(value, sizeof(value), "%u", bitrate_mbps_);
+    if (!radio_ime_request(value, "Video bitrate", "Enter bitrate in Mbps (1-1000)",
+                           BitrateResult, this))
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+        SetText(document_, "settings-note", "Text entry is currently unavailable");
+    }
+}
+
+void MoonlightApp::BitrateResult(const char *text, void *user_data)
+{
+    MoonlightApp *app = static_cast<MoonlightApp *>(user_data);
+    if (!app) return;
+    unsigned value = 0;
+    bool valid = text && *text;
+    if (valid)
+        for (const char *p = text; *p; ++p)
+        {
+            if (*p < '0' || *p > '9' || value > 1000) { valid = false; break; }
+            value = value * 10 + static_cast<unsigned>(*p - '0');
+        }
+    if (!valid || value < 1 || value > 1000)
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+        SetText(app->document_, "settings-note", "Enter a whole number from 1 to 1000 Mbps; previous value retained");
+        return;
+    }
+    app->config_.bitrate_mbps = app->bitrate_mbps_ = value;
+    (void)moonlight_config_save(&app->config_);
+    prosperolight::ui_sound_play(prosperolight::UiSoundCue::Setting);
+    app->UpdateSettings();
+    app->UpdateGames();
 }
 
 void MoonlightApp::StartManualHostEntry()

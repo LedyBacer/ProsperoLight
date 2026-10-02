@@ -127,7 +127,7 @@
                     <button id="setting-bitrate" class="setting-row setting-row-3">
                         <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
                         <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Video bitrate</span><span class="setting-help">Cross cycles local-network presets up to 500 Mbps</span>
+                        <span class="setting-name">Video bitrate</span><span class="setting-help">Press Cross to enter 1-1000 Mbps</span>
                         <span id="setting-bitrate-value" class="setting-value">20 Mbps</span>
                     </button>
                     <button id="setting-display-area" class="setting-row setting-row-4">
