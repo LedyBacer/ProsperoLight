@@ -98,3 +98,9 @@ and packaging do not establish pad API permissions or effect fidelity on PS5.
    to the host without restarting the client; no stale feedback should replay.
 9. Check a native-haptics game separately. `pcm_envelope` should increase, but
    assess this as approximate vibration, not waveform-fidelity validation.
+
+## Review fixes
+
+Touchpad click + L3 sends Select/Back; touchpad click + R3 sends Guide. Both work for all controller slots and suppress constituent button clicks and touch contacts while held. PS/Create remain system-owned. DualSense connections explicitly select scePad rumble mode (2) for legacy vibration. Nonzero low amplitudes are preserved when converting 16-bit host motor values.
+
+On Windows Vibepollo can emulate DualSense with `gamepad = vhf_ds5`, provided its virtual gamepad driver is installed. `ds4` uses a PS4 device. Reference: https://github.com/Nonary/Vibepollo/blob/master/docs/configuration.md .
