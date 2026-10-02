@@ -67,7 +67,7 @@ negotiated limited-range Rec.709 SDR or BT.2020 PQ HDR into RGB. PQ remains code
 through the HDR output; there is no tone mapping or CPU image readback.
 
 HDR scanout shares `ps5_videoout_formats.h` with the existing HEVC presenter,
-using its 10-bit BT.2020/PQ VideoOut format. SDR uses BGRA8. Moonlight's setHdrMode
+using its 10-bit BT.2020/PQ VideoOut format with VK_FORMAT_A2B10G10R10_UNORM_PACK32 (red in the low bits). SDR uses BGRA8. Moonlight's setHdrMode
 and LiGetHdrMetadata callbacks remain active; HDR host/display mismatch reports
 an error. Physical output HDR status is checked after the initial settling
 windows, using the native presenter's 48-byte VideoOut status ABI.

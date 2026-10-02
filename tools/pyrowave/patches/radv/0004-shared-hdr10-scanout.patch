@@ -64,7 +64,7 @@
  static const VkFormat videoout_formats[] = {
     VK_FORMAT_B8G8R8A8_UNORM,
     VK_FORMAT_B8G8R8A8_SRGB,
-+   VK_FORMAT_A2R10G10B10_UNORM_PACK32,
++   VK_FORMAT_A2B10G10R10_UNORM_PACK32,
  };
  
  static VkResult
@@ -73,7 +73,7 @@
        {
           f->format = videoout_formats[i];
 -         f->colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-+         f->colorSpace = videoout_formats[i] == VK_FORMAT_A2R10G10B10_UNORM_PACK32
++         f->colorSpace = videoout_formats[i] == VK_FORMAT_A2B10G10R10_UNORM_PACK32
 +            ? VK_COLOR_SPACE_HDR10_ST2084_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
        }
     }
@@ -83,7 +83,7 @@
           assert(f->sType == VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR);
           f->surfaceFormat.format = videoout_formats[i];
 -         f->surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-+         f->surfaceFormat.colorSpace = videoout_formats[i] == VK_FORMAT_A2R10G10B10_UNORM_PACK32
++         f->surfaceFormat.colorSpace = videoout_formats[i] == VK_FORMAT_A2B10G10R10_UNORM_PACK32
 +            ? VK_COLOR_SPACE_HDR10_ST2084_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
        }
     }
@@ -104,7 +104,7 @@
 -   VkResult result = videoout_register_locked();
 +   const bool hdr = pCreateInfo->imageColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT;
 +   VkResult result = hdr != out->hdr ||
-+      (hdr && pCreateInfo->imageFormat != VK_FORMAT_A2R10G10B10_UNORM_PACK32)
++      (hdr && pCreateInfo->imageFormat != VK_FORMAT_A2B10G10R10_UNORM_PACK32)
 +      ? VK_ERROR_FORMAT_NOT_SUPPORTED : videoout_register_locked();
     if (result == VK_SUCCESS && out->current && out->current != (struct wsi_videoout_swapchain *)
                                                   wsi_swapchain_from_handle(pCreateInfo->oldSwapchain))

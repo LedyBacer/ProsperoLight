@@ -1088,6 +1088,14 @@ static int wait_for_marker(int64_t marker, unsigned *waits_out)
             }
         }
     }
+    if (timed_out) {
+        char receipt[240];
+        snprintf(receipt, sizeof(receipt), "Native flip timeout: handle=%08x expected=%lld shown=%lld count=%llu fps=%u budget_us=%llu queue=%u",
+                 (unsigned)presenter.video, (long long)marker, (long long)status[3],
+                 (unsigned long long)status[0], presenter.requested_fps,
+                 (unsigned long long)budget_us, presenter.flip_queue ? 1u : 0u);
+        report_agc_receipt(receipt);
+    }
     if (waits_out)
         *waits_out = waits;
     if (timed_out)

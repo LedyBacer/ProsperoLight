@@ -20,7 +20,7 @@ void PyroWaveVideoBackend::initialize(unsigned width, unsigned height, unsigned 
     VkBool32 support=VK_FALSE;VK_OK(vkGetPhysicalDeviceSurfaceSupportKHR(c_.physical,c_.family,surface_,&support));if(!support)fail("queue cannot present");
     VkSurfaceCapabilitiesKHR caps;VK_OK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(c_.physical,surface_,&caps));if(!(caps.supportedUsageFlags&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))fail("swapchain color attachment unsupported");
     VK_OK(vkGetPhysicalDeviceSurfaceFormatsKHR(c_.physical,surface_,&n,nullptr));std::vector<VkSurfaceFormatKHR> formats(n);VK_OK(vkGetPhysicalDeviceSurfaceFormatsKHR(c_.physical,surface_,&n,formats.data()));
-    const VkFormat target_format=hdr ? VK_FORMAT_A2R10G10B10_UNORM_PACK32 : VK_FORMAT_B8G8R8A8_UNORM;
+    const VkFormat target_format=hdr ? VK_FORMAT_A2B10G10R10_UNORM_PACK32 : VK_FORMAT_B8G8R8A8_UNORM;
     const VkColorSpaceKHR color_space=hdr ? VK_COLOR_SPACE_HDR10_ST2084_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     bool found=false;for(auto f:formats)found|=f.format==target_format&&f.colorSpace==color_space;if(!found)fail(hdr ? "HDR10 output unavailable on this display" : "BGRA8 SDR output unavailable");
     VkSwapchainCreateInfoKHR sc={VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};sc.surface=surface_;sc.minImageCount=std::max(3u,caps.minImageCount);if(caps.maxImageCount&&sc.minImageCount>caps.maxImageCount)fail("swapchain image count");

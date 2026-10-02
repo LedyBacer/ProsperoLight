@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  * Shared scanout semantics from ProsperoLight's hardware-validated presenter.
- * SDR: BGRA8; HDR10: packed B10 G10 R10 A2, BT.2020/PQ output tagging.
+ * SDR: BGRA8; HDR10: packed R10 G10 B10 A2 (red in the low bits), BT.2020/PQ output tagging.
  */
 #pragma once
 #include <stdint.h>

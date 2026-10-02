@@ -89,6 +89,13 @@ void lan_http_report_set_host(const char *host)
 
 int lan_http_report_text(const char *message)
 {
+    // Retain session setup/failure receipts even when LAN telemetry is disabled.
+    if (message) {
+        if (FILE *log = fopen("/download0/prosperolight-session.log", "a")) {
+            fprintf(log, "%s\n", message);
+            fclose(log);
+        }
+    }
 #if PROSPEROLIGHT_LAN_TELEMETRY
     char request[256];
     size_t message_length;
