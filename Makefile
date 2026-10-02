@@ -92,7 +92,7 @@ STREAM_INPUTS := tools/pyrowave/apply-transport.sh tools/pyrowave/patches/moonli
 	$(wildcard third_party/mbedtls/library/* third_party/mbedtls/include/mbedtls/*) \
 	$(wildcard third_party/opus/src/* third_party/opus/include/*)
 
-.PHONY: all app build init doctor test test-deps test-unit test-integration libc deps pacbrew pacbrew-list stream-deps assets-check format format-check tidy lint check ffpkg ffpfsc packages deploy undeploy clean distclean help
+.PHONY: transport-deps all app build init doctor test test-deps test-unit test-integration libc deps pacbrew pacbrew-list stream-deps assets-check format format-check tidy lint check ffpkg ffpfsc packages deploy undeploy clean distclean help
 
 all: app
 build: app
@@ -106,6 +106,9 @@ doctor:
 	@bash tools/doctor.sh
 
 test: test-unit test-integration test-performance-guards
+
+transport-deps:
+	@bash tools/pyrowave/apply-transport.sh
 
 test-deps:
 	@printf '%s\n' '==> [test-deps] Fetching the pinned host-only GoogleTest source'
@@ -125,7 +128,7 @@ $(HOST_UNIT_TEST): tests/test_prosperolight.cpp include/moonlight_config.hpp \
 		include/moonlight_physical_input.hpp \
 		include/moonlight_stream_input.hpp src/moonlight_config.cpp \
 		include/lan_http_report.hpp src/lan_http_report.cpp \
-		tools/setup-test-dependencies.sh | test-deps
+		tools/setup-test-dependencies.sh | test-deps transport-deps
 	@printf '%s\n' '==> [test-unit] Compiling the host-native GoogleTest binary'
 	@mkdir -p -- $(@D)
 	@gtest=$$(bash tools/setup-test-dependencies.sh); \
@@ -165,7 +168,7 @@ performance-round3-candidates:
 	@bash tools/build-performance-candidates.sh --round3
 
 .PHONY: test-performance-guards
-test-performance-guards:
+test-performance-guards: | transport-deps
 	@mkdir -p build/tests
 	@clang -std=c11 -D_DEFAULT_SOURCE -DUSE_MBEDTLS -O2 -c third_party/moonlight-common-c/src/FakeCallbacks.c \
 		-Ithird_party/moonlight-common-c/src -Ithird_party/moonlight-common-c/enet/include \

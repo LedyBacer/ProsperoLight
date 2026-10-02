@@ -15,6 +15,7 @@ fi
 [[ -n $tidy ]] || { echo "clang-tidy is required" >&2; exit 2; }
 
 bash "$root/tools/setup-native-dependencies.sh" >/dev/null
+bash "$root/tools/pyrowave/apply-transport.sh"
 sdk="$root/.deps/native/ps5-payload-sdk"
 zlib="$root/.deps/native/zlib/root/usr/include"
 
