@@ -3128,7 +3128,7 @@ static void ps5_controller_set_mouse_mode(ps5_controller_state_t *state, int ena
         state->last_event_us = 0;
     }
     snprintf(notification.message, sizeof(notification.message),
-             "ProsperoLight: %s mode enabled. Select + Square switches to %s.",
+             "ProsperoLight: %s mode enabled. Touchpad + Square switches to %s.",
              state->mouse_mode ? "Mouse" : "Controller",
              state->mouse_mode ? "controller" : "mouse");
     (void)sceKernelSendNotificationRequest(0, &notification, sizeof(notification), 0);

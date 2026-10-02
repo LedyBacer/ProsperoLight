@@ -150,7 +150,7 @@ Nothing is installed globally by these optional bootstrappers.
 Normal and release builds keep the optional LAN telemetry sink disabled. Older
 development builds tried to open TCP port `8767` on the selected Sunshine host
 before decoder setup; a silently filtered connection could block before the
-loading renderer and `Select + L1` monitor were available.
+loading renderer and `Touchpad + L1` monitor were available.
 
 Only diagnostics workstations running the telemetry receiver should build with
 `LAN_TELEMETRY=1`. Never enable it in a distributed package.
@@ -231,7 +231,7 @@ new generated directory. Do not attempt to write to `/app0`.
 ## Collecting performance metrics through klog
 
 Start a klog capture before testing and leave it connected until after returning
-from the stream with Select+L1. ProsperoLight emits its performance summary after
+from the stream with Touchpad + L1. ProsperoLight emits its performance summary after
 the streaming workers stop, with no per-frame kernel logging during gameplay.
 Filter for `[ProsperoLight perf]`. Each record includes a session number and
 `part=N/total`; concatenate the text after `json=` in part order to recover the

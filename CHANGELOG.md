@@ -12,8 +12,13 @@ Not released. It adds two features to experimental beta **01.000.070**; the
   the PC. Turn on another controller, choose a user for it when the PS5 asks,
   and it joins as the next one, before or during a stream. A controller that is
   switched off, or whose user signs out, is removed from the PC.
-- `Select + L1` (leave the stream) and `Select + R1` (statistics) work on every
-  controller. Mouse mode and the stream keyboard stay with the first one.
+- `Touchpad + L1` (leave the stream) and `Touchpad + R1` (statistics) work on
+  every controller. Mouse mode and the stream keyboard stay with the first one.
+- **The stream shortcuts are named after their button.** They were written
+  `Select + ...`; the button is the touchpad, pressed down until it clicks, so
+  they are now `Touchpad + L1`, `Touchpad + R1`, `Touchpad + Square` and
+  `Touchpad + Triangle`. The shortcuts themselves did not change. Settings, the
+  launcher's footer and the README show the buttons as icons.
 - **Sunshine port per PC.** The PCs page has a **Port** button for the selected
   PC, and **Add PC** accepts `address:port`. Use it when Sunshine's **Port**
   setting is not 47989. One address can be saved with several ports.
@@ -78,7 +83,7 @@ Use [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues) a
 - Codec/HDR, resolution/FPS, bitrate, stereo/5.1, Ethernet or Wi-Fi.
 - The three new settings, and whether this beta is smoother, unchanged, or
   worse than `.062` or `.060` in the same game.
-- With the overlay on (Select+R1): the "Decoder", "Decode (last second)" and
+- With the overlay on (Touchpad + R1): the "Decoder", "Decode (last second)" and
   both "Frames dropped" lines.
 - If available, attach `performance-last.json` and `performance-frames.csv` from
   the app's `/download0/moonlight/` save directory. These are overwritten by the
@@ -132,7 +137,7 @@ Use [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues) a
 - Codec/HDR, resolution/FPS, bitrate, stereo/5.1, Ethernet or Wi-Fi.
 - Game and whether this beta is smoother, unchanged, or worse than `.060`.
 - Complete Windows/RDP login first, reconnect, then warm up for 30 seconds and
-  play the same area for two minutes. Return with Select+L1 and close the app.
+  play the same area for two minutes. Return with Touchpad + L1 and close the app.
   Separate login/menu/teardown time from gameplay. Stop early if unusable.
 - If available, attach `performance-last.json` and `performance-frames.csv` from
   the app's `/download0/moonlight/` save directory. These are overwritten by the

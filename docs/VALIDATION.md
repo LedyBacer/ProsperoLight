@@ -31,9 +31,9 @@ settings.
    DualSense input. Then select 5.1 in Settings, relaunch the stream, and verify
    discrete front-left, front-right, center, LFE, back-left, and back-right
    output with no signal on the unused side pair.
-5. Toggle the metrics overlay with `Select + R1`, then return using
-   `Select + L1`. Confirm no debug text is left in the launcher.
-6. At Windows sign-in, press `Select + Triangle` and confirm ProsperoLight's
+5. Toggle the metrics overlay with `Touchpad + R1`, then return using
+   `Touchpad + L1`. Confirm no debug text is left in the launcher.
+6. At Windows sign-in, press `Touchpad + Triangle` and confirm ProsperoLight's
    stream keyboard appears without a PS5 notification. Use the D-pad and Cross
    to enter private text, Triangle for Shift, Square for Backspace, and Options
    for Enter. Confirm the password is never present in ProsperoLight
@@ -41,7 +41,7 @@ settings.
 7. Launch and stop a non-Desktop Sunshine application. Repeat a launch after
    returning to the launcher; a failed or stalled session must return with a
    useful error rather than remain black.
-8. Test mouse emulation using `Select + Square`, then return to controller
+8. Test mouse emulation using `Touchpad + Square`, then return to controller
    mode with the same shortcut. Confirm both modes still accept input.
 9. Connect a physical USB keyboard and mouse. In Desktop, type letters,
    punctuation, Shift/Ctrl combinations, Backspace, Enter, and an arrow key;
@@ -80,7 +80,7 @@ tested `eboot.bin` SHA-256 is
 `aaa47276ba5844e6aee625ed7def176149631a92ea950ec3e82eba8d80eaf7f9`.
 
 Content version `01.000.014` moves controller initialization and the
-`Select + L1` escape monitor ahead of decoder allocation and keeps the monitor
+`Touchpad + L1` escape monitor ahead of decoder allocation and keeps the monitor
 alive through the Moonlight connection handshake. Startup is bounded to 20
 seconds and the first video frame to 10 seconds; either failure closes the
 Sunshine session, reports the reason, and returns to the launcher. Host tests
@@ -112,8 +112,8 @@ cleanup.
 Content version `01.000.021` adds password-safe native PS5 text entry during a
 stream. The frozen candidate at commit `a608b67` launched, rendered the paired
 launcher, resumed the H.264 Desktop stream, and opened PS5 common-dialog title
-`NPXS40093` when the targeted `Select + Triangle` chord was sent. Cancelling
-the dialog sent no text; the existing `Select + L1` shortcut then returned to
+`NPXS40093` when the targeted `Touchpad + Triangle` chord was sent. Cancelling
+the dialog sent no text; the existing `Touchpad + L1` shortcut then returned to
 the launcher, and the title closed normally. FTP, klog, and loader services
 remained reachable after teardown. The tested `eboot.bin` SHA-256 is
 `a7c0c7bb03d605c738d1db531b4923109e555fccc247bc144fc65bc8f09881b7`.
@@ -123,7 +123,7 @@ actual private Windows sign-in remain the operator acceptance step.
 
 Content version `01.000.022` replaced the native dialog with the documented
 Windows `Win + Ctrl + O` shortcut. The PS5 notification proved that the
-`Select + Triangle` handler ran, but the Windows On-Screen Keyboard did not
+`Touchpad + Triangle` handler ran, but the Windows On-Screen Keyboard did not
 appear at the secure sign-in screen. This is a failed acceptance result for
 that approach; Windows documents opening its Accessibility menu at sign-in
 rather than relying on the desktop OSK shortcut.
@@ -160,7 +160,7 @@ already running.
 
 The frozen `f3ad73f` candidate passed the corresponding hardware gate with no
 listener on port `8767`. It started and presented H.264 1080p Desktop twice in
-one process, returned through `Select + L1`, then survived a complete title
+one process, returned through `Touchpad + L1`, then survived a complete title
 close/reopen and resumed the Sunshine-reported running Desktop session. Sunshine
 recorded a client connection, disconnection, and completed encoder teardown for
 each observed session. The title processes stopped normally and FTP, klog, and

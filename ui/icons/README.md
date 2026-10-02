@@ -27,6 +27,12 @@ Runtime palette:
 The generated imagery is a project asset. The PlayStation name and controller
 symbol conventions remain trademarks of their respective owner.
 
+`touchpad.tga`, `l1.tga` and `r1.tga` are project-authored 40 x 40 icons in the
+same form, drawn by `tools/generate-button-icons.py` (the two labels use Inter
+SemiBold). The launcher shows them in the Settings note about the stream
+shortcuts and in the footer. The same script draws the SVG icons the README
+uses, in `docs/images/buttons/`.
+
 `play.svg` and `stop.svg` are deterministic project-authored playback symbols,
 with matching 18 x 18 straight-alpha TGA runtime assets. They render directly
 on the action button without an enclosing icon well and are not PlayStation

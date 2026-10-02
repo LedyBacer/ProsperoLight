@@ -88,8 +88,8 @@ presented by AGC without copying decoded pixels through a CPU framebuffer.
   delay. When 15 frames are waiting they are all discarded and a keyframe is
   requested. At the 300 Mbps setting this happened 13 times in 17 seconds, and
   the decoder still only managed 90 FPS.
-- **How to tell.** With the overlay on (`Select + R1`), "Frames dropped by
-  decoder backlog" rises and "Decode (last second)" shows a load near 100%.
+- **How to tell.** With the overlay on (![Touchpad][touchpad] + ![R1][r1]), "Frames dropped
+  by decoder backlog" rises and "Decode (last second)" shows a load near 100%.
   "Frames dropped by your network connection" is a different problem.
 - The 300, 400 and 500 Mbps presets are beyond the 4K decoder at every frame rate.
 
@@ -331,14 +331,14 @@ behavior.
 3. Select **Pair PC**, then enter the displayed PIN in Sunshine within two
    minutes.
 4. Open **Games**, choose Desktop or another advertised application, and press
-   Cross.
-5. Use `Select + L1` to end the stream and return to ProsperoLight.
+   ![Cross][cross].
+5. Press ![Touchpad][touchpad] + ![L1][l1] to end the stream and return to ProsperoLight.
 
 Pairing credentials and settings are title-scoped. Installing under a different
 title ID intentionally requires pairing again.
 
-To forget an old PC, select it on **PCs**, choose **Remove PC**, then press Cross
-again to confirm. This works while the PC is offline and removes only that saved
+To forget an old PC, select it on **PCs**, choose **Remove PC**, then press
+![Cross][cross] again to confirm. This works while the PC is offline and removes only that saved
 entry; it does not revoke pairing on the host or affect other saved PCs. Use
 **Refresh** or **Add PC** to find and pair with the replacement host. A host
 advertising itself on the network may appear again after refresh.
@@ -380,42 +380,56 @@ PC, and the next controller to join takes its place.
 
 ## Controls
 
+The icons are the controller's buttons. ![Touchpad][touchpad] is the touchpad button: press the
+touchpad down until it clicks.
+
 ### Launcher
 
 | Input | Action |
 | --- | --- |
-| D-pad / left analog stick | Move focus or change the selected PC/application/setting |
-| Cross | Activate, pair, launch, resume, or change a setting |
-| Circle | Return to the PCs page |
-| Square | Stop the active Sunshine application |
-| Triangle | Refresh the selected Sunshine host |
-| L1 / R1 | Change between PCs, Games, and Settings |
-| Options | Open Settings |
+| ![D-pad][dpad] / left ![analog stick][stick] | Move focus or change the selected PC/application/setting |
+| ![Cross][cross] | Activate, pair, launch, resume, or change a setting |
+| ![Circle][circle] | Return to the PCs page |
+| ![Square][square] | Stop the active Sunshine application |
+| ![Triangle][triangle] | Refresh the selected Sunshine host |
+| ![L1][l1] / ![R1][r1] | Change between PCs, Games, and Settings |
+| ![Options][options] | Open Settings |
 
 ### Streaming
 
 | Input | Action |
 | --- | --- |
-| `Select + R1` | Toggle the metrics overlay |
-| `Select + L1` | End the stream and return to ProsperoLight |
-| `Select + Square` | Toggle mouse/controller mode |
-| `Select + Triangle` | Toggle ProsperoLight's stream keyboard |
+| ![Touchpad][touchpad] + ![R1][r1] | Toggle the metrics overlay |
+| ![Touchpad][touchpad] + ![L1][l1] | End the stream and return to ProsperoLight |
+| ![Touchpad][touchpad] + ![Square][square] | Toggle mouse/controller mode |
+| ![Touchpad][touchpad] + ![Triangle][triangle] | Toggle ProsperoLight's stream keyboard |
 | Physical USB keyboard | Forward keys and modifiers directly to Sunshine |
 | Physical USB mouse | Move, click, and scroll directly on the Sunshine host |
-| Either analog stick in mouse mode | Move the pointer |
-| Cross / Circle / Square in mouse mode | Left / right / middle mouse button |
-| L1 / R1 in mouse mode | Mouse X1 / X2 button |
-| D-pad in mouse mode | Vertical / horizontal scroll |
-| D-pad while keyboard is open | Move between keys |
-| Cross while keyboard is open | Type the selected key |
-| Triangle while keyboard is open | Toggle Shift |
-| Square while keyboard is open | Send Backspace |
-| Options while keyboard is open | Send Enter and close the keyboard |
-| Circle while keyboard is open | Close the keyboard |
+| Either ![analog stick][stick] in mouse mode | Move the pointer |
+| ![Cross][cross] / ![Circle][circle] / ![Square][square] in mouse mode | Left / right / middle mouse button |
+| ![L1][l1] / ![R1][r1] in mouse mode | Mouse X1 / X2 button |
+| ![D-pad][dpad] in mouse mode | Vertical / horizontal scroll |
+| ![D-pad][dpad] while keyboard is open | Move between keys |
+| ![Cross][cross] while keyboard is open | Type the selected key |
+| ![Triangle][triangle] while keyboard is open | Toggle Shift |
+| ![Square][square] while keyboard is open | Send Backspace |
+| ![Options][options] while keyboard is open | Send Enter and close the keyboard |
+| ![Circle][circle] while keyboard is open | Close the keyboard |
 
-`Select + R1` and `Select + L1` work on every controller. Mouse mode and the
-stream keyboard belong to the first controller; on the others those two
+![Touchpad][touchpad] + ![R1][r1] and ![Touchpad][touchpad] + ![L1][l1] work on every controller. Mouse mode and
+the stream keyboard belong to the first controller; on the others those two
 shortcuts are ordinary button presses for the game.
+
+[cross]: docs/images/buttons/cross.svg "Cross"
+[circle]: docs/images/buttons/circle.svg "Circle"
+[square]: docs/images/buttons/square.svg "Square"
+[triangle]: docs/images/buttons/triangle.svg "Triangle"
+[options]: docs/images/buttons/options.svg "Options"
+[l1]: docs/images/buttons/l1.svg "L1"
+[r1]: docs/images/buttons/r1.svg "R1"
+[dpad]: docs/images/buttons/dpad.svg "D-pad"
+[stick]: docs/images/buttons/stick.svg "Analog stick"
+[touchpad]: docs/images/buttons/touchpad.svg "Touchpad button"
 
 The stream keyboard contains every printable US-ASCII character used by
 standard passwords. It is not currently a multilingual or Unicode input

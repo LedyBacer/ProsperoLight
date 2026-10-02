@@ -475,33 +475,33 @@ TEST(VideoOutput, UsesHardwareValidatedBilinearSampler)
     EXPECT_NE(kNativeAgcBilinearSamplerWord, 0x08000000u);
 }
 
-TEST(StreamShortcuts, SelectL1ReturnsToLauncher)
+TEST(StreamShortcuts, TouchpadL1ReturnsToLauncher)
 {
     EXPECT_TRUE(
-        moonlight_stream_disconnect_requested(MOONLIGHT_PS5_PAD_SELECT | MOONLIGHT_PS5_PAD_L1));
-    EXPECT_FALSE(moonlight_stream_disconnect_requested(MOONLIGHT_PS5_PAD_SELECT));
+        moonlight_stream_disconnect_requested(MOONLIGHT_PS5_PAD_TOUCHPAD | MOONLIGHT_PS5_PAD_L1));
+    EXPECT_FALSE(moonlight_stream_disconnect_requested(MOONLIGHT_PS5_PAD_TOUCHPAD));
 }
 
-TEST(StreamShortcuts, SelectR1TogglesMetrics)
+TEST(StreamShortcuts, TouchpadR1TogglesMetrics)
 {
     EXPECT_TRUE(
-        moonlight_stream_hud_toggle_requested(MOONLIGHT_PS5_PAD_SELECT | MOONLIGHT_PS5_PAD_R1));
+        moonlight_stream_hud_toggle_requested(MOONLIGHT_PS5_PAD_TOUCHPAD | MOONLIGHT_PS5_PAD_R1));
     EXPECT_FALSE(moonlight_stream_hud_toggle_requested(MOONLIGHT_PS5_PAD_R1));
 }
 
-TEST(StreamShortcuts, SelectTriangleTogglesStreamKeyboard)
+TEST(StreamShortcuts, TouchpadTriangleTogglesStreamKeyboard)
 {
-    EXPECT_TRUE(
-        moonlight_stream_keyboard_requested(MOONLIGHT_PS5_PAD_SELECT | MOONLIGHT_PS5_PAD_TRIANGLE));
+    EXPECT_TRUE(moonlight_stream_keyboard_requested(MOONLIGHT_PS5_PAD_TOUCHPAD |
+                                                    MOONLIGHT_PS5_PAD_TRIANGLE));
     EXPECT_FALSE(moonlight_stream_keyboard_requested(MOONLIGHT_PS5_PAD_TRIANGLE));
 }
 
-TEST(StreamShortcuts, SelectSquareTogglesMouseMode)
+TEST(StreamShortcuts, TouchpadSquareTogglesMouseMode)
 {
-    EXPECT_TRUE(moonlight_stream_mouse_toggle_requested(MOONLIGHT_PS5_PAD_SELECT |
+    EXPECT_TRUE(moonlight_stream_mouse_toggle_requested(MOONLIGHT_PS5_PAD_TOUCHPAD |
                                                         MOONLIGHT_PS5_PAD_SQUARE));
     EXPECT_FALSE(moonlight_stream_mouse_toggle_requested(MOONLIGHT_PS5_PAD_SQUARE));
-    EXPECT_FALSE(moonlight_stream_mouse_toggle_requested(MOONLIGHT_PS5_PAD_SELECT));
+    EXPECT_FALSE(moonlight_stream_mouse_toggle_requested(MOONLIGHT_PS5_PAD_TOUCHPAD));
 }
 
 TEST(StreamShortcuts, MouseAxisHasDeadzoneAndDirection)

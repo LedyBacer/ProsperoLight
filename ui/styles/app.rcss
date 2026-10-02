@@ -142,7 +142,14 @@ button.focused > .focused-chrome { display: block; }
 .setting-help { position: absolute; left: 28px; top: 33px; width: 820px; height: 28px; color: #84c9ff; font-size: 19px; line-height: 26px; }
 .setting-value { position: absolute; left: 860px; top: 13px; width: 470px; height: 38px; color: #c8eaff; font-size: 24px; line-height: 38px; text-align: right; }
 .setting-fixed { border-color: #376b9b; background-color: #0a254a; }
-.settings-note { position: absolute; left: 34px; top: 850px; width: 1320px; height: 38px; color: #84c9ff; font-size: 20px; line-height: 30px; }
+.settings-note { position: absolute; left: 34px; top: 850px; width: 1380px; height: 42px; color: #84c9ff; font-size: 20px; line-height: 38px; }
+.note-label { position: absolute; left: 0px; top: 0px; width: 190px; height: 42px; white-space: nowrap; }
+.note-shortcut { position: absolute; top: 0px; width: 280px; height: 42px; color: #b6ddf8; }
+.note-shortcut img { position: absolute; top: 0px; width: 40px; height: 40px; }
+.note-shortcut .note-pad { left: 0px; } .note-shortcut .note-key { left: 64px; }
+.note-shortcut em { position: absolute; left: 42px; top: 0px; width: 20px; height: 42px; font-style: normal; text-align: center; }
+.note-shortcut span { position: absolute; left: 114px; top: 0px; height: 42px; white-space: nowrap; }
+.note-shortcut-0 { left: 210px; } .note-shortcut-1 { left: 500px; } .note-shortcut-2 { left: 790px; } .note-shortcut-3 { left: 1080px; }
 
 #controller-footer { position: absolute; left: 0px; top: 1004px; width: 1920px; height: 76px; border-top: 1px #4f9adc; background-color: #081d3c; }
 .controller-hint { position: absolute; top: 16px; height: 44px; color: #b6ddf8; }
@@ -153,7 +160,7 @@ button.focused > .focused-chrome { display: block; }
 .hint-stop { left: 374px; width: 140px; }
 .hint-refresh { left: 532px; width: 170px; }
 .hint-options { left: 720px; width: 180px; }
-.hint-nav { left: 924px; width: 220px; } .hint-nav span { left: 0px; color: #f4f8ff; } .hint-nav em { position: absolute; left: 96px; top: 0px; color: #b6ddf8; font-size: 20px; font-style: normal; line-height: 38px; }
+.hint-nav { left: 924px; width: 220px; } .hint-nav .hint-second { left: 46px; } .hint-nav em { position: absolute; left: 96px; top: 0px; color: #b6ddf8; font-size: 20px; font-style: normal; line-height: 38px; }
 #footer-status-dot { position: absolute; left: 1608px; top: 28px; }
 #footer-status { position: absolute; left: 1638px; top: 19px; width: 218px; height: 38px; color: #63d8a2; font-size: 20px; line-height: 32px; text-align: right; }
 

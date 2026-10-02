@@ -1535,9 +1535,6 @@ void MoonlightApp::UpdateSettings()
                                                                                    : "1080",
                   config_.stream_fps);
     SetText(document_, "header-mode", text);
-    SetText(document_, "settings-note",
-            "Stream shortcuts: Select+Triangle keyboard; Select+Square mouse; Select+R1 stats; "
-            "Select+L1 return.");
 }
 
 void MoonlightApp::HandleInput(const radio_input_event_t &event)

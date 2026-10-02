@@ -626,13 +626,59 @@ class ToolTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(configured["titleId"], readme)
         self.assertIn(configured["contentVersion"], readme)
-        for shortcut in (
-            "Select + L1",
-            "Select + R1",
-            "Select + Square",
-            "Select + Triangle",
-        ):
-            self.assertIn(shortcut, readme)
+        for button, label in (("L1", "l1"), ("R1", "r1"), ("Square", "square"),
+                              ("Triangle", "triangle")):
+            self.assertIn(f"| ![Touchpad][touchpad] + ![{button}][{label}] |", readme)
+
+    def test_stream_shortcuts_are_named_after_the_touchpad(self):
+        # The button was once written "Select"; the changelog keeps one note of it.
+        old_name = re.compile(r"Select ?\+")
+        for name in ("README.md", "docs/TROUBLESHOOTING.md", "docs/VALIDATION.md",
+                     "docs/PERFORMANCE_ROUND_3.md", "ui/main.rml", "src/moonlight_app.cpp",
+                     "src/moonlight_stream.cpp", "include/moonlight_stream_input.hpp"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIsNone(old_name.search(text), name)
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertEqual(len(old_name.findall(changelog)), 1)
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+        self.assertIn("Touchpad + Square switches to %s.", stream)
+
+    def test_buttons_are_shown_as_icons(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools/generate-button-icons.py"), "--check"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        references = dict(re.findall(r"^\[(\w+)\]: (docs/images/buttons/\w+\.svg) ", readme, re.M))
+        self.assertEqual(len(references), 10)
+        for label, path in references.items():
+            self.assertTrue((ROOT / path).is_file(), path)
+            self.assertIn(f"][{label}]", readme)
+        controls = readme[readme.index("## Controls"):]
+        controls = controls[: controls.index("[cross]:")]
+        for name in ("Cross", "Circle", "Square", "Triangle", "Options", "L1", "R1", "D-pad"):
+            self.assertIsNone(re.search(rf"(?<!\[){name}(?!\])", controls), name)
+
+        markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
+        styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
+        source = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
+        self.assertEqual(markup.count('class="note-pad" src="icons/touchpad.tga"'), 4)
+        for index, key in enumerate(("l1", "r1", "square", "triangle")):
+            self.assertIn(
+                f'note-shortcut-{index}"><img class="note-pad" src="icons/touchpad.tga" width="40" '
+                f'height="40" alt=""/><em>+</em><img class="note-key" src="icons/{key}.tga"',
+                markup,
+            )
+            self.assertIn(f".note-shortcut-{index} {{ left:", styles)
+        self.assertIn('<img src="icons/l1.tga" width="40" height="40" alt=""/><img class="hint-second" '
+                      'src="icons/r1.tga"', markup)
+        # The note is markup now; the app must not overwrite it with text.
+        self.assertNotIn('"settings-note"', source)
+        for name in ("touchpad", "l1", "r1"):
+            icon = (ROOT / "ui/icons" / f"{name}.tga").read_bytes()
+            self.assertEqual(icon[:18].hex(), "000002000000000000000000280028002028", name)
+            self.assertEqual(len(icon), 18 + 40 * 40 * 4, name)
 
     def test_launcher_has_no_diagnostics_page(self):
         markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")

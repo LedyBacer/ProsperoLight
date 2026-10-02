@@ -167,7 +167,13 @@
                         <span class="setting-name">Decoder CPU cores</span><span id="setting-cores-help" class="setting-help">Reserved for decoding; stream threads use the remaining cores</span>
                         <span id="setting-cores-value" class="setting-value">3 cores</span>
                     </button>
-                    <span id="settings-note" class="settings-note">Stream shortcuts: Select+Triangle keyboard; Select+Square mouse; Select+R1 stats; Select+L1 return.</span>
+                    <span id="settings-note" class="settings-note">
+                        <span class="note-label">During a stream</span>
+                        <span class="note-shortcut note-shortcut-0"><img class="note-pad" src="icons/touchpad.tga" width="40" height="40" alt=""/><em>+</em><img class="note-key" src="icons/l1.tga" width="40" height="40" alt=""/><span>Leave stream</span></span>
+                        <span class="note-shortcut note-shortcut-1"><img class="note-pad" src="icons/touchpad.tga" width="40" height="40" alt=""/><em>+</em><img class="note-key" src="icons/r1.tga" width="40" height="40" alt=""/><span>Statistics</span></span>
+                        <span class="note-shortcut note-shortcut-2"><img class="note-pad" src="icons/touchpad.tga" width="40" height="40" alt=""/><em>+</em><img class="note-key" src="icons/square.tga" width="40" height="40" alt=""/><span>Mouse mode</span></span>
+                        <span class="note-shortcut note-shortcut-3"><img class="note-pad" src="icons/touchpad.tga" width="40" height="40" alt=""/><em>+</em><img class="note-key" src="icons/triangle.tga" width="40" height="40" alt=""/><span>Keyboard</span></span>
+                    </span>
                 </section>
 
             </main>
@@ -178,7 +184,7 @@
                 <span class="controller-hint hint-stop"><img src="icons/square.tga" width="40" height="40" alt=""/><span>Stop</span></span>
                 <span class="controller-hint hint-refresh"><img src="icons/triangle.tga" width="40" height="40" alt=""/><span>Refresh</span></span>
                 <span class="controller-hint hint-options"><img src="icons/options.tga" width="40" height="40" alt=""/><span>Settings</span></span>
-                <span class="controller-hint hint-nav"><span>L1 / R1</span><em>Sections</em></span>
+                <span class="controller-hint hint-nav"><img src="icons/l1.tga" width="40" height="40" alt=""/><img class="hint-second" src="icons/r1.tga" width="40" height="40" alt=""/><em>Sections</em></span>
                 <span id="footer-status-dot" class="status-dot online"><img class="status-icon status-online-icon" src="icons/status-online.tga" width="18" height="18" alt=""/><img class="status-icon status-offline-icon" src="icons/status-offline.tga" width="18" height="18" alt=""/></span>
                 <span id="footer-status">SUNSHINE READY</span>
             </footer>
