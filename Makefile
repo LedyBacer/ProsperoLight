@@ -312,7 +312,7 @@ help:
 	  'make distclean       Also remove the ignored .deps/ cache'
 
 .PHONY: controller-deps
-controller-deps:
+controller-deps: $(if $(wildcard tools/pyrowave/apply-transport.sh),transport-deps)
 	@bash tools/controllers/apply-haptics.sh
 
 $(HOST_UNIT_TEST) test-integration test-stream-performance test-performance-guards: | controller-deps
