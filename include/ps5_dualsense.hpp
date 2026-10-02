@@ -37,6 +37,7 @@ static_assert(offsetof(PadSample, timestamp_us) == 0x50);
 static_assert(offsetof(PadSample, connected_count) == 0x68);
 void Init(int32_t primary_user, int32_t primary_handle);
 uint16_t ActiveMask();
+int RemoteShortcuts(uint32_t raw_buttons, int mapped_buttons);
 void PrimarySample(const PadSample &sample, bool suppressed);
 int SendPrimary(int buttons, uint8_t left_trigger, uint8_t right_trigger, int16_t left_x,
                 int16_t left_y, int16_t right_x, int16_t right_y);

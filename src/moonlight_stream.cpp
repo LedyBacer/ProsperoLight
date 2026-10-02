@@ -3052,7 +3052,7 @@ static void ps5_controller_set_mouse_mode(ps5_controller_state_t *state, int ena
         state->last_event_us = 0;
     }
     snprintf(notification.message, sizeof(notification.message),
-             "ProsperoLight: %s mode enabled. Select + Square switches to %s.",
+             "ProsperoLight: %s mode enabled. Touchpad + Square switches to %s.",
              state->mouse_mode ? "Mouse" : "Controller",
              state->mouse_mode ? "controller" : "mouse");
     (void)sceKernelSendNotificationRequest(0, &notification, sizeof(notification), 0);
@@ -3258,6 +3258,9 @@ static void ps5_controller_poll(ps5_controller_state_t *state)
         }
 
         event = ps5_controller_map_sample(sample, neutral);
+        if (!neutral)
+            event.buttons =
+                prosperolight::dualsense::RemoteShortcuts(sample->buttons, event.buttons);
         mouse_buttons = neutral ? 0 : sample->buttons;
         state->last_raw_buttons = raw_buttons;
         state->observed_raw_buttons |= raw_buttons;

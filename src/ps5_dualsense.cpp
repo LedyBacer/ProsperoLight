@@ -20,6 +20,7 @@ extern "C"
     int32_t scePadRead(int32_t handle, void *samples, int32_t capacity);
     int32_t scePadReadState(int32_t handle, void *sample);
     int32_t scePadSetVibration(int32_t handle, const void *param);
+    int32_t scePadSetVibrationMode(int32_t handle, int32_t mode);
     int32_t scePadSetLightBar(int32_t handle, const void *param);
     int32_t scePadResetLightBar(int32_t handle);
     int32_t scePadSetMotionSensorState(int32_t handle, bool enabled);
@@ -115,7 +116,8 @@ void OutputResult(Slot &slot, const char *operation, int result)
 uint32_t SupportedButtons()
 {
     return UP_FLAG | DOWN_FLAG | LEFT_FLAG | RIGHT_FLAG | A_FLAG | B_FLAG | X_FLAG | Y_FLAG |
-           LB_FLAG | RB_FLAG | BACK_FLAG | PLAY_FLAG | LS_CLK_FLAG | RS_CLK_FLAG | TOUCHPAD_FLAG;
+           LB_FLAG | RB_FLAG | BACK_FLAG | PLAY_FLAG | LS_CLK_FLAG | RS_CLK_FLAG | TOUCHPAD_FLAG |
+           SPECIAL_FLAG;
 }
 constexpr uint16_t Capabilities = LI_CCAP_ANALOG_TRIGGERS | LI_CCAP_RUMBLE |
                                   LI_CCAP_TRIGGER_RUMBLE | LI_CCAP_TOUCHPAD | LI_CCAP_ACCEL |
@@ -174,6 +176,8 @@ void SetConnection(unsigned index, const PadSample &sample)
     if (!slot.connected)
     {
         slot.connected = true;
+        // Select legacy motor emulation explicitly for scePadSetVibration.
+        OutputResult(slot, "enable rumble mode", scePadSetVibrationMode(slot.handle, 2));
         active_mask |= 1u << index;
         alignas(8) uint8_t info_buffer[256]{};
         PadInfo info{};
@@ -281,9 +285,10 @@ void ExtendedInput(unsigned index, const PadSample &sample, bool suppressed)
     }
     if (Announce(index) != 0)
         return;
+    const bool remote_chord = (sample.buttons & 0x100000u) && (sample.buttons & 0x6u);
     if (LiGetHostFeatureFlags() & LI_FF_CONTROLLER_TOUCH_EVENTS)
     {
-        const unsigned count = sample.touch_count > 2 ? 2 : sample.touch_count;
+        const unsigned count = remote_chord ? 0 : (sample.touch_count > 2 ? 2 : sample.touch_count);
         for (unsigned old = 0; old < slot.previous.touch_count; ++old)
         {
             const Touch &touch = slot.previous.touches[old];
@@ -315,6 +320,8 @@ void ExtendedInput(unsigned index, const PadSample &sample, bool suppressed)
         }
     }
     slot.previous = sample;
+    if (remote_chord)
+        slot.previous.touch_count = 0;
     if (slot.previous.touch_count > 2)
         slot.previous.touch_count = 2;
     const uint64_t now = Now();
@@ -348,7 +355,7 @@ int Buttons(uint32_t raw)
     for (unsigned i = 0; i < sizeof(native) / sizeof(native[0]); ++i)
         if (raw & native[i])
             result |= remote[i];
-    return result;
+    return RemoteShortcuts(raw, result);
 }
 void Discover()
 {
@@ -466,6 +473,16 @@ bool DecodeTrigger(TriggerCommand &command, uint8_t type, const uint8_t *data)
     return false;
 }
 } // namespace
+int RemoteShortcuts(uint32_t raw, int mapped)
+{
+    if (!(raw & 0x100000u))
+        return mapped;
+    if (raw & 0x2u)
+        mapped = (mapped & ~(TOUCHPAD_FLAG | LS_CLK_FLAG)) | BACK_FLAG;
+    if (raw & 0x4u)
+        mapped = (mapped & ~(TOUCHPAD_FLAG | RS_CLK_FLAG)) | SPECIAL_FLAG;
+    return mapped;
+}
 void Init(int32_t user, int32_t handle)
 {
     Lock lock;
@@ -635,8 +652,8 @@ void Rumble(uint16_t index, uint16_t low, uint16_t high)
     if (!slot.connected)
         return;
     ++slot.rumble_requests;
-    slot.rumble[0] = low >> 8;
-    slot.rumble[1] = high >> 8;
+    slot.rumble[0] = (low + 256u) / 257u;
+    slot.rumble[1] = (high + 256u) / 257u;
     slot.rumble_dirty = true;
 }
 void RumbleTriggers(uint16_t index, uint16_t left, uint16_t right)
