@@ -104,3 +104,25 @@ and packaging do not establish pad API permissions or effect fidelity on PS5.
 Touchpad click + L3 sends Select/Back; touchpad click + R3 sends Guide. Both work for all controller slots and suppress constituent button clicks and touch contacts while held. PS/Create remain system-owned. DualSense connections explicitly select scePad rumble mode (2) for legacy vibration. Nonzero low amplitudes are preserved when converting 16-bit host motor values.
 
 On Windows Vibepollo can emulate DualSense with `gamepad = vhf_ds5`, provided its virtual gamepad driver is installed. `ds4` uses a PS4 device. Reference: https://github.com/Nonary/Vibepollo/blob/master/docs/configuration.md .
+
+## Local pre-PR validation (2026-10-02)
+
+The upstream workflow commands were run in the Linux build container using
+Clang 18 and Python 3.13 with its pinned Mbed TLS code-generation dependencies:
+
+- `make lint`: formatting, Clang static analysis, attribution, metadata and shell checks.
+- `make test-unit test-performance-guards`: 42 GoogleTest cases, C++ allocation
+  runtime, pipeline lifetime, socket handling and mocked thread-placement checks.
+- `make test-integration`: 49 host tooling tests.
+- `make test-stream-performance`: scalar/SIMD FEC recovery and matching parity,
+  five upstream Opus tests per variant, and stereo/six-channel PCM comparison.
+- `make libc` and `sha256sum -c libc.prx.sha256`: deterministic runtime rebuild
+  and matching checked-in checksum.
+- `make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200
+  INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8`: independent release build,
+  valid FSELF integrity and verified FFPFSC packaging with zero warnings/errors.
+
+These host checks do not prove controller output on PS5. User review separately
+confirmed two controllers, rumble, touchpad, RGB, acceleration, gyroscope and
+adaptive triggers in the combined PyroWave preview. Three/four-controller use
+and the new Select/Guide shortcuts have not yet been confirmed by user review.
