@@ -109,8 +109,11 @@ mapfile -d '' -t source_paths < <(
         ! -path "$root/src/gamestream/*" \
         -print0 | sort -z
 )
+bash "$root/tools/pyrowave/apply-transport.sh"
+
 sources=()
 for source in "${source_paths[@]}"; do
+    [[ ${PYROWAVE:-0} == 1 || $source != "$root/src/pyrowave/"* ]] || continue
     sources+=("${source#"$root/"}")
 done
 (( ${#sources[@]} > 0 )) || { echo "src/ has no C or C++ sources" >&2; exit 2; }
@@ -158,6 +161,21 @@ if (( ${#pacbrew_packages[@]} > 0 || ${#pacbrew_includes[@]} > 0 || ${#pacbrew_a
     printf 'PacBrew dependencies: %s\n' "${pacbrew_packages[*]:-(manual archives)}"
 fi
 
+pyrowave_cflags=()
+pyrowave_archives=()
+radv_link_flags=()
+radv_link_inputs=()
+link_script=(-T "$native/ps5-pie.ld")
+if [[ ${PYROWAVE:-0} == 1 ]]; then
+    source "$root/tools/pyrowave/build-deps.sh"
+    prepare_pyrowave_build
+    # Use one C++ ABI, matching the platform library required by RADV.
+    filtered_archives=()
+    for archive in "${archives[@]}"; do
+        [[ $archive != vendor/ps5/sdk/lib/libcxx.a && $archive != vendor/ps5/sdk/lib/libcxxabi.a && $archive != vendor/ps5/sdk/lib/libunwind.a ]] && filtered_archives+=("$archive")
+    done
+    archives=("${filtered_archives[@]}")
+fi
 objects=()
 for source in "${sources[@]}"; do
     [[ $source =~ ^src/[A-Za-z0-9_./-]+\.(c|cc|cpp)$ && -f $root/$source ]] || {
@@ -181,7 +199,7 @@ for source in "${sources[@]}"; do
         }
         args+=("-I$root/$include")
     done
-    args+=("${pacbrew_cflags[@]}")
+    args+=("${pacbrew_cflags[@]}" "${pyrowave_cflags[@]}")
     PS5_PAYLOAD_SDK="$sdk_root" sh "$root/tooling/prospero-clang18" \
         "${args[@]}" -c "$root/$source" -o "$object"
     objects+=("$object")
@@ -241,11 +259,12 @@ done
 if (( ${#pacbrew_libs[@]} > 0 )); then
     link_inputs+=(--start-group "${pacbrew_libs[@]}" --end-group)
 fi
-"$sdk_root/bin/prospero-lld" -T "$native/ps5-pie.ld" --eh-frame-hdr \
+"$sdk_root/bin/prospero-lld" "${link_script[@]}" --eh-frame-hdr "${radv_link_flags[@]}" \
     --version-script "$native/app-symbols.map" \
     --exclude-libs=ALL \
     -L "$build/obj" \
     -e _start -o "$build/llvm-pie.elf" "${link_inputs[@]}" \
+    --start-group "${pyrowave_archives[@]}" --end-group "${radv_link_inputs[@]}" \
     --as-needed "$sdk_root"/target/lib/*.so
 "$tool" link --in "$build/llvm-pie.elf" --out "$build/eboot.elf" \
     --stub-dir "$sdk_root/target/lib" \
@@ -316,6 +335,17 @@ PY
     fi
     "$tool" self --inspect --file "$app/sce_module/$name"
 done
+mkdir -p "$app/licenses"
+cp "$root/LICENSE" "$app/licenses/ProsperoLight-GPL.txt"
+cp "$root/THIRD_PARTY_NOTICES.md" "$app/licenses/THIRD_PARTY_NOTICES.md"
+cp "$root/third_party/moonlight-common-c/LICENSE.txt" "$app/licenses/moonlight-common-c-LICENSE.txt"
+if [[ ${PYROWAVE:-0} == 1 ]]; then
+    cp "$root/src/pyrowave/LICENSE-MIT.txt" "$app/licenses/PS5-PyroWave-PoC-MIT.txt"
+    cp "$root/.deps/pyrowave/pyrowave/LICENSE" "$app/licenses/PyroWave-MIT.txt"
+    cp "$root/.deps/pyrowave/Granite/LICENSE" "$app/licenses/Granite-MIT.txt"
+    cp "$root/.deps/pyrowave/Granite/third_party/volk/LICENSE.md" "$app/licenses/Volk-MIT.txt"
+    cp "$root/.deps/pyrowave/Granite/third_party/khronos/vulkan-headers/LICENSE.md" "$app/licenses/Vulkan-Headers-LICENSE.md"
+fi
 "$tool" self --inspect --file "$app/eboot.bin"
 python3 "$root/tools/write-build-provenance.py" "$app/eboot.bin" "$build/build-provenance.json"
 

@@ -26,3 +26,6 @@ tooling/prospero-clang18 text eol=lf
 # Vendored SDK/UI inputs retain upstream line endings and whitespace verbatim.
 vendor/** -text -whitespace
 ui/fonts/** -text -whitespace
+
+# Unified diff context includes intentionally blank context lines.
+tools/pyrowave/patches/** -whitespace

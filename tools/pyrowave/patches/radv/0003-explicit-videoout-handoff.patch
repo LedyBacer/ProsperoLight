@@ -1,0 +1,123 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -218,6 +218,8 @@
+    struct wsi_videoout_swapchain *current;
+ 
+    /* The flip thread and its queue. */
++   bool stopping;
++   int64_t physical;
+    bool thread_started;
+    thrd_t thread;
+    struct wsi_videoout_present queue[VIDEOOUT_BUFFERS * 2];
+@@ -226,6 +228,7 @@
+ 
+ static struct wsi_videoout_output videoout_output = {
+    .handle = -1,
++   .physical = -1,
+ };
+ static once_flag videoout_once = ONCE_FLAG_INIT;
+ 
+@@ -387,6 +390,7 @@
+       return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
+    buffers = address;
++   out->physical = physical;
+    /* The display reads memory, not the CPU's cache. */
+    memset(buffers, 0, bytes);
+    for (size_t at = 0; at < bytes; at += 64)
+@@ -398,6 +402,7 @@
+       return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+ #endif
+ 
++   out->buffers = buffers;
+    int result = sceVideoOutSetFlipRate(out->handle, 0);
+    struct ps5_video_out_buffer registered[VIDEOOUT_BUFFERS];
+    for (uint32_t i = 0; i < VIDEOOUT_BUFFERS; i++)
+@@ -432,8 +437,12 @@
+    struct wsi_videoout_output *out = &videoout_output;
+    mtx_lock(&out->lock);
+    for (;;) {
+-      while (out->queue_count == 0)
++      while (out->queue_count == 0 && !out->stopping)
+          cnd_wait(&out->changed, &out->lock);
++      if (out->stopping) {
++         mtx_unlock(&out->lock);
++         return 0;
++      }
+       const struct wsi_videoout_present present = out->queue[out->queue_head];
+       mtx_unlock(&out->lock);
+ 
+@@ -1129,3 +1138,73 @@
+ wsi_display_setup_syncobj_fd(struct wsi_device *wsi_device, int fd)
+ {
+ }
++
++/* Explicit ownership handoff for applications that also use an AGC/menu
++ * presenter. Call only after all RADV swapchains, devices and instances are
++ * destroyed. Ordinary RetroArch-style device recreation retains its existing
++ * process-wide output until the application explicitly requests this handoff.
++ */
++int wsi_ps5_release_videoout(void);
++
++int
++wsi_ps5_release_videoout(void)
++{
++   struct wsi_videoout_output *out = &videoout_output;
++   call_once(&videoout_once, videoout_output_init_once);
++   mtx_lock(&out->lock);
++   if (out->current || out->queue_count) {
++      mtx_unlock(&out->lock);
++      return -1;
++   }
++   out->stopping = true;
++   cnd_broadcast(&out->changed);
++   const bool join = out->thread_started;
++   mtx_unlock(&out->lock);
++   if (join)
++      thrd_join(out->thread, NULL);
++   mtx_lock(&out->lock);
++   out->thread_started = false;
++   out->stopping = false;
++   int result = 0;
++#if defined(__PROSPERO__)
++   if (out->handle >= 0) {
++      const int64_t deadline = os_time_get_nano() + INT64_C(2000000000);
++      while (videoout_shown_argument_locked() < out->flip_argument && os_time_get_nano() < deadline)
++         sceVideoOutWaitVblank(out->handle);
++      const int unregister_result = out->buffers ? sceVideoOutUnregisterBuffers(out->handle, 0) : 0;
++      const int restore_result = out->high_frame_rate
++         ? sceVideoOutConfigureOutput(out->handle, PS5_VIDEO_OUT_MODE_RESTORE, NULL, NULL, NULL) : 0;
++      if (restore_result == 0) {
++         sceVideoOutWaitVblank(out->handle);
++         sceVideoOutWaitVblank(out->handle);
++      }
++      const int close_result = sceVideoOutClose(out->handle);
++      fprintf(stderr, "wsi/videoout: handoff unregister=%08x restore=%08x close=%08x\n",
++              (unsigned)unregister_result, (unsigned)restore_result, (unsigned)close_result);
++      if (close_result != 0) {
++         mtx_unlock(&out->lock);
++         return close_result;
++      }
++      if (restore_result != 0)
++         result = restore_result;
++      if (unregister_result != 0 && unregister_result != PS5_VIDEO_OUT_ERROR_BUSY)
++         result = unregister_result;
++   }
++   if (out->buffers)
++      sceKernelMunmap(out->buffers, VIDEOOUT_BUFFERS * VIDEOOUT_BUFFER_BYTES);
++   if (out->physical >= 0)
++      sceKernelReleaseDirectMemory(out->physical, VIDEOOUT_BUFFERS * VIDEOOUT_BUFFER_BYTES);
++#else
++   if (out->buffers)
++      munmap(out->buffers, VIDEOOUT_BUFFERS * VIDEOOUT_BUFFER_BYTES);
++#endif
++   out->buffers = NULL;
++   out->physical = -1;
++   out->handle = -1;
++   out->opened = out->high_frame_rate = out->modes_settled = out->high_mode_offered = false;
++   out->flip_argument = 0;
++   out->queue_head = out->queue_count = 0;
++   memset(out->buffer, 0, sizeof(out->buffer));
++   mtx_unlock(&out->lock);
++   return result;
++}

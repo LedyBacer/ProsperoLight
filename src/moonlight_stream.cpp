@@ -20,6 +20,7 @@
 #include <opus_multistream.h>
 
 #include "moonlight_stream.hpp"
+#include "stream_profile.hpp"
 #include "moonlight_config.hpp"
 #include "moonlight_physical_input.hpp"
 #include "moonlight_stream_input.hpp"
@@ -38,6 +39,9 @@
 #include "gamestream/gs_http.h"
 #include "gamestream/gs_log.h"
 #include "../../third_party/moonlight-common-c/src/Limelight.h"
+#if PROSPEROLIGHT_PYROWAVE
+#include "pyrowave/stream_backend.hpp"
+#endif
 
 // Frame slots cover every picture the deepest pipeline can hold, one waiting
 // for presentation, one on screen, the protected latest output and one spare.
@@ -3350,6 +3354,8 @@ static void connection_stage_complete(int stage)
     (void)lan_http_report_text(receipt);
 }
 
+static char protocol_error[192]{};
+
 static void connection_log(const char *format, ...)
 {
     char message[320];
@@ -3363,6 +3369,8 @@ static void connection_log(const char *format, ...)
     length = strlen(message);
     while (length && (message[length - 1] == '\n' || message[length - 1] == '\r'))
         message[--length] = '\0';
+    if (strstr(message,"Incompatible PyroWave bitstream") || strstr(message,"Selected PyroWave profile is unsupported"))
+        snprintf(protocol_error,sizeof(protocol_error),"%s",message);
     // The only signal moonlight-common-c gives when it discards its frame queue
     // because decoding fell behind. Rare lines; never per packet.
     if (strstr(message, "Video decode unit queue overflow"))
@@ -3412,6 +3420,9 @@ static void connection_set_hdr_mode(bool enabled)
     std::atomic_fetch_add_explicit(&host_hdr_transitions, 1u, std::memory_order_relaxed);
     if (enabled)
         metadata_valid = LiGetHdrMetadata(&metadata) ? 1 : 0;
+#if PROSPEROLIGHT_PYROWAVE
+    prosperolight::pyrowave::set_hdr_mode(enabled, metadata_valid ? &metadata : nullptr);
+#endif
     snprintf(receipt, sizeof(receipt),
              "Moonlight HDR mode: active=%u transitions=%u metadata=%u max_nits=%u min_1e4_nits=%u "
              "max_cll=%u max_fall=%u",
@@ -3445,7 +3456,7 @@ static void nvhttp_log_sink(const char *message)
 
 static int prepare_native_session(client_identity_t *identity, gs_server_t *server,
                                   STREAM_CONFIGURATION *configuration,
-                                  const native_video_mode_t *mode, int gamepad_mask,
+                                  const moonlight::ResolvedStreamProfile &profile, int gamepad_mask,
                                   const char *host, const char *app_name, int requested_app_id)
 {
     app_entry_t *apps = NULL;
@@ -3475,15 +3486,11 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
         gs_error = "Pair this client from the launcher";
         return GS_WRONG_STATE;
     }
-    if (!mode ||
-        (mode->video_format == VIDEO_FORMAT_H265_MAIN10 &&
-         !(server->server_codec_mode_support & SCM_HEVC_MAIN10)) ||
-        (mode->video_format == VIDEO_FORMAT_H265 &&
-         !(server->server_codec_mode_support & SCM_HEVC)) ||
-        (mode->video_format == VIDEO_FORMAT_H264 &&
-         !(server->server_codec_mode_support & SCM_MASK_H264)))
+    if (!(server->server_codec_mode_support & profile.capability))
     {
-        gs_error = "Selected video codec is not supported by this Sunshine PC";
+        static char unsupported[192];
+        snprintf(unsupported, sizeof(unsupported), "Selected PC does not advertise %s", profile.name);
+        gs_error = unsupported;
         return GS_NOT_SUPPORTED_MODE;
     }
 
@@ -3617,10 +3624,15 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     const uint32_t requested_audio =
         options ? options->audio_configuration : MOONLIGHT_AUDIO_STEREO;
     int audio_configuration = AUDIO_CONFIGURATION_STEREO;
-    const native_video_mode_t *mode =
-        find_video_mode(options ? options->video_codec : MOONLIGHT_VIDEO_CODEC_H264,
-                        options ? options->stream_resolution : MOONLIGHT_STREAM_RESOLUTION_1080P,
-                        options ? options->hdr_enabled : 0u);
+    const auto profile = moonlight::resolve_stream_profile(
+        options ? options->video_codec : MOONLIGHT_VIDEO_CODEC_H264,
+        options ? options->chroma_sampling : MOONLIGHT_CHROMA_420,
+        options && options->hdr_enabled);
+    const bool use_pyrowave = profile.decoder_backend == moonlight::DecoderBackend::PyroWaveRadv;
+    const uint32_t resolution = options ? options->stream_resolution : MOONLIGHT_STREAM_RESOLUTION_1080P;
+    const unsigned stream_width = resolution == MOONLIGHT_STREAM_RESOLUTION_2160P ? 3840 : resolution == MOONLIGHT_STREAM_RESOLUTION_1440P ? 2560 : 1920;
+    const unsigned stream_height = resolution == MOONLIGHT_STREAM_RESOLUTION_2160P ? 2160 : resolution == MOONLIGHT_STREAM_RESOLUTION_1440P ? 1440 : 1080;
+    const native_video_mode_t *mode = use_pyrowave ? nullptr : find_video_mode(profile.codec, resolution, profile.hdr);
     const bool classic_pipeline =
         !options || options->decoder_pipeline != MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
     const uint32_t requested_depth = classic_pipeline ? 1u : (uint32_t)DECODER_PIPELINE_DEPTH;
@@ -3654,24 +3666,45 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     if (metrics)
         memset(metrics, 0, sizeof(*metrics));
 
-    if (!host[0] || !mode)
+    if (!host[0] || (!use_pyrowave && !mode))
         return -1;
+#if !PROSPEROLIGHT_PYROWAVE
+    if (use_pyrowave) { if (metrics) snprintf(metrics->error, sizeof(metrics->error), "PyroWave backend is not included in this build"); return -1; }
+#endif
+    snprintf(notification.message, sizeof(notification.message),
+        "Stream profile: codec=%u format=%s resolution=%ux%u fps=%u bitrate=%u kbps chroma=%s depth=%u range=%s decoder=%s bitstream=%s",
+        profile.codec, profile.format_name, stream_width, stream_height, stream_fps, bitrate_kbps,
+        profile.chroma == MOONLIGHT_CHROMA_444 ? "444" : "420", profile.bit_depth,
+        profile.hdr ? "HDR10" : "SDR", use_pyrowave ? "RADV" : "VideoDec2", use_pyrowave ? PYROWAVE_BITSTREAM_ID : "n/a");
+    (void)lan_http_report_text(notification.message);
+    protocol_error[0]=0;
+#if PROSPEROLIGHT_PYROWAVE
+    if(use_pyrowave) prosperolight::pyrowave::clear_error();
+#endif
     lan_http_report_set_host(host);
     if (requested_audio == MOONLIGHT_AUDIO_51_SURROUND && ps5_audio_surround_available())
         audio_configuration = AUDIO_CONFIGURATION_51_SURROUND;
     else if (requested_audio == MOONLIGHT_AUDIO_51_SURROUND)
         (void)lan_http_report_text("Moonlight 5.1 unavailable; falling back to stereo");
 
-    result = start_connection_loading(&loading, NULL, 0, mode->hdr, mode->visible_width,
-                                      mode->visible_height, stream_fps, NULL);
+    result = start_connection_loading(&loading, NULL, 0, profile.hdr, stream_width,
+                                      stream_height, stream_fps, NULL);
     if (result != 0)
         goto done;
 
     snprintf(notification.message, sizeof(notification.message),
-             "Native zero-copy stage 1: mode=%s fps=%u bitrate=%u kbps input_slot=%x", mode->name,
+             "Native zero-copy stage 1: mode=%s fps=%u bitrate=%u kbps input_slot=%x", profile.name,
              stream_fps, bitrate_kbps, INPUT_SLOT_BYTES);
     (void)lan_http_report_text(notification.message);
     sceSystemServiceHideSplashScreen();
+    if (use_pyrowave)
+    {
+        renderer.stream_fps = stream_fps;
+        renderer.process_cpu_mask = moonlight::kTitleCpuMask;
+        renderer.layout = moonlight::plan_thread_layout(renderer.process_cpu_mask, 0);
+        stop_connection_loading();
+        goto configure_stream;
+    }
     result = sceSysmoduleLoadModule(207);
     snprintf(notification.message, sizeof(notification.message),
              "Native zero-copy stage 2: sysmodule207=%08x", (uint32_t)result);
@@ -3820,17 +3853,19 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     }
     stop_connection_loading();
 
+configure_stream:
     LiInitializeStreamConfiguration(&stream_config);
-    stream_config.width = (int)mode->visible_width;
-    stream_config.height = (int)mode->visible_height;
+    stream_config.width = (int)stream_width;
+    stream_config.height = (int)stream_height;
     stream_config.fps = (int)stream_fps;
     stream_config.bitrate = (int)bitrate_kbps;
     stream_config.packetSize = 1392;
     stream_config.streamingRemotely = STREAM_CFG_LOCAL;
     stream_config.audioConfiguration = audio_configuration;
-    stream_config.supportedVideoFormats = mode->video_format;
-    stream_config.colorSpace = mode->hdr ? COLORSPACE_REC_2020 : COLORSPACE_REC_709;
+    stream_config.supportedVideoFormats = profile.video_format;
+    stream_config.colorSpace = profile.hdr ? COLORSPACE_REC_2020 : COLORSPACE_REC_709;
     stream_config.colorRange = COLOR_RANGE_LIMITED;
+    stream_config.pyrowaveCompression = 0;
     stream_config.encryptionFlags = ENCFLG_NONE;
     controller_result = ps5_controller_init(&controller);
     controller_ready = controller_result == 0;
@@ -3860,12 +3895,12 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
              (uint32_t)physical_input.mouse_init_result, (uint32_t)physical_input.mouse_open_result,
              physical_input.mouse_handle_count);
     (void)lan_http_report_text(notification.message);
-    result = start_connection_loading(&loading, frame_memory, frame_size, mode->hdr,
-                                      mode->visible_width, mode->visible_height, stream_fps,
+    result = start_connection_loading(&loading, frame_memory, frame_size, profile.hdr,
+                                      stream_width, stream_height, stream_fps,
                                       controller_ready ? &controller : NULL);
     snprintf(notification.message, sizeof(notification.message),
              "Native connecting animation: present=%08x thread=%08x hdr=%u", (uint32_t)result,
-             (uint32_t)loading.create_result, mode->hdr ? 1u : 0u);
+             (uint32_t)loading.create_result, profile.hdr ? 1u : 0u);
     (void)lan_http_report_text(notification.message);
     if (result != 0)
         goto done;
@@ -3873,7 +3908,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         moonlight::client_refresh_x100(stream_fps, loading.output_refresh_x100);
     stream_config.clientRefreshRateX100 = (int)renderer.client_refresh_x100;
     identity_initialized = 1;
-    result = prepare_native_session(&client_identity, &gs_server, &stream_config, mode,
+    result = prepare_native_session(&client_identity, &gs_server, &stream_config, profile,
                                     controller_ready ? 1 : 0, host, app_name, app_id);
     if (result != GS_OK)
         goto done;
@@ -3890,6 +3925,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         goto done;
     }
 
+    protocol_error[0]=0;
     connection_terminated = 0;
     connection_error = 0;
     std::atomic_store_explicit(&host_hdr_active, 0u, std::memory_order_relaxed);
@@ -3900,7 +3936,14 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     std::atomic_store_explicit(&video_queue_overflows, 0u, std::memory_order_relaxed);
     std::atomic_store_explicit(&video_unrecoverable_frames, 0u, std::memory_order_relaxed);
     std::atomic_store_explicit(&connection_failed_stage, 0, std::memory_order_relaxed);
-    prepare_video_callbacks(stream_slices, mode->codec_type == 1u);
+    if (!use_pyrowave) prepare_video_callbacks(stream_slices, mode->codec_type == 1u);
+#if PROSPEROLIGHT_PYROWAVE
+    if (use_pyrowave)
+    {
+        stop_connection_animation();
+        prosperolight::pyrowave::prepare_callbacks(fail_stream,vsync_enabled!=0,!options || options->display_area==MOONLIGHT_DISPLAY_AREA_TV_SAFE);
+    }
+#endif
     native_agc_set_vsync((int)vsync_enabled);
     // Keep every stream thread off the decoder's CPUs. New threads inherit the
     // creator's mask, so narrow this thread first; moonlight-common-c's thread
@@ -3918,7 +3961,12 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     }
     connection_result = LiStartConnection(
         &gs_server.server_info, &stream_config, &moonlight_connection_callbacks,
-        &moonlight_video_callbacks, &moonlight_audio_callbacks, &renderer, 0, NULL, 0);
+#if PROSPEROLIGHT_PYROWAVE
+        use_pyrowave ? prosperolight::pyrowave::callbacks() : &moonlight_video_callbacks,
+#else
+        &moonlight_video_callbacks,
+#endif
+        &moonlight_audio_callbacks, &renderer, 0, NULL, 0);
     std::atomic_store_explicit(&loading.connection_pending, 0, std::memory_order_release);
     stop_connection_loading();
     if (connection_result != 0)
@@ -3957,10 +4005,10 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
             const uint64_t now = monotonic_us();
             if (now >= synthetic_motion_next_us)
             {
-                const short x = (short)((synthetic_motion_events * 32u) % mode->visible_width);
-                const short y = (short)(mode->visible_height / 2u);
-                if (LiSendMousePositionEvent(x, y, (short)mode->visible_width,
-                                             (short)mode->visible_height) != 0)
+                const short x = (short)((synthetic_motion_events * 32u) % stream_width);
+                const short y = (short)(stream_height / 2u);
+                if (LiSendMousePositionEvent(x, y, (short)stream_width,
+                                             (short)stream_height) != 0)
                     ++synthetic_motion_errors;
                 ++synthetic_motion_events;
                 synthetic_motion_next_us += UINT64_C(16667);
@@ -3972,6 +4020,10 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
             ps5_controller_poll(&controller);
         if (physical_input_ready)
             ps5_physical_input_poll(&physical_input);
+#if PROSPEROLIGHT_PYROWAVE
+        if (use_pyrowave)
+            renderer.presented = (uint32_t)prosperolight::pyrowave::presented();
+#endif
         if (std::atomic_load_explicit(&renderer.presented, std::memory_order_relaxed) == 0 &&
             monotonic_us() - first_frame_wait_start_us >= FIRST_VIDEO_FRAME_TIMEOUT_US)
         {
@@ -4007,6 +4059,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     live_elapsed_us = renderer.last_present_us > renderer.first_present_us
                           ? renderer.last_present_us - renderer.first_present_us
                           : 0;
+    if (!use_pyrowave) {
     snprintf(
         notification.message, sizeof(notification.message),
         "Moonlight live result: rc=%08x connection=%08x terminated=%d user_stop=%d error=%08x "
@@ -4079,8 +4132,16 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
                  native_agc_vsync_active(), native_agc_flip_events_active());
         (void)lan_http_report_text(notification.message);
     }
+    }
 
 done:
+#if PROSPEROLIGHT_PYROWAVE
+    if (result != 0 && use_pyrowave) {
+        prosperolight::pyrowave::copy_error(stream_error,sizeof(stream_error));
+        if(stream_error[0]) { snprintf(protocol_error,sizeof(protocol_error),"%s",stream_error); gs_error=protocol_error; }
+        else if(protocol_error[0]) gs_error=protocol_error;
+    }
+#endif
     if (result != 0 && !controller.requested_stop)
     {
         if (std::atomic_load_explicit(&loading.timed_out, std::memory_order_relaxed))
@@ -4239,6 +4300,10 @@ done:
         moonlight_video_callbacks.stop();
         moonlight_video_callbacks.cleanup();
     }
+#if PROSPEROLIGHT_PYROWAVE
+    if (use_pyrowave)
+        prosperolight::pyrowave::cleanup();
+#endif
     save_performance_summary(renderer, input_intervals, options, result);
     if (renderer.access_units)
     {

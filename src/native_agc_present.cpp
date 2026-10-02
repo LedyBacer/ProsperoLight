@@ -71,8 +71,8 @@ static_assert(PROSPEROLIGHT_FLIP_POLL_US >= 100 && PROSPEROLIGHT_FLIP_POLL_US <=
 #define HUD_REFRESH_FRAMES 60u
 #define DIRECT_MEMORY_TYPE 12
 #define MAP_PROTECTION 0x33
-#define VIDEO_OUT_PIXEL_FORMAT_SDR UINT64_C(0x8000000000000000)
-#define VIDEO_OUT_PIXEL_FORMAT_HDR UINT64_C(0x8100070422000000)
+
+#include "ps5_videoout_formats.h"
 #define VIDEO_OUT_REFRESH_RATE_59_94 UINT64_C(3)
 #define VIDEO_OUT_REFRESH_RATE_119_88 UINT64_C(13)
 #define VIDEO_OUT_REFRESH_RATE_89_91 UINT64_C(35)
@@ -1189,6 +1189,16 @@ static int configure_launcher_output(int32_t handle)
     return sceVideoOutConfigureOutput(handle, VIDEO_OUT_REQUEST_DEFAULT, NULL, NULL, NULL);
 }
 
+// Same 48-byte output status already used by the native presenter. The
+// dynamic-range/flags interpretation is documented by Kodi's public PS5 port:
+// https://github.com/VivaLaVent/kodi-ps5/blob/main/overlay/xbmc/platform/ps5/VideoOutInfo.cpp
+int native_videoout_hdr_active(int32_t handle)
+{
+    video_output_status_t status = {};
+    if (handle < 0 || sceVideoOutGetOutputStatus(handle, &status) != 0) return -1;
+    return status.output_class == 2u || (status.flags & 1u) ? 1 : 0;
+}
+
 static void update_presenter_output_status(const char *stage)
 {
     video_resolution_status_t resolution = {};
@@ -1240,6 +1250,13 @@ void native_agc_set_hud_enabled(int enabled)
 int native_agc_hud_enabled(void)
 {
     return std::atomic_load_explicit(&hud_enabled, std::memory_order_relaxed);
+}
+
+void native_agc_keyboard_snapshot(int *enabled, uint32_t *selected, int *shifted)
+{
+    *enabled = keyboard_enabled.load(std::memory_order_acquire);
+    *selected = keyboard_selected.load(std::memory_order_relaxed);
+    *shifted = keyboard_shifted.load(std::memory_order_relaxed);
 }
 
 void native_agc_set_keyboard_state(int enabled, uint32_t selected, int shifted)

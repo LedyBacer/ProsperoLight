@@ -1,0 +1,18 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -318,10 +318,12 @@
+       if (out->high_frame_rate) {
+          const uint64_t period = videoout_vblank_period_ns(out->handle);
+          if (period > VIDEOOUT_HIGH_REFRESH_LIMIT_NS) {
+-            sceVideoOutConfigureOutput(out->handle, PS5_VIDEO_OUT_MODE_RESTORE, NULL, NULL, NULL);
+-            out->high_frame_rate = false;
++            /* Before buffers/scanout start, vblank waits can reflect startup
++             * pacing rather than the configured HDMI mode. Keep an accepted
++             * mode provisional; the application must verify physical counters
++             * once real frames are presented and fall back if needed. */
+             fprintf(stderr,
+-                    "wsi/videoout: 119.88 Hz accepted, but a vblank comes every %.3f ms; 59.94 Hz restored\n",
++                    "wsi/videoout: 119.88 Hz accepted; startup period %.3f ms; verify after scanout starts\n",
+                     (double)period / 1e6);
+          }
+       } else {

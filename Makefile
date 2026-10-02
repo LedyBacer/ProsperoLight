@@ -7,6 +7,7 @@ SHELL := /bin/bash
 
 -include .env
 
+PYROWAVE ?= 1
 LAN_TELEMETRY ?= 0
 STREAM_SELF_TEST_FPS ?= 0
 STREAM_SELF_TEST_RESOLUTION ?= 0
@@ -30,6 +31,7 @@ GPU_TIMESTAMPS ?= 0
 CATCHUP_QUEUE_FRAMES ?= 0
 REFERENCE_FRAME_INVALIDATION ?= 0
 APP_DEFINITIONS ?= SDL_MAIN_HANDLED SDL_STATIC_LIB USING_GENERATED_CONFIG_H RMLUI_STATIC_LIB
+APP_DEFINITIONS += PROSPEROLIGHT_PYROWAVE=$(PYROWAVE)
 APP_DEFINITIONS += PROSPEROLIGHT_LAN_TELEMETRY=$(LAN_TELEMETRY)
 APP_DEFINITIONS += PROSPEROLIGHT_STREAM_SELF_TEST_FPS=$(STREAM_SELF_TEST_FPS)
 APP_DEFINITIONS += PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION=$(STREAM_SELF_TEST_RESOLUTION)
@@ -69,11 +71,11 @@ HOST_TEST_CXXFLAGS ?= -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror \
 	-ffunction-sections -fdata-sections
 HOST_TEST_LDFLAGS ?= -Wl,--gc-sections
 GTEST_ARGS ?=
+export FEC_SIMD OPUS_SIMD PYROWAVE
 export APP_DEFINITIONS APP_INCLUDE_PATHS APP_STATIC_ARCHIVES APP_RUNTIME_MODULES
 export PACBREW_PACKAGES PACBREW_INCLUDE_PATHS PACBREW_STATIC_ARCHIVES
 export PS5_HOST FTP_PORT DEPLOY_FORMAT PS5_FTP_USER PS5_FTP_PASSWORD DEPLOY_DRY_RUN
 export TITLE_ID APP_NAME APP_CATEGORY CONTENT_SUFFIX
-export FEC_SIMD OPUS_SIMD
 
 RUNTIME := runtime/libc.prx
 RUNTIME_INPUTS := tools/rebuild-libc.sh \
@@ -84,7 +86,7 @@ HOST_RUNTIME_TEST := build/tests/cpp_runtime_tests
 STREAM_ARCHIVES := build/stream-deps/libmoonlight-common-c.a \
 	build/stream-deps/libopus.a build/stream-deps/libmbedtls.a \
 	build/stream-deps/libmbedx509.a build/stream-deps/libmbedcrypto.a
-STREAM_INPUTS := tools/build-stream-deps.sh tools/native-toolchain.sh \
+STREAM_INPUTS := tools/pyrowave/apply-transport.sh tools/pyrowave/patches/moonlight/0001-vibepollo-independent-record-protocol.patch tools/build-stream-deps.sh tools/native-toolchain.sh \
 	$(wildcard src/gamestream/* platform/ps5/*) \
 	$(wildcard third_party/moonlight-common-c/src/* third_party/moonlight-common-c/enet/*) \
 	$(wildcard third_party/mbedtls/library/* third_party/mbedtls/include/mbedtls/*) \
