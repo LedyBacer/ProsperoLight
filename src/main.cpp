@@ -117,6 +117,7 @@ struct LauncherSelection
     unsigned stream_resolution = MOONLIGHT_STREAM_RESOLUTION_1080P;
     unsigned stream_fps = MOONLIGHT_STREAM_FPS_60;
     unsigned hdr_enabled = 0;
+    unsigned chroma_sampling = MOONLIGHT_CHROMA_420;
     unsigned audio_configuration = MOONLIGHT_AUDIO_STEREO;
     unsigned vsync_enabled = 1;
     unsigned decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_CLASSIC;
@@ -1094,6 +1095,7 @@ MoonlightApp::Command RunLauncher(LauncherSelection *selection, const char *stre
                 selection->stream_resolution = app.StreamResolution();
                 selection->stream_fps = app.StreamFps();
                 selection->hdr_enabled = app.HdrEnabled();
+                selection->chroma_sampling = app.ChromaSampling();
                 selection->audio_configuration = app.AudioConfiguration();
                 selection->vsync_enabled = app.VsyncEnabled();
                 selection->decoder_pipeline = app.DecoderPipeline();
@@ -1166,6 +1168,7 @@ int main()
         options.stream_resolution = selection.stream_resolution;
         options.stream_fps = selection.stream_fps;
         options.hdr_enabled = selection.hdr_enabled;
+        options.chroma_sampling = selection.chroma_sampling;
         options.audio_configuration = selection.audio_configuration;
         options.vsync_enabled = selection.vsync_enabled;
         options.decoder_pipeline = selection.decoder_pipeline;

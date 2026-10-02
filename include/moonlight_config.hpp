@@ -23,6 +23,9 @@ extern "C"
 #define MOONLIGHT_DISPLAY_AREA_FULL 1U
 #define MOONLIGHT_VIDEO_CODEC_H264 0U
 #define MOONLIGHT_VIDEO_CODEC_HEVC 1U
+#define MOONLIGHT_VIDEO_CODEC_PYROWAVE 2U
+#define MOONLIGHT_CHROMA_420 0U
+#define MOONLIGHT_CHROMA_444 1U
 #define MOONLIGHT_STREAM_RESOLUTION_1080P 0U
 #define MOONLIGHT_STREAM_RESOLUTION_1440P 1U
 #define MOONLIGHT_STREAM_RESOLUTION_2160P 2U
@@ -59,6 +62,7 @@ extern "C"
         uint32_t vsync_enabled;
         uint32_t decoder_pipeline;
         uint32_t decoder_cores;
+        uint32_t chroma_sampling;
         moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
     } moonlight_config_t;
 

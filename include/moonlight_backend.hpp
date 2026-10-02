@@ -41,6 +41,7 @@ typedef struct moonlight_backend_snapshot {
     int current_app_id;
     uint32_t hevc_supported;
     uint32_t main10_supported;
+    uint32_t pyrowave_profiles;
     uint32_t app_count;
     char host[128];
     char name[64];

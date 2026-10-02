@@ -134,9 +134,9 @@ button.focused > .focused-chrome { display: block; }
 .games-back { left: 1164px; top: 670px; }
 .games-status { left: 34px; top: 862px; width: 1380px; }
 
-.setting-row { position: absolute; left: 34px; width: 1380px; height: 64px; overflow: hidden; }
-.setting-row-0 { top: 164px; } .setting-row-1 { top: 232px; } .setting-row-2 { top: 300px; } .setting-row-3 { top: 368px; } .setting-row-4 { top: 436px; }
-.setting-row-5 { top: 504px; } .setting-row-6 { top: 572px; } .setting-row-7 { top: 640px; } .setting-row-8 { top: 708px; } .setting-row-9 { top: 776px; }
+.setting-row { position: absolute; left: 34px; width: 1380px; height: 60px; overflow: hidden; }
+.setting-row-0 { top: 164px; } .setting-row-1 { top: 225px; } .setting-row-2 { top: 286px; } .setting-row-3 { top: 347px; } .setting-row-4 { top: 408px; }
+.setting-row-5 { top: 469px; } .setting-row-6 { top: 530px; } .setting-row-7 { top: 591px; } .setting-row-8 { top: 652px; } .setting-row-9 { top: 713px; }
 .setting-name { position: absolute; left: 28px; top: 2px; width: 450px; height: 32px; font-size: 24px; line-height: 32px; }
 .setting-help { position: absolute; left: 28px; top: 33px; width: 820px; height: 28px; color: #84c9ff; font-size: 19px; line-height: 26px; }
 .setting-value { position: absolute; left: 860px; top: 13px; width: 470px; height: 38px; color: #c8eaff; font-size: 24px; line-height: 38px; text-align: right; }
@@ -167,3 +167,5 @@ button.focused > .focused-chrome { display: block; }
 #pair-modal-status { position: absolute; left: 48px; top: 354px; width: 434px; height: 72px; color: #b6ddf8; font-size: 20px; line-height: 30px; text-align: center; }
 
 .hidden { display: none; }
+
+.setting-row-10 { top: 774px; }

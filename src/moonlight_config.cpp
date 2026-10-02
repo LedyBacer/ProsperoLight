@@ -12,7 +12,7 @@
 #include <string.h>
 
 #define CONFIG_MAGIC UINT32_C(0x504c4346)
-#define CONFIG_VERSION 6U
+#define CONFIG_VERSION 7U
 #define CONFIG_PATH "/download0/prosperolight-config.bin"
 #define CONFIG_TEMP_PATH "/download0/prosperolight-config.tmp"
 #define OPEN_READ_ONLY 0x0000
@@ -132,6 +132,28 @@ typedef struct legacy_config_file_v5
     legacy_config_v5_t config;
 } legacy_config_file_v5_t;
 
+typedef struct legacy_config_v6
+    {
+        uint32_t host_count;
+        uint32_t selected_host;
+        uint32_t bitrate_mbps;
+        uint32_t display_area;
+        uint32_t video_codec;
+        uint32_t stream_resolution;
+        uint32_t stream_fps;
+        uint32_t hdr_enabled;
+        uint32_t audio_configuration;
+        uint32_t vsync_enabled;
+        uint32_t decoder_pipeline;
+        uint32_t decoder_cores;
+        moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+} legacy_config_v6_t;
+
+typedef struct legacy_config_file_v6 {
+    uint32_t magic, version, checksum, reserved;
+    legacy_config_v6_t config;
+} legacy_config_file_v6_t;
+
 extern "C"
 {
     int sceKernelOpen(const char *path, int flags, uint16_t mode);
@@ -230,6 +252,7 @@ void moonlight_config_defaults(moonlight_config_t *config)
 bool moonlight_config_load(moonlight_config_t *config)
 {
     config_file_t file;
+    legacy_config_file_v6_t legacy_v6;
     legacy_config_file_v5_t legacy_v5;
     legacy_config_file_v4_t legacy_v4;
     legacy_config_file_v3_t legacy_v3;
@@ -246,6 +269,15 @@ bool moonlight_config_load(moonlight_config_t *config)
         file.config.host_count <= MOONLIGHT_CONFIG_MAX_HOSTS)
     {
         *config = file.config;
+    }
+    else if (read_exact(CONFIG_PATH, &legacy_v6, sizeof(legacy_v6)) &&
+             legacy_v6.magic == CONFIG_MAGIC && legacy_v6.version == 6U &&
+             legacy_v6.checksum == checksum(&legacy_v6.config, sizeof(legacy_v6.config)) &&
+             legacy_v6.config.host_count <= MOONLIGHT_CONFIG_MAX_HOSTS)
+    {
+        // The v6 scalar prefix is unchanged; hosts move past the new field.
+        memcpy(config, &legacy_v6.config, offsetof(legacy_config_v6_t, hosts));
+        memcpy(config->hosts, legacy_v6.config.hosts, sizeof(config->hosts));
     }
     else if (read_exact(CONFIG_PATH, &legacy_v5, sizeof(legacy_v5)) &&
              legacy_v5.magic == CONFIG_MAGIC && legacy_v5.version == 5U &&
@@ -332,7 +364,7 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->bitrate_mbps = 20;
     if (config->display_area > MOONLIGHT_DISPLAY_AREA_FULL)
         config->display_area = MOONLIGHT_DISPLAY_AREA_FULL;
-    if (config->video_codec > MOONLIGHT_VIDEO_CODEC_HEVC)
+    if (config->video_codec > MOONLIGHT_VIDEO_CODEC_PYROWAVE)
         config->video_codec = MOONLIGHT_VIDEO_CODEC_H264;
     if (config->stream_resolution > MOONLIGHT_STREAM_RESOLUTION_2160P)
         config->stream_resolution = MOONLIGHT_STREAM_RESOLUTION_1080P;
@@ -351,8 +383,10 @@ bool moonlight_config_load(moonlight_config_t *config)
     if (config->decoder_cores < MOONLIGHT_DECODER_CORES_MIN ||
         config->decoder_cores > MOONLIGHT_DECODER_CORES_MAX)
         config->decoder_cores = MOONLIGHT_DECODER_CORES_DEFAULT;
-    if (config->hdr_enabled)
-        config->video_codec = MOONLIGHT_VIDEO_CODEC_HEVC;
+    if (config->chroma_sampling > MOONLIGHT_CHROMA_444)
+        config->chroma_sampling = MOONLIGHT_CHROMA_420;
+    if (config->video_codec == MOONLIGHT_VIDEO_CODEC_H264)
+        config->hdr_enabled = 0;
     return true;
 }
 

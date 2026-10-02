@@ -41,6 +41,7 @@ class MoonlightApp
     unsigned StreamResolution() const;
     unsigned StreamFps() const;
     unsigned HdrEnabled() const;
+    unsigned ChromaSampling() const { return config_.chroma_sampling; }
     unsigned AudioConfiguration() const;
     unsigned VsyncEnabled() const;
     unsigned DecoderPipeline() const;
