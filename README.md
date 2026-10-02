@@ -88,7 +88,7 @@ presented by AGC without copying decoded pixels through a CPU framebuffer.
   delay. When 15 frames are waiting they are all discarded and a keyframe is
   requested. At the 300 Mbps setting this happened 13 times in 17 seconds, and
   the decoder still only managed 90 FPS.
-- **How to tell.** With the overlay on (`Select + R1`), "Frames dropped by
+- **How to tell.** With the overlay on (`Touchpad click + R1`), "Frames dropped by
   decoder backlog" rises and "Decode (last second)" shows a load near 100%.
   "Frames dropped by your network connection" is a different problem.
 - The 300, 400 and 500 Mbps presets are beyond the 4K decoder at every frame rate.
@@ -326,7 +326,7 @@ behavior.
    minutes.
 4. Open **Games**, choose Desktop or another advertised application, and press
    Cross.
-5. Use `Select + L1` to end the stream and return to ProsperoLight.
+5. Use `Touchpad click + L1` to end the stream and return to ProsperoLight.
 
 Pairing credentials and settings are title-scoped. Installing under a different
 title ID intentionally requires pairing again.
@@ -362,12 +362,20 @@ advertising itself on the network may appear again after refresh.
 
 ### Streaming
 
+Touchpad means pressing the touchpad, not touching its surface. L3/R3 mean
+clicking the left/right stick. Native PS and Create buttons remain controlled
+by the PS5 system; use the chords below for host Select/Back and PS/Guide.
+These two host chords work on all controller slots; local UI shortcuts belong
+to the primary controller. Host overlay behavior depends on Steam/game settings.
+
 | Input | Action |
 | --- | --- |
-| `Select + R1` | Toggle the metrics overlay |
-| `Select + L1` | End the stream and return to ProsperoLight |
-| `Select + Square` | Toggle mouse/controller mode |
-| `Select + Triangle` | Toggle ProsperoLight's stream keyboard |
+| `Touchpad click + R1` | Toggle the metrics overlay |
+| `Touchpad click + L1` | End the stream and return to ProsperoLight |
+| `Touchpad click + Square` | Toggle mouse/controller mode |
+| `Touchpad click + Triangle` | Toggle ProsperoLight's stream keyboard |
+| `Touchpad click + L3` | Send Select/Back to the host |
+| `Touchpad click + R3` | Send PS/Guide to the host (for example, Steam overlay) |
 | Physical USB keyboard | Forward keys and modifiers directly to Sunshine |
 | Physical USB mouse | Move, click, and scroll directly on the Sunshine host |
 | Either analog stick in mouse mode | Move the pointer |

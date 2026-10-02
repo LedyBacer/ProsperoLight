@@ -28,7 +28,8 @@ original input path.
 ## Implemented
 
 - Four independently numbered controllers; analog sticks/triggers, D-pad,
-  face/shoulder buttons, stick clicks, Options, Create and touchpad click.
+  face/shoulder buttons, stick clicks, Options and touchpad click. Host Select/Back
+  and PS/Guide use touchpad click + L3/R3; native Create/PS are system-owned.
 - Two simultaneous touch contacts with stable IDs, normalized coordinates and
   down/move/up/cancel lifecycle. Local UI chords, mouse mode and intercepted
   system input cancel host touches and suppress feedback until focus returns.
@@ -78,7 +79,8 @@ No per-feature hardware tests were performed during implementation. Compilation
 and packaging do not establish pad API permissions or effect fidelity on PS5.
 
 1. Start a stream with one DualSense. Check every button, both sticks and analog
-   triggers; verify Create is visible as Share/Back on the host.
+   triggers; verify touchpad click + L3 sends Select/Back and touchpad click + R3
+   sends PS/Guide to the host. Native Create/PS still open PS5 system UI.
 2. Enable the host's PlayStation/DualSense virtual controller support. In a game
    that outputs effects, check rumble, left/right adaptive resistance and LEDs.
    Inspect `DualSense ...` session-log rows if an effect is missing: distinguish
