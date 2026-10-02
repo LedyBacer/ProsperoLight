@@ -100,3 +100,14 @@ six-channel Opus layout (`FL FR FC LFE BL BR`) and writes it to PS5's validated
 eight-channel AudioOut layout, with `SL` and `SR` zero-filled. If the
 eight-channel port cannot be opened before negotiation, the session requests
 stereo instead.
+
+## Where files are kept
+
+`storage::Initialize()` (`src/app_storage.cpp`) is the first call in `main`,
+while the process has one thread. It reads what an earlier version kept in
+`/download0`, asks for filesystem access (`src/elevation`: the bundled helper
+`sandbox-elevator.elf` is sent to the console's ELF loader on port 9021), and
+settles every path in `storage::paths()`: the install folder for the app's own
+files and `/data/prosperolight` for what it writes. It then opens the log. No
+other source names a sandbox path; without access the same structure holds
+`/app0` and `/download0`.

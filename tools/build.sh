@@ -285,6 +285,16 @@ mkdir -p "$app/sce_sys" "$app/sce_module"
 "$tool" self --sign --in "$build/eboot.elf" --out "$app/eboot.bin" \
     --magic "$fself_magic"
 
+# Filesystem access (tooling/elevation): the console's ELF loader runs this
+# helper when the app starts. It only answers the title it was built for.
+grep -Fq "target_title_id[] = \"$title_id\"" "$root/tooling/elevation/helper/main.cpp" || {
+    echo "tooling/elevation/helper/main.cpp is not built for $title_id" >&2; exit 2;
+}
+make -s -C "$root/tooling/elevation/helper" PS5_PAYLOAD_SDK="$sdk_root" \
+    OUTPUT="$build/elevation/sandbox-elevator.elf"
+python3 "$root/tooling/elevation/validate-helper.py" "$build/elevation/sandbox-elevator.elf"
+cp "$build/elevation/sandbox-elevator.elf" "$app/sandbox-elevator.elf"
+
 cp "$param" "$app/sce_sys/param.json"
 for asset in icon0.png pic0.dds pic1.dds snd0.at9; do
     [[ -f $root/sce_sys/$asset ]] && cp "$root/sce_sys/$asset" "$app/sce_sys/$asset"

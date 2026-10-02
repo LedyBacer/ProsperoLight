@@ -7,6 +7,7 @@
 /* Foreground native AGC presentation of a Videodec2 AVC8 caller buffer. */
 
 #include "native_agc_present.hpp"
+#include "app_storage.hpp"
 #include "lan_http_report.hpp"
 #include "moonlight_stream_keyboard.hpp"
 #include "native_agc_output.hpp"
@@ -265,7 +266,9 @@ static uint64_t present_now_us(void)
 static void report_agc_receipt(const char *receipt)
 {
 #if PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS != 0
-    if (FILE *log = fopen("/download0/prosperolight-agc-selftest.log", "a"))
+    char path[176];
+    snprintf(path, sizeof(path), "%s/prosperolight-agc-selftest.log", storage::paths().logs);
+    if (FILE *log = fopen(path, "a"))
     {
         fprintf(log, "%s\n", receipt);
         fclose(log);

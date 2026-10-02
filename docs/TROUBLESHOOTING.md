@@ -212,14 +212,25 @@ Square or the Games-screen action.
 
 ## The launcher does not appear, or does not come back after a stream
 
-The launcher writes what it does to `/download0/prosperolight-launcher.log` in
-the title's storage (the previous launch is kept as
-`prosperolight-launcher.prev.log`): opening the display, the first frame,
+The launcher writes what it does to
+`/data/prosperolight/logs/prosperolight-launcher.log` (the previous launch is
+kept as `prosperolight-launcher.prev.log`; without filesystem access both are
+in the title's `/download0`): opening the display, the first frame,
 closing before a stream, each stream's start and end, and how long the display
 was left to settle. The OpenGL runtime writes its own lines to the same file.
 A launcher that cannot open the display tries twice more, two seconds apart,
 then waits to be closed. After a stream above 60 Hz or in HDR, five seconds of
 black screen before the launcher returns are intended (`HFR_SETTLE_MS`).
+
+## The app does not use `/data/prosperolight`
+
+The first line of the log is `[PL] storage: title=... status=N app=... data=...`.
+`status=0` means the console gave filesystem access. `status=5` means the helper
+`sandbox-elevator.elf` is missing beside `eboot.bin`; `status=9` means nothing
+answered on port 9021: load an ELF loader (elfldr) before starting the app. With
+any status other than 0 the app keeps its files in `/download0` and reads its
+own files from `/app0`. The helper also writes one line to klog:
+`[sandbox-elevator] fw=... pid=... capability=1 result=N`.
 
 ## `/download0` is missing
 

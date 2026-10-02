@@ -4,38 +4,17 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Process-level pieces the statically linked OpenGL runtime expects, adapted
- * from ps5-opengl's native-app/runtime_shims.c: where standard output goes,
- * what happens if main returns, and a few libc entry points the application
- * libc does not provide.
+ * from ps5-opengl's native-app/runtime_shims.c: what happens if main returns,
+ * and a few libc entry points the application libc does not provide. Standard
+ * output becomes the log in src/app_storage.cpp.
  */
 
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 
 extern int sceKernelUsleep(uint32_t microseconds);
-
-/* The log is kept in the title's own storage, beside the saved settings. */
-#define PROSPEROLIGHT_LOG_PATH "/download0/prosperolight-launcher.log"
-#define PROSPEROLIGHT_PREVIOUS_LOG_PATH "/download0/prosperolight-launcher.prev.log"
-
-__attribute__((constructor)) static void prosperolight_open_log(void)
-{
-    /* Keep the previous launch's log: it is the one that explains a crash. */
-    rename(PROSPEROLIGHT_LOG_PATH, PROSPEROLIGHT_PREVIOUS_LOG_PATH);
-    FILE *stream = freopen(PROSPEROLIGHT_LOG_PATH, "w", stdout);
-    /* Start a fresh file, then make both streams append-only and unbuffered
-     * so the log survives a close from the home screen or a GPU fail-stop. */
-    if (stream != NULL)
-        stream = freopen(PROSPEROLIGHT_LOG_PATH, "a", stdout);
-    if (stream != NULL)
-        setvbuf(stream, NULL, _IONBF, 0);
-    stream = freopen(PROSPEROLIGHT_LOG_PATH, "a", stderr);
-    if (stream != NULL)
-        setvbuf(stream, NULL, _IONBF, 0);
-}
 
 /* Returning from main or calling exit() crashes a native title; stay alive
  * until the console closes it. */

@@ -20,6 +20,7 @@
 #include <opus_multistream.h>
 
 #include "moonlight_stream.hpp"
+#include "app_storage.hpp"
 #include "moonlight_config.hpp"
 #include "moonlight_physical_input.hpp"
 #include "moonlight_stream_input.hpp"
@@ -52,7 +53,7 @@
 #define PIPELINE_CLEAN_OUTPUTS 600u
 #define PRESENT_FAILURE_LIMIT 3u
 #define CATCHUP_HOLD_US UINT64_C(250000)
-#define MOONLIGHT_IDENTITY_DIRECTORY "/download0/moonlight"
+#define MOONLIGHT_IDENTITY_DIRECTORY (storage::paths().pairing)
 #define CONTROLLER_KEEPALIVE_US UINT64_C(1000000)
 #define CONNECTION_SETUP_TIMEOUT_US UINT64_C(20000000)
 #define FIRST_VIDEO_FRAME_TIMEOUT_US UINT64_C(10000000)
@@ -836,8 +837,12 @@ static bool write_performance_bytes(int descriptor, const char *data, size_t len
 static void save_frame_trace()
 {
 #if PROSPEROLIGHT_PERFORMANCE_DETAIL
-    constexpr auto temporary = MOONLIGHT_IDENTITY_DIRECTORY "/performance-frames.csv.tmp";
-    constexpr auto destination = MOONLIGHT_IDENTITY_DIRECTORY "/performance-frames.csv";
+    char temporary[176];
+    char destination[176];
+    snprintf(temporary, sizeof(temporary), "%s/performance-frames.csv.tmp",
+             storage::paths().performance);
+    snprintf(destination, sizeof(destination), "%s/performance-frames.csv",
+             storage::paths().performance);
     // Rows are batched: one write per row cost tens of thousands of system calls.
     static char batch[65536];
     const int descriptor = sceKernelOpen(temporary, 0x601, 0600);
@@ -1058,8 +1063,12 @@ static void save_performance_summary(const native_renderer_state_t &state,
     memcpy(report + length, "}}\n", 3);
     length += 3;
     log_performance_summary(report, length);
-    constexpr auto temporary = MOONLIGHT_IDENTITY_DIRECTORY "/performance-last.json.tmp";
-    constexpr auto destination = MOONLIGHT_IDENTITY_DIRECTORY "/performance-last.json";
+    char temporary[176];
+    char destination[176];
+    snprintf(temporary, sizeof(temporary), "%s/performance-last.json.tmp",
+             storage::paths().performance);
+    snprintf(destination, sizeof(destination), "%s/performance-last.json",
+             storage::paths().performance);
     const int descriptor = sceKernelOpen(temporary, 0x601, 0600);
     if (descriptor < 0)
         return;

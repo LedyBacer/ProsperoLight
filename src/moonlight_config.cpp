@@ -6,6 +6,8 @@
 
 #include "moonlight_config.hpp"
 
+#include "app_storage.hpp"
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,8 +15,8 @@
 
 #define CONFIG_MAGIC UINT32_C(0x504c4346)
 #define CONFIG_VERSION 7U
-#define CONFIG_PATH "/download0/prosperolight-config.bin"
-#define CONFIG_TEMP_PATH "/download0/prosperolight-config.tmp"
+#define CONFIG_PATH (storage::paths().config)
+#define CONFIG_TEMP_PATH (storage::paths().config_temporary)
 #define OPEN_READ_ONLY 0x0000
 #define OPEN_WRITE_CREATE_TRUNCATE 0x0601
 #define FILE_MODE_0666 0x01b6

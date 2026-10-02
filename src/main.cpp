@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "app_storage.hpp"
 #include "launcher/launcher.hpp"
 #include "moonlight_stream.hpp"
 #include "native_agc_present.hpp"
@@ -155,8 +156,13 @@ void RunVideoOutputSelfTest()
     constexpr std::uint32_t frame_count = PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS * 5;
     std::int64_t surface_start = -1;
     void *surface = nullptr;
-    (void)std::remove("/download0/prosperolight-agc-selftest.log");
-    FILE *receipt = std::fopen("/download0/prosperolight-videoout-selftest.txt", "w");
+    char receipt_path[176];
+    std::snprintf(receipt_path, sizeof(receipt_path), "%s/prosperolight-agc-selftest.log",
+                  storage::paths().logs);
+    (void)std::remove(receipt_path);
+    std::snprintf(receipt_path, sizeof(receipt_path), "%s/prosperolight-videoout-selftest.txt",
+                  storage::paths().logs);
+    FILE *receipt = std::fopen(receipt_path, "w");
 
     int result = sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(),
                                                surface_pool_bytes, 0x4000, 12, &surface_start);
@@ -239,6 +245,9 @@ void RunVideoOutputSelfTest()
 
 int main()
 {
+    // Filesystem access first, while the process has one thread: every path
+    // the app reads or writes is settled here (app_storage.hpp).
+    storage::Initialize();
 #if PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS != 0
     RunVideoOutputSelfTest();
 #endif

@@ -6,6 +6,8 @@
 
 #include "moonlight_backend.hpp"
 
+#include "app_storage.hpp"
+
 #include "gamestream/certgen.h"
 #include "gamestream/client.h"
 #include "gamestream/gs_errors.h"
@@ -16,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MOONLIGHT_IDENTITY_DIRECTORY "/download0/moonlight"
+#define MOONLIGHT_IDENTITY_DIRECTORY (storage::paths().pairing)
 #define MOONLIGHT_ARTWORK_SLOTS 6
 
 typedef struct artwork_slot

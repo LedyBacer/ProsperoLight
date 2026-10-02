@@ -251,7 +251,7 @@ int main(int argc, char **argv)
         model.set_artwork_decoder(make_poster);
         model.Initialize(now_ms);
         launcher::View view(model, fonts);
-        view.set_version("01.000.080");
+        view.set_version("01.000.081");
         view.set_players(2);
         view.show_stream_error(stream_error);
         bool started = false;

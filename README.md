@@ -135,9 +135,9 @@ tooling are maintained in this repository.
 | Title ID | `PPSA99002` |
 | Category | Game |
 | Experimental beta / stable | `01.000.070` / `01.000.060` |
-| In development, not released | `01.000.080`: new launcher; up to four controllers, Sunshine port per PC |
+| In development, not released | `01.000.081`: new launcher; files under `/data/prosperolight`; up to four controllers, Sunshine port per PC |
 | Version source | [`sce_sys/param.json`](sce_sys/param.json) |
-| Writable data | `/download0` only |
+| Writable data | `/data/prosperolight` (`/download0` when the console has no ELF loader) |
 
 ## Features
 
@@ -145,7 +145,7 @@ tooling are maintained in this repository.
 - Reach a Sunshine that does not use the default port 47989: each saved PC has
   its own port, and a discovered PC uses the port it advertises.
 - Remember up to eight PCs, pairing identities, and stream preferences under
-  `/download0` across application restarts.
+  `/data/prosperolight` across application restarts and updates.
 - Pair with a two-minute PIN dialog with a countdown, and unpair after a
   confirmation.
 - See every saved PC and its state in one list, and browse up to 64 advertised
@@ -297,9 +297,9 @@ again, then publishes the `.ffpfsc` image, app-folder `.zip`, and `SHA256SUMS`.
    bar.
 
 Do not relaunch immediately after replacing the same pathname: ShadowMountPlus
-may still have the previous image mounted. Keeping the title ID as `PPSA99002`
-preserves the title's `/download0` pairing and settings data; `/app0` comes from
-the replacement image, while Shell presentation metadata may remain cached.
+may still have the previous image mounted. Pairing and settings are kept in
+`/data/prosperolight` (see [Files on the console](#files-on-the-console)) and
+are not touched by an update; Shell presentation metadata may remain cached.
 
 ## Deploy
 
@@ -440,6 +440,32 @@ standard passwords. It is not currently a multilingual or Unicode input
 method. Keyboard text is sent directly as Moonlight key events and is not
 stored by ProsperoLight or written to its configuration.
 
+## Files on the console
+
+When it starts, ProsperoLight asks the console's ELF loader for access to the
+filesystem (the method ProsperoEden uses, see
+[`tooling/elevation`](tooling/elevation/README.md)). With it, everything the
+app writes is in one folder that an update, a reinstall or a new title image
+does not touch:
+
+| Path | Contents |
+| --- | --- |
+| `/data/prosperolight/config/prosperolight-config.bin` | Saved PCs and stream settings |
+| `/data/prosperolight/pairing/` | `cert.pem` and `key.pem`, the identity Sunshine paired with |
+| `/data/prosperolight/logs/prosperolight-launcher.log` | This launch's log; the previous one is `prosperolight-launcher.prev.log` |
+| `/data/prosperolight/logs/performance-last.json` | The last stream's performance report |
+
+The first start with filesystem access copies the saved PCs, the settings and
+the pairing from the title's own storage, so nothing has to be paired again.
+The older copies stay where they were. To start over, delete
+`/data/prosperolight` while the app is closed. Keep `pairing/key.pem` private:
+it is what lets this console connect to a paired PC.
+
+Without an ELF loader listening on the console (port 9021), or if the request
+is refused, the app keeps working from its sandbox as before: `/app0` and
+`/download0`. The first line of the log says which it is (`status=0` means
+access was given).
+
 ## Source layout
 
 ```text
@@ -449,7 +475,10 @@ src/launcher/launcher_view.cpp       the three screens and their dialogs
 src/launcher/launcher_ps5.cpp        display, controller, sound, box art
 src/moonlight_backend.cpp            pairing, app listing, artwork, and control
 src/moonlight_discovery.cpp          LAN discovery
-src/moonlight_config.cpp             /download0 host and preference persistence
+src/moonlight_config.cpp             host and preference persistence
+src/app_storage.cpp                  where files are kept: /data/prosperolight
+src/elevation/                       request for filesystem access
+tooling/elevation/                   the helper the console's ELF loader runs
 src/moonlight_stream.cpp             Moonlight session, VideoDec2, audio, input
 include/moonlight_physical_input.hpp USB-HID to Moonlight input mapping
 src/native_agc_present.cpp           zero-copy AGC presentation and overlays

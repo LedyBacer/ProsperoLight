@@ -1,5 +1,34 @@
 # Changelog
 
+## 01.000.081
+
+### Development build: files under `/data/prosperolight`
+
+Not released, and not yet run on a console. Everything from 01.000.080 below
+is included.
+
+- **One folder for everything the app writes.** When it starts, ProsperoLight
+  asks the console's ELF loader for access to the filesystem, the way
+  ProsperoEden does. With it, saved PCs and settings are in
+  `/data/prosperolight/config`, the pairing in `/data/prosperolight/pairing`,
+  and the log and the last stream's performance report in
+  `/data/prosperolight/logs`. An update or a reinstall does not touch them.
+- **Nothing to pair again.** The first start copies the saved PCs, the settings
+  and the pairing from the title's own storage. The older copies stay there.
+- **Still works without it.** With no ELF loader on port 9021, or if the request
+  is refused, the app uses `/app0` and `/download0` as before. The first line
+  of the log says which it is.
+- The app folder has one more file, `sandbox-elevator.elf`: the helper the ELF
+  loader runs. It only answers title `PPSA99002`.
+
+### What was tested
+
+On the PC only: the build, the checks of the helper's file, and the tests.
+What a console run must still show: access is given (`status=0` in the log),
+the launcher finds its fonts and sounds in the install folder, the saved PCs
+and the pairing come over, and a stream still starts and returns with the
+process outside its sandbox.
+
 ## 01.000.080
 
 ### Development build: a new launcher

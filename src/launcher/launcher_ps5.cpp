@@ -6,6 +6,7 @@
 
 #include "launcher/launcher.hpp"
 
+#include "app_storage.hpp"
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
 #include "native_agc_present.hpp"
@@ -64,7 +65,12 @@ namespace
 
 using namespace hui;
 
-constexpr const char *kAssets = "/app0/assets";
+// The app's own files: /app0 in the sandbox, the install folder outside it.
+std::string Assets()
+{
+    return std::string(storage::paths().app) + "/assets";
+}
+
 // Posters are kept at most this tall: twice what a card shows at 4K needs
 // nothing more, and 64 of them must fit comfortably in graphics memory.
 constexpr int kPosterHeight = 672;
@@ -170,7 +176,7 @@ bool DecodePoster(const unsigned char *png, std::size_t size, ArtworkImage *imag
 bool LoadFont(gfx::Renderer &renderer, const char *name, gfx::Font *font, ui::FontRef *ref)
 {
     std::string data;
-    const std::string path = std::string(kAssets) + "/fonts/" + name;
+    const std::string path = Assets() + "/fonts/" + name;
     if (!save::read_file(path, &data, 8u << 20) || !font->load(data))
     {
         sys::log("[PL] launcher: font %s failed: %s", name, font->error().c_str());
@@ -227,7 +233,7 @@ audio::SoundBank &Sounds()
     if (!loaded)
     {
         loaded = true;
-        const auto stats = bank.load(std::string(kAssets) + "/audio/sfx");
+        const auto stats = bank.load(Assets() + "/audio/sfx");
         sys::log("[PL] launcher: sounds files=%d rejected=%d", stats.files, stats.rejected);
     }
     return bank;
@@ -285,7 +291,8 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             model.set_artwork_decoder(DecodePoster);
             model.Initialize(static_cast<std::uint64_t>(sys::monotonic_us() / 1000));
             View view(model, fonts);
-            view.set_version(read_content_version("/app0/sce_sys/param.json"));
+            view.set_version(
+                read_content_version(std::string(storage::paths().app) + "/sce_sys/param.json"));
             view.set_first_start(first_start);
             view.show_stream_error(stream_error);
             view.set_players(SignedInUsers());
