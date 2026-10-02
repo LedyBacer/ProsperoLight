@@ -3499,6 +3499,7 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
             return result;
     }
     resume_requested = server->current_game == target_id;
+    gamepad_mask = prosperolight::dualsense::ActiveMask();
     result = gs_start_app(server, configuration, target_id, true, false, gamepad_mask);
     snprintf(notification.message, sizeof(notification.message),
              "Native NVHTTP launch: rc=%08x action=%s target=%s id=%d gamepads=%x rtsp=%s error=%s",
@@ -3857,7 +3858,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     stream_config.clientRefreshRateX100 = (int)renderer.client_refresh_x100;
     identity_initialized = 1;
     result = prepare_native_session(&client_identity, &gs_server, &stream_config, mode,
-                                    prosperolight::dualsense::ActiveMask(), host, app_name, app_id);
+                                    controller_ready ? 1 : 0, host, app_name, app_id);
     if (result != GS_OK)
         goto done;
     session_started = 1;
