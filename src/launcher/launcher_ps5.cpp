@@ -173,6 +173,21 @@ bool DecodePoster(const unsigned char *png, std::size_t size, ArtworkImage *imag
     return true;
 }
 
+// The folders the About screen names.
+View::Storage StorageFolders()
+{
+    const storage::Paths &paths = storage::paths();
+    View::Storage folders;
+    folders.access = paths.status == 0;
+    folders.settings = paths.config;
+    const std::size_t slash = folders.settings.rfind('/');
+    if (slash != std::string::npos && slash != 0)
+        folders.settings.resize(slash);
+    folders.pairing = paths.pairing;
+    folders.logs = paths.logs;
+    return folders;
+}
+
 bool LoadFont(gfx::Renderer &renderer, const char *name, gfx::Font *font, ui::FontRef *ref)
 {
     std::string data;
@@ -293,6 +308,7 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             View view(model, fonts);
             view.set_version(
                 read_content_version(std::string(storage::paths().app) + "/sce_sys/param.json"));
+            view.set_storage(StorageFolders());
             view.set_first_start(first_start);
             view.show_stream_error(stream_error);
             view.set_players(SignedInUsers());

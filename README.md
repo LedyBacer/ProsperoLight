@@ -396,7 +396,7 @@ touchpad down until it clicks.
 | ![Circle][circle] | Return to the PCs page |
 | ![Square][square] | Stop the active Sunshine application |
 | ![Triangle][triangle] | Search the network for Sunshine again |
-| ![L1][l1] / ![R1][r1] | Change between PCs, Games, and Settings |
+| ![L1][l1] / ![R1][r1] | Change between PCs, Games, Settings, and About |
 | ![Options][options] | Open Settings |
 
 ### Streaming
@@ -471,7 +471,7 @@ access was given).
 ```text
 src/main.cpp                         launcher and stream take turns
 src/launcher/launcher_model.cpp      launcher state and requests, no drawing
-src/launcher/launcher_view.cpp       the three screens and their dialogs
+src/launcher/launcher_view.cpp       the four screens and their dialogs
 src/launcher/launcher_ps5.cpp        display, controller, sound, box art
 src/moonlight_backend.cpp            pairing, app listing, artwork, and control
 src/moonlight_discovery.cpp          LAN discovery

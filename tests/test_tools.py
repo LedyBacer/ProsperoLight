@@ -713,9 +713,18 @@ class ToolTests(unittest.TestCase):
             for name in ("Cross", "Circle", "Square", "Triangle", "Options", "Touchpad", "L1", "R1"):
                 self.assertIsNone(re.search(rf"\b{name}\b", text), text)
 
-    def test_launcher_has_three_screens(self):
+    def test_launcher_has_four_screens(self):
         view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
-        self.assertIn('tabs_.set_tabs({{"PCs"}, {"Games"}, {"Settings"}});', view)
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        self.assertIn('tabs_.set_tabs({{"PCs"}, {"Games"}, {"Settings"}, {"About"}});', view)
+        self.assertIn("constexpr int kScreens = 4;", view)
+        # About gives credit, as ProsperoEden's page does, and names the folders.
+        about = view[view.index("void View::draw_about(") : view.index("void View::draw_pairing(")]
+        for text in ("Powered by Moonlight", "moonlight-stream.org", "Sunshine developers",
+                     "brought to you by BlackBearReloaded", "made with ElevenLabs",
+                     '"Version " + version_', "files_.draw(canvas);"):
+            self.assertIn(text, about)
+        self.assertIn("view.set_storage(StorageFolders());", platform)
         self.assertNotIn("Diagnostics", view)
 
     def test_every_sunshine_request_uses_the_port_saved_for_that_pc(self):

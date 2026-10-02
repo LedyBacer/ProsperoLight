@@ -232,6 +232,7 @@ int main(int argc, char **argv)
     const std::uint32_t back = hui::action_bit(Action::back);
     const std::uint32_t next = hui::action_bit(Action::page_next);
     const std::uint32_t previous = hui::action_bit(Action::page_prev);
+    const std::uint32_t options = hui::action_bit(Action::menu);
     const std::uint32_t triangle = hui::action_bit(Action::north);
     const std::uint32_t square = hui::action_bit(Action::west);
 
@@ -253,6 +254,8 @@ int main(int argc, char **argv)
         launcher::View view(model, fonts);
         view.set_version("01.000.081");
         view.set_players(2);
+        view.set_storage({true, "/data/prosperolight/config", "/data/prosperolight/pairing",
+                          "/data/prosperolight/logs"});
         view.show_stream_error(stream_error);
         bool started = false;
         const auto step_frame = [&](const hui::InputFrame &input)
@@ -429,7 +432,7 @@ int main(int argc, char **argv)
     // ---- Settings ----
     session("settings",
             {
-                {30, previous},
+                {30, options},
                 {60, 0, Direction::down, "video"},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
@@ -452,6 +455,9 @@ int main(int argc, char **argv)
         expect(saved.video_codec == MOONLIGHT_VIDEO_CODEC_H264 && saved.hdr_enabled == 0,
                "choosing H.264 turns HDR off");
     }
+
+    // ---- About: one step back from the first tab ----
+    session("about", {{30, previous}, {60, 0, Direction::none, "page"}, {10, back}, {30, 0}}, "");
 
     // ---- a PC that stops answering, and one without apps ----
     fake::world()[0].online = false;

@@ -47,7 +47,7 @@ second application architecture.
 
 The launcher is three parts. `launcher_model.cpp` holds what is known (saved
 PCs, settings, Sunshine's state, pairing) and every request to the network; it
-draws nothing. `launcher_view.cpp` draws the three screens and their dialogs
+draws nothing. `launcher_view.cpp` draws the four screens and their dialogs
 with the widgets of the UI kit in `third_party/ps5-homebrew-ui`, reads the
 model and asks it for things. `launcher_ps5.cpp` owns the console: the EGL
 display of the ps5-opengl SDK, the controller, the audio port, the sounds and

@@ -53,7 +53,7 @@ struct Palette
     hui::gfx::Color accent;
 };
 
-// The launcher's three screens and their dialogs, drawn with the kit's
+// The launcher's four screens and their dialogs, drawn with the kit's
 // widgets. It reads the Model and asks it for things; it owns no network or
 // console call, so the same code draws on the PC for tests.
 class View
@@ -70,6 +70,16 @@ class View
     {
         first_start_ = first;
     }
+    // Where the app keeps its files, for the About screen.
+    struct Storage
+    {
+        // False while the app uses its own sandboxed storage.
+        bool access = false;
+        std::string settings;
+        std::string pairing;
+        std::string logs;
+    };
+    void set_storage(const Storage &storage);
     // How many controllers have a signed-in user (1 to 4).
     void set_players(int count);
     // A stream that ended with an error: shown once, on the Games screen.
@@ -137,6 +147,7 @@ class View
     void draw_app_art(hui::ui::Canvas &canvas, const hui::gfx::Rect &art, float radius,
                       const hui::ui::CardItem &item) const;
     void draw_settings(hui::ui::Canvas &canvas, hui::ui::Painter &paint) const;
+    void draw_about(hui::ui::Canvas &canvas, hui::ui::Painter &paint) const;
     void draw_pairing(hui::ui::Canvas &canvas) const;
     void draw_loader_tip(hui::ui::Canvas &canvas) const;
     hui::ui::GlyphStyle glyphs(const hui::ui::Painter &paint) const;
@@ -188,6 +199,11 @@ class View
     hui::ui::Banner warning_;
     hui::ui::Panel shortcut_panel_;
     bool limits_apply_ = false;
+    // About
+    hui::ui::Panel credits_panel_;
+    hui::ui::Panel start_panel_;
+    hui::ui::DetailList files_;
+    bool storage_access_ = false;
     // overlays
     hui::tween::Spring pair_fade_;
     hui::ui::PinEntry pin_;

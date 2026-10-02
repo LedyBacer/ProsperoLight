@@ -30,6 +30,9 @@ constexpr float kContentTop = 262.0f;
 constexpr Rect kHostPanel{816.0f, kContentTop, kRight - 816.0f, 544.0f};
 constexpr Rect kProfilePanel{1176.0f, kContentTop, kRight - 1176.0f, 436.0f};
 constexpr Rect kShortcutPanel{1176.0f, kContentTop + 456.0f, kRight - 1176.0f, 252.0f};
+constexpr Rect kCreditsPanel{kMargin, kContentTop, 852.0f, 708.0f};
+constexpr Rect kStartPanel{kMargin + 876.0f, kContentTop, 852.0f, 708.0f};
+constexpr int kScreens = 4;
 constexpr Rect kPairPanel{960.0f - 440.0f, 250.0f, 880.0f, 560.0f};
 constexpr int kColumns = 7;
 // How long the connecting screen stays before the stream takes the display.
@@ -174,6 +177,13 @@ void View::set_players(int count)
         status_.set_player(index, index < count);
 }
 
+void View::set_storage(const Storage &storage)
+{
+    storage_access_ = storage.access;
+    files_.set_items(
+        {{"Settings", storage.settings}, {"Pairing", storage.pairing}, {"Logs", storage.logs}});
+}
+
 void View::show_stream_error(const char *message)
 {
     if (message && message[0])
@@ -279,13 +289,13 @@ bool View::take_start_stream()
 
 void View::build()
 {
-    tabs_.set_tabs({{"PCs"}, {"Games"}, {"Settings"}});
+    tabs_.set_tabs({{"PCs"}, {"Games"}, {"Settings"}, {"About"}});
     tabs_.style.kind = ui::TabKind::pill;
     tabs_.style.on_page = true;
     tabs_.style.height = 52.0f;
     tabs_.style.text_size = 25.0f;
     tabs_.style.padding = 28.0f;
-    tabs_.set_bounds({470.0f, 62.0f, 520.0f, 52.0f});
+    tabs_.set_bounds({470.0f, 62.0f, 680.0f, 52.0f});
     tabs_.set_active(0, true);
     tabs_.set_focused(false);
 
@@ -453,6 +463,16 @@ void View::build()
     warning_.set_bounds({profile.x, profile.y + 196.0f, profile.w, 0.0f});
     profile_details_.set_bounds({profile.x, profile.y + 228.0f, profile.w, profile.h - 224.0f});
 
+    // ---- About ----
+    files_.style.panel = false;
+    files_.style.row_height = 44.0f;
+    files_.style.label_size = 21.0f;
+    files_.style.value_size = 22.0f;
+    files_.style.padding = 4.0f;
+    files_.style.label_share = 0.2f;
+    const Rect start = start_panel_.content_rect(kStartPanel).inset(14.0f);
+    files_.set_bounds({start.x, start.y + 398.0f, start.w, 170.0f});
+
     // ---- overlays ----
     pin_.style.length = 4;
     pin_.style.box_width = 92.0f;
@@ -546,6 +566,9 @@ void View::restyle()
     profile_details_.style.theme = t;
     warning_.style.theme = t;
     shortcut_panel_.style.theme = t;
+    credits_panel_.style.theme = t;
+    start_panel_.style.theme = t;
+    files_.style.theme = t;
     pin_.style.theme = t;
     pair_timer_.style.theme = t;
     port_prompt_.style.theme = t;
@@ -899,7 +922,7 @@ void View::show(int screen, ui::Feedback *feedback)
         hosts_.enter();
     else if (screen_ == 1)
         apps_.enter();
-    else
+    else if (screen_ == 2)
         form_.enter();
     apply_ambient(false);
 }
@@ -1001,8 +1024,7 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     else if (input.is_pressed(Action::page_next) || input.is_pressed(Action::page_prev))
     {
         const int direction = input.is_pressed(Action::page_next) ? 1 : -1;
-        const int count = 3;
-        const int next = (screen_ + direction + count) % count;
+        const int next = (screen_ + direction + kScreens) % kScreens;
         feedback.play(audio::Cue::tab, 1.0f + 0.04f * static_cast<float>(next));
         show(next, &feedback);
     }
@@ -1034,7 +1056,7 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     {
         update_games(input, feedback);
     }
-    else
+    else if (screen_ == 2)
     {
         update_settings(input, feedback);
     }
@@ -1058,6 +1080,7 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     no_apps_.update(dt);
     loading_apps_.update(dt);
     form_.update(dt);
+    files_.update(dt);
     headroom_.update(dt);
     profile_details_.update(dt);
     warning_.update(dt);
@@ -1340,8 +1363,10 @@ void View::draw(Frame &frame) const
         draw_hosts(canvas, paint);
     else if (screen_ == 1)
         draw_games(canvas, paint);
-    else
+    else if (screen_ == 2)
         draw_settings(canvas, paint);
+    else
+        draw_about(canvas, paint);
     list.pop_transform();
     list.pop_opacity();
     draw_footer(canvas, paint);
@@ -1375,7 +1400,7 @@ void View::draw_header(ui::Canvas &canvas, ui::Painter &paint) const
     // Tabs between the two shoulder buttons that turn them.
     const ui::GlyphStyle keys = glyphs(paint);
     const Rect first = tabs_.tab_rect(canvas.fonts, 0);
-    const Rect last = tabs_.tab_rect(canvas.fonts, 2);
+    const Rect last = tabs_.tab_rect(canvas.fonts, kScreens - 1);
     ui::draw_button(list, canvas.fonts, keys, ui::Button::l1,
                     first.x - 22.0f - ui::button_width(ui::Button::l1, 32.0f), 88.0f, 32.0f);
     tabs_.draw(canvas);
@@ -1459,9 +1484,13 @@ void View::draw_footer(ui::Canvas &canvas, ui::Painter &paint) const
             hints[count++] = {ui::Button::square, "Stop app"};
         hints[count++] = {ui::Button::circle, "PCs"};
     }
-    else
+    else if (screen_ == 2)
     {
         hints[count++] = {ui::Button::dpad, "Choose and change"};
+        hints[count++] = {ui::Button::circle, "PCs"};
+    }
+    else
+    {
         hints[count++] = {ui::Button::circle, "PCs"};
     }
     ui::draw_hints(list, canvas.fonts, glyphs(paint), hints, count, kRight, true);
@@ -1744,6 +1773,76 @@ void View::draw_settings(ui::Canvas &canvas, ui::Painter &paint) const
         ui::draw_button(list, canvas.fonts, glyph, kShortcuts[i].second, x, cy, 32.0f);
         paint.body(kShortcuts[i].what, keys.x + 176.0f, cy + 8.0f, 24.0f, t.text);
     }
+}
+
+// Credits and first steps, after ProsperoEden's About page.
+void View::draw_about(ui::Canvas &canvas, ui::Painter &paint) const
+{
+    gfx::DrawList &list = canvas.list;
+    const ui::Theme &t = theme_;
+    const ui::FontRef &regular = canvas.fonts.regular;
+    const Color rule = t.text_muted.with_alpha(0.28f);
+    paint.heading("About ProsperoLight", kMargin - 2.0f, 212.0f, 52.0f, paint.page_text());
+    paint.body("Credits and first steps",
+               kMargin + paint.heading_width("About ProsperoLight", 52.0f) + 22.0f, 212.0f, 24.0f,
+               paint.page_text_muted());
+
+    credits_panel_.draw(canvas, kCreditsPanel);
+    const Rect left = credits_panel_.content_rect(kCreditsPanel).inset(14.0f);
+    const float bottom = left.y + left.h - 6.0f;
+    paint.label(ui::upper("Project credits"), left.x, left.y + 20.0f, 19.0f, t.text_muted);
+    paint.heading("Powered by Moonlight", left.x, left.y + 72.0f, 38.0f);
+    ui::paragraph(list, regular,
+                  "ProsperoLight speaks the Moonlight protocol through moonlight-common-c. All "
+                  "credit for it goes to the Moonlight developers and contributors.",
+                  left.x, left.y + 118.0f, 24.0f, left.w, 34.0f, t.text, 3);
+    paint.label("moonlight-stream.org", left.x, left.y + 226.0f, 24.0f, t.primary);
+    list.rounded_rect({left.x, left.y + 252.0f, left.w, 1.0f}, 0.0f, rule);
+    paint.label(ui::upper("Thanks"), left.x, left.y + 288.0f, 19.0f, t.text_muted);
+    ui::paragraph(list, regular,
+                  "Thanks to the Sunshine developers for the host on the PC, to the whole PS5 "
+                  "homebrew community, and to every developer whose tools and libraries make "
+                  "ProsperoLight possible.",
+                  left.x, left.y + 326.0f, 24.0f, left.w, 34.0f, t.text, 3);
+    list.rounded_rect({left.x, left.y + 426.0f, left.w, 1.0f}, 0.0f, rule);
+    paint.label(ui::upper("PS5 edition"), left.x, left.y + 462.0f, 19.0f, t.text_muted);
+    ui::paragraph(list, regular,
+                  "ProsperoLight is an unofficial PS5 client brought to you by BlackBearReloaded.",
+                  left.x, left.y + 500.0f, 24.0f, left.w, 34.0f, t.text, 2);
+    paint.body("Menu sound effects made with ElevenLabs.", left.x, bottom, 20.0f, t.text_muted);
+    if (!version_.empty())
+        paint.label("Version " + version_, left.x + left.w, bottom, 20.0f, t.primary,
+                    gfx::Align::right);
+
+    start_panel_.draw(canvas, kStartPanel);
+    const Rect right = start_panel_.content_rect(kStartPanel).inset(14.0f);
+    paint.label(ui::upper("Getting started"), right.x, right.y + 20.0f, 19.0f, t.text_muted);
+    paint.heading("Stream from your PC", right.x, right.y + 72.0f, 38.0f);
+    struct Step
+    {
+        const char *title;
+        const char *body;
+    };
+    static constexpr Step kSteps[] = {
+        {"Run Sunshine on the PC", "Keep it open, on the same network as this PS5."},
+        {"Pair once", "Choose the PC in PCs, then type the PIN shown here into Sunshine."},
+        {"Play", "Pick an app in Games and start it."},
+    };
+    for (int i = 0; i < 3; ++i)
+    {
+        const float y = right.y + 132.0f + static_cast<float>(i) * 78.0f;
+        const char number[2] = {static_cast<char>('1' + i), '\0'};
+        list.circle(right.x + 20.0f, y + 6.0f, 20.0f, t.primary.with_alpha(0.16f));
+        paint.label(number, right.x + 20.0f, y + 14.0f, 22.0f, t.primary, gfx::Align::center);
+        paint.label(kSteps[i].title, right.x + 60.0f, y, 25.0f, t.text);
+        paint.body(kSteps[i].body, right.x + 60.0f, y + 30.0f, 22.0f, t.text_muted);
+    }
+    list.rounded_rect({right.x, right.y + 350.0f, right.w, 1.0f}, 0.0f, rule);
+    paint.label(ui::upper("Files on this PS5"), right.x, right.y + 386.0f, 19.0f, t.text_muted);
+    files_.draw(canvas);
+    paint.body(storage_access_ ? "An update or a reinstall does not touch them."
+                               : "Kept in the app's own storage: no filesystem access at start-up.",
+               right.x, right.y + right.h - 6.0f, 20.0f, t.text_muted);
 }
 
 void View::draw_pairing(ui::Canvas &canvas) const

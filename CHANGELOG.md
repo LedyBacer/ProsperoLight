@@ -2,7 +2,7 @@
 
 ## 01.000.081
 
-### Development build: files under `/data/prosperolight`
+### Development build: files under `/data/prosperolight`, and an About page
 
 Not released, and not yet run on a console. Everything from 01.000.080 below
 is included.
@@ -20,6 +20,9 @@ is included.
   of the log says which it is.
 - The app folder has one more file, `sandbox-elevator.elf`: the helper the ELF
   loader runs. It only answers title `PPSA99002`.
+- **About.** A fourth tab, as in ProsperoEden: credits for Moonlight and
+  Sunshine, thanks, who made the PS5 edition, the version, three steps to get
+  started, and the folders the settings, the pairing and the logs are in.
 
 ### What was tested
 
