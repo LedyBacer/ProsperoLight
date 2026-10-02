@@ -1,0 +1,107 @@
+diff --git a/src/Limelight.h b/src/Limelight.h
+--- a/src/Limelight.h
++++ b/src/Limelight.h
+@@ -483,6 +483,9 @@
+ // This callback is invoked to set a controller's RGB LED (if present).
+ typedef void(*ConnListenerSetControllerLED)(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b);
+ 
++// Bounded Vibepollo PCM callback; receive thread must not block.
++typedef void(*ConnListenerControllerHaptics)(uint16_t controllerNumber, uint32_t sequence, const uint8_t* pcm, uint16_t frames);
++
+ typedef struct _CONNECTION_LISTENER_CALLBACKS {
+     ConnListenerStageStarting stageStarting;
+     ConnListenerStageComplete stageComplete;
+@@ -497,6 +500,7 @@
+     ConnListenerSetMotionEventState setMotionEventState;
+     ConnListenerSetControllerLED setControllerLED;
+     ConnListenerSetAdaptiveTriggers setAdaptiveTriggers;
++    ConnListenerControllerHaptics controllerHaptics;
+ } CONNECTION_LISTENER_CALLBACKS, *PCONNECTION_LISTENER_CALLBACKS;
+ 
+ // Use this function to zero the connection callbacks when allocated on the stack or heap
+diff --git a/src/ControlStream.c b/src/ControlStream.c
+--- a/src/ControlStream.c
++++ b/src/ControlStream.c
+@@ -1,4 +1,5 @@
+ #include "Limelight-internal.h"
++#include "ControllerHaptics.h"
+ 
+ // This is a private header, but it just contains some time macros
+ #include <enet/time.h>
+@@ -1293,7 +1294,17 @@
+             }
+ 
+             // Process client callbacks in a separate thread
+-            if (needsAsyncCallback(ctlHdr->type)) {
++            if (ctlHdr->type == ML_HAPTICS_PACKET_TYPE) {
++                const uint8_t* payload = (const uint8_t*)(ctlHdr + 1);
++                if (packetLength >= (int)sizeof(*ctlHdr) &&
++                    MlHapticsValidate(payload, packetLength - sizeof(*ctlHdr)) &&
++                    ListenerCallbacks.controllerHaptics) {
++                    ListenerCallbacks.controllerHaptics(MlHapticsRead16(payload + 2),
++                        MlHapticsRead32(payload + 4), payload + ML_HAPTICS_HEADER_SIZE,
++                        MlHapticsRead16(payload + 8));
++                }
++            }
++            else if (needsAsyncCallback(ctlHdr->type)) {
+                 queueAsyncCallback(ctlHdr, packetLength);
+             }
+             else if (ctlHdr->type == packetTypes[IDX_TERMINATION]) {
+diff --git a/src/SdpGenerator.c b/src/SdpGenerator.c
+--- a/src/SdpGenerator.c
++++ b/src/SdpGenerator.c
+@@ -1,4 +1,5 @@
+ #include "Limelight-internal.h"
++#include "ControllerHaptics.h"
+ #include <inttypes.h>
+ 
+ #define MAX_OPTION_NAME_LEN 128
+@@ -270,6 +271,7 @@
+     if (IS_SUNSHINE()) {
+         // Send client feature flags to Sunshine hosts
+         uint32_t moonlightFeatureFlags = ML_FF_FEC_STATUS | ML_FF_SESSION_ID_V1;
++        if (ListenerCallbacks.controllerHaptics) moonlightFeatureFlags |= ML_FF_HAPTICS_PCM;
+         snprintf(payloadStr, sizeof(payloadStr), "%" PRIu32, moonlightFeatureFlags);
+         err |= addAttributeString(&optionHead, "x-ml-general.featureFlags", payloadStr);
+ 
+diff --git a/src/ControllerHaptics.h b/src/ControllerHaptics.h
+new file mode 100644
+--- /dev/null
++++ b/src/ControllerHaptics.h
+@@ -0,0 +1,36 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// Versioned Vibeshine extension. All multibyte fields and samples are LE.
++#pragma once
++#include <stdint.h>
++#include <stddef.h>
++
++#define ML_HAPTICS_PACKET_TYPE 0x5601
++#define ML_HAPTICS_CHANNEL 0x08
++#define ML_HAPTICS_HEADER_SIZE 12
++#define ML_HAPTICS_MAX_FRAMES 240
++#define ML_HAPTICS_FRAME_BYTES 4
++#define ML_HAPTICS_MAX_PAYLOAD (ML_HAPTICS_HEADER_SIZE + ML_HAPTICS_MAX_FRAMES * ML_HAPTICS_FRAME_BYTES)
++#define LI_CCAP_HAPTICS_PCM 0x8000
++#define ML_FF_HAPTICS_PCM 0x04
++
++static inline uint16_t MlHapticsRead16(const uint8_t* p) {
++    return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
++}
++static inline uint32_t MlHapticsRead32(const uint8_t* p) {
++    return (uint32_t)MlHapticsRead16(p) | ((uint32_t)MlHapticsRead16(p + 2) << 16);
++}
++static inline void MlHapticsWrite16(uint8_t* p, uint16_t n) {
++    p[0] = (uint8_t)n; p[1] = (uint8_t)(n >> 8);
++}
++static inline void MlHapticsWrite32(uint8_t* p, uint32_t n) {
++    MlHapticsWrite16(p, (uint16_t)n); MlHapticsWrite16(p + 2, (uint16_t)(n >> 16));
++}
++// Payload: version=1, format=1 (48 kHz S16LE stereo), controller, sequence,
++// frame count, reserved=0, then interleaved left/right actuator samples.
++static inline int MlHapticsValidate(const uint8_t* p, size_t size) {
++    if (!p || size < ML_HAPTICS_HEADER_SIZE || p[0] != 1 || p[1] != 1 ||
++        MlHapticsRead16(p + 2) >= 16 || MlHapticsRead16(p + 10) != 0) return 0;
++    uint16_t frames = MlHapticsRead16(p + 8);
++    return frames > 0 && frames <= ML_HAPTICS_MAX_FRAMES &&
++        size == ML_HAPTICS_HEADER_SIZE + (size_t)frames * ML_HAPTICS_FRAME_BYTES;
++}

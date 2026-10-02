@@ -6,6 +6,8 @@
 
 /* Native game Moonlight/Sunshine Videodec2 zero-copy stream. */
 
+#include "ps5_dualsense.hpp"
+
 #include <limits.h>
 #include <pthread.h>
 #include <stddef.h>
@@ -331,18 +333,7 @@ static uint32_t decoder_max_level(const native_video_mode_t *mode, uint32_t stre
     return 150u;
 }
 
-typedef struct ps5_pad_sample
-{
-    uint32_t buttons;
-    uint8_t left_x, left_y, right_x, right_y;
-    uint8_t left_trigger, right_trigger;
-    uint8_t reserved_to_connected[66];
-    int32_t connected;
-    uint64_t timestamp_us;
-    uint8_t extension[16];
-    uint8_t connected_count;
-    uint8_t remaining[15];
-} ps5_pad_sample_t;
+using ps5_pad_sample_t = prosperolight::dualsense::PadSample;
 
 static_assert(sizeof(ps5_pad_sample_t) == 120,
               "normal Pad samples must use the verified 120-byte ABI");
@@ -2898,6 +2889,8 @@ static controller_event_t ps5_controller_map_sample(const ps5_pad_sample_t *samp
         event.buttons |= LS_CLK_FLAG;
     if (sample->buttons & PS5_PAD_BUTTON_R3)
         event.buttons |= RS_CLK_FLAG;
+    if (sample->buttons & 0x1u)
+        event.buttons |= BACK_FLAG;
     if (sample->buttons & PS5_PAD_BUTTON_OPTIONS)
         event.buttons |= PLAY_FLAG;
     if (sample->buttons & PS5_PAD_BUTTON_TOUCH_PAD)
@@ -2913,37 +2906,22 @@ static controller_event_t ps5_controller_map_sample(const ps5_pad_sample_t *samp
 
 static void ps5_controller_send(ps5_controller_state_t *state, const controller_event_t *event)
 {
-    static const uint32_t supported_buttons =
-        UP_FLAG | DOWN_FLAG | LEFT_FLAG | RIGHT_FLAG | A_FLAG | B_FLAG | X_FLAG | Y_FLAG | LB_FLAG |
-        RB_FLAG | PLAY_FLAG | LS_CLK_FLAG | RS_CLK_FLAG | TOUCHPAD_FLAG;
     uint64_t now;
     int result;
-
-    if (!state->announced)
-    {
-        result = LiSendControllerArrivalEvent(0, 1, LI_CTYPE_PS, supported_buttons,
-                                              LI_CCAP_ANALOG_TRIGGERS);
-        state->arrival_result = result;
-        if (result != 0)
-        {
-            ++state->send_errors;
-            return;
-        }
-        state->announced = 1;
-    }
 
     now = monotonic_us();
     if (state->last_event_us != 0 && !memcmp(event, &state->last_event, sizeof(*event)) &&
         now - state->last_event_us < CONTROLLER_KEEPALIVE_US)
         return;
-    result =
-        LiSendMultiControllerEvent(0, 1, event->buttons, event->left_trigger, event->right_trigger,
-                                   event->left_x, event->left_y, event->right_x, event->right_y);
+    result = prosperolight::dualsense::SendPrimary(event->buttons, event->left_trigger,
+                                                   event->right_trigger, event->left_x,
+                                                   event->left_y, event->right_x, event->right_y);
     if (result != 0)
     {
         ++state->send_errors;
         return;
     }
+    state->announced = (prosperolight::dualsense::ActiveMask() & 1) != 0;
     state->last_event = *event;
     state->last_event_us = now;
     ++state->events;
@@ -3232,8 +3210,14 @@ static void ps5_controller_poll(ps5_controller_state_t *state)
             state->connected_count = sample->connected_count;
             state->connected_count_valid = 1;
             state->last_raw_buttons = 0;
+            state->last_event_us = 0;
             ps5_controller_release_mouse_buttons(state);
         }
+        prosperolight::dualsense::PrimarySample(
+            *sample, neutral || state->mouse_mode || state->keyboard_mode ||
+                         moonlight_stream_mouse_toggle_requested(raw_buttons) ||
+                         moonlight_stream_keyboard_requested(raw_buttons) ||
+                         moonlight_stream_hud_toggle_requested(raw_buttons));
         if (neutral)
             raw_buttons = 0;
         mouse_toggle = moonlight_stream_mouse_toggle_requested(raw_buttons) &&
@@ -3308,16 +3292,13 @@ static void ps5_controller_poll(ps5_controller_state_t *state)
 static void ps5_controller_stop(ps5_controller_state_t *state)
 {
     ps5_controller_release_mouse_buttons(state);
-    if (!state->announced)
-        return;
-    state->removal_result = LiSendMultiControllerEvent(0, 0, 0, 0, 0, 0, 0, 0, 0);
-    if (state->removal_result != 0)
-        ++state->send_errors;
+    prosperolight::dualsense::Stop();
     state->announced = 0;
 }
 
 static void ps5_controller_shutdown(ps5_controller_state_t *state)
 {
+    prosperolight::dualsense::Shutdown();
     native_agc_set_keyboard_state(0, 0, 0);
     if (state->handle >= 0)
     {
@@ -3429,13 +3410,14 @@ static CONNECTION_LISTENER_CALLBACKS moonlight_connection_callbacks = {
     .connectionStarted = connection_started,
     .connectionTerminated = connection_ended,
     .logMessage = connection_log,
-    .rumble = nullptr,
+    .rumble = prosperolight::dualsense::Rumble,
     .connectionStatusUpdate = nullptr,
     .setHdrMode = connection_set_hdr_mode,
-    .rumbleTriggers = nullptr,
-    .setMotionEventState = nullptr,
-    .setControllerLED = nullptr,
-    .setAdaptiveTriggers = nullptr,
+    .rumbleTriggers = prosperolight::dualsense::RumbleTriggers,
+    .setMotionEventState = prosperolight::dualsense::MotionState,
+    .setControllerLED = prosperolight::dualsense::Led,
+    .setAdaptiveTriggers = prosperolight::dualsense::AdaptiveTriggers,
+    .controllerHaptics = prosperolight::dualsense::Haptics,
 };
 
 static void nvhttp_log_sink(const char *message)
@@ -3834,6 +3816,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     stream_config.encryptionFlags = ENCFLG_NONE;
     controller_result = ps5_controller_init(&controller);
     controller_ready = controller_result == 0;
+    prosperolight::dualsense::Init(controller.user_id, controller.handle);
     if (controller_ready && controller.user_id >= 0)
         physical_input_ready = ps5_physical_input_init(&physical_input, controller.user_id) == 0;
     snprintf(notification.message, sizeof(notification.message),
@@ -3874,7 +3857,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     stream_config.clientRefreshRateX100 = (int)renderer.client_refresh_x100;
     identity_initialized = 1;
     result = prepare_native_session(&client_identity, &gs_server, &stream_config, mode,
-                                    controller_ready ? 1 : 0, host, app_name, app_id);
+                                    prosperolight::dualsense::ActiveMask(), host, app_name, app_id);
     if (result != GS_OK)
         goto done;
     session_started = 1;
@@ -3970,6 +3953,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         }
         if (controller_ready)
             ps5_controller_poll(&controller);
+        prosperolight::dualsense::Poll();
         if (physical_input_ready)
             ps5_physical_input_poll(&physical_input);
         if (std::atomic_load_explicit(&renderer.presented, std::memory_order_relaxed) == 0 &&
