@@ -35,8 +35,11 @@ constexpr Rect kStartPanel{kMargin + 876.0f, kContentTop, 852.0f, 708.0f};
 constexpr int kScreens = 4;
 constexpr Rect kPairPanel{960.0f - 440.0f, 250.0f, 880.0f, 560.0f};
 constexpr int kColumns = 7;
-// How long the connecting screen stays before the stream takes the display.
-constexpr float kLaunchSeconds = 0.9f;
+// How long the connecting screen stays before the stream takes the display,
+// and how far its bar gets meanwhile. The stream carries the bar on from there.
+constexpr float kLaunchSeconds = 1.0f;
+constexpr float kHandoverProgress = 0.3f;
+constexpr Rect kConnectBar{kMargin, 974.0f, kRight - kMargin, 10.0f};
 
 // Measured on the console for 4K HEVC: smooth up to / freezes above, in Mbps.
 struct BitrateLimit
@@ -516,7 +519,10 @@ void View::build()
     loader_.style.layout = ui::LoadingLayout::corner;
     loader_.style.veil = 0.62f;
     loader_.style.prompt = "";
-    loader_.set_stages({{"Connecting", 1.0f}, {"Starting the app", 2.0f}});
+    // The bar is drawn here (draw_connect_bar), not by the loading screen:
+    // the stream continues the same bar after the launcher has closed.
+    loader_.style.indicator = ui::LoadingIndicator::none;
+    loader_.style.percent = false;
     loader_.art = [this](ui::Canvas &canvas, const Rect &screen, float)
     {
         const moonlight_backend_snapshot_t &backend = model_.backend();
@@ -972,9 +978,9 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
 
     if (launching_)
     {
-        load_progress_ = std::min(load_progress_ + dt / kLaunchSeconds * 0.5f, 0.5f);
-        loader_.set_progress(load_progress_);
-        if (load_progress_ >= 0.5f)
+        load_progress_ =
+            std::min(load_progress_ + dt / kLaunchSeconds * kHandoverProgress, kHandoverProgress);
+        if (load_progress_ >= kHandoverProgress)
             start_stream_ = true;
     }
     else if (host_prompt_.is_open())
@@ -1382,6 +1388,7 @@ void View::draw(Frame &frame) const
     unpair_dialog_.draw(above);
     loader_.draw(above);
     draw_loader_tip(above);
+    draw_connect_bar(above);
 }
 
 void View::draw_header(ui::Canvas &canvas, ui::Painter &paint) const
@@ -1873,6 +1880,32 @@ void View::draw_pairing(ui::Canvas &canvas) const
     pair_timer_.draw(canvas);
     paint.body("This closes by itself when Sunshine accepts the PIN.", panel.cx(),
                panel.y + panel.h - 36.0f, 21.0f, t.text_muted, gfx::Align::center);
+    list.pop_opacity();
+}
+
+View::ConnectBar View::connecting_bar() const
+{
+    return {kConnectBar, theme_.primary, load_progress_};
+}
+
+// The connecting screen's bar. Its track and its label belong to the picture
+// the stream is given; the fill is drawn here first and by the stream after.
+void View::draw_connect_bar(ui::Canvas &canvas) const
+{
+    const float shown = loader_.opacity();
+    if (shown <= 0.01f)
+        return;
+    gfx::DrawList &list = canvas.list;
+    list.push_opacity(shown);
+    ui::Painter paint(list, canvas.fonts, theme_, 0);
+    const Color ink = Color::rgb(0xffffff);
+    const float radius = kConnectBar.h * 0.5f;
+    paint.label("Connecting", kConnectBar.x, kConnectBar.y - 20.0f, 22.0f, ink.with_alpha(0.85f));
+    list.rounded_rect(kConnectBar, radius, ink.with_alpha(0.16f));
+    if (!plate_ && load_progress_ > 0.0f)
+        list.rounded_rect({kConnectBar.x, kConnectBar.y,
+                           std::max(kConnectBar.w * load_progress_, kConnectBar.h), kConnectBar.h},
+                          radius, theme_.primary);
     list.pop_opacity();
 }
 

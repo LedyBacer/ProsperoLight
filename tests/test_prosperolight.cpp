@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "connecting_plate.hpp"
 #include "lan_http_report.hpp"
 #include "native_agc_output.hpp"
 #include "moonlight_stream_input.hpp"
@@ -1325,3 +1326,118 @@ TEST(HostHealth, DebouncesTransientFailuresAndRecovers)
     EXPECT_FALSE(health.Reconnecting());
 }
 } // namespace
+
+namespace
+{
+
+std::vector<std::uint8_t> picture_of(std::uint8_t red, std::uint8_t green, std::uint8_t blue)
+{
+    std::vector<std::uint8_t> picture(static_cast<std::size_t>(connecting::kWidth) *
+                                      connecting::kHeight * 4u);
+    for (std::size_t at = 0; at < picture.size(); at += 4)
+    {
+        picture[at] = red;
+        picture[at + 1] = green;
+        picture[at + 2] = blue;
+        picture[at + 3] = 255;
+    }
+    return picture;
+}
+
+constexpr std::size_t kPlateLuma =
+    static_cast<std::size_t>(connecting::kWidth) * connecting::kSurfaceHeight;
+
+} // namespace
+
+TEST(ConnectingScreen, PictureBecomesLimitedRangeVideo)
+{
+    const std::vector<std::uint8_t> white = picture_of(255, 255, 255);
+    connecting::Plate plate;
+    std::vector<std::uint8_t> surface(connecting::surface_bytes(false));
+
+    plate.build(white.data(), {}, false);
+    EXPECT_FALSE(plate.has_bar());
+    plate.compose(surface.data(), 0.0f, 1.0f);
+    EXPECT_EQ(surface[0], 235);
+    EXPECT_EQ(surface[kPlateLuma], 128);
+    // The rows below the picture are padding: black.
+    EXPECT_EQ(surface[static_cast<std::size_t>(connecting::kHeight) * connecting::kWidth], 16);
+
+    // Without a picture the plate is a black screen.
+    plate.build(nullptr, {}, false);
+    plate.compose(surface.data(), 1.0f, 1.0f);
+    EXPECT_EQ(surface[0], 16);
+    EXPECT_EQ(surface[kPlateLuma + 1], 128);
+}
+
+TEST(ConnectingScreen, BarFillsFromTheLeftAndNeverPastItsProgress)
+{
+    const std::vector<std::uint8_t> dark = picture_of(10, 10, 10);
+    connecting::Bar bar;
+    bar.x = 96.0f;
+    bar.y = 974.0f;
+    bar.width = 1728.0f;
+    bar.height = 10.0f;
+    connecting::Plate plate;
+    std::vector<std::uint8_t> whole(connecting::surface_bytes(false));
+    std::vector<std::uint8_t> rows(connecting::surface_bytes(false));
+    const auto luma = [](const std::vector<std::uint8_t> &surface, int x)
+    { return surface[979u * connecting::kWidth + static_cast<std::size_t>(x)]; };
+
+    plate.build(dark.data(), bar, false);
+    ASSERT_TRUE(plate.has_bar());
+    plate.compose(whole.data(), 0.5f, 1.0f);
+    EXPECT_EQ(luma(whole, 500), 235); // inside the fill
+    EXPECT_LT(luma(whole, 1200), 30); // beyond it: the picture
+    EXPECT_LT(luma(whole, 90), 30);   // left of the bar
+    // Redrawing only the bar's rows gives the same picture, and says what it wrote.
+    plate.compose(rows.data(), 0.2f, 1.0f);
+    connecting::Range written[2];
+    plate.compose_bar(rows.data(), 0.5f, written);
+    EXPECT_EQ(rows, whole);
+    EXPECT_GT(written[0].bytes, 0u);
+    EXPECT_LT(written[0].bytes, 40u * connecting::kWidth);
+    EXPECT_GE(written[1].offset, kPlateLuma);
+    // Nothing is filled at zero.
+    plate.compose(whole.data(), 0.0f, 1.0f);
+    EXPECT_LT(luma(whole, 100), 30);
+}
+
+TEST(ConnectingScreen, FadesToVideoBlack)
+{
+    const std::vector<std::uint8_t> colour = picture_of(200, 40, 90);
+    connecting::Bar bar;
+    bar.x = 96.0f;
+    bar.y = 974.0f;
+    bar.width = 1728.0f;
+    bar.height = 10.0f;
+    connecting::Plate plate;
+    std::vector<std::uint8_t> surface(connecting::surface_bytes(false));
+
+    plate.build(colour.data(), bar, false);
+    plate.compose(surface.data(), 1.0f, 1.0f);
+    const int bright = surface[0];
+    plate.compose(surface.data(), 1.0f, 0.5f);
+    EXPECT_LT(surface[0], bright);
+    EXPECT_GT(surface[0], 16);
+    plate.compose(surface.data(), 1.0f, 0.0f);
+    for (std::size_t at = 0; at < surface.size(); at += 977)
+        EXPECT_EQ(surface[at], at < kPlateLuma ? 16 : 128) << at;
+}
+
+TEST(ConnectingScreen, HdrPlateUsesTenBitPqLevels)
+{
+    const std::vector<std::uint8_t> white = picture_of(255, 255, 255);
+    connecting::Plate plate;
+    std::vector<std::uint16_t> surface(connecting::surface_bytes(true) / 2u);
+
+    plate.build(white.data(), {}, true);
+    EXPECT_TRUE(plate.hdr());
+    plate.compose(surface.data(), 0.0f, 1.0f);
+    // White at 203 nits is 58% of the PQ signal: far from the top of the range.
+    EXPECT_GT(surface[0], 555);
+    EXPECT_LT(surface[0], 590);
+    EXPECT_EQ(surface[kPlateLuma], 512);
+    plate.compose(surface.data(), 0.0f, 0.0f);
+    EXPECT_EQ(surface[0], 64);
+}

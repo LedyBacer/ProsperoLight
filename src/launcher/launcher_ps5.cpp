@@ -7,6 +7,7 @@
 #include "launcher/launcher.hpp"
 
 #include "app_storage.hpp"
+#include "connecting_plate.hpp"
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
 #include "native_agc_present.hpp"
@@ -56,6 +57,8 @@ static_assert(PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION == MOONLIGHT_STREAM_RESO
 static_assert(PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST == 0 ||
                   PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST == 1,
               "STOP_ACTIVE_APP_SELF_TEST must be 0 or 1");
+
+extern "C" void prosperolight_release_splash(void);
 
 namespace launcher
 {
@@ -239,6 +242,80 @@ int SignedInUsers()
     return count > 0 ? count : 1;
 }
 
+// A picture of the connecting screen for the stream to keep showing while it
+// connects. The bar's fill is left out: the stream draws it, further each frame.
+void CaptureConnecting(gfx::Renderer &renderer, View &view, Frame &frame, Selection *selection)
+{
+    constexpr int kWidth = connecting::kWidth;
+    constexpr int kHeight = connecting::kHeight;
+    const std::int64_t started = sys::monotonic_us();
+    selection->connecting_rgba.clear();
+
+    GLuint framebuffer = 0;
+    GLuint texture = 0;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kWidth, kHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glGenFramebuffers(1, &framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+    bool ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if (ok)
+    {
+        view.set_plate(true);
+        frame.reset();
+        frame.glass_texture = renderer.glass_texture();
+        view.draw(frame);
+        view.set_plate(false);
+        renderer.begin();
+        renderer.backdrop(frame.backdrop);
+        renderer.draw(frame.scene);
+        renderer.glass();
+        renderer.draw(frame.overlay);
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        renderer.present(framebuffer, kWidth, kHeight);
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        std::vector<std::uint8_t> pixels(static_cast<std::size_t>(kWidth) * kHeight * 4u);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        ok = glGetError() == GL_NO_ERROR;
+        // A picture with nothing in it was not read back.
+        bool lit = false;
+        for (std::size_t at = 0; ok && !lit && at < pixels.size(); at += 4u * 997u)
+            lit = pixels[at] != 0 || pixels[at + 1] != 0 || pixels[at + 2] != 0;
+        ok = ok && lit;
+        if (ok)
+        {
+            // OpenGL's first row is the bottom one.
+            const std::size_t row = static_cast<std::size_t>(kWidth) * 4u;
+            selection->connecting_rgba.resize(pixels.size());
+            for (int y = 0; y < kHeight; ++y)
+                std::memcpy(selection->connecting_rgba.data() + static_cast<std::size_t>(y) * row,
+                            pixels.data() + static_cast<std::size_t>(kHeight - 1 - y) * row, row);
+            const View::ConnectBar bar = view.connecting_bar();
+            selection->connecting_bar[0] = bar.rect.x;
+            selection->connecting_bar[1] = bar.rect.y;
+            selection->connecting_bar[2] = bar.rect.w;
+            selection->connecting_bar[3] = bar.rect.h;
+            selection->connecting_fill[0] = static_cast<std::uint8_t>(bar.fill.r * 255.0f + 0.5f);
+            selection->connecting_fill[1] = static_cast<std::uint8_t>(bar.fill.g * 255.0f + 0.5f);
+            selection->connecting_fill[2] = static_cast<std::uint8_t>(bar.fill.b * 255.0f + 0.5f);
+            selection->connecting_progress = bar.progress;
+        }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &framebuffer);
+    glDeleteTextures(1, &texture);
+    sys::log("[PL] launcher: connecting picture %s in %lld ms", ok ? "taken" : "not available",
+             static_cast<long long>((sys::monotonic_us() - started) / 1000));
+}
+
 // The recorded sounds are read once and kept: a stream does not need the
 // memory back, and the launcher returns after every stream.
 audio::SoundBank &Sounds()
@@ -259,6 +336,9 @@ audio::SoundBank &Sounds()
 Result Run(Selection *selection, const char *stream_error, bool first_start)
 {
     const std::int64_t opened_at = sys::monotonic_us();
+    // Milliseconds since the launcher began to open, for the log.
+    const auto elapsed = [opened_at]
+    { return static_cast<long long>((sys::monotonic_us() - opened_at) / 1000); };
     sys::log("[PL] launcher: opening (first=%d)", first_start ? 1 : 0);
 
     // 4K when the television takes it, else 1080p.
@@ -269,7 +349,8 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
         sys::log("[PL] launcher: display open failed");
         return Result::failed;
     }
-    sys::log("[PL] launcher: display %dx%d", display.width(), display.height());
+    sys::log("[PL] launcher: display %dx%d after %lld ms", display.width(), display.height(),
+             elapsed());
 
     Result outcome = Result::failed;
     {
@@ -288,6 +369,7 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
         // The launcher's theme uses neither of these two faces.
         fonts.pixel = fonts.mono;
         fonts.hand = fonts.regular;
+        sys::log("[PL] launcher: renderer and fonts after %lld ms", elapsed());
         if (!ready)
         {
             sys::log("[PL] launcher: renderer or fonts failed");
@@ -312,6 +394,7 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             view.set_first_start(first_start);
             view.show_stream_error(stream_error);
             view.set_players(SignedInUsers());
+            sys::log("[PL] launcher: sound, controller and screens after %lld ms", elapsed());
 
             Frame frame;
             ui::Feedback feedback;
@@ -379,10 +462,11 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                 }
                 if (++frames == 1)
                 {
+                    // The console's splash picture has covered the wait.
+                    prosperolight_release_splash();
                     const bool hidden = sys::hide_splash_screen();
                     sys::log("[PL] launcher: first frame after %lld ms, splash hidden=%d",
-                             static_cast<long long>((sys::monotonic_us() - opened_at) / 1000),
-                             hidden ? 1 : 0);
+                             elapsed(), hidden ? 1 : 0);
                 }
 
 #if PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST != 0
@@ -415,6 +499,7 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
 #endif
                 if (view.take_start_stream() && FillSelection(model, selection))
                 {
+                    CaptureConnecting(renderer, view, frame, selection);
                     outcome = Result::start_stream;
                     break;
                 }

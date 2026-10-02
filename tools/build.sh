@@ -263,6 +263,8 @@ wrap_options=()
 for symbol in malloc calloc realloc free posix_memalign malloc_usable_size; do
     wrap_options+=("--wrap=$symbol")
 done
+# The splash picture is hidden when the launcher says so (src/runtime/runtime_shims.c).
+wrap_options+=("--wrap=sceSystemServiceHideSplashScreen")
 "$sdk_root/bin/prospero-lld" -T "$native/ps5-pie.ld" --eh-frame-hdr "${wrap_options[@]}" \
     --version-script "$native/app-symbols.map" \
     --exclude-libs=ALL \

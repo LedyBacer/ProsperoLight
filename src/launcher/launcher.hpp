@@ -9,6 +9,7 @@
 #include "moonlight_config.hpp"
 
 #include <cstdint>
+#include <vector>
 
 namespace launcher
 {
@@ -30,6 +31,13 @@ struct Selection
     unsigned vsync_enabled = 1;
     unsigned decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_CLASSIC;
     unsigned decoder_cores = MOONLIGHT_DECODER_CORES_DEFAULT;
+    // The connecting screen as the launcher last drew it, without the fill of
+    // its bar (connecting_plate.hpp): the stream keeps showing it. Empty when
+    // it could not be read back; the stream then starts from a black screen.
+    std::vector<std::uint8_t> connecting_rgba;
+    float connecting_bar[4] = {}; // x, y, width, height, in pixels of the picture
+    std::uint8_t connecting_fill[3] = {};
+    float connecting_progress = 0.0f;
 };
 
 enum class Result

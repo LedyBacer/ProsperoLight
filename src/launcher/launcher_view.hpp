@@ -95,6 +95,21 @@ class View
     void update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feedback);
     void draw(Frame &frame) const;
 
+    // The connecting screen's bar: where it is, its colour and how far it is.
+    struct ConnectBar
+    {
+        hui::gfx::Rect rect;
+        hui::gfx::Color fill;
+        float progress = 0.0f;
+    };
+    ConnectBar connecting_bar() const;
+    // Draws the connecting screen without the fill of its bar: the picture
+    // the stream is given, which draws the fill itself from then on.
+    void set_plate(bool plate)
+    {
+        plate_ = plate;
+    }
+
     // True once, when the stream should start.
     bool take_start_stream();
     int screen() const
@@ -150,6 +165,7 @@ class View
     void draw_about(hui::ui::Canvas &canvas, hui::ui::Painter &paint) const;
     void draw_pairing(hui::ui::Canvas &canvas) const;
     void draw_loader_tip(hui::ui::Canvas &canvas) const;
+    void draw_connect_bar(hui::ui::Canvas &canvas) const;
     hui::ui::GlyphStyle glyphs(const hui::ui::Painter &paint) const;
 
     Model &model_;
@@ -215,6 +231,7 @@ class View
     hui::ui::LoadingScreen loader_;
     float load_progress_ = 0.0f;
     bool launching_ = false;
+    bool plate_ = false;
     bool start_stream_ = false;
     hui::ui::ToastStack toasts_;
     std::string pending_error_;

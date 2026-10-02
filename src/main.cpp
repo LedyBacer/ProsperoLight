@@ -5,6 +5,7 @@
  */
 
 #include "app_storage.hpp"
+#include "connecting_plate.hpp"
 #include "launcher/launcher.hpp"
 #include "moonlight_stream.hpp"
 #include "native_agc_present.hpp"
@@ -29,6 +30,8 @@ extern "C" int sceKernelMapDirectMemory(void **address, std::size_t length, int 
 extern "C" int sceKernelReleaseDirectMemory(std::int64_t direct_memory_start, std::size_t length);
 extern "C" int sceSysmoduleLoadModule(std::uint16_t module_id);
 extern "C" int munmap(void *address, std::size_t length);
+extern "C" void prosperolight_release_splash(void);
+extern "C" int sceSystemServiceHideSplashScreen(void);
 extern "C" void *__dso_handle = nullptr;
 
 #ifndef PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS
@@ -266,6 +269,9 @@ int main()
         stream_error[0] = '\0';
         if (result != launcher::Result::start_stream)
         {
+            // Nothing was drawn: the splash picture must not hide the home screen's way out.
+            prosperolight_release_splash();
+            (void)sceSystemServiceHideSplashScreen();
             // The display can refuse while the television changes mode.
             if (++launcher_failures < 3)
             {
@@ -297,6 +303,19 @@ int main()
         options.vsync_enabled = selection.vsync_enabled;
         options.decoder_pipeline = selection.decoder_pipeline;
         options.decoder_cores = selection.decoder_cores;
+        moonlight_connecting_picture_t picture{};
+        if (selection.connecting_rgba.size() ==
+            static_cast<std::size_t>(connecting::kWidth) * connecting::kHeight * 4u)
+        {
+            picture.rgba = selection.connecting_rgba.data();
+            picture.bar_x = selection.connecting_bar[0];
+            picture.bar_y = selection.connecting_bar[1];
+            picture.bar_width = selection.connecting_bar[2];
+            picture.bar_height = selection.connecting_bar[3];
+            std::memcpy(picture.fill, selection.connecting_fill, sizeof(picture.fill));
+            picture.progress = selection.connecting_progress;
+            options.connecting = &picture;
+        }
         ++streams;
         char line[160];
         std::snprintf(line, sizeof(line), "[PL] main: stream %u starts (%u FPS, hdr=%u)", streams,

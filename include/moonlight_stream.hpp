@@ -13,6 +13,17 @@
 extern "C" {
 #endif
 
+/* The launcher's connecting screen, for the stream to keep showing. */
+typedef struct moonlight_connecting_picture {
+    const uint8_t *rgba; /* 1920 x 1080 sRGB pixels, top row first */
+    float bar_x;         /* the progress bar, in pixels of the picture */
+    float bar_y;
+    float bar_width;
+    float bar_height;
+    uint8_t fill[3]; /* the colour of the bar's fill */
+    float progress;  /* where the launcher's bar stood, 0 to 1 */
+} moonlight_connecting_picture_t;
+
 typedef struct moonlight_stream_options {
     const char *host;
     uint16_t host_port; /* Sunshine port of that PC; 0 selects the default */
@@ -29,6 +40,8 @@ typedef struct moonlight_stream_options {
     uint32_t vsync_enabled;
     uint32_t decoder_pipeline; /* MOONLIGHT_DECODER_PIPELINE_* */
     uint32_t decoder_cores;    /* 3-5 physical cores for Videodec2 workers */
+    /* NULL shows a black screen until the first picture */
+    const moonlight_connecting_picture_t *connecting;
 } moonlight_stream_options_t;
 
 typedef struct moonlight_stream_metrics {

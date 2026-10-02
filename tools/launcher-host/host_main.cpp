@@ -12,6 +12,7 @@
 // usage: launcher_host <assets dir> <output dir> [width height]
 
 #include "fake_world.hpp"
+#include "connecting_plate.hpp"
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
 
@@ -29,6 +30,8 @@
 #include "stb_image_write.h"
 
 #include <cmath>
+#include <algorithm>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -243,6 +246,10 @@ int main(int argc, char **argv)
     std::size_t cue_count = 0;
     std::size_t missing_cues = 0;
 
+    // The picture a session that starts a stream hands to the stream.
+    std::vector<unsigned char> plate;
+    launcher::View::ConnectBar plate_bar;
+
     // Runs one launcher from start-up until its script ends; returns whether
     // it asked for a stream.
     const auto session = [&](const char *prefix, const std::vector<Step> &script,
@@ -252,7 +259,7 @@ int main(int argc, char **argv)
         model.set_artwork_decoder(make_poster);
         model.Initialize(now_ms);
         launcher::View view(model, fonts);
-        view.set_version("01.000.081");
+        view.set_version("01.000.082");
         view.set_players(2);
         view.set_storage({true, "/data/prosperolight/config", "/data/prosperolight/pairing",
                           "/data/prosperolight/logs"});
@@ -330,6 +337,33 @@ int main(int argc, char **argv)
             input.nav = step.nav;
             if (!started)
                 step_frame(input);
+        }
+        if (started)
+        {
+            // What the console does at this moment: the connecting screen once
+            // more, without the fill of its bar, read back as pixels.
+            view.set_plate(true);
+            frame.reset();
+            frame.glass_texture = renderer.glass_texture();
+            view.draw(frame);
+            view.set_plate(false);
+            renderer.begin();
+            renderer.backdrop(frame.backdrop);
+            renderer.draw(frame.scene);
+            renderer.glass();
+            renderer.draw(frame.overlay);
+            glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+            glClearColor(0, 0, 0, 1);
+            glClear(GL_COLOR_BUFFER_BIT);
+            renderer.present(framebuffer, width, height);
+            glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+            glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+            const std::size_t row = static_cast<std::size_t>(width) * 4;
+            plate.resize(pixels.size());
+            for (int y = 0; y < height; ++y)
+                std::memcpy(plate.data() + static_cast<std::size_t>(y) * row,
+                            pixels.data() + static_cast<std::size_t>(height - 1 - y) * row, row);
+            plate_bar = view.connecting_bar();
         }
         model.Shutdown();
         return started;
@@ -424,6 +458,73 @@ int main(int argc, char **argv)
         },
         "");
     expect(started, "Cross on an app starts the stream");
+
+    // ---- the stream's side of the connecting screen ----
+    // The picture becomes a video frame; the stream draws the bar on it.
+    expect(width == connecting::kWidth && height == connecting::kHeight &&
+               plate.size() == static_cast<std::size_t>(width) * height * 4,
+           "the connecting screen is handed over as a 1920 x 1080 picture");
+    expect(plate_bar.progress > 0.29f && plate_bar.progress < 0.31f,
+           "the launcher's bar stops at 30%, where the stream takes over");
+    if (failures == 0)
+    {
+        connecting::Bar bar;
+        bar.x = plate_bar.rect.x;
+        bar.y = plate_bar.rect.y;
+        bar.width = plate_bar.rect.w;
+        bar.height = plate_bar.rect.h;
+        bar.fill[0] = static_cast<std::uint8_t>(plate_bar.fill.r * 255.0f + 0.5f);
+        bar.fill[1] = static_cast<std::uint8_t>(plate_bar.fill.g * 255.0f + 0.5f);
+        bar.fill[2] = static_cast<std::uint8_t>(plate_bar.fill.b * 255.0f + 0.5f);
+        connecting::Plate video;
+        video.build(plate.data(), bar, false);
+        std::vector<unsigned char> surface(connecting::surface_bytes(false));
+        const std::size_t luma = static_cast<std::size_t>(connecting::kWidth) * connecting::kSurfaceHeight;
+        // The frame as the television shows it: BT.709 video back to pixels.
+        const auto save = [&](const char *name, float progress, float brightness)
+        {
+            video.compose(surface.data(), progress, brightness);
+            for (int y = 0; y < height; ++y)
+            {
+                for (int x = 0; x < width; ++x)
+                {
+                    const std::size_t at = static_cast<std::size_t>(y) * width + x;
+                    const std::size_t pair = luma + static_cast<std::size_t>(y / 2) * width + (x & ~1);
+                    const float l = (surface[at] - 16.0f) / 219.0f;
+                    const float cb = (surface[pair] - 128.0f) / 224.0f;
+                    const float cr = (surface[pair + 1] - 128.0f) / 224.0f;
+                    const float r = l + 1.5748f * cr;
+                    const float b = l + 1.8556f * cb;
+                    const float g = (l - 0.2126f * r - 0.0722f * b) / 0.7152f;
+                    unsigned char *out = pixels.data() + at * 4;
+                    out[0] = static_cast<unsigned char>(std::clamp(r, 0.0f, 1.0f) * 255.0f + 0.5f);
+                    out[1] = static_cast<unsigned char>(std::clamp(g, 0.0f, 1.0f) * 255.0f + 0.5f);
+                    out[2] = static_cast<unsigned char>(std::clamp(b, 0.0f, 1.0f) * 255.0f + 0.5f);
+                    out[3] = 255;
+                }
+            }
+            const std::string path = output + "/stream-" + name + ".png";
+            stbi_flip_vertically_on_write(0);
+            stbi_write_png(path.c_str(), width, height, 4, pixels.data(), width * 4);
+            stbi_flip_vertically_on_write(1);
+            std::fprintf(stderr, "wrote %s\n", path.c_str());
+        };
+        const int middle = static_cast<int>(bar.y + bar.height * 0.5f);
+        const auto bar_luma = [&](float share)
+        { return surface[static_cast<std::size_t>(middle) * width + static_cast<int>(bar.x + bar.width * share)]; };
+        save("connecting", 0.65f, 1.0f);
+        const int filled = bar_luma(0.3f);
+        const int empty = bar_luma(0.9f);
+        expect(filled > empty + 40, "the stream fills the bar as far as the connection is");
+        save("first-picture", 1.0f, 1.0f);
+        expect(bar_luma(0.9f) == filled, "the bar is full when the first picture is ready");
+        save("fading", 1.0f, 0.4f);
+        video.compose(surface.data(), 1.0f, 0.0f);
+        bool black = true;
+        for (std::size_t at = 0; at < surface.size(); ++at)
+            black = black && surface[at] == (at < luma ? 16 : 128);
+        expect(black, "the connecting screen fades to black before the stream appears");
+    }
     expect(fake::world()[0].current_app == 0, "Square stops the running app");
 
     // ---- back from a stream that failed ----

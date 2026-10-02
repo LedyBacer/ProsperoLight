@@ -7,6 +7,7 @@
 /* Native game Moonlight/Sunshine Videodec2 zero-copy stream. */
 
 #include <limits.h>
+#include <math.h>
 #include <pthread.h>
 #include <stddef.h>
 #include <stdarg.h>
@@ -21,6 +22,7 @@
 
 #include "moonlight_stream.hpp"
 #include "app_storage.hpp"
+#include "connecting_plate.hpp"
 #include "moonlight_config.hpp"
 #include "moonlight_physical_input.hpp"
 #include "moonlight_stream_input.hpp"
@@ -1098,16 +1100,10 @@ static int ps5_controller_disconnect_only(ps5_controller_state_t *state)
     return 0;
 }
 
+// Watches the controller and the clock while the connection is set up.
 typedef struct connection_loading_state
 {
-    void *surface;
-    size_t surface_bytes;
     ps5_controller_state_t *controller;
-    int hdr;
-    uint32_t output_source_width;
-    uint32_t output_source_height;
-    uint32_t requested_fps;
-    uint32_t output_refresh_x100;
     std::atomic<int> active;
     std::atomic<int> cancel_requested;
     std::atomic<int> timed_out;
@@ -1116,14 +1112,11 @@ typedef struct connection_loading_state
     pthread_t thread;
     int thread_started;
     int create_result;
-    int present_result;
 } connection_loading_state_t;
 
 static std::atomic<connection_loading_state_t *> active_connection_loading;
 static uint64_t monotonic_us(void);
 
-// Watches the controller and the clock while the connection is set up. The
-// screen shows one black frame meanwhile; nothing is drawn from here.
 static void *connection_loading_thread(void *context)
 {
     auto *state = static_cast<connection_loading_state_t *>(context);
@@ -1154,38 +1147,11 @@ static void *connection_loading_thread(void *context)
     return NULL;
 }
 
-static int start_connection_loading(connection_loading_state_t *state, void *surface,
-                                    size_t surface_bytes, int hdr, uint32_t output_source_width,
-                                    uint32_t output_source_height, uint32_t requested_fps,
+static int start_connection_loading(connection_loading_state_t *state,
                                     ps5_controller_state_t *controller)
 {
-    state->surface = surface;
-    state->surface_bytes = surface_bytes;
-    state->hdr = hdr;
-    state->output_source_width = output_source_width;
-    state->output_source_height = output_source_height;
-    state->requested_fps = requested_fps;
     state->controller = controller;
     state->started_us = monotonic_us();
-    state->present_result = 0;
-    state->output_refresh_x100 = 0;
-    if (surface && surface_bytes)
-    {
-        // The launcher's connecting screen has just closed. One black frame
-        // opens the output in the stream's mode; it stays until the first
-        // picture arrives.
-        state->present_result = native_agc_present_blank(
-            surface, surface_bytes, hdr, output_source_width, output_source_height, requested_fps);
-        if (state->present_result != 0)
-            (void)native_agc_present_shutdown();
-        else
-        {
-            // The refresh rate the console really got, for the negotiation.
-            uint32_t width = 0, height = 0;
-            native_agc_output_status(&width, &height, &state->output_refresh_x100);
-        }
-    }
-
     std::atomic_store_explicit(&state->active, 1, std::memory_order_relaxed);
     std::atomic_store_explicit(&state->cancel_requested, 0, std::memory_order_relaxed);
     std::atomic_store_explicit(&state->timed_out, 0, std::memory_order_relaxed);
@@ -1284,6 +1250,235 @@ static void release_direct(void *address, int64_t start, size_t size)
         (void)sceKernelMunmap(address, size);
     if (start >= 0)
         (void)sceKernelReleaseDirectMemory(start, size);
+}
+
+// ---- the connecting screen ---------------------------------------------------
+// The launcher hands over a picture of its connecting screen. The stream keeps
+// it on the television, its bar still moving, until the first picture of the
+// stream is ready; then the bar runs to its end and the screen fades out.
+typedef struct connecting_screen_state
+{
+    connecting::Plate plate;
+    void *surface;
+    int64_t surface_start;
+    size_t surface_size;
+    int hdr;
+    uint32_t output_source_width;
+    uint32_t output_source_height;
+    uint32_t requested_fps;
+    uint32_t output_refresh_x100;
+    float progress;
+    uint64_t started_us;
+    // The bar is at least at the floor, and creeps towards the ceiling while
+    // the step it stands for is still running.
+    std::atomic<uint32_t> floor_x1000;
+    std::atomic<uint32_t> ceiling_x1000;
+    std::atomic<int> active;
+    std::atomic<int> finish;
+    pthread_t thread;
+    int thread_started;
+    int present_result;
+} connecting_screen_state_t;
+
+static connecting_screen_state_t connecting_screen;
+
+static int connecting_screen_present(connecting_screen_state_t *state)
+{
+    return native_agc_present_still(state->surface, connecting::surface_bytes(state->hdr != 0),
+                                    state->hdr, state->output_source_width,
+                                    state->output_source_height, state->requested_fps);
+}
+
+static int connecting_screen_show(connecting_screen_state_t *state, float progress,
+                                  float brightness)
+{
+    state->plate.compose(state->surface, progress, brightness);
+    native_agc_flush_source(state->surface, connecting::surface_bytes(state->hdr != 0));
+    return connecting_screen_present(state);
+}
+
+static int connecting_screen_show_bar(connecting_screen_state_t *state, float progress)
+{
+    connecting::Range written[2];
+
+    state->plate.compose_bar(state->surface, progress, written);
+    for (const connecting::Range &range : written)
+        native_agc_flush_source(static_cast<const uint8_t *>(state->surface) + range.offset,
+                                range.bytes);
+    return connecting_screen_present(state);
+}
+
+static void *connecting_screen_thread(void *context)
+{
+    auto *state = static_cast<connecting_screen_state_t *>(context);
+    const bool has_bar = state->plate.has_bar();
+    uint64_t last_us = monotonic_us();
+    float progress = state->progress;
+
+    while (std::atomic_load_explicit(&state->active, std::memory_order_relaxed) &&
+           !std::atomic_load_explicit(&state->finish, std::memory_order_acquire))
+    {
+        if (!has_bar)
+        {
+            // A black screen: there is nothing to move.
+            sceKernelUsleep(10000);
+            continue;
+        }
+        const uint64_t now_us = monotonic_us();
+        const float elapsed = static_cast<float>(now_us - last_us) / 1e6f;
+        const float dt = elapsed < 0.1f ? elapsed : 0.1f;
+        const float floor = static_cast<float>(std::atomic_load_explicit(
+                                &state->floor_x1000, std::memory_order_relaxed)) /
+                            1000.0f;
+        const float ceiling = static_cast<float>(std::atomic_load_explicit(
+                                  &state->ceiling_x1000, std::memory_order_relaxed)) /
+                              1000.0f;
+        last_us = now_us;
+        if (progress < floor)
+            progress += (floor - progress) * (1.0f - expf(-dt / 0.12f));
+        if (progress < ceiling)
+            progress += (ceiling - progress) * (1.0f - expf(-dt / 2.5f));
+        // Each call returns at the television's next refresh.
+        state->present_result = connecting_screen_show_bar(state, progress);
+        if (state->present_result != 0)
+            return NULL;
+    }
+    if (!has_bar || !std::atomic_load_explicit(&state->active, std::memory_order_relaxed))
+        return NULL;
+
+    // The first picture is ready: the bar runs to its end, then the screen
+    // fades to black and the stream takes its place.
+    const float from = progress;
+    uint64_t started_us = monotonic_us();
+    for (;;)
+    {
+        const float t = static_cast<float>(monotonic_us() - started_us) / 220000.0f;
+        const float eased = t >= 1.0f ? 1.0f : 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+        state->present_result = connecting_screen_show_bar(state, from + (1.0f - from) * eased);
+        if (state->present_result != 0 || t >= 1.0f)
+            break;
+    }
+    if (state->present_result == 0)
+        sceKernelUsleep(70000);
+    started_us = monotonic_us();
+    while (state->present_result == 0)
+    {
+        const float t = static_cast<float>(monotonic_us() - started_us) / 260000.0f;
+        const float shade = t >= 1.0f ? 1.0f : t * t * (3.0f - 2.0f * t);
+        state->present_result = connecting_screen_show(state, 1.0f, 1.0f - shade);
+        if (t >= 1.0f)
+            break;
+    }
+    return NULL;
+}
+
+// Sets how far the bar is: at least floor, creeping towards ceiling.
+static void connecting_screen_stage(float floor, float ceiling)
+{
+    std::atomic_store_explicit(&connecting_screen.floor_x1000,
+                               static_cast<uint32_t>(floor * 1000.0f), std::memory_order_relaxed);
+    std::atomic_store_explicit(&connecting_screen.ceiling_x1000,
+                               static_cast<uint32_t>(ceiling * 1000.0f), std::memory_order_relaxed);
+}
+
+// Puts the picture on the television, from the caller's thread, and starts
+// the thread that keeps its bar moving. Without a picture the screen is black.
+static int connecting_screen_begin(const moonlight_connecting_picture_t *picture, int hdr,
+                                   uint32_t output_source_width, uint32_t output_source_height,
+                                   uint32_t requested_fps, int64_t direct_memory_limit)
+{
+    connecting_screen_state_t *state = &connecting_screen;
+    connecting::Bar bar;
+    const uint8_t *rgba = picture ? picture->rgba : NULL;
+    int32_t result;
+
+    if (rgba)
+    {
+        bar.x = picture->bar_x;
+        bar.y = picture->bar_y;
+        bar.width = picture->bar_width;
+        bar.height = picture->bar_height;
+        memcpy(bar.fill, picture->fill, sizeof(bar.fill));
+    }
+    state->plate.build(rgba, bar, hdr != 0);
+    state->hdr = hdr;
+    state->output_source_width = output_source_width;
+    state->output_source_height = output_source_height;
+    state->requested_fps = requested_fps;
+    state->output_refresh_x100 = 0;
+    state->progress = rgba ? picture->progress : 0.0f;
+    state->started_us = monotonic_us();
+    state->thread_started = 0;
+    state->present_result = -1;
+    state->surface = NULL;
+    state->surface_start = -1;
+    state->surface_size = align_16k(connecting::surface_bytes(hdr != 0));
+    std::atomic_store_explicit(&state->active, 0, std::memory_order_relaxed);
+    std::atomic_store_explicit(&state->finish, 0, std::memory_order_relaxed);
+    connecting_screen_stage(state->progress, state->progress);
+
+    result = allocate_direct(state->surface_size, 0x32, direct_memory_limit, &state->surface_start,
+                             &state->surface);
+    if (result != 0)
+        return result;
+    state->present_result = connecting_screen_show(state, state->progress, 1.0f);
+    if (state->present_result != 0)
+    {
+        (void)native_agc_present_shutdown();
+        return state->present_result;
+    }
+    // The refresh rate the console really got, read on the thread that
+    // presented, before the bar's thread starts presenting.
+    {
+        uint32_t width = 0, height = 0;
+        native_agc_output_status(&width, &height, &state->output_refresh_x100);
+    }
+    std::atomic_store_explicit(&state->active, 1, std::memory_order_relaxed);
+    if (pthread_create(&state->thread, NULL, connecting_screen_thread, state) == 0)
+        state->thread_started = 1;
+    else
+        std::atomic_store_explicit(&state->active, 0, std::memory_order_relaxed);
+    return 0;
+}
+
+// The first picture of the stream is about to be shown: let the bar finish
+// and the screen fade, and wait for that. Called by the presenting thread.
+static void connecting_screen_finish(void)
+{
+    connecting_screen_state_t *state = &connecting_screen;
+
+    if (!state->thread_started)
+        return;
+    std::atomic_store_explicit(&state->finish, 1, std::memory_order_release);
+    (void)pthread_join(state->thread, NULL);
+    state->thread_started = 0;
+    printf("[PL] stream: first picture %llu ms after the connecting screen, present=%08x\n",
+           (unsigned long long)((monotonic_us() - state->started_us) / 1000u),
+           (uint32_t)state->present_result);
+}
+
+// The stream ended before its first picture: stop where the bar is.
+static void connecting_screen_stop(void)
+{
+    connecting_screen_state_t *state = &connecting_screen;
+
+    std::atomic_store_explicit(&state->active, 0, std::memory_order_relaxed);
+    if (state->thread_started)
+    {
+        (void)pthread_join(state->thread, NULL);
+        state->thread_started = 0;
+    }
+}
+
+// After the presenter has shut down: nothing reads the picture any more.
+static void connecting_screen_release(void)
+{
+    connecting_screen_state_t *state = &connecting_screen;
+
+    release_direct(state->surface, state->surface_start, state->surface_size);
+    state->surface = NULL;
+    state->surface_start = -1;
+    state->plate.clear();
 }
 
 static decoder_resources_t make_decoder_resources()
@@ -2090,6 +2285,7 @@ static void *video_present_thread(void *context)
     auto *state = static_cast<native_renderer_state_t *>(context);
     stream_ready_frame_t current{};
     bool flip_pending = false;
+    bool first_picture = true;
     unsigned failures = 0;
 
     if (state->layout.present)
@@ -2124,6 +2320,14 @@ static void *video_present_thread(void *context)
         }
         state->frames.state[static_cast<size_t>(current.slot)] = Pool::Presenting;
         pthread_mutex_unlock(&state->lock);
+        if (first_picture)
+        {
+            // The connecting screen leaves before the first picture is shown,
+            // and the presenter's figures start with the stream's own frames.
+            connecting_screen_finish();
+            native_agc_reset_performance();
+            first_picture = false;
+        }
         if (submit_presentation(state, current) == 0)
         {
             flip_pending = true;
@@ -2220,7 +2424,6 @@ static void moonlight_renderer_start(void)
 #if PROSPEROLIGHT_PERFORMANCE_DETAIL
     frame_trace.count = frame_trace.omitted = 0;
 #endif
-    native_agc_reset_performance();
     if (!state)
         return;
     renderer_sync_init(state);
@@ -3914,8 +4117,23 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     else if (requested_audio == MOONLIGHT_AUDIO_51_SURROUND)
         (void)lan_http_report_text("Moonlight 5.1 unavailable; falling back to stereo");
 
-    result = start_connection_loading(&loading, NULL, 0, mode->hdr, mode->visible_width,
-                                      mode->visible_height, stream_fps, NULL);
+    direct_memory_limit = sceKernelGetDirectMemorySize();
+    // The launcher's connecting screen goes back on the television before
+    // anything slow starts, and stays until the first picture of the stream.
+    result = connecting_screen_begin(options ? options->connecting : NULL, mode->hdr,
+                                     mode->visible_width, mode->visible_height, stream_fps,
+                                     direct_memory_limit);
+    snprintf(notification.message, sizeof(notification.message),
+             "Connecting screen: present=%08x picture=%u hdr=%u refresh=%u", (uint32_t)result,
+             connecting_screen.plate.has_bar() ? 1u : 0u, mode->hdr ? 1u : 0u,
+             connecting_screen.output_refresh_x100);
+    (void)lan_http_report_text(notification.message);
+    printf("[PL] stream: %s\n", notification.message);
+    if (result != 0)
+        goto done;
+    connecting_screen_stage(connecting_screen.progress, 0.45f);
+
+    result = start_connection_loading(&loading, NULL);
     if (result != 0)
         goto done;
 
@@ -3932,7 +4150,6 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         goto done;
     sysmodule_loaded = 1;
 
-    direct_memory_limit = sceKernelGetDirectMemorySize();
     compute_memory.size = sizeof(compute_memory);
     result = sceVideodec2QueryComputeMemoryInfo(&compute_memory);
     compute_size = align_16k((size_t)compute_memory.cpu_gpu_size);
@@ -4116,17 +4333,13 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
              (uint32_t)physical_input.mouse_init_result, (uint32_t)physical_input.mouse_open_result,
              physical_input.mouse_handle_count);
     (void)lan_http_report_text(notification.message);
-    result = start_connection_loading(&loading, frame_memory, frame_size, mode->hdr,
-                                      mode->visible_width, mode->visible_height, stream_fps,
-                                      controller_ready ? &controller : NULL);
-    snprintf(notification.message, sizeof(notification.message),
-             "Black frame before the stream: present=%08x thread=%08x hdr=%u", (uint32_t)result,
-             (uint32_t)loading.create_result, mode->hdr ? 1u : 0u);
-    (void)lan_http_report_text(notification.message);
+    // The decoder is ready; next Sunshine starts the app.
+    connecting_screen_stage(0.45f, 0.70f);
+    result = start_connection_loading(&loading, controller_ready ? &controller : NULL);
     if (result != 0)
         goto done;
     renderer.client_refresh_x100 =
-        moonlight::client_refresh_x100(stream_fps, loading.output_refresh_x100);
+        moonlight::client_refresh_x100(stream_fps, connecting_screen.output_refresh_x100);
     stream_config.clientRefreshRateX100 = (int)renderer.client_refresh_x100;
     identity_initialized = 1;
     result = prepare_native_session(&client_identity, &gs_server, &stream_config, mode, launch_mask,
@@ -4134,6 +4347,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     if (result != GS_OK)
         goto done;
     session_started = 1;
+    connecting_screen_stage(0.70f, 0.88f);
     if (std::atomic_load_explicit(&loading.cancel_requested, std::memory_order_relaxed))
     {
         if (std::atomic_load_explicit(&loading.timed_out, std::memory_order_relaxed))
@@ -4192,6 +4406,8 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     }
     connection_active = 1;
     stream_started = 1;
+    // Connected: what is left is the first picture.
+    connecting_screen_stage(0.88f, 0.97f);
     first_frame_wait_start_us = monotonic_us();
     if (options && options->synthetic_motion)
         synthetic_motion_next_us = monotonic_us();
@@ -4387,6 +4603,7 @@ done:
         LiStopConnection();
     }
     stop_connection_loading();
+    connecting_screen_stop();
     http_clear_interrupt();
     snprintf(
         notification.message, sizeof(notification.message),
@@ -4530,6 +4747,7 @@ done:
     renderer_sync_destroy(&renderer);
     if (source_idle_result == 0 && delete_result == 0)
     {
+        connecting_screen_release();
         release_direct(frame_memory, frame_start, frame_pool_size);
         release_direct(input_memory, input_start, input_pool_size);
         release_decoder_resources(&resources);

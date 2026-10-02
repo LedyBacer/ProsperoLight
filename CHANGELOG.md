@@ -1,5 +1,31 @@
 # Changelog
 
+## 01.000.082
+
+### Development build: one connecting screen, and no black start
+
+Not released. Everything from 01.000.081 below is included.
+
+- **The connecting screen stays until the stream is there.** It used to stop
+  at a fixed point when the launcher handed the display to the stream. Now the
+  stream keeps the same screen on the television and moves the bar on with
+  each step: display ready, decoder ready, Sunshine has started the app,
+  connected. When the first picture arrives the bar runs to its end, the
+  screen fades out, and the stream appears. Touchpad + L1 still cancels.
+- **No black screen when the app opens.** The console's own splash picture
+  now stays until the launcher has drawn its first frame; before, it was
+  taken away about four seconds too early.
+- **Faster second launch.** What the launcher's graphics compile is kept in
+  `/data/prosperolight/cache`, so later launches skip that work.
+- The log has a time for each step of opening the launcher.
+
+### What was tested
+
+On the PC only: the picture handed to the stream, the bar and the fade are
+drawn and checked by the launcher render check (three `stream-*.png`
+pictures) and by unit tests. Not yet seen on a console: the hand-over itself,
+the splash picture staying up, and the shader cache.
+
 ## 01.000.081
 
 ### Development build: files under `/data/prosperolight`, and an About page

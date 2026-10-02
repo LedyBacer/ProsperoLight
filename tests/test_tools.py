@@ -167,15 +167,16 @@ class ToolTests(unittest.TestCase):
         self.assertIn("options.stream_fps = selection.stream_fps;", launcher)
         self.assertIn("stream_config.fps = (int)stream_fps;", stream)
         self.assertIn(
-            "moonlight::client_refresh_x100(stream_fps, loading.output_refresh_x100)", stream
+            "moonlight::client_refresh_x100(stream_fps, connecting_screen.output_refresh_x100)",
+            stream,
         )
         self.assertIn("stream_config.clientRefreshRateX100 = (int)renderer.client_refresh_x100;", stream)
         negotiation = stream.index("stream_config.clientRefreshRateX100 =")
-        self.assertLess(stream.index("start_connection_loading(&loading, frame_memory"), negotiation)
+        self.assertLess(stream.index("result = connecting_screen_begin("), negotiation)
         self.assertLess(negotiation, stream.index("result = prepare_native_session(&client_identity"))
         self.assertLess(negotiation, stream.index("connection_result = LiStartConnection("))
-        loading = stream[stream.index("static int start_connection_loading("):]
-        self.assertLess(loading.index("native_agc_output_status("), loading.index("pthread_create("))
+        begin = stream[stream.index("static int connecting_screen_begin("):]
+        self.assertLess(begin.index("native_agc_output_status("), begin.index("pthread_create("))
         self.assertIn("redraw_rate != (int)state->stream_fps", stream)
 
     def test_selectable_surround_audio_reaches_sunshine_and_ps5_audioout(self):
@@ -343,9 +344,7 @@ class ToolTests(unittest.TestCase):
 
     def test_stream_opens_pad_after_decoder_loading_worker_stops(self):
         source = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
-        early_loading = source.index(
-            "start_connection_loading(&loading, NULL, 0, mode->hdr, mode->visible_width,"
-        )
+        early_loading = source.index("result = start_connection_loading(&loading, NULL);")
         early_loading_stop = source.index("stop_connection_loading();", early_loading)
         pad_init = source.index("controller_result = ps5_controller_init(&controller)")
         self.assertLess(early_loading, early_loading_stop)
@@ -601,23 +600,70 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(source.count("kNativeAgcBilinearSamplerWord"), 2)
         self.assertNotIn("descriptor[18] = descriptor[22] = 0x08000000", source)
 
-    def test_stream_shows_no_connecting_animation(self):
+    def test_connecting_screen_stays_until_the_first_picture(self):
         stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
         presenter = (ROOT / "src/native_agc_present.cpp").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        run = stream[stream.index("int moonlight_stream_run(") :]
 
-        # The launcher's connecting screen is the only one. The stream opens
-        # the output with one black frame and draws nothing else until video.
-        self.assertNotIn("animation", stream)
-        self.assertEqual(stream.count("native_agc_present_blank("), 1)
-        self.assertNotIn("native_agc_present_loading", stream + presenter)
-        self.assertNotIn("loading-", presenter)
-        self.assertFalse((ROOT / "assets/private/loading-connecting-alpha.bin").exists())
-        # Cancelling and the set-up timeout still work without it.
+        # The launcher takes a picture of its connecting screen, without the
+        # bar's fill, and the stream is given it.
+        self.assertIn("CaptureConnecting(renderer, view, frame, selection);", platform)
+        self.assertIn("if (!plate_ && load_progress_ > 0.0f)", view)
+        self.assertIn("options.connecting = &picture;", main)
+        # The stream shows it before anything slow, and moves the bar on at
+        # each step of the connection.
+        begin = run.index("result = connecting_screen_begin(")
+        self.assertLess(begin, run.index("sceSysmoduleLoadModule(207)"))
+        steps = [run.index(f"connecting_screen_stage({step}") for step in
+                 ("connecting_screen.progress, 0.45f", "0.45f, 0.70f", "0.70f, 0.88f", "0.88f, 0.97f")]
+        self.assertEqual(steps, sorted(steps))
+        self.assertLess(steps[2], run.index("connection_result = LiStartConnection("))
+        self.assertLess(run.index("connection_result = LiStartConnection("), steps[3])
+        # It leaves when the first picture is about to be shown, on the thread
+        # that shows it, and never later than the stream's own teardown.
+        present = stream[stream.index("static void *video_present_thread(") :]
+        self.assertLess(present.index("connecting_screen_finish();"),
+                        present.index("submit_presentation(state, current)"))
+        done = run[run.index("\ndone:") :]
+        self.assertLess(done.index("connecting_screen_stop();"),
+                        done.index("native_agc_present_shutdown();"))
+        self.assertLess(done.index("native_agc_present_shutdown();"),
+                        done.index("connecting_screen_release();"))
+        # The picture is drawn edge to edge, whatever the picture-size setting.
+        still = presenter[presenter.index("int native_agc_present_still(") :]
+        still = still[: still.index("void native_agc_flush_source(")]
+        self.assertIn("std::atomic_exchange_explicit(&tv_safe_area, 0", still)
+        self.assertIn("std::atomic_store_explicit(&tv_safe_area, safe_area", still)
+        # Cancelling and the set-up timeout are watched on their own thread.
         worker = stream[stream.index("static void *connection_loading_thread(") :]
         worker = worker[: worker.index("static int start_connection_loading(")]
         self.assertIn("CONNECTION_SETUP_TIMEOUT_US", worker)
         self.assertIn("LiInterruptConnection();", worker)
         self.assertNotIn("native_agc_present", worker)
+        self.assertFalse((ROOT / "assets/private/loading-connecting-alpha.bin").exists())
+
+    def test_splash_stays_until_the_launcher_has_drawn(self):
+        build = (ROOT / "tools/build.sh").read_text(encoding="utf-8")
+        shims = (ROOT / "src/runtime/runtime_shims.c").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        storage = (ROOT / "src/app_storage.cpp").read_text(encoding="utf-8")
+        fetch = (ROOT / "tools/fetch-opengl-sdk.sh").read_text(encoding="utf-8")
+
+        # Every request to hide the splash picture goes through the app, which
+        # lets it through once the launcher's first frame is on screen.
+        self.assertIn('wrap_options+=("--wrap=sceSystemServiceHideSplashScreen")', build)
+        self.assertIn("int __wrap_sceSystemServiceHideSplashScreen(void)", shims)
+        first = platform[platform.index("if (++frames == 1)") :]
+        self.assertLess(first.index("prosperolight_release_splash();"),
+                        first.index("sys::hide_splash_screen();"))
+        self.assertLess(platform.index("display.swap()"), platform.index("if (++frames == 1)"))
+        # Compiled shaders are kept between launches, per OpenGL runtime version.
+        self.assertIn('setenv("PS5_SHADER_CACHE_DIR", shaders, 1)', storage)
+        version = re.search(r"^version=(\S+)$", fetch, re.M).group(1)
+        self.assertIn(f'kShaderCache[] = "opengl-{version}"', storage)
 
     def test_release_metadata_preserves_hdr_and_high_resolution_hfr_capabilities(self):
         configured = json.loads(
@@ -791,7 +837,7 @@ class ToolTests(unittest.TestCase):
         # The launch request names the controllers present, and the user list
         # is read before the loading worker starts polling the first pad.
         self.assertLess(run.index("launch_mask = ps5_controller_launch_mask(&controller);"),
-                        run.index("result = start_connection_loading(&loading, frame_memory"))
+                        run.index("start_connection_loading(&loading, controller_ready ? &controller"))
         session = " ".join(run[run.index("result = prepare_native_session(") :][:240].split())
         self.assertIn("mode, launch_mask, host, host_port, app_name, app_id);", session)
         # No packet may claim a fixed set of controllers.

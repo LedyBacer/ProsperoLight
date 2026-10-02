@@ -65,6 +65,13 @@ int native_agc_present_main10(const void *source, size_t source_bytes, uint32_t 
 int native_agc_present_blank(void *surface, size_t surface_bytes, int hdr,
                              uint32_t output_source_width, uint32_t output_source_height,
                              uint32_t requested_fps);
+// The connecting screen: a 1920 x 1088 picture, drawn edge to edge whatever
+// the picture-size setting is. It returns once the television shows it.
+int native_agc_present_still(const void *surface, size_t surface_bytes, int hdr,
+                             uint32_t output_source_width, uint32_t output_source_height,
+                             uint32_t requested_fps);
+// Makes bytes the CPU wrote into a picture visible to the GPU.
+void native_agc_flush_source(const void *data, size_t bytes);
 int native_agc_wait_source_idle(const void *source);
 int native_agc_finish_frame(void);
 // Query only on the presentation owner thread, or after the stream worker joins.

@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <sys/stat.h>
@@ -27,6 +28,8 @@ constexpr char kInstallDir[] = "/data/homebrew/PPSA99002";
 // The title's sandbox, seen from the console's own root.
 constexpr char kSandboxApp[] = "/mnt/sandbox/PPSA99002_000/app0";
 constexpr char kSandboxData[] = "/mnt/sandbox/PPSA99002_000/download0";
+// Compiled shaders belong to one version of the OpenGL runtime (tools/fetch-opengl-sdk.sh).
+constexpr char kShaderCache[] = "opengl-1.0.0";
 constexpr char kLogName[] = "prosperolight-launcher.log";
 constexpr char kPreviousLogName[] = "prosperolight-launcher.prev.log";
 
@@ -135,7 +138,7 @@ bool make_data_folders()
 {
     mkdir(kDataDir, 0777);
     bool ok = is_directory(kDataDir);
-    for (const char *folder : {"config", "pairing", "logs"})
+    for (const char *folder : {"config", "pairing", "logs", "cache"})
     {
         char path[160];
         std::snprintf(path, sizeof(path), "%s/%s", kDataDir, folder);
@@ -181,17 +184,28 @@ void storage::Initialize()
         std::snprintf(paths.logs, sizeof(paths.logs), "%s%s", base, data_ready ? "/logs" : "");
         std::snprintf(paths.performance, sizeof(paths.performance), "%s/%s", base,
                       data_ready ? "logs" : "moonlight");
+        std::snprintf(paths.cache, sizeof(paths.cache), "%s/cache", base);
     }
     open_log(paths.logs);
+
+    // The launcher's graphics keep what they compiled: the first launch compiles
+    // its shaders, later ones read them back.
+    char shaders[176];
+    mkdir(paths.cache, 0777);
+    std::snprintf(shaders, sizeof(shaders), "%s/%s", paths.cache, kShaderCache);
+    mkdir(shaders, 0777);
+    const bool cache_ready =
+        is_directory(shaders) && setenv("PS5_SHADER_CACHE_DIR", shaders, 1) == 0;
 
     char line[400];
     std::snprintf(line, sizeof(line),
                   "[PL] storage: title=%s status=%d app=%s data=%s uid=%d/%d gid=%d/%d "
-                  "group_matched=%d\n",
+                  "group_matched=%d shader_cache=%d\n",
                   kTitleId, paths.status, paths.app,
                   granted ? (data_ready ? kDataDir : kSandboxData) : "/download0",
                   static_cast<int>(getuid()), static_cast<int>(geteuid()),
-                  static_cast<int>(getgid()), static_cast<int>(getegid()), group_matched ? 1 : 0);
+                  static_cast<int>(getgid()), static_cast<int>(getegid()), group_matched ? 1 : 0,
+                  cache_ready ? 1 : 0);
     say(line);
     if (!data_ready)
         return;

@@ -147,11 +147,14 @@ Nothing is installed globally by these optional bootstrappers.
 
 ## Launching a stream stays black
 
-After the launcher's connecting screen the picture is black until the first
-frame of the stream arrives: the television changes mode and Sunshine starts
-the app. A few seconds are normal. After twenty seconds without a connection
-the app returns to the launcher with a message, and Touchpad + L1 returns
-sooner.
+The connecting screen stays on the television, its bar moving, until the first
+frame of the stream arrives; then the bar runs to its end and the screen fades
+into the stream. The picture goes black for a moment when the launcher hands
+the display to the stream, and for longer if the television has to change mode
+(120 Hz or HDR). After twenty seconds without a connection the app returns to
+the launcher with a message, and Touchpad + L1 returns sooner. If the screen is
+black for the whole connection, the launcher could not take the picture of its
+connecting screen: the log says `connecting picture not available`.
 
 Normal and release builds keep the optional LAN telemetry sink disabled. Older
 development builds tried to open TCP port `8767` on the selected Sunshine host

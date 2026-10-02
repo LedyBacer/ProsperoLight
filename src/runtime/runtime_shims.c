@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Process-level pieces the statically linked OpenGL runtime expects, adapted
- * from ps5-opengl's native-app/runtime_shims.c: what happens if main returns,
+ * from ps5-opengl's native-app/runtime_shims.c: when the splash picture goes,
+ * what happens if main returns,
  * and a few libc entry points the application libc does not provide. Standard
  * output becomes the log in src/app_storage.cpp.
  */
@@ -15,6 +16,23 @@
 #include <stdlib.h>
 
 extern int sceKernelUsleep(uint32_t microseconds);
+
+/* The console's splash picture stays up until the launcher has drawn its first
+ * frame. The OpenGL runtime asks to hide it as soon as the display opens, which
+ * would leave a black screen while fonts load and shaders compile; the build
+ * routes every such call here (--wrap), and the launcher says when. */
+extern int __real_sceSystemServiceHideSplashScreen(void);
+static int prosperolight_splash_released;
+
+void prosperolight_release_splash(void)
+{
+    prosperolight_splash_released = 1;
+}
+
+int __wrap_sceSystemServiceHideSplashScreen(void)
+{
+    return prosperolight_splash_released ? __real_sceSystemServiceHideSplashScreen() : 0;
+}
 
 /* Returning from main or calling exit() crashes a native title; stay alive
  * until the console closes it. */

@@ -17,7 +17,8 @@ kit="$root/third_party/ps5-homebrew-ui"
 mkdir -p "$build/obj"
 
 sources=("$root"/tools/launcher-host/*.cpp "$root/src/launcher/launcher_model.cpp"
-    "$root/src/launcher/launcher_view.cpp" "$root/src/moonlight_config.cpp")
+    "$root/src/launcher/launcher_view.cpp" "$root/src/moonlight_config.cpp"
+    "$root/src/connecting_plate.cpp")
 while IFS= read -r -d '' source; do
     sources+=("$source")
 done < <(find "$kit/gfx" "$kit/ui" "$kit/core" "$kit/audio" -type f -name '*.cpp' -print0 | sort -z)

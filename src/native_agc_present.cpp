@@ -8,6 +8,7 @@
 
 #include "native_agc_present.hpp"
 #include "app_storage.hpp"
+#include "connecting_plate.hpp"
 #include "lan_http_report.hpp"
 #include "moonlight_stream_keyboard.hpp"
 #include "native_agc_output.hpp"
@@ -1657,6 +1658,29 @@ int native_agc_present_blank(void *surface, size_t surface_bytes, int hdr,
     return present_frame(surface, surface_bytes, BLANK_PITCH, BLANK_SURFACE_HEIGHT, BLANK_PITCH,
                          BLANK_VISIBLE_HEIGHT, requested_fps, NULL, hdr, output_source_width,
                          output_source_height, false);
+}
+
+int native_agc_present_still(const void *surface, size_t surface_bytes, int hdr,
+                             uint32_t output_source_width, uint32_t output_source_height,
+                             uint32_t requested_fps)
+{
+    if (!surface || surface_bytes < connecting::surface_bytes(hdr != 0))
+        return -1;
+    // The launcher drew this picture for the whole screen: no TV-safe margin.
+    const int safe_area =
+        std::atomic_exchange_explicit(&tv_safe_area, 0, std::memory_order_relaxed);
+    const int result =
+        present_frame(surface, surface_bytes, connecting::kWidth, connecting::kSurfaceHeight,
+                      connecting::kWidth, connecting::kHeight, requested_fps, NULL, hdr,
+                      output_source_width, output_source_height, false);
+    std::atomic_store_explicit(&tv_safe_area, safe_area, std::memory_order_relaxed);
+    return result;
+}
+
+void native_agc_flush_source(const void *data, size_t bytes)
+{
+    if (data && bytes)
+        flush_gpu_data(data, bytes);
 }
 
 void native_agc_note_initialized(void)
