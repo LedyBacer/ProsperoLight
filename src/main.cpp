@@ -188,8 +188,8 @@ void RunVideoOutputSelfTest()
     {
         void *frame_surface = static_cast<std::uint8_t *>(surface) + index * surface_bytes;
         present_result =
-            native_agc_present_loading(frame_surface, visible_surface_bytes, index, 0, pitch,
-                                       visible_height, PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS);
+            native_agc_present_blank(frame_surface, visible_surface_bytes, 0, pitch, visible_height,
+                                     PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS);
         if (present_result != 0)
             break;
     }

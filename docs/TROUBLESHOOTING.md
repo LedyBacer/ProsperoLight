@@ -145,12 +145,18 @@ Nothing is installed globally by these optional bootstrappers.
   `user_scan_errors`. A peak of 1 with no errors means the PS5 never reported a
   second signed-in user with a connected controller.
 
-## Launching a stream stays black before the Connecting screen
+## Launching a stream stays black
+
+After the launcher's connecting screen the picture is black until the first
+frame of the stream arrives: the television changes mode and Sunshine starts
+the app. A few seconds are normal. After twenty seconds without a connection
+the app returns to the launcher with a message, and Touchpad + L1 returns
+sooner.
 
 Normal and release builds keep the optional LAN telemetry sink disabled. Older
 development builds tried to open TCP port `8767` on the selected Sunshine host
 before decoder setup; a silently filtered connection could block before the
-loading renderer and `Touchpad + L1` monitor were available.
+connection watcher and `Touchpad + L1` monitor were available.
 
 Only diagnostics workstations running the telemetry receiver should build with
 `LAN_TELEMETRY=1`. Never enable it in a distributed package.

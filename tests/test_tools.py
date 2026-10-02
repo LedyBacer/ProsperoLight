@@ -601,13 +601,23 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(source.count("kNativeAgcBilinearSamplerWord"), 2)
         self.assertNotIn("descriptor[18] = descriptor[22] = 0x08000000", source)
 
-    def test_loading_labels_match_the_embedded_dimensions(self):
-        expected = {
-            "loading-prosperolight-alpha.bin": (232, 35),
-            "loading-connecting-alpha.bin": (287, 52),
-        }
-        for name, (width, height) in expected.items():
-            self.assertEqual((ROOT / "assets/private" / name).stat().st_size, width * height)
+    def test_stream_shows_no_connecting_animation(self):
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+        presenter = (ROOT / "src/native_agc_present.cpp").read_text(encoding="utf-8")
+
+        # The launcher's connecting screen is the only one. The stream opens
+        # the output with one black frame and draws nothing else until video.
+        self.assertNotIn("animation", stream)
+        self.assertEqual(stream.count("native_agc_present_blank("), 1)
+        self.assertNotIn("native_agc_present_loading", stream + presenter)
+        self.assertNotIn("loading-", presenter)
+        self.assertFalse((ROOT / "assets/private/loading-connecting-alpha.bin").exists())
+        # Cancelling and the set-up timeout still work without it.
+        worker = stream[stream.index("static void *connection_loading_thread(") :]
+        worker = worker[: worker.index("static int start_connection_loading(")]
+        self.assertIn("CONNECTION_SETUP_TIMEOUT_US", worker)
+        self.assertIn("LiInterruptConnection();", worker)
+        self.assertNotIn("native_agc_present", worker)
 
     def test_release_metadata_preserves_hdr_and_high_resolution_hfr_capabilities(self):
         configured = json.loads(

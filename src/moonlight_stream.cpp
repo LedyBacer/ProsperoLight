@@ -1108,8 +1108,6 @@ typedef struct connection_loading_state
     uint32_t output_source_height;
     uint32_t requested_fps;
     uint32_t output_refresh_x100;
-    std::atomic<int> animation_enabled;
-    std::atomic<int> animation_presenting;
     std::atomic<int> active;
     std::atomic<int> cancel_requested;
     std::atomic<int> timed_out;
@@ -1124,53 +1122,34 @@ typedef struct connection_loading_state
 static std::atomic<connection_loading_state_t *> active_connection_loading;
 static uint64_t monotonic_us(void);
 
+// Watches the controller and the clock while the connection is set up. The
+// screen shows one black frame meanwhile; nothing is drawn from here.
 static void *connection_loading_thread(void *context)
 {
     auto *state = static_cast<connection_loading_state_t *>(context);
-    uint32_t phase = 1;
 
     while (std::atomic_load_explicit(&state->active, std::memory_order_relaxed))
     {
-        if (std::atomic_load_explicit(&state->animation_enabled, std::memory_order_acquire))
+        if (ps5_controller_disconnect_only(state->controller))
+            state->controller->requested_stop = 1;
+        if (state->controller && state->controller->requested_stop)
+            std::atomic_store_explicit(&state->cancel_requested, 1, std::memory_order_relaxed);
+        if (monotonic_us() - state->started_us >= CONNECTION_SETUP_TIMEOUT_US)
         {
-            std::atomic_store_explicit(&state->animation_presenting, 1, std::memory_order_release);
-            if (std::atomic_load_explicit(&state->animation_enabled, std::memory_order_acquire))
-                state->present_result = native_agc_present_loading(
-                    state->surface, state->surface_bytes, phase++, state->hdr,
-                    state->output_source_width, state->output_source_height, state->requested_fps);
-            if (state->present_result != 0)
-            {
-                std::atomic_store_explicit(&state->animation_enabled, 0, std::memory_order_release);
-                (void)native_agc_present_shutdown();
-            }
-            std::atomic_store_explicit(&state->animation_presenting, 0, std::memory_order_release);
+            std::atomic_store_explicit(&state->timed_out, 1, std::memory_order_relaxed);
+            std::atomic_store_explicit(&state->cancel_requested, 1, std::memory_order_relaxed);
         }
-        for (unsigned slice = 0; slice < 25; ++slice)
+        if (std::atomic_load_explicit(&state->cancel_requested, std::memory_order_relaxed))
         {
-            if (!std::atomic_load_explicit(&state->active, std::memory_order_relaxed))
+            http_interrupt();
+            if (std::atomic_load_explicit(&state->connection_pending, std::memory_order_acquire))
+            {
+                LiInterruptConnection();
+                std::atomic_store_explicit(&state->active, 0, std::memory_order_relaxed);
                 break;
-            if (ps5_controller_disconnect_only(state->controller))
-                state->controller->requested_stop = 1;
-            if (state->controller && state->controller->requested_stop)
-                std::atomic_store_explicit(&state->cancel_requested, 1, std::memory_order_relaxed);
-            if (monotonic_us() - state->started_us >= CONNECTION_SETUP_TIMEOUT_US)
-            {
-                std::atomic_store_explicit(&state->timed_out, 1, std::memory_order_relaxed);
-                std::atomic_store_explicit(&state->cancel_requested, 1, std::memory_order_relaxed);
             }
-            if (std::atomic_load_explicit(&state->cancel_requested, std::memory_order_relaxed))
-            {
-                http_interrupt();
-                if (std::atomic_load_explicit(&state->connection_pending,
-                                              std::memory_order_acquire))
-                {
-                    LiInterruptConnection();
-                    std::atomic_store_explicit(&state->active, 0, std::memory_order_relaxed);
-                    break;
-                }
-            }
-            sceKernelUsleep(10000);
         }
+        sceKernelUsleep(10000);
     }
     return NULL;
 }
@@ -1190,21 +1169,18 @@ static int start_connection_loading(connection_loading_state_t *state, void *sur
     state->started_us = monotonic_us();
     state->present_result = 0;
     state->output_refresh_x100 = 0;
-    std::atomic_store_explicit(&state->animation_enabled, 0, std::memory_order_relaxed);
-    std::atomic_store_explicit(&state->animation_presenting, 0, std::memory_order_relaxed);
     if (surface && surface_bytes)
     {
-        state->present_result =
-            native_agc_present_loading(surface, surface_bytes, 0, hdr, output_source_width,
-                                       output_source_height, requested_fps);
-        std::atomic_store_explicit(&state->animation_enabled, state->present_result == 0,
-                                   std::memory_order_relaxed);
+        // The launcher's connecting screen has just closed. One black frame
+        // opens the output in the stream's mode; it stays until the first
+        // picture arrives.
+        state->present_result = native_agc_present_blank(
+            surface, surface_bytes, hdr, output_source_width, output_source_height, requested_fps);
         if (state->present_result != 0)
             (void)native_agc_present_shutdown();
         else
         {
-            // Snapshot on the presentation owner before the animation worker
-            // starts. Negotiation must not race that worker's output updates.
+            // The refresh rate the console really got, for the negotiation.
             uint32_t width = 0, height = 0;
             native_agc_output_status(&width, &height, &state->output_refresh_x100);
         }
@@ -1221,18 +1197,6 @@ static int start_connection_loading(connection_loading_state_t *state, void *sur
     else
         std::atomic_store_explicit(&state->active, 0, std::memory_order_relaxed);
     return state->create_result;
-}
-
-static void stop_connection_animation(void)
-{
-    connection_loading_state_t *state =
-        std::atomic_load_explicit(&active_connection_loading, std::memory_order_acquire);
-
-    if (!state)
-        return;
-    std::atomic_store_explicit(&state->animation_enabled, 0, std::memory_order_release);
-    while (std::atomic_load_explicit(&state->animation_presenting, std::memory_order_acquire))
-        sceKernelUsleep(1000);
 }
 
 static void stop_connection_loading(void)
@@ -2256,7 +2220,6 @@ static void moonlight_renderer_start(void)
 #if PROSPEROLIGHT_PERFORMANCE_DETAIL
     frame_trace.count = frame_trace.omitted = 0;
 #endif
-    stop_connection_animation();
     native_agc_reset_performance();
     if (!state)
         return;
@@ -4157,7 +4120,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
                                       mode->visible_width, mode->visible_height, stream_fps,
                                       controller_ready ? &controller : NULL);
     snprintf(notification.message, sizeof(notification.message),
-             "Native connecting animation: present=%08x thread=%08x hdr=%u", (uint32_t)result,
+             "Black frame before the stream: present=%08x thread=%08x hdr=%u", (uint32_t)result,
              (uint32_t)loading.create_result, mode->hdr ? 1u : 0u);
     (void)lan_http_report_text(notification.message);
     if (result != 0)

@@ -79,9 +79,9 @@ static_assert(PROSPEROLIGHT_FLIP_POLL_US >= 100 && PROSPEROLIGHT_FLIP_POLL_US <=
 #define VIDEO_OUT_REFRESH_RATE_89_91 UINT64_C(35)
 #define VIDEO_OUT_REQUEST_DEFAULT 1u
 #define VIDEO_OUT_REQUEST_120_HZ 15u
-#define LOADING_PITCH 1920u
-#define LOADING_SURFACE_HEIGHT 1088u
-#define LOADING_VISIBLE_HEIGHT 1080u
+#define BLANK_PITCH 1920u
+#define BLANK_SURFACE_HEIGHT 1088u
+#define BLANK_VISIBLE_HEIGHT 1080u
 #define VIDEO_OUT_FLIP_MODE_VSYNC 1u
 #define VIDEO_OUT_FLIP_MODE_HSYNC 2u
 // Flip events only wake the waiter early; flip status stays authoritative.
@@ -303,8 +303,6 @@ EMBED_ASSET(native_agc_pixel_header, "pixel.header.bin");
 EMBED_ASSET(native_agc_pixel_code, "pixel.text.linear-buffer.bin");
 EMBED_ASSET(native_agc_pixel_hdr_code, "pixel.text.p010-passthrough.bin");
 EMBED_ASSET(native_agc_resources, "netflix-video-resources.bin");
-EMBED_ASSET(native_loading_prosperolight, "loading-prosperolight-alpha.bin");
-EMBED_ASSET(native_loading_connecting, "loading-connecting-alpha.bin");
 
 static const uint8_t hud_font[96 * 8] = {
 #include "native_hud_font.inc"
@@ -1619,81 +1617,18 @@ int native_agc_present_main10(const void *source, size_t source_bytes, uint32_t 
                          PROSPEROLIGHT_PRESENT_OVERLAP != 0);
 }
 
-static void loading_set_luma(void *surface, uint32_t x, uint32_t y, uint16_t value, int hdr)
+// One black frame. It opens the output in the stream's mode before the first
+// picture arrives: the television settles meanwhile, and the refresh rate the
+// console really got is known before the stream is negotiated.
+int native_agc_present_blank(void *surface, size_t surface_bytes, int hdr,
+                             uint32_t output_source_width, uint32_t output_source_height,
+                             uint32_t requested_fps)
 {
-    size_t index;
-
-    if (x >= LOADING_PITCH || y >= LOADING_VISIBLE_HEIGHT)
-        return;
-    index = (size_t)y * LOADING_PITCH + x;
-    if (hdr)
-        ((uint16_t *)surface)[index] = value;
-    else
-        ((uint8_t *)surface)[index] = (uint8_t)value;
-}
-
-static void loading_draw_disc(void *surface, int center_x, int center_y, int radius, uint16_t value,
-                              int hdr)
-{
-    for (int y = -radius; y <= radius; ++y)
-        for (int x = -radius; x <= radius; ++x)
-            if (x * x + y * y <= radius * radius)
-                loading_set_luma(surface, (uint32_t)(center_x + x), (uint32_t)(center_y + y), value,
-                                 hdr);
-}
-
-static void loading_blend_luma(void *surface, uint32_t x, uint32_t y, uint16_t value, uint8_t alpha,
-                               int hdr)
-{
-    size_t index;
-
-    if (!alpha || x >= LOADING_PITCH || y >= LOADING_VISIBLE_HEIGHT)
-        return;
-    index = (size_t)y * LOADING_PITCH + x;
-    if (hdr)
-    {
-        auto *samples = static_cast<uint16_t *>(surface);
-        const int current = samples[index];
-        samples[index] = (uint16_t)(current + ((int)value - current) * alpha / 255);
-    }
-    else
-    {
-        auto *samples = static_cast<uint8_t *>(surface);
-        const int current = samples[index];
-        samples[index] = (uint8_t)(current + ((int)value - current) * alpha / 255);
-    }
-}
-
-static void loading_draw_label(void *surface, const uint8_t *mask, size_t mask_bytes,
-                               uint32_t width, uint32_t height, uint32_t center_x, uint32_t y,
-                               uint16_t value, int hdr)
-{
-    const uint32_t x = center_x - width / 2u;
-
-    if (mask_bytes != (size_t)width * height)
-        return;
-    for (uint32_t row = 0; row < height; ++row)
-        for (uint32_t column = 0; column < width; ++column)
-            loading_blend_luma(surface, x + column, y + row, value,
-                               mask[(size_t)row * width + column], hdr);
-}
-
-int native_agc_present_loading(void *surface, size_t surface_bytes, uint32_t phase, int hdr,
-                               uint32_t output_source_width, uint32_t output_source_height,
-                               uint32_t requested_fps)
-{
-    static const int dot_offsets[8][2] = {
-        {0, -58}, {41, -41}, {58, 0}, {41, 41}, {0, 58}, {-41, 41}, {-58, 0}, {-41, -41},
-    };
-    const size_t sample_count = (size_t)LOADING_PITCH * LOADING_SURFACE_HEIGHT;
+    const size_t sample_count = (size_t)BLANK_PITCH * BLANK_SURFACE_HEIGHT;
     const size_t required_bytes = hdr ? sample_count * 3u : sample_count * 3u / 2u;
-    const uint16_t background = hdr ? 80u : 20u;
+    // Video black and neutral chroma, at ten and at eight bits.
+    const uint16_t black = hdr ? 64u : 16u;
     const uint16_t neutral = hdr ? 512u : 128u;
-    const uint16_t dim = hdr ? 180u : 64u;
-    const uint16_t trail = hdr ? 440u : 142u;
-    const uint16_t bright = hdr ? 760u : 235u;
-    const uint16_t text = hdr ? 700u : 220u;
-    const uint32_t active = phase & 7u;
 
     if (!surface || surface_bytes < required_bytes)
         return -1;
@@ -1708,46 +1643,20 @@ int native_agc_present_loading(void *surface, size_t surface_bytes, uint32_t pha
     {
         auto *samples = static_cast<uint16_t *>(surface);
         for (size_t index = 0; index < sample_count; ++index)
-            samples[index] = background;
+            samples[index] = black;
         for (size_t index = sample_count; index < sample_count + sample_count / 2u; ++index)
             samples[index] = neutral;
     }
     else
     {
-        memset(surface, (int)background, sample_count);
+        memset(surface, (int)black, sample_count);
         memset((uint8_t *)surface + sample_count, (int)neutral, sample_count / 2u);
     }
-
-    for (uint32_t index = 0; index < 8u; ++index)
-    {
-        uint16_t value = dim;
-        int radius = 8;
-
-        if (index == active)
-        {
-            value = bright;
-            radius = 13;
-        }
-        else if (index == ((active + 7u) & 7u))
-        {
-            value = trail;
-            radius = 10;
-        }
-        loading_draw_disc(surface, 960 + dot_offsets[index][0], 432 + dot_offsets[index][1], radius,
-                          value, hdr);
-    }
-    loading_draw_label(
-        surface, native_loading_prosperolight_start,
-        (size_t)(native_loading_prosperolight_end - native_loading_prosperolight_start), 232u, 35u,
-        960u, 536u, text, hdr);
-    loading_draw_label(surface, native_loading_connecting_start,
-                       (size_t)(native_loading_connecting_end - native_loading_connecting_start),
-                       287u, 52u, 960u, 586u, text, hdr);
     flush_gpu_data(surface, required_bytes);
 
-    return present_frame(surface, surface_bytes, LOADING_PITCH, LOADING_SURFACE_HEIGHT,
-                         LOADING_PITCH, LOADING_VISIBLE_HEIGHT, requested_fps, NULL, hdr,
-                         output_source_width, output_source_height, false);
+    return present_frame(surface, surface_bytes, BLANK_PITCH, BLANK_SURFACE_HEIGHT, BLANK_PITCH,
+                         BLANK_VISIBLE_HEIGHT, requested_fps, NULL, hdr, output_source_width,
+                         output_source_height, false);
 }
 
 void native_agc_note_initialized(void)

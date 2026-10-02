@@ -20,6 +20,9 @@ is included.
   of the log says which it is.
 - The app folder has one more file, `sandbox-elevator.elf`: the helper the ELF
   loader runs. It only answers title `PPSA99002`.
+- **One connecting screen.** After the launcher's connecting screen, the old
+  dark screen with the circling dots is gone. The picture stays black for the
+  moment it takes the television to change mode, then the stream appears.
 - **About.** A fourth tab, as in ProsperoEden: credits for Moonlight and
   Sunshine, thanks, who made the PS5 edition, the version, three steps to get
   started, and the folders the settings, the pairing and the logs are in.
