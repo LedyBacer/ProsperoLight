@@ -15,8 +15,6 @@ Not released. Everything from 01.000.081 below is included.
 - **No black screen when the app opens.** The console's own splash picture
   now stays until the launcher has drawn its first frame; before, it was
   taken away about four seconds too early.
-- **Faster second launch.** What the launcher's graphics compile is kept in
-  `/data/prosperolight/cache`, so later launches skip that work.
 - The log has a time for each step of opening the launcher.
 
 ### What was tested
@@ -24,7 +22,7 @@ Not released. Everything from 01.000.081 below is included.
 On the PC only: the picture handed to the stream, the bar and the fade are
 drawn and checked by the launcher render check (three `stream-*.png`
 pictures) and by unit tests. Not yet seen on a console: the hand-over itself,
-the splash picture staying up, and the shader cache.
+and the splash picture staying up.
 
 ## 01.000.081
 

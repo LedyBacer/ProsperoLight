@@ -650,7 +650,6 @@ class ToolTests(unittest.TestCase):
         shims = (ROOT / "src/runtime/runtime_shims.c").read_text(encoding="utf-8")
         platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
         storage = (ROOT / "src/app_storage.cpp").read_text(encoding="utf-8")
-        fetch = (ROOT / "tools/fetch-opengl-sdk.sh").read_text(encoding="utf-8")
 
         # Every request to hide the splash picture goes through the app, which
         # lets it through once the launcher's first frame is on screen.
@@ -660,10 +659,8 @@ class ToolTests(unittest.TestCase):
         self.assertLess(first.index("prosperolight_release_splash();"),
                         first.index("sys::hide_splash_screen();"))
         self.assertLess(platform.index("display.swap()"), platform.index("if (++frames == 1)"))
-        # Compiled shaders are kept between launches, per OpenGL runtime version.
-        self.assertIn('setenv("PS5_SHADER_CACHE_DIR", shaders, 1)', storage)
-        version = re.search(r"^version=(\S+)$", fetch, re.M).group(1)
-        self.assertIn(f'kShaderCache[] = "opengl-{version}"', storage)
+        # The runtime's shader cache stays off: it stopped the launcher on the console.
+        self.assertNotIn("setenv(", storage)
 
     def test_release_metadata_preserves_hdr_and_high_resolution_hfr_capabilities(self):
         configured = json.loads(

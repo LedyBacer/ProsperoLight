@@ -14,7 +14,6 @@
 //   pairing/   cert.pem and key.pem: the identity Sunshine paired with
 //   logs/      prosperolight-launcher.log, the previous launch's log, and the
 //              last stream's performance report
-//   cache/     what the launcher's graphics compiled, so the next launch is faster
 // and the app's own files are read from the folder it was installed in.
 // Without it (no ELF loader on the console, or the request was refused) the
 // sandbox paths stay: /app0 and /download0, as in every earlier version.
@@ -34,8 +33,6 @@ struct Paths
     // The folder the pairing identity is in; the identity code creates it.
     char pairing[128] = "/download0/moonlight";
     char logs[128] = "/download0";
-    // Compiled launcher shaders, kept between launches.
-    char cache[128] = "/download0/cache";
     // The folder a stream leaves its performance report in.
     char performance[128] = "/download0/moonlight";
 };
