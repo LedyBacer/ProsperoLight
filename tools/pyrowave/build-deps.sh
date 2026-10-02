@@ -46,6 +46,21 @@ prepare_pyrowave_build() {
         esac
     done
     radv_link_flags=("${filtered_flags[@]}")
+    # Mesa's generated dispatch tables also reference optional, unimplemented
+    # RADV entry points weakly. Bind only those absent from the entire archive
+    # to absolute zero: the common Vulkan implementation remains the fallback.
+    # Otherwise LLD can retain them as dynamic imports, which the PS5 module
+    # writer correctly refuses because no system module provides RADV symbols.
+    local radv_archive="$PS5_VULKAN_ROOT/.deps/native/radv-release/lib/libvulkan_radeon.ps5.a"
+    local weak_symbols="$root/build/pyrowave/radv-optional-symbols.txt" symbol
+    llvm-nm-18 --format=posix "$radv_archive" | awk '
+        $1 ~ /^radv_/ && ($2 == "w" || $2 == "v") { weak[$1] = 1 }
+        $1 ~ /^radv_/ && $2 != "U" && $2 != "w" && $2 != "v" { defined[$1] = 1 }
+        END { for (name in weak) if (!(name in defined)) print name }
+    ' | LC_ALL=C sort > "$weak_symbols"
+    while IFS= read -r symbol; do
+        radv_link_flags+=("--defsym=$symbol=0")
+    done < "$weak_symbols"
     link_script=("${radv_linker_script[@]}")
     radv_link_flags+=(--wrap=sceVideoOutOpen --wrap=sceVideoOutSubmitFlip)
 }
