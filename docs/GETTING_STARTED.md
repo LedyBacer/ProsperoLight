@@ -70,8 +70,9 @@ The normal folder build needs no managed runtime or external host project.
 Repository-owned tools are compiled from C/C++ source automatically.
 
 The root application is C++20. It uses the libc++ headers already present in
-the fetched public SDK. RmlUi-facing translation units retain exceptions and
-RTTI for ABI compatibility; the project startup/runtime bridge disables both.
+the fetched public SDK. Exceptions and RTTI are disabled in every translation
+unit. The launcher draws with the ps5-opengl SDK, which the build downloads and
+verifies on first use.
 See [Native build tooling](NATIVE_TOOLING.md).
 
 Compressed `.ffpfsc` output uses Python 3.9 or newer with `venv` support. The

@@ -3,15 +3,11 @@
 # Copyright (C) 2026 BlackBearReloaded
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-"""Draw the controller button icons used by the README and the launcher.
+"""Draw the controller button icons the README shows in place of button names.
 
-docs/images/buttons/*.svg are the icons the README shows in place of button
-names. Each sits on its own dark plate, so it reads on a light or a dark page,
-and is 20 pixels tall so it fits in a line of text.
-
-ui/icons/touchpad.tga, l1.tga and r1.tga are launcher icons in the same form
-as the existing ones: 40 x 40, uncompressed, straight alpha, top origin. They
-need Pillow and are drawn from ui/fonts/Inter-SemiBold.ttf.
+docs/images/buttons/*.svg each sit on their own dark plate, so they read on a
+light or a dark page, and are 20 pixels tall so they fit in a line of text.
+The launcher draws its own button glyphs.
 
 usage: generate-button-icons.py [--check]
 
@@ -24,12 +20,11 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SVG_DIRECTORY = ROOT / "docs/images/buttons"
-TGA_DIRECTORY = ROOT / "ui/icons"
 
 PLATE = "#101c36"
 PLATE_EDGE = "#2f4470"
 NEUTRAL = "#F2F7F8"
-# The launcher's palette for the four shapes (ui/icons/README.md).
+# The colours of the four shapes.
 CROSS = "#70E1DC"
 CIRCLE = "#FF8793"
 SQUARE = "#D18BE5"
@@ -110,44 +105,6 @@ def svg_icons():
     }
 
 
-def write_tga_icons():
-    from PIL import Image, ImageDraw, ImageFont
-
-    scale = 8
-    size = 40 * scale
-    colour = tuple(int(NEUTRAL[i:i + 2], 16) for i in (1, 3, 5))
-    font = ImageFont.truetype(str(ROOT / "ui/fonts/Inter-SemiBold.ttf"), 15 * scale)
-
-    def plate(draw):
-        draw.rounded_rectangle(
-            [1.5 * scale, 8.5 * scale, 38.5 * scale, 31.5 * scale],
-            radius=8 * scale, outline=255, width=int(2.5 * scale))
-
-    def touchpad(draw):
-        plate(draw)
-        draw.line([20 * scale, 10 * scale, 20 * scale, 30 * scale], fill=255, width=2 * scale)
-
-    def shoulder_key(label):
-        def draw_key(draw):
-            plate(draw)
-            draw.text((20 * scale, 20 * scale), label, font=font, fill=255, anchor="mm")
-        return draw_key
-
-    for name, paint in (("touchpad", touchpad), ("l1", shoulder_key("L1")), ("r1", shoulder_key("R1"))):
-        # One colour and a coverage mask keep the alpha straight after scaling down.
-        mask = Image.new("L", (size, size), 0)
-        paint(ImageDraw.Draw(mask))
-        mask = mask.resize((40, 40), Image.LANCZOS)
-        # The same bytes as the other launcher icons: an 18-byte header, then
-        # BGRA rows from the top, and no TGA 2.0 footer.
-        header = bytes([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40, 0, 40, 0, 32, 0x28])
-        blue_green_red = bytes(reversed(colour))
-        pixels = b"".join(blue_green_red + bytes([alpha]) for alpha in mask.getdata())
-        path = TGA_DIRECTORY / f"{name}.tga"
-        path.write_bytes(header + pixels)
-        print(f"wrote {path.relative_to(ROOT)}")
-
-
 def main(arguments):
     check = "--check" in arguments
     stale = []
@@ -164,7 +121,6 @@ def main(arguments):
         for path in stale:
             print(f"{path} is out of date; run tools/generate-button-icons.py", file=sys.stderr)
         return 1 if stale else 0
-    write_tga_icons()
     return 0
 
 

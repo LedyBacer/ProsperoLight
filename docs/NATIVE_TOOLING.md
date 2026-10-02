@@ -63,15 +63,16 @@ zlib is the only directly linked host library.
 ## Target C++ profile
 
 Application `.cpp` files compile as C++20 with exceptions and RTTI disabled.
-The public SDK's libc++ headers provide zero-cost vocabulary types and
-`std::unique_ptr`; the build does not link the full libc++, libc++abi, or unwind
-archives. Repository-owned replacement allocation operators use the clean-room
-runtime for small objects and anonymous page mappings for allocations of 64 KiB
-or more. All returned storage is at least 32-byte aligned because optimized
-RmlUi constructors use aligned AVX stores. This keeps expanded RmlUi textures
-out of the bounded libc heap without weakening the platform allocation
-contract. The operators are localized before PS5 conversion, so they do not
-become loader-visible application exports.
+The public SDK's libc++ headers provide the C++ library. The launcher's OpenGL
+runtime is linked statically, together with the SDK's libc++, libc++abi and
+unwind archives (`tools/prepare-opengl.sh` writes the link group). That runtime
+needs a process heap of its own: `src/runtime/app_heap.c` is linked with
+`--wrap` for the malloc family, so every allocation of the executable goes to a
+128 MiB arena that is never unmapped and continues on the libc heap when the
+arena is full. Repository-owned replacement allocation operators use that heap
+for small objects and anonymous page mappings for allocations of 64 KiB or
+more, with at least 32-byte alignment. The operators are localized before PS5
+conversion, so they do not become loader-visible application exports.
 
 Throwing `new` deliberately traps on allocation failure. Nothrow allocation
 returns `nullptr`. Prefer value semantics and allocation-free RAII in steady

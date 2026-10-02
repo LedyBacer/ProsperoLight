@@ -11,7 +11,7 @@ validation, deployment tooling, and test/lint workflow.
 
 Ported application areas:
 
-- RmlUi launcher, presentation assets, and metadata.
+- OpenGL launcher, presentation assets, and metadata.
 - Sunshine discovery, pairing, app browsing, and stream lifecycle control.
 - VideoDec2-to-AGC GPU presentation, Opus AudioOut, and DualSense input.
 - Metrics overlay, mouse emulation, HDR preference, and stream recovery UI.

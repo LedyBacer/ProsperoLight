@@ -76,3 +76,10 @@ SECTIONS {
         *(COMMON)
     } : data
 }
+
+/* OpenGL apps: libunwind in the OpenGL runtime locates unwind tables
+ * through these bounds (as in ps5-opengl's native-app/ps5-pie.ld). */
+PROVIDE(__eh_frame_start = ADDR(.eh_frame));
+PROVIDE(__eh_frame_end = ADDR(.eh_frame) + SIZEOF(.eh_frame));
+PROVIDE(__eh_frame_hdr_start = ADDR(.eh_frame_hdr));
+PROVIDE(__eh_frame_hdr_end = ADDR(.eh_frame_hdr) + SIZEOF(.eh_frame_hdr));

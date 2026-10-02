@@ -1,5 +1,50 @@
 # Changelog
 
+## 01.000.080
+
+### Development build: a new launcher
+
+Not released, and not yet run on a console. Everything from 01.000.071 below
+is included.
+
+- **New look.** The launcher is drawn by the GPU with the widgets of
+  ps5-homebrew-ui, at up to 4K, in ProsperoLight's own Moonlight theme: frosted
+  panels over a night-blue sky. Tabs in the header replace the sidebar.
+- **PCs.** Every saved PC is on screen with its state: ready, needs pairing, or
+  offline. The panel beside the list shows the selected PC's address, port,
+  pairing, app count and running app. **Remove** must be held; **Unpair** asks
+  first. The Refresh button is gone: Triangle searches the network again.
+- **Games.** Box art is shown as posters, seven to a row, and the list scrolls.
+  The selected app's name is the headline and the page takes its colours from
+  the poster. The running app carries a badge.
+- **Settings.** Rows are grouped, left and right change a value, and bitrate is
+  a slider from 10 to 300 Mbps. At 4K a meter shows the bitrate against the
+  decoder's measured limit and a warning appears above it. The stream shortcuts
+  are listed with the buttons' shapes.
+- **Sounds.** Every widget has its sound: moving, choosing, switching, sliders,
+  dialogs, notices, and starting a stream.
+- **Address and port** are typed on a number pad inside the launcher. The PS5
+  keyboard is no longer used.
+- The screen keeps moving while a PC is slow to answer: requests to Sunshine
+  run on their own thread.
+- Notices appear as toasts, and buttons are shown as glyphs, not named.
+- After a stream above 60 Hz or in HDR, the screen stays black for five seconds
+  before the launcher returns, while the television changes mode.
+- SDL2, RmlUi and FreeType are no longer part of the app. The launcher uses the
+  ps5-opengl SDK; the app file grows from 5 MB to 25 MB.
+- PC and app names can use western and central European letters and Cyrillic.
+  Other scripts are not drawn yet.
+
+### What was tested
+
+On the PC only: the launcher's logic and screens run against a pretend Sunshine
+network (first start, three PCs, pairing, port and address entry, removing,
+stopping an app, starting a stream, settings, a PC that does not answer), every
+state is rendered to a picture, and every sound a widget asks for has a
+recording. The console build links and imports nothing that an earlier console
+build did not. The hand-over between the launcher and the stream on one display
+has not run on a console.
+
 ## 01.000.071
 
 ### Development build — multiple controllers and a Sunshine port per PC

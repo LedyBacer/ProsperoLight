@@ -1747,6 +1747,11 @@ int native_agc_present_loading(void *surface, size_t surface_bytes, uint32_t pha
                          output_source_width, output_source_height, false);
 }
 
+void native_agc_note_initialized(void)
+{
+    agc_initialized = 1;
+}
+
 int native_agc_present_shutdown(void)
 {
     const int finish_result = native_agc_finish_frame();

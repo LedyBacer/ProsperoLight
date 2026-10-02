@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def render_label(font_size: int, text: str, output_name: str) -> tuple[int, int]:
-    font_root = ROOT / "ui/fonts/lvgl-bitmap"
+    font_root = ROOT / "third_party/fonts/lvgl-bitmap"
     definition = ET.parse(font_root / f"Montserrat-{font_size}.fnt").getroot()
     common = definition.find("common")
     assert common is not None

@@ -1,0 +1,421 @@
+/*
+ * ps5-native-app-boilerplate - ProsperoLight component.
+ * Copyright (C) 2026 BlackBearReloaded
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#include "launcher/launcher.hpp"
+
+#include "launcher/launcher_model.hpp"
+#include "launcher/launcher_view.hpp"
+#include "native_agc_present.hpp"
+#include "ps5_pngdec.hpp"
+
+#include "audio/cues.hpp"
+#include "audio/mixer.hpp"
+#include "core/input.hpp"
+#include "core/save_file.hpp"
+#include "core/version.hpp"
+#include "gfx/renderer.hpp"
+#include "platform/ps5/audio_out.hpp"
+#include "platform/ps5/display_egl.hpp"
+#include "platform/ps5/pad.hpp"
+#include "platform/ps5/system.hpp"
+#include "ui/fonts.hpp"
+
+#include <GL/glcorearb.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <span>
+#include <string>
+#include <vector>
+
+extern "C" int sceUserServiceGetLoginUserIdList(std::int32_t user_ids[4]);
+
+#ifndef PROSPEROLIGHT_STREAM_SELF_TEST_FPS
+#define PROSPEROLIGHT_STREAM_SELF_TEST_FPS 0
+#endif
+#ifndef PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION
+#define PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION MOONLIGHT_STREAM_RESOLUTION_1080P
+#endif
+#ifndef PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST
+#define PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST 0
+#endif
+
+static_assert(PROSPEROLIGHT_STREAM_SELF_TEST_FPS == 0 ||
+                  PROSPEROLIGHT_STREAM_SELF_TEST_FPS == MOONLIGHT_STREAM_FPS_90 ||
+                  PROSPEROLIGHT_STREAM_SELF_TEST_FPS == MOONLIGHT_STREAM_FPS_120,
+              "STREAM_SELF_TEST_FPS must be 0, 90, or 120");
+static_assert(PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION == MOONLIGHT_STREAM_RESOLUTION_1080P ||
+                  PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION == MOONLIGHT_STREAM_RESOLUTION_1440P ||
+                  PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION == MOONLIGHT_STREAM_RESOLUTION_2160P,
+              "STREAM_SELF_TEST_RESOLUTION must be 0, 1, or 2");
+static_assert(PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST == 0 ||
+                  PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST == 1,
+              "STOP_ACTIVE_APP_SELF_TEST must be 0 or 1");
+
+namespace launcher
+{
+
+namespace
+{
+
+using namespace hui;
+
+constexpr const char *kAssets = "/app0/assets";
+// Posters are kept at most this tall: twice what a card shows at 4K needs
+// nothing more, and 64 of them must fit comfortably in graphics memory.
+constexpr int kPosterHeight = 672;
+constexpr std::uint64_t kLargestPicture = 64u * 1024u * 1024u;
+
+#if PROSPEROLIGHT_STREAM_SELF_TEST_FPS != 0
+bool high_refresh_self_test_consumed;
+#endif
+#if PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST != 0
+bool stop_active_app_self_test_consumed;
+#endif
+
+// Sunshine's box art, decoded by the console's PNG decoder and scaled down.
+// Runs on the model's worker thread.
+bool DecodePoster(const unsigned char *png, std::size_t size, ArtworkImage *image)
+{
+    if (!png || size == 0 || size > UINT32_MAX)
+        return false;
+    ScePngDecParseParam parse{png, static_cast<std::uint32_t>(size), 0};
+    ScePngDecImageInfo info{};
+    if (scePngDecParseHeader(&parse, &info) < 0 || info.image_width == 0 || info.image_height == 0)
+        return false;
+    const std::uint64_t bytes =
+        static_cast<std::uint64_t>(info.image_width) * info.image_height * 4;
+    if (bytes > kLargestPicture)
+        return false;
+
+    ScePngDecCreateParam create{sizeof(ScePngDecCreateParam), info.bit_depth > 8 ? 1u : 0u,
+                                info.image_width};
+    const int work_size = scePngDecQueryMemorySize(&create);
+    if (work_size <= 0)
+        return false;
+    void *work = std::malloc(static_cast<std::size_t>(work_size));
+    void *handle = nullptr;
+    if (!work || scePngDecCreate(&create, work, static_cast<std::uint32_t>(work_size), &handle) < 0)
+    {
+        std::free(work);
+        return false;
+    }
+    // Pixel format 1 is blue, green, red, alpha: the order the launcher has
+    // always asked this decoder for.
+    std::vector<unsigned char> decoded(static_cast<std::size_t>(bytes));
+    ScePngDecDecodeParam decode{png,
+                                decoded.data(),
+                                static_cast<std::uint32_t>(size),
+                                static_cast<std::uint32_t>(bytes),
+                                1,
+                                255,
+                                info.image_width * 4};
+    ScePngDecImageInfo output{};
+    const int result = scePngDecDecode(handle, &decode, &output);
+    (void)scePngDecDelete(handle);
+    std::free(work);
+    if (result < 0)
+        return false;
+
+    // Each output pixel is the average of the block of source pixels it covers.
+    const int source_width = static_cast<int>(info.image_width);
+    const int source_height = static_cast<int>(info.image_height);
+    int height = source_height > kPosterHeight ? kPosterHeight : source_height;
+    int width = static_cast<int>(static_cast<std::int64_t>(source_width) * height / source_height);
+    if (width < 1)
+        width = 1;
+    image->width = width;
+    image->height = height;
+    image->rgba.resize(static_cast<std::size_t>(width) * height * 4);
+    for (int y = 0; y < height; ++y)
+    {
+        const int y0 = static_cast<int>(static_cast<std::int64_t>(y) * source_height / height);
+        int y1 = static_cast<int>(static_cast<std::int64_t>(y + 1) * source_height / height);
+        if (y1 <= y0)
+            y1 = y0 + 1;
+        for (int x = 0; x < width; ++x)
+        {
+            const int x0 = static_cast<int>(static_cast<std::int64_t>(x) * source_width / width);
+            int x1 = static_cast<int>(static_cast<std::int64_t>(x + 1) * source_width / width);
+            if (x1 <= x0)
+                x1 = x0 + 1;
+            unsigned sum[4] = {0, 0, 0, 0};
+            for (int sy = y0; sy < y1; ++sy)
+            {
+                const unsigned char *row =
+                    decoded.data() + (static_cast<std::size_t>(sy) * source_width + x0) * 4;
+                for (int sx = x0; sx < x1; ++sx, row += 4)
+                {
+                    sum[0] += row[0];
+                    sum[1] += row[1];
+                    sum[2] += row[2];
+                    sum[3] += row[3];
+                }
+            }
+            const unsigned count = static_cast<unsigned>((y1 - y0) * (x1 - x0));
+            unsigned char *out = image->rgba.data() + (static_cast<std::size_t>(y) * width + x) * 4;
+            out[0] = static_cast<unsigned char>(sum[2] / count);
+            out[1] = static_cast<unsigned char>(sum[1] / count);
+            out[2] = static_cast<unsigned char>(sum[0] / count);
+            out[3] = static_cast<unsigned char>(sum[3] / count);
+        }
+    }
+    return true;
+}
+
+bool LoadFont(gfx::Renderer &renderer, const char *name, gfx::Font *font, ui::FontRef *ref)
+{
+    std::string data;
+    const std::string path = std::string(kAssets) + "/fonts/" + name;
+    if (!save::read_file(path, &data, 8u << 20) || !font->load(data))
+    {
+        sys::log("[PL] launcher: font %s failed: %s", name, font->error().c_str());
+        return false;
+    }
+    ref->font = font;
+    ref->texture = renderer.batch().create_font_texture(*font);
+    return true;
+}
+
+// What the player chose, for the stream. False when nothing can be streamed.
+bool FillSelection(const Model &model, Selection *selection)
+{
+    const moonlight_config_t &config = model.config();
+    const moonlight_config_host_t *host = model.selected_host();
+    const moonlight_backend_snapshot_t &backend = model.backend();
+    if (!host || model.selected_app() >= backend.app_count)
+        return false;
+    const moonlight_backend_app_t &app = backend.apps[model.selected_app()];
+    std::snprintf(selection->host, sizeof(selection->host), "%s", host->address);
+    selection->host_port = moonlight_config_host_port(host);
+    std::snprintf(selection->app_name, sizeof(selection->app_name), "%s", app.name);
+    selection->app_id = app.id;
+    selection->bitrate_kbps = config.bitrate_mbps * 1000u;
+    selection->display_area = config.display_area;
+    selection->video_codec = config.video_codec;
+    selection->stream_resolution = config.stream_resolution;
+    selection->stream_fps = config.stream_fps;
+    selection->hdr_enabled = config.hdr_enabled;
+    selection->audio_configuration = config.audio_configuration;
+    selection->vsync_enabled = config.vsync_enabled;
+    selection->decoder_pipeline = config.decoder_pipeline;
+    selection->decoder_cores = config.decoder_cores;
+    return true;
+}
+
+int SignedInUsers()
+{
+    std::int32_t users[4] = {-1, -1, -1, -1};
+    if (sceUserServiceGetLoginUserIdList(users) < 0)
+        return 1;
+    int count = 0;
+    for (std::int32_t user : users)
+        count += user != -1 ? 1 : 0;
+    return count > 0 ? count : 1;
+}
+
+// The recorded sounds are read once and kept: a stream does not need the
+// memory back, and the launcher returns after every stream.
+audio::SoundBank &Sounds()
+{
+    static audio::SoundBank bank;
+    static bool loaded = false;
+    if (!loaded)
+    {
+        loaded = true;
+        const auto stats = bank.load(std::string(kAssets) + "/audio/sfx");
+        sys::log("[PL] launcher: sounds files=%d rejected=%d", stats.files, stats.rejected);
+    }
+    return bank;
+}
+
+} // namespace
+
+Result Run(Selection *selection, const char *stream_error, bool first_start)
+{
+    const std::int64_t opened_at = sys::monotonic_us();
+    sys::log("[PL] launcher: opening (first=%d)", first_start ? 1 : 0);
+
+    // 4K when the television takes it, else 1080p.
+    ps5::Display display;
+    if (!(ps5::Display::supports_display_modes() && display.open(3840, 2160)) &&
+        !display.open(1920, 1080))
+    {
+        sys::log("[PL] launcher: display open failed");
+        return Result::failed;
+    }
+    sys::log("[PL] launcher: display %dx%d", display.width(), display.height());
+
+    Result outcome = Result::failed;
+    {
+        gfx::Renderer renderer;
+        gfx::Font regular;
+        gfx::Font semibold;
+        gfx::Font headline;
+        gfx::Font mono;
+        ui::Fonts fonts;
+        const bool ready =
+            renderer.init() &&
+            LoadFont(renderer, "inter-regular.huifont", &regular, &fonts.regular) &&
+            LoadFont(renderer, "inter-semibold.huifont", &semibold, &fonts.semibold) &&
+            LoadFont(renderer, "montserrat-medium.huifont", &headline, &fonts.display) &&
+            LoadFont(renderer, "dejavu-sans-mono.huifont", &mono, &fonts.mono);
+        // The launcher's theme uses neither of these two faces.
+        fonts.pixel = fonts.mono;
+        fonts.hand = fonts.regular;
+        if (!ready)
+        {
+            sys::log("[PL] launcher: renderer or fonts failed");
+        }
+        else
+        {
+            ps5::Pad pad;
+            pad.open();
+            InputTracker tracker;
+            audio::Mixer mixer;
+            ps5::AudioOut audio_out;
+            audio_out.start(mixer);
+            audio::SoundBank &sounds = Sounds();
+
+            Model model;
+            model.set_artwork_decoder(DecodePoster);
+            model.Initialize(static_cast<std::uint64_t>(sys::monotonic_us() / 1000));
+            View view(model, fonts);
+            view.set_version(read_content_version("/app0/sce_sys/param.json"));
+            view.set_first_start(first_start);
+            view.show_stream_error(stream_error);
+            view.set_players(SignedInUsers());
+
+            Frame frame;
+            ui::Feedback feedback;
+            PadSample samples[64];
+            std::vector<std::uint32_t> posters;
+            std::uint64_t frames = 0;
+            std::int64_t last_frame = sys::monotonic_us();
+            for (;;)
+            {
+                const std::int64_t now = sys::monotonic_us();
+                float dt = frames == 0 ? 1.0f / 60.0f : static_cast<float>(now - last_frame) / 1e6f;
+                last_frame = now;
+                if (dt > 0.05f)
+                    dt = 0.05f; // a hitch must not teleport the animations
+                const std::size_t count = pad.read(samples);
+                const InputFrame input = tracker.update(std::span<const PadSample>(samples, count),
+                                                        static_cast<std::uint64_t>(now));
+
+                model.Poll(static_cast<std::uint64_t>(now / 1000));
+                ArtworkImage image;
+                while (model.TakeArtwork(&image))
+                {
+                    const std::uint32_t texture = renderer.batch().create_texture(
+                        image.width, image.height, image.rgba.data());
+                    posters.push_back(texture);
+                    view.set_artwork(
+                        image.app_id, texture,
+                        static_cast<float>(image.width) / static_cast<float>(image.height),
+                        View::palette_of(image.rgba.data(), image.width, image.height));
+                }
+                for (std::uint32_t texture : view.take_released_textures())
+                {
+                    glDeleteTextures(1, &texture);
+                    std::erase(posters, texture);
+                }
+                if (frames % 60 == 30)
+                    view.set_players(SignedInUsers());
+
+                feedback.clear();
+                view.update(input, dt, feedback);
+                for (const audio::CueEvent &event : feedback.cues)
+                    sounds.play(mixer,
+                                event.set == audio::SoundSet::count ? audio::SoundSet::glass
+                                                                    : event.set,
+                                event);
+
+                frame.reset();
+                frame.glass_texture = renderer.glass_texture();
+                view.draw(frame);
+                renderer.begin();
+                renderer.backdrop(frame.backdrop);
+                renderer.draw(frame.scene);
+                renderer.glass();
+                renderer.draw(frame.overlay);
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+                renderer.present(0, display.width(), display.height());
+                if (!display.swap())
+                {
+                    sys::log("[PL] launcher: swap failed frame=%llu error=%s",
+                             static_cast<unsigned long long>(frames),
+                             ps5::egl_error_name(display.last_error()));
+                    break;
+                }
+                if (++frames == 1)
+                {
+                    const bool hidden = sys::hide_splash_screen();
+                    sys::log("[PL] launcher: first frame after %lld ms, splash hidden=%d",
+                             static_cast<long long>((sys::monotonic_us() - opened_at) / 1000),
+                             hidden ? 1 : 0);
+                }
+
+#if PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST != 0
+                if (!stop_active_app_self_test_consumed && model.backend_valid() &&
+                    model.backend().online && model.backend().paired &&
+                    model.backend().current_app_id)
+                {
+                    stop_active_app_self_test_consumed = true;
+                    model.StopApp();
+                }
+#endif
+#if PROSPEROLIGHT_STREAM_SELF_TEST_FPS != 0
+                // A test build starts one stream by itself, with its own values.
+                if (!high_refresh_self_test_consumed && model.backend_valid() &&
+                    model.backend().online && model.backend().paired && model.backend().app_count)
+                {
+                    high_refresh_self_test_consumed = true;
+                    model.SelectApp(0);
+                    if (FillSelection(model, selection))
+                    {
+                        selection->bitrate_kbps = 80000;
+                        selection->video_codec = MOONLIGHT_VIDEO_CODEC_HEVC;
+                        selection->stream_resolution = PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION;
+                        selection->stream_fps = PROSPEROLIGHT_STREAM_SELF_TEST_FPS;
+                        selection->hdr_enabled = 0;
+                        outcome = Result::start_stream;
+                        break;
+                    }
+                }
+#endif
+                if (view.take_start_stream() && FillSelection(model, selection))
+                {
+                    outcome = Result::start_stream;
+                    break;
+                }
+            }
+
+            // Hand everything back before the stream opens it for itself:
+            // the worker thread, the audio port, the controller, then the
+            // graphics objects (they die with the context) and the display.
+            sys::log("[PL] launcher: closing after %llu frames (stream=%d)",
+                     static_cast<unsigned long long>(frames),
+                     outcome == Result::start_stream ? 1 : 0);
+            model.Shutdown();
+            audio_out.stop();
+            pad.close();
+            if (!posters.empty())
+                glDeleteTextures(static_cast<GLsizei>(posters.size()), posters.data());
+            if (frames > 0)
+                native_agc_note_initialized();
+        }
+        renderer.release();
+    }
+    display.close();
+    sys::log("[PL] launcher: closed");
+    return outcome;
+}
+
+} // namespace launcher

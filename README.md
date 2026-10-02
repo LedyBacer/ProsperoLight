@@ -22,13 +22,15 @@
   <img src="https://img.shields.io/badge/video-H.264%20%7C%20HEVC-70E1DC" alt="H.264 and HEVC">
   <img src="https://img.shields.io/badge/frame%20rate-60%20%7C%2090%20%7C%20120%20FPS-5BBEFF" alt="60, 90, and 120 FPS">
   <img src="https://img.shields.io/badge/audio-Stereo%20%7C%205.1%20Opus-7DD3FC" alt="Stereo and 5.1 Opus audio">
-  <img src="https://img.shields.io/badge/UI-RmlUi-5DDFA4" alt="RmlUi">
+  <img src="https://img.shields.io/badge/UI-OpenGL-5DDFA4" alt="OpenGL launcher">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
 </p>
 
-Demo available by clicking the image below.
+![ProsperoLight's Games screen: the selected app as a headline over a row of posters](docs/images/prosperolight.png)
 
-[![ProsperoLight Games screen configured for 4K HDR](docs/images/prosperolight.png)](https://imgur.com/a/19lB0sX)
+The picture is the launcher of the development version drawn on a PC with
+sample apps. A [video of the released version](https://imgur.com/a/19lB0sX)
+shows a stream on the console.
 
 ## Highlights
 
@@ -45,11 +47,11 @@ Demo available by clicking the image below.
   multi-PC pairing, application artwork, and launch/resume/stop controls.
 - Persistent stream preferences, edge-to-edge or TV-safe presentation,
   independent frame-rate selection, and bitrate presets from 10 to 500 Mbps.
-- Selectable 48 kHz stereo or 5.1 surround Opus audio, native launcher sound
-  effects, live performance metrics, and graceful connection recovery.
+- Selectable 48 kHz stereo or 5.1 surround Opus audio, a sound for every
+  launcher widget, live performance metrics, and graceful connection recovery.
 
 ProsperoLight is a native PS5 client for the open Moonlight/Sunshine streaming
-protocol. Its RmlUi launcher discovers and pairs with Sunshine hosts, browses
+protocol. Its OpenGL launcher discovers and pairs with Sunshine hosts, browses
 their applications, and starts a native streaming session. Video access units
 are decoded by PS5 VideoDec2 and the resulting GPU-visible surfaces are
 presented by AGC without copying decoded pixels through a CPU framebuffer.
@@ -133,7 +135,7 @@ tooling are maintained in this repository.
 | Title ID | `PPSA99002` |
 | Category | Game |
 | Experimental beta / stable | `01.000.070` / `01.000.060` |
-| In development, not released | `01.000.071`: up to four controllers, Sunshine port per PC |
+| In development, not released | `01.000.080`: new launcher; up to four controllers, Sunshine port per PC |
 | Version source | [`sce_sys/param.json`](sce_sys/param.json) |
 | Writable data | `/download0` only |
 
@@ -144,10 +146,10 @@ tooling are maintained in this repository.
   its own port, and a discovered PC uses the port it advertises.
 - Remember up to eight PCs, pairing identities, and stream preferences under
   `/download0` across application restarts.
-- Pair with a two-minute PIN dialog and unpair through explicit two-press
+- Pair with a two-minute PIN dialog with a countdown, and unpair after a
   confirmation.
-- Browse up to 64 advertised Sunshine applications with paged artwork,
-  launch/resume feedback, and active-application stop controls.
+- See every saved PC and its state in one list, and browse up to 64 advertised
+  Sunshine applications as posters with launch/resume and stop controls.
 - Decode H.264 High and HEVC Main streams through VideoDec2 at 1080p, 1440p,
   and 2160p. Select 60, 90, or 120 FPS independently of resolution and bitrate;
   live 1440p/90 and 2160p/120 Sunshine sessions are hardware-validated.
@@ -156,8 +158,9 @@ tooling are maintained in this repository.
   3840x2160 target and 2160p is presented 1:1. High-refresh streams retain the
   same 4K output geometry: 1440p is GPU-scaled to 4K, while 2160p/120 is
   presented through the PS5's native 3840x2160 119.88 Hz output path.
-- Select bitrate presets up to 500 Mbps. The best setting depends on the host,
-  encoder, network, and selected codec rather than link speed alone.
+- Set the bitrate from 10 to 300 Mbps on a slider. At 4K the Settings screen
+  shows how close the bitrate is to the decoder's measured limit and warns
+  above it.
 - Choose V-Sync, the decoder pipeline (Classic, or the experimental Adaptive),
   and how many CPU cores decoding may use.
 - Enable HEVC Main10 HDR10 output at any available resolution and frame-rate
@@ -175,10 +178,10 @@ tooling are maintained in this repository.
   packet loss, network/host latency, and decode time.
 - Recover from connection failures and return from a stream to the launcher
   without leaving a stale session running.
-- Use original 4K launcher artwork, icon, loading presentation, and selection
-  music in a controller-first RmlUi interface.
-- Play distinct opening, navigation, action, setting, back, success, error, and
-  stream-start cues through the native PS5 SDL audio backend.
+- Use original 4K artwork, icon, loading presentation, and selection music.
+- Use a launcher drawn by the GPU at up to 4K: frosted panels, the selected
+  app's colours behind them, button glyphs in place of button names, and a
+  sound for every move, choice, switch, dialog and notice.
 
 ## Current status
 
@@ -325,10 +328,10 @@ behavior.
 
 1. Start Sunshine on a PC connected to the same trusted LAN. Wired Ethernet
    for both the PC and PS5 is strongly recommended.
-2. Open ProsperoLight and choose a discovered PC, or select **Add PC** and enter
-   its IPv4 address (see [Sunshine on another port](#sunshine-on-another-port)
+2. Open ProsperoLight and choose a discovered PC, or choose **Add a PC** and
+   type its IPv4 address (see [Sunshine on another port](#sunshine-on-another-port)
    if Sunshine does not use port 47989).
-3. Select **Pair PC**, then enter the displayed PIN in Sunshine within two
+3. Choose **Pair this PC**, then enter the displayed PIN in Sunshine within two
    minutes.
 4. Open **Games**, choose Desktop or another advertised application, and press
    ![Cross][cross].
@@ -337,11 +340,12 @@ behavior.
 Pairing credentials and settings are title-scoped. Installing under a different
 title ID intentionally requires pairing again.
 
-To forget an old PC, select it on **PCs**, choose **Remove PC**, then press
-![Cross][cross] again to confirm. This works while the PC is offline and removes only that saved
-entry; it does not revoke pairing on the host or affect other saved PCs. Use
-**Refresh** or **Add PC** to find and pair with the replacement host. A host
-advertising itself on the network may appear again after refresh.
+To forget an old PC, select it on **PCs**, move to **Remove** and hold
+![Cross][cross] until the button fills. This works while the PC is offline and
+removes only that saved entry; it does not revoke pairing on the host or affect
+other saved PCs. Press ![Triangle][triangle] to search the network again, or
+choose **Add a PC**, to find and pair with the replacement host. A host
+advertising itself on the network may appear again after a search.
 
 ### Sunshine on another port
 
@@ -351,9 +355,9 @@ saved PC:
 
 - A PC found on the network uses the port Sunshine advertises. Nothing needs
   to be typed.
-- Select a PC on **PCs** and choose **Port** to change its port. An empty entry
-  restores 47989.
-- **Add PC** also accepts an address with a port, for example
+- Select a PC on **PCs** and choose **Change port**. An empty entry restores
+  47989.
+- **Add a PC** also accepts an address with a port, for example
   `192.168.1.50:48989`.
 
 Only this one number is needed: Sunshine derives its other ports from it and
@@ -391,7 +395,7 @@ touchpad down until it clicks.
 | ![Cross][cross] | Activate, pair, launch, resume, or change a setting |
 | ![Circle][circle] | Return to the PCs page |
 | ![Square][square] | Stop the active Sunshine application |
-| ![Triangle][triangle] | Refresh the selected Sunshine host |
+| ![Triangle][triangle] | Search the network for Sunshine again |
 | ![L1][l1] / ![R1][r1] | Change between PCs, Games, and Settings |
 | ![Options][options] | Open Settings |
 
@@ -439,8 +443,10 @@ stored by ProsperoLight or written to its configuration.
 ## Source layout
 
 ```text
-src/main.cpp                         SDL2/RmlUi lifetime and stream handoff
-src/moonlight_app.cpp                launcher state, navigation, and feedback
+src/main.cpp                         launcher and stream take turns
+src/launcher/launcher_model.cpp      launcher state and requests, no drawing
+src/launcher/launcher_view.cpp       the three screens and their dialogs
+src/launcher/launcher_ps5.cpp        display, controller, sound, box art
 src/moonlight_backend.cpp            pairing, app listing, artwork, and control
 src/moonlight_discovery.cpp          LAN discovery
 src/moonlight_config.cpp             /download0 host and preference persistence
@@ -451,7 +457,9 @@ src/gamestream/                      retained Moonlight-compatible C boundary
 include/*.hpp                        application-owned public interfaces
 platform/ps5/                        narrow Moonlight PS5 compatibility adapters
 third_party/                         pinned Moonlight, mbedTLS, and Opus sources
-ui/                                  RML, RCSS, fonts, icons, and chrome assets
+third_party/ps5-homebrew-ui/         the UI kit the launcher is drawn with
+assets/                              launcher fonts and sounds
+tools/launcher-host/                 the launcher on the PC, for tests and pictures
 sce_sys/                             launcher metadata, 4K artwork, icon, music
 runtime/libc.prx                     generated clean-room loader runtime
 tooling/native/                      native ELF/FSELF and runtime build tools

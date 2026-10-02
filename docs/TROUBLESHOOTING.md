@@ -210,18 +210,16 @@ Square or the Games-screen action.
 - Consult loader diagnostics; the home-screen message alone is not a root
   cause.
 
-## Moving focus crashes the launcher
+## The launcher does not appear, or does not come back after a stream
 
-Symbolicate the fatal instruction and backtrace against `build/llvm-pie.elf`.
-RmlUi loads hidden button-state textures lazily when focus changes, so a trap in
-`operator new` followed by `SdlRenderInterface::LoadTexture` indicates that the
-large-allocation mapping path was lost or failed. The launcher must keep
-allocations of 64 KiB or more outside the bounded libc heap.
-
-A startup `SIGBUS` at an aligned AVX store inside
-`Rml::ElementInstancerPools::Initialize()` means the replacement `operator new`
-returned insufficiently aligned storage. Its allocation header and small-object
-backing allocation must preserve the runtime's 32-byte alignment guarantee.
+The launcher writes what it does to `/download0/prosperolight-launcher.log` in
+the title's storage (the previous launch is kept as
+`prosperolight-launcher.prev.log`): opening the display, the first frame,
+closing before a stream, each stream's start and end, and how long the display
+was left to settle. The OpenGL runtime writes its own lines to the same file.
+A launcher that cannot open the display tries twice more, two seconds apart,
+then waits to be closed. After a stream above 60 Hz or in HDR, five seconds of
+black screen before the launcher returns are intended (`HFR_SETTLE_MS`).
 
 ## `/download0` is missing
 

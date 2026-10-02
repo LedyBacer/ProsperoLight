@@ -78,5 +78,9 @@ void native_agc_set_vsync(int enabled);
 int native_agc_vsync_active(void);
 int native_agc_flip_events_active(void);
 int native_agc_present_shutdown(void);
+/* The launcher's OpenGL runtime initialises AGC for the process when it draws
+   its first frame. Call this once it has: the stream's presenter then uses
+   that initialisation and does not ask for a second one. */
+void native_agc_note_initialized(void);
 
 #endif

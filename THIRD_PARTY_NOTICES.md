@@ -10,9 +10,8 @@ ProsperoLight exists thanks to the maintainers and contributors of:
 - [PS5 Native App Boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate)
   and the [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk) for the
   reproducible native foundation and public target integration;
-- [RmlUi](https://github.com/mikke89/RmlUi),
-  [SDL2](https://github.com/libsdl-org/SDL/tree/SDL2) (John Törnblom's [PS5 port](https://github.com/ps5-payload-dev/SDL)), and
-  [FreeType](https://freetype.org/) for the launcher interface;
+- [ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) and
+  [Mesa](https://www.mesa3d.org/), which the launcher draws with;
 - [mbedTLS](https://github.com/Mbed-TLS/mbedtls) and
   [Opus](https://github.com/xiph/opus) for secure protocol and audio support;
 - [MkPFS](https://github.com/PSBrew/MkPFS),
@@ -106,9 +105,37 @@ The streaming protocol and decoder integration use pinned source revisions of
 [moonlight-common-c](https://github.com/moonlight-stream/moonlight-common-c),
 [mbedTLS](https://github.com/Mbed-TLS/mbedtls), and
 [Opus](https://github.com/xiph/opus). Their licenses are retained in the
-corresponding `third_party/` source trees. RmlUi, SDL2, and FreeType are used
-from the PS5 integration archives in `vendor/ps5/` and retain their upstream
-licenses. None of these dependencies is claimed to be project-authored.
+corresponding `third_party/` source trees. None of these dependencies is
+claimed to be project-authored.
+
+## Launcher
+
+The launcher is drawn with OpenGL through the
+[ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) SDK 1.0.0
+(GPL-3.0-or-later), which the build downloads after verifying SHA-256
+`f93643c04c843d56143b00951df1f8042ea7706ae9f19e4e9abf158e1ead77c5` and links
+statically. The SDK contains Mesa 26.2.0 (primarily MIT, with file-specific
+licences), OpenGNM and OpenGNM PSBC (MIT), SPIRV-Headers and Vulkan-Headers;
+its own `LICENSE`, `LICENSES/` and `THIRD_PARTY_NOTICES.md` are unpacked beside
+it under ignored `.deps/ps5-opengl/` and are not distributed by this
+repository. `src/runtime/app_heap.c` and `src/runtime/runtime_shims.c` are
+adapted from that SDK's native application recipe.
+
+`third_party/ps5-homebrew-ui/` is the UI kit the launcher's widgets come from:
+ps5-homebrew-ui, Copyright (C) 2026 BlackBearReloaded, GPL-3.0-or-later. Its
+shader distance functions follow Inigo Quilez's published formulas (MIT).
+
+The launcher's fonts in `assets/fonts/` are distance-field renderings, made
+by `tools/bake-fonts.sh`, of the typefaces in `third_party/fonts/`: Inter and
+Montserrat (SIL Open Font License 1.1) and DejaVu Sans Mono (Bitstream Vera
+licence). Their licence texts are kept beside both. The baker and the PC
+harness use `stb_truetype.h` and `stb_image_write.h` from
+[stb](https://github.com/nothings/stb) (public domain or MIT); neither is part
+of the application.
+
+The launcher's sounds in `assets/audio/sfx/glass/` are original recordings by
+BlackBearReloaded, generated with ElevenLabs Sound Effects, Copyright (C) 2026
+BlackBearReloaded, and distributed under GPL-3.0-or-later.
 
 The small sources in `vendor/ps5/sdk/stubs/` are linker-only import
 descriptions for public PS5 system modules missing from the bundled SDK stub
