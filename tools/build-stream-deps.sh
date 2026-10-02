@@ -8,6 +8,7 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/tools/native-toolchain.sh"
+bash "$root/tools/pyrowave/apply-transport.sh"
 fec_simd=${FEC_SIMD:-0}
 opus_simd=${OPUS_SIMD:-0}
 [[ "$fec_simd" =~ ^[01]$ && "$opus_simd" =~ ^[01]$ ]] || {
