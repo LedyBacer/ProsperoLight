@@ -173,8 +173,11 @@ void SetConnection(unsigned index, const PadSample &sample)
     {
         slot.connected = true;
         active_mask |= 1u << index;
+        alignas(8) uint8_t info_buffer[256]{};
         PadInfo info{};
-        if (scePadGetControllerInformation(slot.handle, &info) >= 0 && info.width && info.height)
+        const int info_result = scePadGetControllerInformation(slot.handle, info_buffer);
+        memcpy(&info, info_buffer, sizeof(info));
+        if (info_result >= 0 && info.width && info.height)
         {
             slot.width = info.width;
             slot.height = info.height;

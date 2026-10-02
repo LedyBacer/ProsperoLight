@@ -19,6 +19,7 @@ tooling/prospero-clang18 text eol=lf
 *.dds binary
 *.at9 binary
 *.prx binary
+tools/controllers/*.patch -whitespace
 *.bin binary
 *.a binary
 *.so binary
