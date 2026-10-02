@@ -32,6 +32,12 @@ Demo available by clicking the image below.
 
 ## Highlights
 
+The PyroWave integration candidate adds explicit codec/chroma/HDR selection and
+manual bitrate entry. See [integration details](docs/PYROWAVE.md) and the pending
+[console regression checklist](docs/PYROWAVE-REGRESSION.md). Existing VideoDec2
+bitrate measurements below apply to H.264/HEVC, not the PyroWave GPU decoder.
+
+
 - Native PS5 hardware streaming through VideoDec2 and AGC at 1080p, 1440p,
   and 2160p, with independently selectable 60, 90, and 120 FPS stream targets.
 - Decoding and presentation on separate threads: a late flip never holds back
@@ -44,7 +50,7 @@ Demo available by clicking the image below.
 - Automatic Sunshine discovery, manual-IP fallback, persistent multi-PC
   pairing, application artwork, and launch/resume/stop controls.
 - Persistent stream preferences, edge-to-edge or TV-safe presentation,
-  independent frame-rate selection, and bitrate presets from 10 to 500 Mbps.
+  independent frame-rate selection, and manual bitrate input from 1 to 1000 Mbps.
 - Selectable 48 kHz stereo or 5.1 surround Opus audio, native launcher sound
   effects, live performance metrics, and graceful connection recovery.
 
@@ -91,7 +97,7 @@ presented by AGC without copying decoded pixels through a CPU framebuffer.
 - **How to tell.** With the overlay on (`Select + R1`), "Frames dropped by
   decoder backlog" rises and "Decode (last second)" shows a load near 100%.
   "Frames dropped by your network connection" is a different problem.
-- The 300, 400 and 500 Mbps presets are beyond the 4K decoder at every frame rate.
+- VideoDec2 settings of 300, 400 and 500 Mbps are beyond the 4K decoder at every frame rate.
 
 Measured on a PS5 with HEVC SDR and eight slices per frame, decoding one frame
 at a time (the default). HDR, H.264 and the lower resolutions are not measured
@@ -153,7 +159,7 @@ tooling are maintained in this repository.
   3840x2160 target and 2160p is presented 1:1. High-refresh streams retain the
   same 4K output geometry: 1440p is GPU-scaled to 4K, while 2160p/120 is
   presented through the PS5's native 3840x2160 119.88 Hz output path.
-- Select bitrate presets up to 500 Mbps. The best setting depends on the host,
+- Enter a bitrate from 1 to 1000 Mbps. The best setting depends on the host,
   encoder, network, and selected codec rather than link speed alone.
 - Choose V-Sync, the decoder pipeline (Classic, or the experimental Adaptive),
   and how many CPU cores decoding may use.
