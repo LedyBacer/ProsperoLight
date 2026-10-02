@@ -315,3 +315,9 @@ help:
 	  'Local defaults:      Copy .env.example to the ignored .env file' \
 	  'make clean           Remove build/, dist/, and generated libc.prx' \
 	  'make distclean       Also remove the ignored .deps/ cache'
+
+.PHONY: controller-deps
+controller-deps:
+	@bash tools/controllers/apply-haptics.sh
+
+$(HOST_UNIT_TEST) test-integration test-stream-performance test-performance-guards: | controller-deps

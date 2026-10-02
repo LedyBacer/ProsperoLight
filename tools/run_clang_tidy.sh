@@ -14,6 +14,7 @@ if [[ -z $tidy ]]; then
 fi
 [[ -n $tidy ]] || { echo "clang-tidy is required" >&2; exit 2; }
 
+bash "$root/tools/controllers/apply-haptics.sh"
 bash "$root/tools/setup-native-dependencies.sh" >/dev/null
 bash "$root/tools/pyrowave/apply-transport.sh"
 sdk="$root/.deps/native/ps5-payload-sdk"
