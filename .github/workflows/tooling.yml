@@ -45,7 +45,7 @@ jobs:
       - name: Install native toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install --yes clang-18 clang-format-18 clang-tidy-18 llvm-18-dev cmake lld-18 make pkg-config python3-venv tar unzip wget ninja-build bison flex libclang-18-dev libclang-cpp18-dev libclc-18-dev libclc-18 libllvmspirvlib-18-dev spirv-tools
+          sudo apt-get install --yes clang-18 clang-format-18 clang-tidy-18 llvm-18-dev cmake lld-18 make pkg-config python3-venv tar unzip wget ninja-build bison flex libclang-18-dev libclang-cpp18-dev libclc-18-dev libclc-18 libllvmspirvlib-18-dev spirv-tools glslang-tools
 
       - name: Read app identity and version
         shell: bash

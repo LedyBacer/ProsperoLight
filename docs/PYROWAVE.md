@@ -110,3 +110,18 @@ bandwidth. On the reviewed PS5/network, 500–600 Mbps was stable; 700–800 Mbp
 produced occasional reported losses. This is not a universal bandwidth limit.
 Bitrate entry permits 1–1000 Mbps but does not guarantee every setting is suitable
 for every codec/network. Host encoder and rate control are unchanged.
+
+## Linux build prerequisites
+
+In addition to ProsperoLight's existing Clang/LLVM 18 toolchain, a clean RADV build
+needs Ninja, Meson >=1.4 (CI pins 1.7.0), Bison, Flex, glslangValidator,
+SPIRV-Tools, Clang development libraries, libclc and the matching LLVM/SPIR-V
+translator development package. The Python environment used by Meson needs Mako,
+PyYAML and packaging. The CI workflow records the Ubuntu 24.04 package names and
+pinned Python versions. The FFPFSC packer also needs Python venv/pip support.
+
+Run `git submodule update --init --recursive` before building. Lint/host-test
+entry points prepare the pinned moonlight-common-c protocol patch; console build
+entry points do the same and fetch the pinned GPU sources. Applied dependency
+patches intentionally make those generated checkouts dirty without changing
+their committed pins. No console/GPU is needed to compile the release artifacts.
