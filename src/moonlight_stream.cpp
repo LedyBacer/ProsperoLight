@@ -2926,6 +2926,8 @@ static void ps5_controller_send(ps5_controller_state_t *state, const controller_
         return;
     }
     state->announced = (prosperolight::dualsense::ActiveMask() & 1) != 0;
+    if (state->announced)
+        state->arrival_result = 0;
     state->last_event = *event;
     state->last_event_us = now;
     ++state->events;
@@ -3296,7 +3298,9 @@ static void ps5_controller_poll(ps5_controller_state_t *state)
 static void ps5_controller_stop(ps5_controller_state_t *state)
 {
     ps5_controller_release_mouse_buttons(state);
-    prosperolight::dualsense::Stop();
+    state->removal_result = prosperolight::dualsense::Stop();
+    if (state->removal_result != 0)
+        ++state->send_errors;
     state->announced = 0;
 }
 

@@ -41,7 +41,7 @@ void PrimarySample(const PadSample &sample, bool suppressed);
 int SendPrimary(int buttons, uint8_t left_trigger, uint8_t right_trigger, int16_t left_x,
                 int16_t left_y, int16_t right_x, int16_t right_y);
 void Poll();
-void Stop();
+int Stop();
 void Shutdown();
 void Rumble(uint16_t controller, uint16_t low, uint16_t high);
 void RumbleTriggers(uint16_t controller, uint16_t left, uint16_t right);

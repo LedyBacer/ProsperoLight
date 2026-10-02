@@ -145,16 +145,18 @@ void ResetOutput(Slot &slot)
     slot.pcm_sequence_valid = false;
     slot.sensor_enabled = false;
 }
-void Disconnect(unsigned index)
+int Disconnect(unsigned index)
 {
     Slot &slot = slots[index];
     active_mask &= ~(1u << index);
     CancelTouches(index);
+    int result = 0;
     if (live && slot.announced)
-        LiSendMultiControllerEvent(index, active_mask, 0, 0, 0, 0, 0, 0, 0);
+        result = LiSendMultiControllerEvent(index, active_mask, 0, 0, 0, 0, 0, 0, 0);
     ResetOutput(slot);
     slot.connected = slot.announced = false;
     slot.last_input = 0;
+    return result;
 }
 void SetConnection(unsigned index, const PadSample &sample)
 {
@@ -588,15 +590,18 @@ void Poll()
         ApplyOutput(slot);
     }
 }
-void Stop()
+int Stop()
 {
     Lock lock;
     if (!initialized)
-        return;
+        return 0;
+    int result = 0;
     for (unsigned i = 0; i < MaxControllers; ++i)
     {
         Slot &slot = slots[i];
-        Disconnect(i);
+        const int removal = Disconnect(i);
+        if (result == 0)
+            result = removal;
         char line[192];
         snprintf(line, sizeof(line), "DualSense slot=%u inputs=%llu pcm=%llu output_errors=%llu", i,
                  (unsigned long long)slot.input_events, (unsigned long long)slot.pcm_packets,
@@ -604,6 +609,7 @@ void Stop()
         lan_http_report_text(line);
     }
     live = false;
+    return result;
 }
 void Shutdown()
 {
