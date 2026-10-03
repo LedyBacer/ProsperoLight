@@ -1,5 +1,5 @@
 /*
- * ProsperoLight - Bounded source-clock presentation timing.
+ * ps5-native-app-boilerplate / ProsperoLight - Bounded source-clock presentation timing.
  * Copyright (C) 2026 BlackBearReloaded
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

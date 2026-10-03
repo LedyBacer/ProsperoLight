@@ -161,8 +161,8 @@ explicitly saved endpoints; the port is not a global streaming setting.
 | Policy | Scheduling | VSync preference |
 | --- | --- | --- |
 | Unpaced | Submit the newest ready frame without a cadence timer. | On synchronizes flips; Off requests immediate output. |
-| Paced | Schedule by stream FPS, matching 59.94/119.88 Hz fixed output where appropriate. Overdue frames do not wait another full period. | On/Off is retained independently. |
-| Paced + VRR | Schedule by stream FPS and request variable-rate VideoOut before opening the loading renderer. | Synchronized flips are required; the saved preference is restored when another policy is selected. |
+| Paced | Learn source cadence, retain a bounded readiness reserve, and align fixed-VSync submissions using observed flip timing. | On/Off is retained independently. |
+| Paced + VRR | Use source-clock pacing and request variable-rate VideoOut; API failure uses fixed-output pacing. | Synchronized flips are required; the saved preference is restored when another policy is selected. |
 
 VRR is a request, not proof that the display accepted it. A rejected request
 falls back to fixed output and is recorded in the session log. Native
@@ -204,7 +204,7 @@ Session, PyroWave and menu-output text logs rotate at 1 MiB each, retaining one 
 
 ### Source-clock frame pacing
 
-Unpaced keeps the latest-frame policy without an extra software wait. Paced and Paced+VRR share a source-clock controller, learn the source interval from presentation timestamps, and carry a small bounded readiness reserve (up to the smaller of 10 ms or one source interval). The ready queue holds at most two decoded native images. Old decoded images are discarded only when a decoded successor exists; compressed H.264/HEVC references are preserved.
+Unpaced keeps the latest-frame policy without an extra software wait. Paced and Paced+VRR share a source-clock controller, learn the source interval from validated RTP timestamps (presentation timestamps are the fallback), and carry a small bounded readiness reserve (up to the smaller of 10 ms or one source interval). The ready queue holds at most two decoded native images. Old decoded images are discarded only when a decoded successor exists; compressed H.264/HEVC references are preserved.
 
 Native fixed-VSync pacing uses completed-flip observations as a best-effort phase estimate and submits with a preparation margin. These observations are not a precise scanout clock. VRR API failure uses the fixed-output timing policy. The HUD distinguishes successful VRR API activation from fixed fallback; API success does not prove physical panel VRR.
 

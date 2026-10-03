@@ -1,4 +1,4 @@
-# ProsperoLight - Source-clock pacing and bounded ready queue regression checks.
+# ps5-native-app-boilerplate / ProsperoLight - Source-clock pacing and bounded ready queue regression checks.
 # Copyright (C) 2026 BlackBearReloaded
 # SPDX-License-Identifier: GPL-3.0-or-later
 import pathlib

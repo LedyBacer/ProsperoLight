@@ -69,7 +69,7 @@ presented by AGC without copying decoded pixels through a CPU framebuffer.
 ## Presentation and connection preferences
 
 The integrated development branch adds **Unpaced**, **Paced**, and
-**Paced + VRR** output policies, an independent VSync preference, an option to
+**Paced + VRR** output policies with a shared source-clock controller and bounded readiness reserve, an independent VSync preference, an option to
 disable menu sounds, and manual **IPv4:HTTP-port** connections through Add PC.
 Settings scroll while the touchpad shortcut hints remain visible. See
 [configuration and current validation boundaries](docs/CONFIGURATION.md#frame-pacing-and-vsync).
