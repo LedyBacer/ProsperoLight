@@ -14,9 +14,14 @@
 static std::string temporary_report, saved_report;
 static bool write_failure, close_failure, log_failure, open_failure;
 static unsigned write_calls;
+static bool diagnostic_logs = true;
 static std::vector<std::string> kernel_records;
 extern "C"
 {
+    int prosperolight_logs_enabled(void)
+    {
+        return diagnostic_logs;
+    }
     int sceKernelDebugOutText(int channel, const char *text)
     {
         assert(channel == 0 && strlen(text) < 512);
@@ -249,5 +254,11 @@ int main()
     kernel_records.clear();
     log_performance_windows(0);
     assert(kernel_records.empty());
+    diagnostic_logs = false;
+    const unsigned writes_before = write_calls;
+    save_performance_summary(state, input, &options, 0);
+    save_frame_trace();
+    log_performance_windows(120);
+    assert(write_calls == writes_before && kernel_records.empty());
     puts(original.c_str()); // The runner parses and validates the actual JSON.
 }
