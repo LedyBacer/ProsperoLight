@@ -9,6 +9,39 @@
 
 namespace moonlight
 {
+// RTP is a relative 90 kHz source clock; never subtract it from local time.
+// Validate forward movement and unwrap rollover before estimating cadence.
+class SourceTimestamp
+{
+  public:
+    uint64_t update(uint32_t rtp, uint64_t fallback_us)
+    {
+        if (!initialized_)
+        {
+            initialized_ = true;
+            last_ = rtp;
+            ticks_ = rtp;
+            return rtp ? ticks_ * 1000000 / 90000 : fallback_us;
+        }
+        const uint32_t delta = rtp - last_;
+        last_ = rtp;
+        if (delta && delta < 900000)
+        {
+            ticks_ += delta;
+            return ticks_ * 1000000 / 90000;
+        }
+        if (!delta)
+            return fallback_us;
+        ticks_ = rtp;
+        return fallback_us;
+    }
+
+  private:
+    uint64_t ticks_{};
+    uint32_t last_{};
+    bool initialized_{};
+};
+
 // A target is a submission deadline. GPU completion and physical display
 // completion remain distinct measurements owned by the presentation backend.
 class FramePacing

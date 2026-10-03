@@ -643,6 +643,7 @@ typedef struct native_renderer_state
     pthread_cond_t wake;
     moonlight::SlotPool<FRAME_SLOT_COUNT> frames;
     moonlight::ReadyMailbox<stream_ready_frame_t> mailbox;
+    moonlight::SourceTimestamp source_clock;
     bool stop_presenting;
 
     // Presentation worker.
@@ -1800,7 +1801,8 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
                                SUBMISSION_QUEUE_CAPACITY];
         submission.arrival_us = arrival_us;
         submission.enqueue_us = network_enqueue_us;
-        submission.pts_us = decode_unit->presentationTimeUs;
+        submission.pts_us =
+            state->source_clock.update(decode_unit->rtpTimestamp, decode_unit->presentationTimeUs);
         submission.frame = decode_unit->frameNumber;
         submission.trace = trace;
         ++state->submission_count;

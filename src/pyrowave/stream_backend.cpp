@@ -25,6 +25,7 @@ struct Frame
     std::vector<uint8_t> bytes;
     std::vector<PyroWaveFraming::Segment> segments;
     uint64_t presentation_us{}, receive_us{}, enqueue_us{}, queued_us{};
+    uint32_t rtp_timestamp{};
     uint16_t critical{};
     int number{};
 };
@@ -107,6 +108,7 @@ void *worker(void *)
 {
     auto &s = *session;
     moonlight::FramePacing pacer;
+    moonlight::SourceTimestamp source_clock;
     const unsigned mode = moonlight::presentation_mode();
     const uint32_t refresh = static_cast<uint32_t>(s.backend->refresh_hz() * 100 + 0.5);
     pacer.reset(s.fps);
@@ -151,6 +153,7 @@ void *worker(void *)
                 }
             }
 
+            frame.presentation_us = source_clock.update(frame.rtp_timestamp, frame.presentation_us);
             PyroWaveFraming::Frame parsed;
             std::string error;
             if (!PyroWaveFraming::parse(frame.bytes.data(), frame.bytes.size(), frame.segments,
@@ -361,6 +364,7 @@ int submit(PDECODE_UNIT unit)
     Frame frame;
     frame.bytes.resize(unit->fullLength);
     frame.presentation_us = unit->presentationTimeUs;
+    frame.rtp_timestamp = unit->rtpTimestamp;
     frame.queued_us = now_us();
     frame.receive_us = unit->receiveTimeUs;
     frame.enqueue_us = unit->enqueueTimeUs;

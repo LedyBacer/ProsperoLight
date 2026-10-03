@@ -17,6 +17,11 @@ class FramePacingPolicy(unittest.TestCase):
 #include "moonlight_pipeline.hpp"
 #include <cassert>
 int main() {
+    moonlight::SourceTimestamp clock;
+    const auto before=clock.update(0xfffffff0u,0);
+    const auto after=clock.update(734u,0);
+    assert(after>before && after-before>=8333 && after-before<=8334);
+    assert(clock.update(734u,42)==42);
     moonlight::ReadyMailbox<int> q;
     q.capacity=2;
     int displaced=0, out=0;
