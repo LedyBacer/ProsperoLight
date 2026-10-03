@@ -116,6 +116,15 @@ class View
     {
         return screen_;
     }
+    // Puts a screen up at once, without sound or animation. The launcher draws
+    // every screen once before its first frame, so that the graphics driver
+    // compiles what each one needs then, not at the first visit.
+    void warm(int screen)
+    {
+        screen_ = screen;
+        screen_age_ = 10.0f;
+    }
+    static constexpr int kScreenCount = 4;
 
   private:
     struct Artwork

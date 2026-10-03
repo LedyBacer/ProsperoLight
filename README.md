@@ -135,7 +135,7 @@ tooling are maintained in this repository.
 | Title ID | `PPSA99002` |
 | Category | Game |
 | Experimental beta / stable | `01.000.070` / `01.000.060` |
-| In development, not released | `01.000.082`: new launcher; files under `/data/prosperolight`; up to four controllers, Sunshine port per PC |
+| In development, not released | `01.000.083`: new launcher; files under `/data/prosperolight`; up to four controllers, Sunshine port per PC |
 | Version source | [`sce_sys/param.json`](sce_sys/param.json) |
 | Writable data | `/data/prosperolight` (`/download0` when the console has no ELF loader) |
 
@@ -454,6 +454,8 @@ does not touch:
 | `/data/prosperolight/pairing/` | `cert.pem` and `key.pem`, the identity Sunshine paired with |
 | `/data/prosperolight/logs/prosperolight-launcher.log` | This launch's log; the previous one is `prosperolight-launcher.prev.log` |
 | `/data/prosperolight/logs/performance-last.json` | The last stream's performance report |
+| `/data/prosperolight/logs/crash-last.txt` | Written only if the app crashes: where it happened |
+| `/data/prosperolight/cache/` | The shaders the launcher compiled, so later launches are faster; safe to delete |
 
 The first start with filesystem access copies the saved PCs, the settings and
 the pairing from the title's own storage, so nothing has to be paired again.

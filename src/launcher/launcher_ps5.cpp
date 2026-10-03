@@ -316,6 +316,36 @@ void CaptureConnecting(gfx::Renderer &renderer, View &view, Frame &frame, Select
              static_cast<long long>((sys::monotonic_us() - started) / 1000));
 }
 
+// Every screen drawn once into the display's back buffer before the first
+// frame (nothing is shown: the next frame covers it). The driver compiles the
+// shaders a screen needs the first time it draws it; done here, behind the
+// splash picture, a tab no longer stutters the first time it opens.
+void WarmUp(gfx::Renderer &renderer, View &view, Frame &frame, int width, int height)
+{
+    const std::int64_t started = sys::monotonic_us();
+    const int shown = view.screen();
+    for (int screen = 0; screen < View::kScreenCount; ++screen)
+    {
+        view.warm(screen);
+        frame.reset();
+        frame.glass_texture = renderer.glass_texture();
+        view.draw(frame);
+        renderer.begin();
+        renderer.backdrop(frame.backdrop);
+        renderer.draw(frame.scene);
+        renderer.glass();
+        renderer.draw(frame.overlay);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+        renderer.present(0, width, height);
+    }
+    view.warm(shown);
+    glFinish();
+    sys::log("[PL] launcher: screens warmed up in %lld ms",
+             static_cast<long long>((sys::monotonic_us() - started) / 1000));
+}
+
 // The recorded sounds are read once and kept: a stream does not need the
 // memory back, and the launcher returns after every stream.
 audio::SoundBank &Sounds()
@@ -395,16 +425,27 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             view.show_stream_error(stream_error);
             view.set_players(SignedInUsers());
             sys::log("[PL] launcher: sound, controller and screens after %lld ms", elapsed());
+            Frame warm_frame;
+            WarmUp(renderer, view, warm_frame, display.width(), display.height());
 
             Frame frame;
             ui::Feedback feedback;
             PadSample samples[64];
             std::vector<std::uint32_t> posters;
             std::uint64_t frames = 0;
+            unsigned slow_frames = 0;
             std::int64_t last_frame = sys::monotonic_us();
             for (;;)
             {
                 const std::int64_t now = sys::monotonic_us();
+                // A frame that took long enough to be seen as a stutter.
+                if (frames > 1 && now - last_frame > 50000 && slow_frames < 60)
+                {
+                    ++slow_frames;
+                    sys::log("[PL] launcher: slow frame %lld ms on screen %d (frame %llu)",
+                             static_cast<long long>((now - last_frame) / 1000), view.screen(),
+                             static_cast<unsigned long long>(frames));
+                }
                 float dt = frames == 0 ? 1.0f / 60.0f : static_cast<float>(now - last_frame) / 1e6f;
                 last_frame = now;
                 if (dt > 0.05f)

@@ -221,6 +221,8 @@ static int run_paired_action(const char *host, uint16_t http_port,
         return GS_INVALID;
 
     memset(snapshot, 0, sizeof(*snapshot));
+    memset(&identity, 0, sizeof(identity));
+    memset(&server, 0, sizeof(server));
     snprintf(snapshot->host, sizeof(snapshot->host), "%s", host);
     snapshot->http_port = http_port;
     result = identity_init(&identity, MOONLIGHT_IDENTITY_DIRECTORY);

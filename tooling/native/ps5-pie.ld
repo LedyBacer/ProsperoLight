@@ -22,8 +22,10 @@ SECTIONS {
     .text 0 : ALIGN(CONSTANT(MAXPAGESIZE)) {
         QUAD(0xcccccccccccccccc)
         QUAD(0xcccccccccccccccc)
+        PROVIDE_HIDDEN(__pl_text_start = .);
         *(.text .text.*)
         *(.plt .plt.*)
+        PROVIDE_HIDDEN(__pl_text_end = .);
     } : text
 
     .eh_frame_hdr : ALIGN(CONSTANT(MAXPAGESIZE)) {

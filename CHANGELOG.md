@@ -1,5 +1,34 @@
 # Changelog
 
+## 01.000.083
+
+### Development build: faster start, no stutter on tabs, crash report
+
+Not released. Everything from 01.000.082 below is included.
+
+- **Faster start from the second launch on.** The launcher keeps the shaders
+  its graphics compile in `/data/prosperolight/cache`. The first try at this
+  stopped the app at its first shader: the cache writes through `mkstemp`,
+  which the OpenGL runtime takes from a system library the app does not load.
+  The app now has its own.
+- **No stutter the first time a tab opens.** Every screen is drawn once,
+  unseen, before the first frame, while the console's splash picture is still
+  up; the graphics driver compiled each screen's shaders on its first visit
+  before.
+- **Crash report.** A fault writes `logs/crash-last.txt` and the same text into
+  the log; `tools/symbolize-crash.py` names the functions. Stopping and
+  unpairing are written to the log too.
+- **Stopping an app no longer closes ProsperoLight** (expected; to be confirmed
+  on the console). Stopping and unpairing run on the launcher's worker thread
+  since 01.000.080, and nest a refresh inside a TLS request: the thread now has
+  a 1 MiB stack instead of the default.
+- The log notes any launcher frame that takes longer than 50 ms.
+
+### What was tested
+
+On the PC: the build, the tests and the launcher render check. On the console:
+see the notes for this build.
+
 ## 01.000.082
 
 ### Development build: one connecting screen, and no black start

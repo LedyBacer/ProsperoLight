@@ -231,6 +231,14 @@ A launcher that cannot open the display tries twice more, two seconds apart,
 then waits to be closed. After a stream above 60 Hz or in HDR, five seconds of
 black screen before the launcher returns are intended (`HFR_SETTLE_MS`).
 
+## The app closed by itself
+
+If the app faulted, it wrote `logs/crash-last.txt` (the one before is kept as
+`crash-prev.txt`) and the same text at the end of the launcher log: what
+happened, where, and the calls found on the stack, as offsets into the build's
+`build/llvm-pie.elf`. `python3 tools/symbolize-crash.py crash-last.txt
+build/llvm-pie.elf` names the functions; it needs the ELF of the same build.
+
 ## The app does not use `/data/prosperolight`
 
 The first line of the log is `[PL] storage: title=... status=N app=... data=...`.

@@ -15,6 +15,12 @@ namespace launcher
 
 namespace
 {
+// The worker's stack: the TLS requests to Sunshine run on it.
+constexpr std::size_t kWorkerStackBytes = 1u << 20;
+} // namespace
+
+namespace
+{
 
 // Settings changed with a slider are written once the player pauses.
 constexpr std::uint64_t kSaveDelayMs = 600;
@@ -461,10 +467,15 @@ void Model::Run(const Job &job, JobResult *result)
         result->result = moonlight_backend_refresh(job.host, job.port, &result->snapshot);
         break;
     case JobKind::unpair:
+        std::printf("[PL] launcher: unpairing %s:%u\n", job.host, job.port);
         result->result = moonlight_backend_unpair(job.host, job.port, &result->snapshot);
+        std::printf("[PL] launcher: unpair answered %d\n", result->result);
         break;
     case JobKind::stop:
+        std::printf("[PL] launcher: stopping the app on %s:%u\n", job.host, job.port);
         result->result = moonlight_backend_stop_app(job.host, job.port, &result->snapshot);
+        std::printf("[PL] launcher: stop answered %d (online=%u running=%d)\n", result->result,
+                    result->snapshot.online, result->snapshot.current_app_id);
         break;
     case JobKind::artwork:
     {
@@ -521,7 +532,15 @@ bool Model::StartNext()
     job_ = next;
     result_ = {};
     __atomic_store_n(&worker_done_, 0, __ATOMIC_RELEASE);
-    if (pthread_create(&worker_, nullptr, Worker, this) != 0)
+    // Stopping an app or unpairing runs a TLS request and then a refresh inside
+    // it, each with its own identity and server on the stack: more than a
+    // thread's default stack holds. The old launcher ran them on the main thread.
+    pthread_attr_t attributes;
+    pthread_attr_init(&attributes);
+    pthread_attr_setstacksize(&attributes, kWorkerStackBytes);
+    const int created = pthread_create(&worker_, &attributes, Worker, this);
+    pthread_attr_destroy(&attributes);
+    if (created != 0)
     {
         // Without a thread the request runs here; the screen waits for it.
         Run(job_, &result_);

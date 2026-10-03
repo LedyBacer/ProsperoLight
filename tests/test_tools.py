@@ -659,8 +659,44 @@ class ToolTests(unittest.TestCase):
         self.assertLess(first.index("prosperolight_release_splash();"),
                         first.index("sys::hide_splash_screen();"))
         self.assertLess(platform.index("display.swap()"), platform.index("if (++frames == 1)"))
-        # The runtime's shader cache stays off: it stopped the launcher on the console.
-        self.assertNotIn("setenv(", storage)
+        # Compiled shaders are kept between launches, per OpenGL runtime version, and
+        # the temporary file the cache writes through is made by the app itself.
+        fetch = (ROOT / "tools/fetch-opengl-sdk.sh").read_text(encoding="utf-8")
+        self.assertIn('setenv("PS5_SHADER_CACHE_DIR", shaders, 1)', storage)
+        version = re.search(r"^version=(\S+)$", fetch, re.M).group(1)
+        self.assertIn(f'kShaderCache[] = "opengl-{version}"', storage)
+        self.assertIn("int mkstemp(char *template_name)", shims)
+        self.assertIn("int isatty(int descriptor)", shims)
+        # Every screen is drawn once before the first frame.
+        self.assertLess(platform.index("WarmUp(renderer, view, warm_frame"),
+                        platform.index("if (++frames == 1)"))
+
+    def test_launcher_worker_has_room_for_tls_requests(self):
+        model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+        backend = (ROOT / "src/moonlight_backend.cpp").read_text(encoding="utf-8")
+
+        # Stop and unpair nest a refresh inside a TLS request on the worker.
+        self.assertIn("constexpr std::size_t kWorkerStackBytes = 1u << 20;", model)
+        self.assertIn("pthread_attr_setstacksize(&attributes, kWorkerStackBytes);", model)
+        action = backend[backend.index("static int run_paired_action(") :]
+        self.assertLess(action.index("memset(&identity, 0, sizeof(identity));"),
+                        action.index("identity_init(&identity"))
+
+    def test_crash_report_is_installed_first(self):
+        main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        report = (ROOT / "src/crash_report.cpp").read_text(encoding="utf-8")
+        script = (ROOT / "tooling/native/ps5-pie.ld").read_text(encoding="utf-8")
+        tool = (ROOT / "tools/symbolize-crash.py").read_text(encoding="utf-8")
+
+        body = main[main.index("int main()") :]
+        self.assertLess(body.index("storage::Initialize();"), body.index("crash::Install("))
+        self.assertLess(body.index("crash::Install("), body.index("launcher::Run("))
+        for name in ("SIGSEGV", "SIGBUS", "SIGILL", "SIGFPE", "SIGABRT"):
+            self.assertIn(f"{{{name}, \"{name}\"", report)
+        self.assertIn("PROVIDE_HIDDEN(__pl_text_start = .);", script)
+        self.assertIn("PROVIDE_HIDDEN(__pl_text_end = .);", script)
+        self.assertIn("(code size 0x", report)
+        self.assertIn("code size 0x", tool)
 
     def test_release_metadata_preserves_hdr_and_high_resolution_hfr_capabilities(self):
         configured = json.loads(

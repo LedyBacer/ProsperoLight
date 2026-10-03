@@ -5,6 +5,7 @@
  */
 
 #include "app_storage.hpp"
+#include "crash_report.hpp"
 #include "connecting_plate.hpp"
 #include "launcher/launcher.hpp"
 #include "moonlight_stream.hpp"
@@ -251,6 +252,8 @@ int main()
     // Filesystem access first, while the process has one thread: every path
     // the app reads or writes is settled here (app_storage.hpp).
     storage::Initialize();
+    // From here a fault leaves a report beside the log.
+    crash::Install(storage::paths().logs);
 #if PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS != 0
     RunVideoOutputSelfTest();
 #endif

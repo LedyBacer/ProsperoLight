@@ -13,7 +13,8 @@
 //   config/    prosperolight-config.bin: saved PCs and stream settings
 //   pairing/   cert.pem and key.pem: the identity Sunshine paired with
 //   logs/      prosperolight-launcher.log, the previous launch's log, and the
-//              last stream's performance report
+//              last stream's performance report; crash-last.txt after a crash
+//   cache/     the shaders the launcher compiled, so the next launch is faster
 // and the app's own files are read from the folder it was installed in.
 // Without it (no ELF loader on the console, or the request was refused) the
 // sandbox paths stay: /app0 and /download0, as in every earlier version.
