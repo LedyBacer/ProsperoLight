@@ -811,11 +811,11 @@ static void save_frame_trace()
     if (!prosperolight_logs_enabled())
         return;
 #if PROSPEROLIGHT_PERFORMANCE_DETAIL
-    constexpr auto temporary = MOONLIGHT_IDENTITY_DIRECTORY "/performance-frames.csv.tmp";
-    constexpr auto destination = MOONLIGHT_IDENTITY_DIRECTORY "/performance-frames.csv";
+    constexpr auto temporary = "/download0/performance-frames.csv.tmp";
+    constexpr auto destination = "/download0/performance-frames.csv";
     // Rows are batched: one write per row cost tens of thousands of system calls.
     static char batch[65536];
-    const int descriptor = sceKernelOpen(temporary, 0x601, 0600);
+    const int descriptor = sceKernelOpen(temporary, 0x601, 0644);
     if (descriptor < 0)
         return;
     size_t used = 0;
@@ -1028,9 +1028,9 @@ static void save_performance_summary(const native_renderer_state_t &state,
     log_performance_summary(report, length);
     if (!prosperolight_logs_enabled())
         return;
-    constexpr auto temporary = MOONLIGHT_IDENTITY_DIRECTORY "/performance-last.json.tmp";
-    constexpr auto destination = MOONLIGHT_IDENTITY_DIRECTORY "/performance-last.json";
-    const int descriptor = sceKernelOpen(temporary, 0x601, 0600);
+    constexpr auto temporary = "/download0/performance-last.json.tmp";
+    constexpr auto destination = "/download0/performance-last.json";
+    const int descriptor = sceKernelOpen(temporary, 0x601, 0644);
     if (descriptor < 0)
         return;
     const bool written = write_performance_bytes(descriptor, report, length);

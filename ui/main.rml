@@ -182,7 +182,7 @@
                         <button id="setting-pacing" class="setting-row">
                             <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
                             <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                            <span class="setting-name">Frame pacing</span><span class="setting-help">Paced smooths source timing; VRR requests variable refresh with fixed-output fallback</span>
+                            <span class="setting-name">Frame pacing</span><span class="setting-help">Smooth frame timing; VRR uses fixed refresh if unavailable</span>
                             <span id="setting-pacing-value" class="setting-value">Paced</span>
                         </button>
                         <button id="setting-logging" class="setting-row">

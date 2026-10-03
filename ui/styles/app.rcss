@@ -141,7 +141,7 @@ button.focused > .focused-chrome { display: block; }
 #settings-list scrollbarvertical sliderarrowdec, #settings-list scrollbarvertical sliderarrowinc { height: 0px; }
 .setting-row { display: block; position: relative; left: 0px; width: 1380px; height: 76px; margin-bottom: 8px; overflow: hidden; }
 .setting-name { position: absolute; left: 28px; top: 2px; width: 450px; height: 32px; font-size: 24px; line-height: 32px; }
-.setting-help { position: absolute; left: 28px; top: 38px; width: 820px; height: 28px; color: #84c9ff; font-size: 20px; line-height: 28px; }
+.setting-help { position: absolute; left: 28px; top: 38px; width: 820px; height: 28px; color: #84c9ff; font-size: 20px; line-height: 28px; white-space: nowrap; overflow: hidden; }
 .setting-value { position: absolute; left: 860px; top: 13px; width: 470px; height: 38px; color: #c8eaff; font-size: 24px; line-height: 38px; text-align: right; }
 .setting-fixed { border-color: #376b9b; background-color: #0a254a; }
 .settings-note { position: absolute; left: 34px; top: 820px; width: 1380px; height: 24px; color: #84c9ff; font-size: 20px; line-height: 24px; white-space: nowrap; }

@@ -138,7 +138,8 @@ bool PyroWaveVideoBackend::ingest(const uint8_t *data,
                                                                     0, 0.9f, nullptr, 0)
                    : decoder_.frame_ready();
 }
-VideoFrameTiming PyroWaveVideoBackend::present(void (*before_present)(void *), void *context)
+VideoFrameTiming PyroWaveVideoBackend::present(void (*before_present)(void *), void *context,
+                                               bool wait_for_prepared)
 {
     double start = clock_ms();
     unsigned index = 0;
@@ -176,7 +177,8 @@ VideoFrameTiming PyroWaveVideoBackend::present(void (*before_present)(void *), v
     // this fence is GPU completion, not physical display completion.
     if (before_present)
     {
-        VK_OK(vkWaitForFences(c_.device, 1, &c_.fence, VK_TRUE, 30000000000ull));
+        if (wait_for_prepared)
+            VK_OK(vkWaitForFences(c_.device, 1, &c_.fence, VK_TRUE, 30000000000ull));
         before_present(context);
     }
     VK_OK(vkQueuePresentKHR(c_.queue, &pi));

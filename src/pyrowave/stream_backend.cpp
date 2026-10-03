@@ -1,5 +1,8 @@
 #include "frame_cadence.hpp"
 #include "frame_pacing.hpp"
+#include "lan_http_report.hpp"
+#include <cstdio>
+#include <new>
 #include "presentation_preferences.hpp"
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "stream_backend.hpp"
@@ -63,6 +66,69 @@ uint64_t now_us()
     return uint64_t(t.tv_sec) * 1000000 + t.tv_nsec / 1000;
 }
 
+// Worker-owned bounded trace: allocate once, export only when the worker exits.
+// VideoOut count observations are not hardware scanout timestamps.
+struct OutputTrace
+{
+    struct Sample
+    {
+        int frame;
+        uint64_t pts, ready, submit, observed, flips;
+    };
+    static constexpr size_t capacity = 32768;
+    std::unique_ptr<Sample[]> samples;
+    size_t count{}, omitted{};
+    moonlight::FramePacing &pacer;
+    unsigned mode, fps;
+    OutputTrace(moonlight::FramePacing &p, unsigned m, unsigned f) : pacer(p), mode(m), fps(f)
+    {
+        if (prosperolight_logs_enabled())
+            samples.reset(new (std::nothrow) Sample[capacity]);
+    }
+    void append(const Sample &sample)
+    {
+        if (!samples)
+            return;
+        if (count == capacity)
+            ++omitted;
+        else
+            samples[count++] = sample;
+    }
+    ~OutputTrace()
+    {
+        log_line("PyroWave pacing result: mode=%u period_us=%llu reserve_us=%llu submissions=%llu "
+                 "misses=%llu resets=%llu late_max_us=%llu spacing_error_max_us=%llu",
+                 mode, (unsigned long long)pacer.stats.period_us,
+                 (unsigned long long)pacer.stats.reserve_us,
+                 (unsigned long long)pacer.stats.submissions,
+                 (unsigned long long)pacer.stats.misses, (unsigned long long)pacer.stats.resets,
+                 (unsigned long long)pacer.stats.late_max_us,
+                 (unsigned long long)pacer.stats.spacing_error_max_us);
+        if (!samples || !prosperolight_logs_enabled())
+            return;
+        const char *temporary = "/download0/pyrowave-output.csv.tmp";
+        const char *destination = "/download0/pyrowave-output.csv";
+        FILE *file = fopen(temporary, "w");
+        if (!file)
+            return;
+        bool ok = fprintf(file,
+                          "# mode=%u,fps=%u,count=%zu,omitted=%zu\n"
+                          "frame,pts_us,ready_us,submit_us,observed_us,flip_count\n",
+                          mode, fps, count, omitted) > 0;
+        for (size_t i = 0; ok && i < count; ++i)
+        {
+            const auto &v = samples[i];
+            ok = fprintf(file, "%d,%llu,%llu,%llu,%llu,%llu\n", v.frame, (unsigned long long)v.pts,
+                         (unsigned long long)v.ready, (unsigned long long)v.submit,
+                         (unsigned long long)v.observed, (unsigned long long)v.flips) > 0;
+        }
+        if (fclose(file) != 0)
+            ok = false;
+        if (!ok || rename(temporary, destination) != 0)
+            remove(temporary);
+    }
+};
+
 struct PacingWait
 {
     Session *session;
@@ -70,6 +136,7 @@ struct PacingWait
     const Frame *frame;
     unsigned mode;
     uint32_t refresh;
+    uint64_t ready_us{}, submit_us{};
 };
 
 void wait_prepared_frame(void *context)
@@ -77,6 +144,12 @@ void wait_prepared_frame(void *context)
     auto &wait = *static_cast<PacingWait *>(context);
     auto &s = *wait.session;
     const uint64_t started = now_us();
+    wait.ready_us = started;
+    if (wait.mode == 0)
+    {
+        wait.submit_us = started;
+        return;
+    }
     const uint64_t deadline = wait.pacer->target(
         wait.frame->number, wait.frame->presentation_us, started,
         wait.mode == 1 && selected_vsync ? wait.refresh : 0, 0, wait.mode == 2 ? wait.refresh : 0);
@@ -101,6 +174,7 @@ void wait_prepared_frame(void *context)
         }
     }
     const uint64_t submitted = now_us();
+    wait.submit_us = submitted;
     wait.pacer->submitted(deadline, submitted, submitted - started);
 }
 
@@ -113,6 +187,7 @@ void *worker(void *)
     const uint32_t refresh = static_cast<uint32_t>(s.backend->refresh_hz() * 100 + 0.5);
     pacer.reset(s.fps);
     const bool paced = mode != 0;
+    OutputTrace trace(pacer, mode, s.fps);
     log_line("PyroWave pacing: mode=%u requested_fps=%u selected_refresh_x100=%u source_clock=1",
              mode, s.fps, refresh);
     uint64_t last = now_us(), incoming = 0, decoded = 0, shown = 0, bytes = 0;
@@ -172,7 +247,7 @@ void *worker(void *)
             ++s.decoded;
             s.backend->update_hud(nullptr, native_agc_hud_enabled() != 0);
             PacingWait wait{&s, &pacer, &frame, mode, refresh};
-            auto timing = s.backend->present(paced ? wait_prepared_frame : nullptr, &wait);
+            auto timing = s.backend->present(wait_prepared_frame, &wait, paced);
             decode_ms += timing.decode_ms;
             render_ms += timing.render_ms;
             ++samples;
@@ -183,17 +258,11 @@ void *worker(void *)
                 log_line("PyroWave worker failed: VideoOut presentation counters unavailable");
                 if (error_callback)
                     error_callback(-1);
-                log_line("PyroWave pacing result: period_us=%llu reserve_us=%llu submissions=%llu "
-                         "misses=%llu resets=%llu late_max_us=%llu spacing_error_max_us=%llu",
-                         (unsigned long long)pacer.stats.period_us,
-                         (unsigned long long)pacer.stats.reserve_us,
-                         (unsigned long long)pacer.stats.submissions,
-                         (unsigned long long)pacer.stats.misses,
-                         (unsigned long long)pacer.stats.resets,
-                         (unsigned long long)pacer.stats.late_max_us,
-                         (unsigned long long)pacer.stats.spacing_error_max_us);
                 return nullptr;
             }
+            trace.append({frame.number, frame.presentation_us, wait.ready_us,
+                          wait.submit_us ? wait.submit_us : now_us(), now_us(),
+                          counters.flip_count});
             s.shown = counters.flip_count;
             presented_count = counters.flip_count;
             const uint64_t now = now_us(), elapsed = now - last;
