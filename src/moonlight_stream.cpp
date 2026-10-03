@@ -598,7 +598,7 @@ typedef struct native_renderer_state
     int32_t last_decode_error;
     uint32_t catchup_refreshes;
     uint32_t decoded;
-    uint32_t not_displayed;
+    std::atomic<uint32_t> not_displayed;
     uint32_t decoder_delayed;
     uint32_t input_sequence;
     uint64_t copy_total_us;
@@ -903,21 +903,21 @@ static void save_performance_summary(const native_renderer_state_t &state,
         PROSPEROLIGHT_OPUS_SIMD, PROSPEROLIGHT_AUDIO_MAX_BACKLOG_MS, state.slices_requested,
         PROSPEROLIGHT_PRESENT_OVERLAP, PROSPEROLIGHT_FLIP_POLL_US, PROSPEROLIGHT_PERFORMANCE_DETAIL,
         (unsigned long long)state.stream_bytes);
-    ok =
-        ok && report_append(
-                  report, sizeof(report), &length,
-                  "\"access_units\":%u,\"decoded\":%u,\"presented\":%u,\"not_displayed\":%u,"
-                  "\"network_frame_gaps\":%llu,\"decoder_frame_gaps\":%llu,\"queue_overflows\":%u,"
-                  "\"decoder_refreshes\":%u,\"decode_errors\":%u,\"last_decode_error\":%d,"
-                  "\"catchup_refreshes\":%u,\"unrecoverable_frames\":%u,"
-                  "\"pending_video_high_water\":%u,\n",
-                  state.access_units, state.decoded, state.presented.load(), state.not_displayed,
-                  (unsigned long long)state.drops.network, (unsigned long long)state.drops.decoder,
-                  std::atomic_load_explicit(&video_queue_overflows, std::memory_order_relaxed),
-                  state.decoder_refreshes, state.decode_errors, (int)state.last_decode_error,
-                  state.catchup_refreshes,
-                  std::atomic_load_explicit(&video_unrecoverable_frames, std::memory_order_relaxed),
-                  state.pending_video_high_water);
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"access_units\":%u,\"decoded\":%u,\"presented\":%u,\"not_displayed\":%u,"
+             "\"network_frame_gaps\":%llu,\"decoder_frame_gaps\":%llu,\"queue_overflows\":%u,"
+             "\"decoder_refreshes\":%u,\"decode_errors\":%u,\"last_decode_error\":%d,"
+             "\"catchup_refreshes\":%u,\"unrecoverable_frames\":%u,"
+             "\"pending_video_high_water\":%u,\n",
+             state.access_units, state.decoded, state.presented.load(), state.not_displayed.load(),
+             (unsigned long long)state.drops.network, (unsigned long long)state.drops.decoder,
+             std::atomic_load_explicit(&video_queue_overflows, std::memory_order_relaxed),
+             state.decoder_refreshes, state.decode_errors, (int)state.last_decode_error,
+             state.catchup_refreshes,
+             std::atomic_load_explicit(&video_unrecoverable_frames, std::memory_order_relaxed),
+             state.pending_video_high_water);
     ok = ok &&
          report_append(
              report, sizeof(report), &length,
@@ -4234,7 +4234,7 @@ configure_stream:
                      renderer.drain_calls, renderer.drain_faults, renderer.decoder_recreations,
                      renderer.decoder_refreshes,
                      std::atomic_load_explicit(&video_queue_overflows, std::memory_order_relaxed),
-                     renderer.decoded, renderer.not_displayed,
+                     renderer.decoded, renderer.not_displayed.load(),
                      (unsigned long long)renderer.drops.network,
                      (unsigned long long)renderer.drops.decoder, renderer.present_errors,
                      placed.applied, placed.applied + placed.failed,
