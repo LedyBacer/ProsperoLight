@@ -65,8 +65,14 @@ void *worker(void *)
 {
     auto &s = *session;
     moonlight::FrameCadence cadence;
-    cadence.reset(now_us(), 1000000, s.fps);
-    const bool paced = moonlight::presentation_mode() != 0;
+    const unsigned mode = moonlight::presentation_mode();
+    const uint32_t refresh = static_cast<uint32_t>(s.backend->refresh_hz() * 100 + 0.5);
+    const uint32_t rate = mode == 1 ? moonlight::fixed_cadence_rate(s.fps, refresh)
+                                    : s.fps * 100;
+    cadence.reset(now_us(), 100000000, rate);
+    const bool paced = mode != 0;
+    log_line("PyroWave pacing: mode=%u target_x100=%u selected_refresh_x100=%u",
+             mode, rate, refresh);
     uint64_t last = now_us(), incoming = 0, decoded = 0, shown = 0, bytes = 0;
     double decode_ms = 0, render_ms = 0;
     uint64_t samples = 0;

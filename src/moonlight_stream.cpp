@@ -1999,6 +1999,8 @@ static bool wait_presentation_deadline(native_renderer_state_t *state)
         {
             stream_cadence_rate = target;
             stream_cadence.reset(now, 100000000, target);
+            LOGI("Moonlight pacing: mode=%u target_x100=%u refresh_x100=%u",
+                        stream_presentation_mode, target, refresh);
         }
         const uint64_t deadline = stream_cadence.next(now);
         // Leave the newest-frame mailbox replaceable throughout this wait.
@@ -4001,6 +4003,8 @@ configure_stream:
 #endif
     stream_presentation_mode = moonlight::presentation_mode();
     stream_cadence_rate = renderer.stream_fps * 100;
+    LOGI("Moonlight pacing: mode=%u requested_fps=%u target_x100=%u",
+         stream_presentation_mode, renderer.stream_fps, stream_cadence_rate);
     stream_cadence.reset(monotonic_us(), 100000000, stream_cadence_rate);
     native_agc_set_vrr(stream_presentation_mode == 2);
     native_agc_set_vsync((int)vsync_enabled);

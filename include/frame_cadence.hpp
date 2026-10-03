@@ -22,7 +22,8 @@ inline uint32_t fixed_cadence_rate(uint32_t fps, uint32_t refresh_x100)
                ? matched : requested;
 }
 // Absolute monotonic deadlines with fractional periods carried forward.
-// Missed deadlines are rebased rather than replayed as a burst of catch-up frames.
+// An overdue frame is eligible immediately; never add another period after
+// a blocking flip or late decoder completion. Rebase to avoid catch-up bursts.
 class FrameCadence
 {
   public:
@@ -38,11 +39,6 @@ class FrameCadence
         if (!frequency_ || !rate_)
             return now;
         const uint64_t period = frequency_ / rate_;
-        if (now > deadline_ && now - deadline_ > period)
-        {
-            deadline_ = now;
-            remainder_ = 0;
-        }
         deadline_ += period;
         remainder_ += frequency_ % rate_;
         if (remainder_ >= rate_)
@@ -50,7 +46,12 @@ class FrameCadence
             ++deadline_;
             remainder_ -= rate_;
         }
-        return deadline_ > now ? deadline_ : now;
+        if (deadline_ < now)
+        {
+            deadline_ = now;
+            remainder_ = 0;
+        }
+        return deadline_;
     }
 
   private:
