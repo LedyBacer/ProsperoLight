@@ -10,6 +10,7 @@
 #include "presentation_preferences.hpp"
 #include "stream_profile.hpp"
 #include "ui_sound_preferences.hpp"
+#include "auto_close_preferences.hpp"
 #include "lan_http_report.hpp"
 
 #include <algorithm>
@@ -77,6 +78,7 @@ enum FormId
     kPacing,
     kLogging,
     kUiSound,
+    kAutoClose,
 };
 
 ui::Theme theme_by_id(const char *id)
@@ -428,6 +430,9 @@ void View::build()
         "48 kHz Opus, decoded on the console.";
     form_.add_toggle(kUiSound, "Menu sounds", true).description =
         "Menu navigation and confirmation sounds.";
+    form_.add_header("Application");
+    form_.add_toggle(kAutoClose, "Close app after stream", false).description =
+        "Close ProsperoLight after the stream ends. Off returns to the menu.";
     form_.add_header("Display");
     form_.add_choice(kArea, "Picture size", {"TV safe", "Edge to edge"}, 0).description =
         "TV safe keeps a margin for televisions that crop the picture.";
@@ -768,6 +773,7 @@ void View::sync_settings_from_config()
     form_.set_choice(kPacing, static_cast<int>(moonlight::presentation_mode()));
     form_.set_toggle(kLogging, prosperolight_logs_enabled() != 0);
     form_.set_toggle(kUiSound, prosperolight::ui_sound_enabled());
+    form_.set_toggle(kAutoClose, prosperolight::auto_close_enabled());
     const bool native = config.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE;
     form_.row(kPipeline)->disabled = !native;
     form_.row(kCores)->disabled = !native;
@@ -809,6 +815,11 @@ void View::apply_setting(int id)
     case kLogging:
         if (!prosperolight_logs_set_enabled(form_.toggle_value(kLogging)))
             toasts_.push(ui::StatusKind::danger, "Could not save logging", "Try again.");
+        sync_settings_from_config();
+        return;
+    case kAutoClose:
+        if (!prosperolight::auto_close_set_enabled(form_.toggle_value(kAutoClose)))
+            toasts_.push(ui::StatusKind::danger, "Could not save automatic close", "Try again.");
         sync_settings_from_config();
         return;
     case kUiSound:

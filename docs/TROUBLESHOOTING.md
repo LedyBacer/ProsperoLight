@@ -306,3 +306,11 @@ For frame pacing comparison, enable diagnostic logs and collect a bounded
 capture for each mode; [the plotting tool](frame-pacing-measurements.md) shows
 intervals and timing distributions. With filesystem elevation, logs and traces
 follow `/data/prosperolight/logs`; the fallback is `/download0`.
+
+### Native setup fails before the host connection
+
+`sysmodule207=80020063` is a local module-loading failure, not a Sunshine
+encoder/bitrate failure. The filesystem elevation helper preserves the title's
+SCE authority, capabilities and attributes while granting filesystem access;
+changing those identities affects runtime loading of Videodec2, keyboard and
+mouse modules. Keep the stage-specific log when diagnosing this failure.

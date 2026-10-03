@@ -26,7 +26,6 @@ using elevation::wire::Kind;
 using elevation::wire::Message;
 
 constexpr char target_title_id[] = "PPSA99002";
-constexpr std::uint64_t system_auth_id = UINT64_C(0x4801000000000013);
 
 struct AppInfo
 {
@@ -136,9 +135,9 @@ Status grant_filesystem(const Target &target, const State &original) noexcept
         return Status::unavailable;
     desired.jail = desired.root;
     desired.identity.fill(0);
-    desired.authority = system_auth_id;
-    desired.caps.fill(0xff);
-    desired.attrs[3] |= 0x80;
+    // Filesystem access must retain the application's module-loading identity.
+    // Replacing its SCE authority/capabilities also affects native sysmodules.
+    // Root credentials and filesystem roots are sufficient for /data access.
 
     State verified{};
     if (write_state(target, desired) && read_state(target, verified) && verified == desired)

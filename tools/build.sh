@@ -432,6 +432,9 @@ if [[ $format == ffpfsc || $format == all ]]; then
     rm -f -- "$dist/$title_id.ffpfsc"
     "$mkpfs" pack folder --no-adjust-output-file-extension \
         --version PS5 --verify "$app" "$dist/$title_id.ffpfsc"
+    # Raw exFAT avoids the PFSC mounting corruption observed on firmware 13.60.
+    "$root/.deps/MkPFS/.venv-linux/bin/python" "$root/tools/pack-exfat.py" \
+        "$app" "$dist/$title_id.exfat"
 fi
 
 printf 'Build complete.\nApp folder: %s\n' "$app"

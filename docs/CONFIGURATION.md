@@ -217,3 +217,11 @@ Per-stream pacing summaries report learned period, reserve, missed readiness tar
 The upstream OpenGL launcher log additionally retains the current and previous
 launch, bounded by a periodic flush/size check. Disabling logging redirects
 stdout/stderr to `/dev/null`; crash reports remain available independently.
+
+### Automatic app close
+
+`Close app after stream` is off by default. When enabled, ProsperoLight requests
+a clean PS5 title shutdown after leaving/ending a stream, after streaming
+resources are released. It does not stop the game on the host. Initial
+connection failures return to the launcher for recovery. The setting persists
+in `config/prosperolight-auto-close.bin` (PLE1 + boolean).

@@ -785,13 +785,13 @@ class ToolTests(unittest.TestCase):
         self.assertIn('"Jinja2==3.1.6" "jsonschema==4.25.1"', workflow)
         self.assertIn('python3 -m zipfile -c "$TITLE_ID.zip" "$TITLE_ID"', workflow)
         self.assertIn(
-            'sha256sum "$TITLE_ID.ffpfsc" "$TITLE_ID.zip" > SHA256SUMS',
+            'sha256sum "$TITLE_ID.exfat" "$TITLE_ID.ffpfsc" "$TITLE_ID.zip" > SHA256SUMS',
             workflow,
         )
         self.assertIn("dist/${{ env.TITLE_ID }}.zip", workflow)
         self.assertIn("dist/SHA256SUMS", workflow)
         self.assertIn(
-            "Expected one FFPFSC image, one app-folder ZIP, and SHA256SUMS.",
+            "Expected one raw exFAT image, one FFPFSC image, one app-folder ZIP, and SHA256SUMS.",
             workflow,
         )
         self.assertIn("find . -type f -name 'PPSA*.ffpfsc' -print0", workflow)
@@ -799,7 +799,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("find . -type f -name 'SHA256SUMS' -print0", workflow)
         self.assertIn('sha256sum -c "$(basename "${checksums[0]}")"', workflow)
         self.assertIn(
-            'assets=("release/$IMAGE" "release/$ARCHIVE" "release/$CHECKSUM")',
+            'assets=("release/$RAW_IMAGE" "release/$IMAGE" "release/$ARCHIVE" "release/$CHECKSUM")',
             workflow,
         )
         self.assertIn("gh release delete-asset", workflow)

@@ -52,7 +52,7 @@ struct Kept
 char g_kept_config[256 * 1024];
 char g_kept_certificate[16 * 1024];
 char g_kept_key[16 * 1024];
-char g_kept_preferences[3][16];
+char g_kept_preferences[4][16];
 Kept g_kept[] = {
     {"/download0/prosperolight-config.bin", "config", "prosperolight-config.bin", g_kept_config,
      sizeof(g_kept_config), 0},
@@ -65,6 +65,8 @@ Kept g_kept[] = {
      g_kept_preferences[1], sizeof(g_kept_preferences[1]), 0},
     {"/download0/prosperolight-ui-sound.bin", "config", "prosperolight-ui-sound.bin",
      g_kept_preferences[2], sizeof(g_kept_preferences[2]), 0},
+    {"/download0/prosperolight-auto-close.bin", "config", "prosperolight-auto-close.bin",
+     g_kept_preferences[3], sizeof(g_kept_preferences[3]), 0},
 };
 
 bool is_file(const char *path)

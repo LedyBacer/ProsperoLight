@@ -276,7 +276,8 @@ Outputs are written to:
 
 ```text
 dist/PPSA99002/           complete title folder
-dist/PPSA99002.ffpfsc     compressed installation image
+dist/PPSA99002.exfat      recommended raw installation image
+dist/PPSA99002.ffpfsc     optional compressed installation image
 ```
 
 Useful development gates are:
@@ -612,3 +613,14 @@ Copyright © 2026 BlackBearReloaded. Licensed under GPL-3.0-or-later; see [LICEN
 
 This project was developed with AI assistance from OpenAI and/or Anthropic tools.
 <!-- bbr-footer:end -->
+
+### Raw production image
+
+Use `PPSA99002.exfat` on PS5. It contains the same production files as the
+compressed image, and the build reads every file back to verify its hash.
+Firmware 13.60 testing exposed duplicated 64 KiB eboot blocks when mounting
+the compressed FFPFSC; the raw image matched the executable and launched
+correctly. The compressed artifact remains available for investigation.
+
+Settings → Application → `Close app after stream` closes ProsperoLight after
+a stream ends when enabled; the default returns to the launcher.
