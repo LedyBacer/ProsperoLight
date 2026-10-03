@@ -90,6 +90,7 @@ RUNTIME_INPUTS := tools/rebuild-libc.sh \
 	$(wildcard tooling/native/runtime/*.txt)
 HOST_UNIT_TEST := build/tests/prosperolight_tests
 HOST_RUNTIME_TEST := build/tests/cpp_runtime_tests
+HOST_ELEVATION_TEST := build/tests/elevation_client
 STREAM_ARCHIVES := build/stream-deps/libmoonlight-common-c.a \
 	build/stream-deps/libopus.a build/stream-deps/libmbedtls.a \
 	build/stream-deps/libmbedx509.a build/stream-deps/libmbedcrypto.a
@@ -118,11 +119,13 @@ test-deps:
 	@printf '%s\n' '==> [test-deps] Fetching the pinned host-only GoogleTest source'
 	@bash tools/setup-test-dependencies.sh >/dev/null
 
-test-unit: $(HOST_UNIT_TEST) $(HOST_RUNTIME_TEST)
+test-unit: $(HOST_UNIT_TEST) $(HOST_RUNTIME_TEST) $(HOST_ELEVATION_TEST)
 	@printf '%s\n' '==> [test-unit] Running host-native GoogleTest application tests'
 	@$(HOST_UNIT_TEST) $(GTEST_ARGS)
 	@printf '%s\n' '==> [test-unit] Running C++ allocation runtime tests'
 	@$(HOST_RUNTIME_TEST)
+	@printf '%s\n' '==> [test-unit] Running Lapy cooperative elevation client tests'
+	@$(HOST_ELEVATION_TEST)
 
 $(HOST_UNIT_TEST): tests/test_prosperolight.cpp include/moonlight_config.hpp \
 		include/moonlight_performance.hpp include/moonlight_tuning.hpp \
@@ -157,6 +160,13 @@ $(HOST_RUNTIME_TEST): tests/test_cpp_runtime.cpp tooling/native/app_cpp_runtime.
 	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -fno-exceptions -fno-rtti \
 		tests/test_cpp_runtime.cpp tooling/native/app_cpp_runtime.cpp \
 		$(HOST_TEST_LDFLAGS) -o $@
+
+$(HOST_ELEVATION_TEST): tests/test_elevation.cpp src/elevation/elevation.cpp \
+		src/elevation/elevation.hpp
+	@printf '%s\n' '==> [test-unit] Compiling the Lapy cooperative elevation client test'
+	@mkdir -p -- $(@D)
+	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -Isrc/elevation \
+		tests/test_elevation.cpp $(HOST_TEST_LDFLAGS) -o $@
 
 test-integration:
 	@printf '%s\n' '==> [test-integration] Running host tooling integration tests'

@@ -1,13 +1,25 @@
-# Filesystem access (sandbox elevation)
+# Filesystem access with upstream Lapy
 
-From [ps5-native-app-boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate)
-`examples/sandbox-elevation`, as ProsperoEden carries it (GPL-3.0-or-later). The app side is in
-`src/elevation` (`elevation.hpp`, `protocol.hpp`, `elevation.cpp`); this folder has the helper the
-console's ELF loader runs (`helper/`) and the check of its file (`validate-helper.py`).
+ProsperoLight uses the cooperative owned-root protocol from
+[ArkSama's PS5-Lapy-JB-Daemon](https://github.com/ArkSama/PS5-Lapy-JB-Daemon) and
+[mpereiraesaa's PS5-Lapy-JB-Daemon](https://github.com/mpereiraesaa/PS5-Lapy-JB-Daemon).
+Lapy is loaded separately on the console and performs the privileged operation. ProsperoLight
+only publishes the requesting process ID through `/download0/elevate_proc`, waits for the
+result, and proves that `/data` is readable and writable before using it.
 
-ProsperoLight changes: the helper's `target_title_id` is `PPSA99002`, and it reads `protocol.hpp`
-from `src/elevation`. The build makes the helper with the PS5 payload SDK and ships it as
-`sandbox-elevator.elf` beside `eboot.bin`. `storage::Initialize()` (`src/app_storage.cpp`) asks
-for `Capability::filesystem` once at startup, and with it the app keeps everything it writes
-under `/data/prosperolight`. Without an ELF loader on the console the request fails and the app
-keeps its sandbox paths (`/app0`, `/download0`).
+The application-side request follows Lapy's upstream
+[`cooperative_elevation.c`](https://github.com/mpereiraesaa/PS5-Lapy-JB-Daemon/blob/main/examples/cooperative_elevation.c)
+example. The result handshake and `/data` proof follow its upstream cooperative test app. The
+request file is written to a temporary file and atomically renamed so Lapy cannot observe a
+partial JSON document.
+
+ProsperoLight does not bundle, fork, or reimplement the Lapy daemon. In particular, the package
+contains no `sandbox-elevator.elf`, kernel offsets, credential mutation, file-descriptor-table
+mutation, or elfldr connection. Use an official upstream Lapy owned-root build in one-shot or
+resident-service mode. If no compatible Lapy service is waiting, the request times out and the
+app stays on `/app0` and `/download0` paths.
+
+Credits for Lapy and the cooperative elevation design go to
+[ArkSama and the PS5-Lapy-JB-Daemon contributors](https://github.com/ArkSama/PS5-Lapy-JB-Daemon/graphs/contributors)
+and
+[mpereiraesaa and the PS5-Lapy-JB-Daemon contributors](https://github.com/mpereiraesaa/PS5-Lapy-JB-Daemon/graphs/contributors).

@@ -23,7 +23,7 @@ extern "C" int sceKernelDebugOutText(int channel, const char *text);
 namespace
 {
 
-// Must match sce_sys/param.json and the helper (tooling/elevation/helper).
+// Must match sce_sys/param.json.
 constexpr char kTitleId[] = "PPSA99002";
 constexpr char kDataDir[] = "/data/prosperolight";
 constexpr char kInstallDir[] = "/data/homebrew/PPSA99002";

@@ -16,7 +16,7 @@
 //              last stream's performance report; crash-last.txt after a crash
 //   cache/     the shaders the launcher compiled, so the next launch is faster
 // and the app's own files are read from the folder it was installed in.
-// Without it (no ELF loader on the console, or the request was refused) the
+// Without it (no compatible upstream Lapy service, or the request was refused) the
 // sandbox paths stay: /app0 and /download0, as in every earlier version.
 
 namespace storage

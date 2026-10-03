@@ -257,7 +257,6 @@ class ToolTests(unittest.TestCase):
     def test_files_are_kept_under_data_prosperolight(self):
         main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
         storage = (ROOT / "src/app_storage.cpp").read_text(encoding="utf-8")
-        helper = (ROOT / "tooling/elevation/helper/main.cpp").read_text(encoding="utf-8")
         build = (ROOT / "tools/build.sh").read_text(encoding="utf-8")
         title = json.loads((ROOT / "sce_sys/param.json").read_text(encoding="utf-8"))["titleId"]
 
@@ -265,8 +264,7 @@ class ToolTests(unittest.TestCase):
         body = main[main.index("int main()") :]
         self.assertLess(body.index("storage::Initialize();"), body.index("RunVideoOutputSelfTest();"))
         self.assertLess(body.index("storage::Initialize();"), body.index("sceSysmoduleLoadModule("))
-        # The helper only answers this title, and the paths name it.
-        self.assertIn(f'target_title_id[] = "{title}"', helper)
+        # The paths name this title; privileged work stays in upstream Lapy.
         self.assertIn(f'kTitleId[] = "{title}"', storage)
         self.assertIn(f'kInstallDir[] = "/data/homebrew/{title}"', storage)
         self.assertIn('kDataDir[] = "/data/prosperolight"', storage)
@@ -276,9 +274,10 @@ class ToolTests(unittest.TestCase):
         self.assertLess(initialize.index("remember(kept);"), initialize.index("elevation::request("))
         self.assertLess(initialize.index("elevation::request("), initialize.index("open_log("))
         self.assertIn("setegid(getgid())", initialize)
-        # The build checks the helper and ships it beside eboot.bin.
-        self.assertIn('validate-helper.py" "$build/elevation/sandbox-elevator.elf"', build)
-        self.assertIn('"$app/sandbox-elevator.elf"', build)
+        # The package never carries the deprecated kernel-writing helper.
+        self.assertIn('rm -f "$app/sandbox-elevator.elf"', build)
+        self.assertNotIn("validate-helper.py", build)
+        self.assertFalse((ROOT / "tooling/elevation/helper/main.cpp").exists())
         # No other source names a sandbox path.
         for path in sorted((ROOT / "src").rglob("*")):
             if path.suffix not in {".c", ".cpp", ".h", ".hpp"} or "elevation" in path.parts:

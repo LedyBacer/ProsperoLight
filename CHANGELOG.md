@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Replaced the bundled sandbox elevation helper with the cooperative upstream
+  PS5-Lapy-JB-Daemon owned-root flow. The app package no longer contains
+  `sandbox-elevator.elf` or app-local kernel credential/file-descriptor writes.
+
 ## 01.000.080
 
 ### Beta: a new launcher, four controllers, files that survive updates

@@ -105,8 +105,8 @@ stereo instead.
 
 `storage::Initialize()` (`src/app_storage.cpp`) is the first call in `main`,
 while the process has one thread. It reads what an earlier version kept in
-`/download0`, asks for filesystem access (`src/elevation`: the bundled helper
-`sandbox-elevator.elf` is sent to the console's ELF loader on port 9021), and
+`/download0`, asks a separately loaded upstream Lapy owned-root service for
+filesystem access (`src/elevation` publishes its cooperative request), and
 settles every path in `storage::paths()`: the install folder for the app's own
 files and `/data/prosperolight` for what it writes. It then opens the log. No
 other source names a sandbox path; without access the same structure holds

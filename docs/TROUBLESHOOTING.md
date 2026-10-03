@@ -242,12 +242,12 @@ build/llvm-pie.elf` names the functions; it needs the ELF of the same build.
 ## The app does not use `/data/prosperolight`
 
 The first line of the log is `[PL] storage: title=... status=N app=... data=...`.
-`status=0` means the console gave filesystem access. `status=5` means the helper
-`sandbox-elevator.elf` is missing beside `eboot.bin`; `status=9` means nothing
-answered on port 9021: load an ELF loader (elfldr) before starting the app. With
-any status other than 0 the app keeps its files in `/download0` and reads its
-own files from `/app0`. The helper also writes one line to klog:
-`[sandbox-elevator] fw=... pid=... capability=1 result=N`.
+`status=0` means the console gave filesystem access. `status=5` means the app
+could not create Lapy's result file; `status=9` means it could not publish the
+cooperative request; `status=11` means no compatible Lapy service completed the
+request within ten seconds. Load an official upstream Lapy owned-root build
+before starting the app. With any status other than 0 the app keeps its files
+in `/download0` and reads its own files from `/app0`.
 
 ## `/download0` is missing
 
