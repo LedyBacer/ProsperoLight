@@ -178,6 +178,12 @@
                         <span class="setting-name">UI sounds</span><span class="setting-help">Menu navigation and confirmation sounds</span>
                         <span id="setting-ui-sound-value" class="setting-value">On</span>
                     </button>
+                    <button id="setting-pacing" class="setting-row setting-row-12">
+                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                        <span class="setting-name">Frame pacing</span><span class="setting-help">VRR uses synchronized flips; unsupported output falls back to fixed refresh</span>
+                        <span id="setting-pacing-value" class="setting-value">Paced</span>
+                    </button>
                     <span id="settings-note" class="settings-note">Hold touchpad click: Triangle keyboard; Square mouse; R1 stats; L1 return. Host: touchpad click+L3 Select/Back; touchpad click+R3 PS/Guide.</span>
                 </section>
 

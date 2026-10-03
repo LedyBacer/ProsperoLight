@@ -10,6 +10,7 @@
 #include "radio_ime.hpp"
 #include "ui_sound.hpp"
 #include "server_endpoint.h"
+#include "presentation_preferences.hpp"
 
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
@@ -91,7 +92,7 @@ const char *const kSettingFocus[] = {
     "setting-codec",   "setting-resolution", "setting-framerate",
     "setting-bitrate", "setting-chroma",     "setting-display-area",
     "setting-hdr",     "setting-audio",      "setting-vsync",
-    "setting-decoder", "setting-cores", "setting-ui-sound"};
+    "setting-decoder", "setting-cores", "setting-ui-sound", "setting-pacing"};
 
 FocusList FocusFor(unsigned screen)
 {
@@ -779,6 +780,14 @@ void MoonlightApp::Activate()
                 return;
             }
         }
+        else if (std::strcmp(kSettingFocus[focus_], "setting-pacing") == 0)
+        {
+            if (!moonlight::save_presentation_mode((moonlight::presentation_mode() + 1) % 3))
+            {
+                SetText(document_, "settings-note", "Could not save presentation setting.");
+                return;
+            }
+        }
         (void)moonlight_config_save(&config_);
         prosperolight::ui_sound_play(prosperolight::UiSoundCue::Setting);
         UpdateSettings();
@@ -1200,7 +1209,7 @@ void MoonlightApp::UpdateFocus()
                                "setting-chroma",    "setting-display-area",
                                "setting-hdr",       "setting-audio",
                                "setting-vsync",     "setting-decoder",
-                               "setting-cores", "setting-ui-sound"};
+                               "setting-cores", "setting-ui-sound", "setting-pacing"};
     for (const char *id : all)
         SetClass(document_, id, "focused", false);
 
@@ -1504,6 +1513,9 @@ void MoonlightApp::UpdateSettings()
     SetText(document_, "setting-cores-value", text);
     SetText(document_, "setting-ui-sound-value",
             prosperolight::ui_sound_enabled() ? "On" : "Off");
+    const unsigned pacing = moonlight::presentation_mode();
+    SetText(document_, "setting-pacing-value",
+            pacing == 2 ? "Paced + VRR" : pacing == 1 ? "Paced" : "Unpaced");
     SetText(document_, "setting-cores-help",
             config_.decoder_cores == MOONLIGHT_DECODER_CORES_MIN
                 ? "Reserved for decoding; stream threads use the remaining cores"

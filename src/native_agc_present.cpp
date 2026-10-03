@@ -977,6 +977,7 @@ static std::atomic<int> keyboard_shifted = 0;
 static std::atomic<uint32_t> keyboard_generation = 0;
 static std::atomic<uint32_t> requested_flip_mode = VIDEO_OUT_FLIP_MODE_VSYNC;
 static std::atomic<int> hsync_rejected = 0;
+static std::atomic<int> vrr_requested = 0;
 
 static uint32_t effective_flip_mode(void)
 {
@@ -985,10 +986,17 @@ static uint32_t effective_flip_mode(void)
                : std::atomic_load_explicit(&requested_flip_mode, std::memory_order_relaxed);
 }
 
+void native_agc_set_vrr(int enabled)
+{
+    vrr_requested.store(enabled != 0, std::memory_order_relaxed);
+}
+
 void native_agc_set_vsync(int enabled)
 {
     std::atomic_store_explicit(&requested_flip_mode,
-                               enabled ? VIDEO_OUT_FLIP_MODE_VSYNC : VIDEO_OUT_FLIP_MODE_HSYNC,
+                               (enabled || vrr_requested.load(std::memory_order_relaxed))
+                                   ? VIDEO_OUT_FLIP_MODE_VSYNC
+                                   : VIDEO_OUT_FLIP_MODE_HSYNC,
                                std::memory_order_relaxed);
 }
 
@@ -1189,9 +1197,22 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
     *preset_result = sceVideoOutConfigureOutput(handle, VIDEO_OUT_REQUEST_120_HZ, NULL, NULL, NULL);
     if (*preset_result != 0)
         return *preset_result;
-    if (requested_fps == 90u)
+    if (vrr_requested.load(std::memory_order_relaxed))
+    {
         *vrr_result = sceVideoOutVrrUnpegFromFixedRate(handle);
-    return *vrr_result;
+        if (*vrr_result != 0)
+        {
+            const uint32_t fixed_mode = requested_fps > 60u ? VIDEO_OUT_REQUEST_120_HZ
+                                                           : VIDEO_OUT_REQUEST_DEFAULT;
+            const int fallback = sceVideoOutConfigureOutput(handle, fixed_mode, NULL, NULL, NULL);
+            char line[160];
+            snprintf(line, sizeof(line), "VRR unavailable: rc=%08x fixed_fallback=%08x",
+                     (uint32_t)*vrr_result, (uint32_t)fallback);
+            report_agc_receipt(line);
+            return fallback;
+        }
+    }
+    return 0;
 }
 
 static int configure_launcher_output(int32_t handle)
@@ -1387,7 +1408,8 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
     presenter.video = sceVideoOutOpen(0xff, 0, 0, NULL);
     if (presenter.video >= 0)
         open_flip_events();
-    if (presenter.video >= 0 && requested_fps > 60u)
+    if (presenter.video >= 0 &&
+        (requested_fps > 60u || vrr_requested.load(std::memory_order_relaxed)))
         mode_result =
             configure_high_refresh_output(presenter.video, requested_fps, &mode_support_result,
                                           &mode_preset_result, &mode_vrr_result);
@@ -1802,7 +1824,7 @@ int native_agc_present_shutdown(void)
     }
     if (presenter.video >= 0 && presenter.ready)
         unregister_result = sceVideoOutUnregisterBuffers(presenter.video, 0);
-    if (presenter.video >= 0 && presenter.requested_fps > 60u)
+    if (presenter.video >= 0)
     {
         restore_result = configure_launcher_output(presenter.video);
         if (restore_result == 0)
