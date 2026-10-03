@@ -1202,8 +1202,8 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
         *vrr_result = sceVideoOutVrrUnpegFromFixedRate(handle);
         if (*vrr_result != 0)
         {
-            const uint32_t fixed_mode = requested_fps > 60u ? VIDEO_OUT_REQUEST_120_HZ
-                                                           : VIDEO_OUT_REQUEST_DEFAULT;
+            const uint32_t fixed_mode =
+                requested_fps > 60u ? VIDEO_OUT_REQUEST_120_HZ : VIDEO_OUT_REQUEST_DEFAULT;
             const int fallback = sceVideoOutConfigureOutput(handle, fixed_mode, NULL, NULL, NULL);
             char line[160];
             snprintf(line, sizeof(line), "VRR unavailable: rc=%08x fixed_fallback=%08x",

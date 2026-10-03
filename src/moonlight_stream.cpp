@@ -1983,12 +1983,23 @@ static void *video_decode_thread(void *context)
 
 static moonlight::FrameCadence stream_cadence;
 static unsigned stream_presentation_mode = 1;
+static uint32_t stream_cadence_rate = 0;
 
 static int submit_presentation(native_renderer_state_t *state, const stream_ready_frame_t &item)
 {
     if (stream_presentation_mode)
     {
         const uint64_t now = monotonic_us();
+        uint32_t width = 0, height = 0, refresh = 0;
+        native_agc_output_status(&width, &height, &refresh);
+        const uint32_t target = stream_presentation_mode == 1
+                                    ? moonlight::fixed_cadence_rate(state->stream_fps, refresh)
+                                    : state->stream_fps * 100;
+        if (target != stream_cadence_rate)
+        {
+            stream_cadence_rate = target;
+            stream_cadence.reset(now, 100000000, target);
+        }
         const uint64_t deadline = stream_cadence.next(now);
         if (deadline > now)
             sceKernelUsleep(static_cast<uint32_t>(deadline - now));
@@ -3967,7 +3978,8 @@ configure_stream:
     }
 #endif
     stream_presentation_mode = moonlight::presentation_mode();
-    stream_cadence.reset(monotonic_us(), 1000000, renderer.stream_fps);
+    stream_cadence_rate = renderer.stream_fps * 100;
+    stream_cadence.reset(monotonic_us(), 100000000, stream_cadence_rate);
     native_agc_set_vrr(stream_presentation_mode == 2);
     native_agc_set_vsync((int)vsync_enabled);
     // Keep every stream thread off the decoder's CPUs. New threads inherit the

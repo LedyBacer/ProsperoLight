@@ -14,6 +14,7 @@ void PyroWaveVideoBackend::initialize(unsigned width, unsigned height, unsigned 
                                       bool hdr, bool vsync, bool tv_safe)
 {
     const bool request_vrr = moonlight::presentation_mode() == 2;
+    const bool prefer_high_refresh = fps > 60 || request_vrr;
     const int output_flags = (fps > 60 || request_vrr ? 1 : 0) | (request_vrr ? 2 : 0);
     vsync = vsync || request_vrr;
     refresh_ = 0;

@@ -1,10 +1,12 @@
 /*
+ * ps5-native-app-boilerplate - Persistent presentation and endpoint policies.
  * Copyright (C) 2026 BlackBearReloaded
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #pragma once
 #include <cstdio>
-namespace moonlight {
+namespace moonlight
+{
 // Independent storage avoids changing legacy codec/host configuration layouts.
 inline unsigned presentation_mode()
 {
@@ -13,8 +15,8 @@ inline unsigned presentation_mode()
     if (!file)
         return 1;
     const bool valid = std::fread(bytes, 1, sizeof(bytes), file) == sizeof(bytes) &&
-                       bytes[0] == 'P' && bytes[1] == 'L' && bytes[2] == 'V' &&
-                       bytes[3] == 1 && bytes[4] <= 2;
+                       bytes[0] == 'P' && bytes[1] == 'L' && bytes[2] == 'V' && bytes[3] == 1 &&
+                       bytes[4] <= 2;
     std::fclose(file);
     return valid ? bytes[4] : 1;
 }

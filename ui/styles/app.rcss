@@ -46,7 +46,7 @@ button {
 .host-chrome { width: 820px; height: 246px; }
 .game-chrome { width: 480px; height: 470px; }
 .app-chrome { width: 260px; height: 340px; }
-.setting-chrome { width: 1380px; height: 64px; }
+.setting-chrome { width: 1380px; height: 54px; }
 .action-chrome { width: 250px; height: 72px; }
 .panel-chrome { position: absolute; left: 0px; top: 0px; }
 .detail-panel-chrome { width: 530px; height: 478px; }
@@ -170,5 +170,3 @@ button.focused > .focused-chrome { display: block; }
 #pair-modal-status { position: absolute; left: 48px; top: 354px; width: 434px; height: 72px; color: #b6ddf8; font-size: 20px; line-height: 30px; text-align: center; }
 
 .hidden { display: none; }
-
-.setting-row-10 { top: 724px; }

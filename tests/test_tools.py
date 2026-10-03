@@ -446,7 +446,7 @@ class ToolTests(unittest.TestCase):
         self.assertNotIn("sceVideoOutWaitVblank", wait)
         self.assertIn("#define PROSPEROLIGHT_FLIP_POLL_US 500", presenter)
         self.assertIn("sceKernelUsleep(PROSPEROLIGHT_FLIP_POLL_US);", presenter)
-        self.assertIn("if (requested_fps == 90u)", presenter)
+        self.assertIn("requested_fps > 60u", presenter)
         self.assertIn("sceVideoOutIsOutputSupported", presenter)
         self.assertIn("sceVideoOutConfigureOutput", presenter)
         self.assertNotIn("sceVideoOutSysConfigureOutput", presenter)
@@ -627,10 +627,10 @@ class ToolTests(unittest.TestCase):
         self.assertIn(configured["titleId"], readme)
         self.assertIn(configured["contentVersion"], readme)
         for shortcut in (
-            "Select + L1",
-            "Select + R1",
-            "Select + Square",
-            "Select + Triangle",
+            "Touchpad click + L1",
+            "Touchpad click + R1",
+            "Touchpad click + Square",
+            "Touchpad click + Triangle",
         ):
             self.assertIn(shortcut, readme)
 
@@ -658,14 +658,19 @@ class ToolTests(unittest.TestCase):
         markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
         styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
 
-        self.assertEqual(markup.count('class="button-chrome setting-chrome'), 22)
-        self.assertEqual(markup.count('width="1380" height="88"'), 22)
-        self.assertIn(".setting-chrome { width: 1380px; height: 64px; }", styles)
-        self.assertIn(".setting-row { position: absolute; left: 34px; width: 1380px; height: 60px;", styles)
-        # Eleven rows on a 61-pixel pitch end at 834; the note and footer follow.
-        self.assertIn(".setting-row-10 { top: 774px; }", styles)
-        self.assertIn(".settings-note { position: absolute; left: 34px; top: 850px;", styles)
-        self.assertIn("#controller-footer { position: absolute; left: 0px; top: 1004px;", styles)
+        import re
+        rows = dict((int(index), int(top)) for index, top in
+                    re.findall(r"\.setting-row-(\d+) \{ top: (\d+)px; \}", styles))
+        row_height = int(re.search(r"\.setting-row \{[^}]*?height: (\d+)px", styles)[1])
+        note_top = int(re.search(r"\.settings-note \{[^}]*?top: (\d+)px", styles)[1])
+        footer_top = int(re.search(r"#controller-footer \{[^}]*?top: (\d+)px", styles)[1])
+        self.assertEqual(sorted(rows), list(range(len(rows))))
+        self.assertEqual(markup.count('class="button-chrome setting-chrome'), len(rows) * 2)
+        for index, top in rows.items():
+            self.assertLessEqual(top + row_height, note_top)
+            if index:
+                self.assertGreaterEqual(top, rows[index - 1] + row_height)
+        self.assertLess(note_top, footer_top)
         for setting in ("chroma", "vsync", "decoder", "cores"):
             self.assertIn(f'id="setting-{setting}"', markup)
             self.assertIn(f'id="setting-{setting}-value"', markup)

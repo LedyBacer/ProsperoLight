@@ -1,16 +1,31 @@
 /*
+ * ps5-native-app-boilerplate - Persistent presentation and endpoint policies.
  * Copyright (C) 2026 BlackBearReloaded
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #pragma once
 #include <cstdint>
 
-namespace moonlight {
+namespace moonlight
+{
+// Account for 59.94/119.88 fixed modes without turning a VRR sample into a cap.
+inline uint32_t fixed_cadence_rate(uint32_t fps, uint32_t refresh_x100)
+{
+    const uint32_t requested = fps * 100;
+    if (!requested || !refresh_x100)
+        return requested;
+    const uint32_t divisor = (refresh_x100 + requested / 2) / requested;
+    if (!divisor)
+        return requested;
+    const uint32_t matched = refresh_x100 / divisor;
+    return matched <= requested && requested - matched <= requested / 100
+               ? matched : requested;
+}
 // Absolute monotonic deadlines with fractional periods carried forward.
 // Missed deadlines are rebased rather than replayed as a burst of catch-up frames.
 class FrameCadence
 {
-public:
+  public:
     void reset(uint64_t now, uint64_t frequency, uint32_t rate)
     {
         deadline_ = now;
@@ -37,7 +52,8 @@ public:
         }
         return deadline_ > now ? deadline_ : now;
     }
-private:
+
+  private:
     uint64_t deadline_ = 0, frequency_ = 0, remainder_ = 0;
     uint32_t rate_ = 0;
 };

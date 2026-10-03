@@ -75,9 +75,8 @@ bool ui_sound_initialize()
     if (settings)
     {
         unsigned char bytes[5]{};
-        if (std::fread(bytes, 1, sizeof(bytes), settings) == sizeof(bytes) &&
-            bytes[0] == 'P' && bytes[1] == 'L' && bytes[2] == 'S' &&
-            bytes[3] == 1 && bytes[4] <= 1)
+        if (std::fread(bytes, 1, sizeof(bytes), settings) == sizeof(bytes) && bytes[0] == 'P' &&
+            bytes[1] == 'L' && bytes[2] == 'S' && bytes[3] == 1 && bytes[4] <= 1)
             sound_enabled = bytes[4] != 0;
         std::fclose(settings);
     }
@@ -108,7 +107,8 @@ bool ui_sound_initialize()
 void ui_sound_play(UiSoundCue cue)
 {
     const size_t index = static_cast<size_t>(cue);
-    if (!sound_enabled || !device || index >= clips.size() || !clips[index].data || !clips[index].length)
+    if (!sound_enabled || !device || index >= clips.size() || !clips[index].data ||
+        !clips[index].length)
         return;
 
     SDL_ClearQueuedAudio(device);
@@ -129,8 +129,7 @@ bool ui_sound_set_enabled(bool enabled)
     const unsigned char bytes[] = {'P', 'L', 'S', 1, static_cast<unsigned char>(enabled)};
     const bool written = std::fwrite(bytes, 1, sizeof(bytes), settings) == sizeof(bytes);
     const int closed = std::fclose(settings);
-    if (!written || closed ||
-        std::rename(temporary, "/download0/prosperolight-ui-sound.bin") != 0)
+    if (!written || closed || std::rename(temporary, "/download0/prosperolight-ui-sound.bin") != 0)
     {
         std::remove(temporary);
         return false;

@@ -6,9 +6,11 @@
 
 #pragma once
 
-namespace prosperolight {
+namespace prosperolight
+{
 
-enum class UiSoundCue {
+enum class UiSoundCue
+{
     Open,
     Move,
     Confirm,

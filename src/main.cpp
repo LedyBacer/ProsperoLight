@@ -38,7 +38,7 @@
 extern "C" int sceVideoOutOpen(int32_t user, int32_t bus, int32_t index, const void *parameters);
 extern "C" int sceVideoOutClose(int32_t handle);
 extern "C" int sceVideoOutConfigureOutput(int32_t handle, uint32_t request, const void *,
-                                         const void *, const void *);
+                                          const void *, const void *);
 
 extern "C" int sceKernelUsleep(std::uint32_t microseconds);
 extern "C" std::int64_t sceKernelGetDirectMemorySize(void);
@@ -977,7 +977,8 @@ MoonlightApp::Command RunLauncher(LauncherSelection *selection, const char *stre
     if (launcher_video >= 0)
     {
         const int reset = sceVideoOutConfigureOutput(launcher_video, 1u, nullptr, nullptr, nullptr);
-        std::fprintf(stderr, "Launcher fixed-output reset: rc=%08x\n", static_cast<unsigned>(reset));
+        std::fprintf(stderr, "Launcher fixed-output reset: rc=%08x\n",
+                     static_cast<unsigned>(reset));
         (void)sceVideoOutClose(launcher_video);
     }
     SDL_SetMainReady();

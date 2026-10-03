@@ -44,6 +44,7 @@ options=$( {
     sha256sum "$root/tools/native-toolchain.sh" "$root/tools/build-stream-deps.sh" \
         "$root/tools/setup-native-dependencies.sh" "$cc" \
         "$("$LLVM_CONFIG" --bindir)/clang" "$("$LLVM_CONFIG" --bindir)/llvm-ar"
+    sha256sum "$root/include/server_endpoint.h"
     find "$common/src" "$common/enet" "$common/nanors" \
         "$mbedtls/include" "$mbedtls/library" "$opus" \
         "$root/platform/ps5" "$root/src/gamestream" \

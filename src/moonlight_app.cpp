@@ -92,7 +92,8 @@ const char *const kSettingFocus[] = {
     "setting-codec",   "setting-resolution", "setting-framerate",
     "setting-bitrate", "setting-chroma",     "setting-display-area",
     "setting-hdr",     "setting-audio",      "setting-vsync",
-    "setting-decoder", "setting-cores", "setting-ui-sound", "setting-pacing"};
+    "setting-decoder", "setting-cores",      "setting-ui-sound",
+    "setting-pacing"};
 
 FocusList FocusFor(unsigned screen)
 {
@@ -115,8 +116,8 @@ bool NormalizeIpv4(const char *text, char output[MOONLIGHT_CONFIG_ADDRESS_SIZE])
         return false;
     unsigned a, b, c, d;
     char extra;
-    if (std::sscanf(hostname, "%u.%u.%u.%u%c", &a, &b, &c, &d, &extra) != 4 ||
-        a > 255 || b > 255 || c > 255 || d > 255)
+    if (std::sscanf(hostname, "%u.%u.%u.%u%c", &a, &b, &c, &d, &extra) != 4 || a > 255 || b > 255 ||
+        c > 255 || d > 255)
         return false;
     if (std::strchr(text, ':'))
         std::snprintf(output, MOONLIGHT_CONFIG_ADDRESS_SIZE, "%u.%u.%u.%u:%u", a, b, c, d, port);
@@ -845,7 +846,8 @@ void MoonlightApp::StartManualHostEntry()
 {
     const moonlight_config_host_t *host = SelectedHost();
     if (radio_ime_request(host && host->manual ? host->address : "", "Add Sunshine PC",
-                          "IPv4 or IPv4:HTTP-port, e.g. 192.168.1.50:47989", ManualHostResult, this))
+                          "IPv4 or IPv4:HTTP-port, e.g. 192.168.1.50:47989", ManualHostResult,
+                          this))
     {
         prosperolight::ui_sound_play(prosperolight::UiSoundCue::Confirm);
         manual_entry_active_ = true;
@@ -1209,7 +1211,8 @@ void MoonlightApp::UpdateFocus()
                                "setting-chroma",    "setting-display-area",
                                "setting-hdr",       "setting-audio",
                                "setting-vsync",     "setting-decoder",
-                               "setting-cores", "setting-ui-sound", "setting-pacing"};
+                               "setting-cores",     "setting-ui-sound",
+                               "setting-pacing"};
     for (const char *id : all)
         SetClass(document_, id, "focused", false);
 
@@ -1511,11 +1514,12 @@ void MoonlightApp::UpdateSettings()
                      : "Decodes one frame at a time");
     std::snprintf(text, sizeof(text), "%u cores", config_.decoder_cores);
     SetText(document_, "setting-cores-value", text);
-    SetText(document_, "setting-ui-sound-value",
-            prosperolight::ui_sound_enabled() ? "On" : "Off");
+    SetText(document_, "setting-ui-sound-value", prosperolight::ui_sound_enabled() ? "On" : "Off");
     const unsigned pacing = moonlight::presentation_mode();
     SetText(document_, "setting-pacing-value",
-            pacing == 2 ? "Paced + VRR" : pacing == 1 ? "Paced" : "Unpaced");
+            pacing == 2   ? "Paced + VRR"
+            : pacing == 1 ? "Paced"
+                          : "Unpaced");
     SetText(document_, "setting-cores-help",
             config_.decoder_cores == MOONLIGHT_DECODER_CORES_MIN
                 ? "Reserved for decoding; stream threads use the remaining cores"
