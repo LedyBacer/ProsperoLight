@@ -24,6 +24,9 @@
 #include "radio_input.hpp"
 #include "radio_ime.hpp"
 #include "ui_sound.hpp"
+#if PROSPEROLIGHT_PYROWAVE
+#include "pyrowave/video/ps5_presentation_stats.hpp"
+#endif
 
 #include <cstdio>
 #include <cstddef>
@@ -971,6 +974,19 @@ void RunVideoOutputSelfTest()
 MoonlightApp::Command RunLauncher(LauncherSelection *selection, const char *stream_error,
                                   bool play_open_sound)
 {
+#if PROSPEROLIGHT_PYROWAVE
+    struct LauncherOutputScope
+    {
+        LauncherOutputScope()
+        {
+            ps5_launcher_output_policy(true);
+        }
+        ~LauncherOutputScope()
+        {
+            ps5_launcher_output_policy(false);
+        }
+    } launcher_output_scope;
+#else
     // Restore fixed default output before SDL opens its launcher VideoOut handle.
     // Never retain streaming VRR/high-refresh state across a return to the menu.
     const int launcher_video = sceVideoOutOpen(0xff, 0, 0, nullptr);
@@ -981,6 +997,7 @@ MoonlightApp::Command RunLauncher(LauncherSelection *selection, const char *stre
                      static_cast<unsigned>(reset));
         (void)sceVideoOutClose(launcher_video);
     }
+#endif
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
     {

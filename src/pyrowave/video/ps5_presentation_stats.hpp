@@ -10,3 +10,6 @@ PresentationStats ps5_presentation_stats();
 void ps5_drain_presents(uint64_t expected);
 
 int ps5_hdr_output_active();
+
+// Apply fixed launcher output to the actual SDL-created VideoOut handle.
+void ps5_launcher_output_policy(bool enabled);

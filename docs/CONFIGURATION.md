@@ -151,8 +151,7 @@ position; stream shortcuts and the footer stay visible outside the list.
 
 ### Custom server port
 
-Select the PC, open Settings, and choose **Server HTTP port**. Enter the server's
-HTTP port (47989 by default), not its browser administration port. The endpoint
-is saved for this PC and immediately refreshed without deleting its identity or
-local pairing credentials. Automatic discovery retains explicitly saved endpoints.
-You can also enter `IPv4:HTTP-port` when adding a PC manually.
+Use **Add PC** and enter `IPv4:HTTP-port`, for example `192.168.1.5:48000`.
+This is the HTTP port (47989 by default), not the browser administration port.
+The selected PC's address always shows its port. Automatic discovery retains
+explicitly saved endpoints; the port is not a global streaming setting.

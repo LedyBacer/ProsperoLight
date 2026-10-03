@@ -3,19 +3,36 @@
 #include "../common.hpp"
 #include "native_agc_present.hpp"
 #include <atomic>
+#include <cstdio>
 #ifdef __PROSPERO__
 extern "C" int __real_sceVideoOutOpen(int32_t, int32_t, int32_t, const void *);
 extern "C" int __real_sceVideoOutSubmitFlip(int32_t, int32_t, uint32_t, int64_t);
 extern "C" int sceVideoOutGetFlipStatus(int32_t, void *);
 extern "C" int sceVideoOutGetVblankStatus(int32_t, void *);
 extern "C" int sceKernelUsleep(uint32_t);
+extern "C" int sceVideoOutConfigureOutput(int32_t, uint32_t, const void *, const void *,
+                                          const void *);
 static std::atomic<int> video_handle{-1};
+static std::atomic<bool> launcher_output{false};
 static std::atomic<uint64_t> flips{0}, errors{0};
 extern "C" int __wrap_sceVideoOutOpen(int32_t user, int32_t bus, int32_t index, const void *p)
 {
     int handle = __real_sceVideoOutOpen(user, bus, index, p);
     if (handle >= 0)
     {
+        if (launcher_output.load())
+        {
+            const int configured =
+                sceVideoOutConfigureOutput(handle, 1u, nullptr, nullptr, nullptr);
+            std::fprintf(stderr, "Launcher SDL fixed-output handle=%d rc=%08x\n", handle,
+                         static_cast<unsigned>(configured));
+            if (FILE *log = std::fopen("/download0/prosperolight-menu-output.log", "a"))
+            {
+                std::fprintf(log, "fixed_output handle=%d rc=%08x\n", handle,
+                             static_cast<unsigned>(configured));
+                std::fclose(log);
+            }
+        }
         video_handle.store(handle);
         flips.store(0);
         errors.store(0);
@@ -36,6 +53,15 @@ extern "C" int __wrap_sceVideoOutSubmitFlip(int32_t handle, int32_t buffer, uint
     return result;
 }
 #endif
+void ps5_launcher_output_policy(bool enabled)
+{
+#ifdef __PROSPERO__
+    launcher_output.store(enabled);
+#else
+    (void)enabled;
+#endif
+}
+
 PresentationStats ps5_presentation_stats()
 {
     PresentationStats result;
