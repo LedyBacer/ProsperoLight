@@ -1223,7 +1223,9 @@ void MoonlightApp::UpdateFocus()
     SetClass(document_, list.ids[focus_], "focused", true);
     if (screen_ == Screen::Settings && focus_ >= 3)
         if (Rml::Element *row = Find(document_, list.ids[focus_]))
-            row->ScrollIntoView(Rml::ScrollIntoViewOptions{Rml::ScrollAlignment::Nearest});
+            row->ScrollIntoView(Rml::ScrollIntoViewOptions{
+                Rml::ScrollAlignment::Nearest, Rml::ScrollAlignment::Nearest,
+                Rml::ScrollBehavior::Instant, Rml::ScrollParentage::Closest});
 }
 
 void MoonlightApp::UpdateHost()
@@ -1512,10 +1514,15 @@ void MoonlightApp::UpdateSettings()
                                                               : "SDR / 8-bit / Rec.709");
     SetText(document_, "setting-audio-value",
             config_.audio_configuration == MOONLIGHT_AUDIO_51_SURROUND ? "5.1 surround" : "Stereo");
-    SetText(document_, "setting-vsync-value", config_.vsync_enabled ? "On" : "Off");
+    const bool vrr_requested = moonlight::presentation_mode() == 2;
+    SetText(document_, "setting-vsync-value",
+            vrr_requested           ? "On (VRR request)"
+            : config_.vsync_enabled ? "On"
+                                    : "Off");
     SetText(document_, "setting-vsync-help",
-            config_.vsync_enabled ? "On shows whole frames at each display refresh"
-                                  : "Off flips immediately: lower latency, visible tearing");
+            vrr_requested ? "Paced + VRR requires synchronized flips; saved preference is retained"
+            : config_.vsync_enabled ? "On shows whole frames at each display refresh"
+                                    : "Off flips immediately: lower latency, visible tearing");
     const bool adaptive = config_.decoder_pipeline == MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
     SetText(document_, "setting-decoder-value", adaptive ? "Adaptive (experimental)" : "Classic");
     SetText(document_, "setting-decoder-help",
@@ -1550,9 +1557,7 @@ void MoonlightApp::UpdateSettings()
         std::snprintf(text, sizeof(text), "PYROWAVE %u FPS", config_.stream_fps);
     }
     SetText(document_, "header-mode", text);
-    SetText(document_, "settings-note",
-            "Hold touchpad click: Triangle keyboard; Square mouse; R1 stats; L1 return. "
-            "Host: touchpad click+L3 Select/Back; touchpad click+R3 PS/Guide.");
+    SetText(document_, "settings-note", "");
 }
 
 void MoonlightApp::HandleInput(const radio_input_event_t &event)

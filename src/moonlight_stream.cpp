@@ -2000,7 +2000,7 @@ static bool wait_presentation_deadline(native_renderer_state_t *state)
             stream_cadence_rate = target;
             stream_cadence.reset(now, 100000000, target);
             LOGI("Moonlight pacing: mode=%u target_x100=%u refresh_x100=%u",
-                        stream_presentation_mode, target, refresh);
+                 stream_presentation_mode, target, refresh);
         }
         const uint64_t deadline = stream_cadence.next(now);
         // Leave the newest-frame mailbox replaceable throughout this wait.
@@ -3735,6 +3735,15 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         prosperolight::pyrowave::clear_error();
 #endif
     lan_http_report_set_host(host);
+    // The loading renderer opens VideoOut before decoder/connection setup.
+    // Apply this session's policy before that first open, not after negotiation.
+    stream_presentation_mode = moonlight::presentation_mode();
+    native_agc_set_vrr(stream_presentation_mode == 2);
+    native_agc_set_vsync((int)vsync_enabled);
+    snprintf(notification.message, sizeof(notification.message),
+             "Moonlight output policy: mode=%u vrr_requested=%u vsync_requested=%u",
+             stream_presentation_mode, stream_presentation_mode == 2 ? 1u : 0u, vsync_enabled);
+    (void)lan_http_report_text(notification.message);
     if (requested_audio == MOONLIGHT_AUDIO_51_SURROUND && ps5_audio_surround_available())
         audio_configuration = AUDIO_CONFIGURATION_51_SURROUND;
     else if (requested_audio == MOONLIGHT_AUDIO_51_SURROUND)
@@ -4001,13 +4010,10 @@ configure_stream:
                                                                    MOONLIGHT_DISPLAY_AREA_TV_SAFE);
     }
 #endif
-    stream_presentation_mode = moonlight::presentation_mode();
     stream_cadence_rate = renderer.stream_fps * 100;
-    LOGI("Moonlight pacing: mode=%u requested_fps=%u target_x100=%u",
-         stream_presentation_mode, renderer.stream_fps, stream_cadence_rate);
+    LOGI("Moonlight pacing: mode=%u requested_fps=%u target_x100=%u", stream_presentation_mode,
+         renderer.stream_fps, stream_cadence_rate);
     stream_cadence.reset(monotonic_us(), 100000000, stream_cadence_rate);
-    native_agc_set_vrr(stream_presentation_mode == 2);
-    native_agc_set_vsync((int)vsync_enabled);
     // Keep every stream thread off the decoder's CPUs. New threads inherit the
     // creator's mask, so narrow this thread first; moonlight-common-c's thread
     // hook then gives the video receive thread a CPU of its own.

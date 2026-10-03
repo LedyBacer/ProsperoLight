@@ -186,7 +186,11 @@
                             <span id="setting-pacing-value" class="setting-value">Paced</span>
                         </button>
                     </div>
-                    <span id="settings-note" class="settings-note">Hold touchpad click: Triangle keyboard; Square mouse; R1 stats; L1 return. Host: touchpad click+L3 Select/Back; touchpad click+R3 PS/Guide.</span>
+                    <span id="settings-note" class="settings-note"></span>
+                    <div id="settings-combos" class="settings-combos">
+                        <span class="settings-combo-local">Hold touchpad click + Triangle: keyboard / Square: mouse / R1: stats / L1: return</span>
+                        <span class="settings-combo-host">Host shortcuts: touchpad click + L3: Select/Back / touchpad click + R3: PS/Guide</span>
+                    </div>
                 </section>
 
             </main>

@@ -667,6 +667,13 @@ class ToolTests(unittest.TestCase):
         note_height = int(re.search(r"\.settings-note \{[^}]*?height: (\d+)px", styles)[1])
         screen_height = int(re.search(r"\.screen \{[^}]*?height: (\d+)px", styles)[1])
         self.assertLessEqual(note_top + note_height, screen_height)
+        combos = re.search(r"\.settings-combos \{([^}]+)\}", styles)[1]
+        combo_top = int(re.search(r"top: (\d+)px", combos)[1])
+        combo_height = int(re.search(r"height: (\d+)px", combos)[1])
+        self.assertLessEqual(note_top + note_height, combo_top)
+        self.assertLessEqual(combo_top + combo_height, screen_height)
+        self.assertIn("settings-combo-local", markup)
+        self.assertIn("settings-combo-host", markup)
         self.assertIn("overflow-y: auto", viewport)
         self.assertIn('id="settings-list"', markup)
         self.assertNotRegex(styles, r"\.setting-row-\d+")
@@ -674,6 +681,7 @@ class ToolTests(unittest.TestCase):
         source = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
         self.assertIn("row->ScrollIntoView", source)
         self.assertIn("Rml::ScrollAlignment::Nearest", source)
+        self.assertIn("Rml::ScrollParentage::Closest", source)
         for setting in ("chroma", "vsync", "decoder", "cores"):
             self.assertIn(f'id="setting-{setting}"', markup)
             self.assertIn(f'id="setting-{setting}-value"', markup)
