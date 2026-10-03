@@ -5,8 +5,6 @@
  */
 
 #include "app_storage.hpp"
-#include "auto_close_preferences.hpp"
-#include "platform/ps5/system.hpp"
 #include "crash_report.hpp"
 #include "connecting_plate.hpp"
 #include "launcher/launcher.hpp"
@@ -324,14 +322,6 @@ int main()
         Log(line);
         const int stream_result = moonlight_stream_run(&options, &metrics);
         std::snprintf(stream_error, sizeof(stream_error), "%s", metrics.error);
-        // The stream has already released its video, audio and input resources.
-        // Initial connection failures still return to the menu for recovery.
-        if (prosperolight::auto_close_enabled() &&
-            (stream_result == 0 || metrics.presented_frames != 0))
-        {
-            Log("[PL] main: automatic close after stream");
-            hui::sys::quit();
-        }
         const bool mode_changed =
             selection.stream_fps > MOONLIGHT_STREAM_FPS_60 || selection.hdr_enabled != 0;
         const unsigned settle_ms = mode_changed ? PROSPEROLIGHT_HFR_SETTLE_MS : 100;

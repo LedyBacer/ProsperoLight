@@ -65,7 +65,7 @@ Kept g_kept[] = {
      g_kept_preferences[1], sizeof(g_kept_preferences[1]), 0},
     {"/download0/prosperolight-ui-sound.bin", "config", "prosperolight-ui-sound.bin",
      g_kept_preferences[2], sizeof(g_kept_preferences[2]), 0},
-    {"/download0/prosperolight-auto-close.bin", "config", "prosperolight-auto-close.bin",
+    {"/download0/prosperolight-host-quit.bin", "config", "prosperolight-host-quit.bin",
      g_kept_preferences[3], sizeof(g_kept_preferences[3]), 0},
 };
 

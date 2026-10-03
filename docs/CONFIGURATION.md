@@ -218,10 +218,11 @@ The upstream OpenGL launcher log additionally retains the current and previous
 launch, bounded by a periodic flush/size check. Disabling logging redirects
 stdout/stderr to `/dev/null`; crash reports remain available independently.
 
-### Automatic app close
+### Quit host app after stream
 
-`Close app after stream` is off by default. When enabled, ProsperoLight requests
-a clean PS5 title shutdown after leaving/ending a stream, after streaming
-resources are released. It does not stop the game on the host. Initial
-connection failures return to the launcher for recovery. The setting persists
-in `config/prosperolight-auto-close.bin` (PLE1 + boolean).
+`Quit host app after stream` is off by default. On sends the authenticated
+Sunshine cancel request when leaving the stream, stopping the host game/app.
+Off keeps the host app running for resume. ProsperoLight stays open in both
+cases. Initial setup failures do not trigger this optional cancel request.
+The setting persists in `config/prosperolight-host-quit.bin` (PLQ1 + boolean).
+The removed local app close setting is not reused.

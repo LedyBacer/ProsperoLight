@@ -622,5 +622,11 @@ Firmware 13.60 testing exposed duplicated 64 KiB eboot blocks when mounting
 the compressed FFPFSC; the raw image matched the executable and launched
 correctly. The compressed artifact remains available for investigation.
 
-Settings → Application → `Close app after stream` closes ProsperoLight after
-a stream ends when enabled; the default returns to the launcher.
+Settings → Host session → `Quit host app after stream` stops the game/app on
+the PC when leaving the stream. Default Off keeps it running. ProsperoLight
+always returns to its launcher.
+
+Decoder load recommendations: PyroWave is green through 500 Mbps, yellow above
+500 and below 700, red at 700–1000, at any resolution/FPS. H.264 4K120 is red
+at any bitrate, 4K90 is yellow, and 4K60 is green through 80 Mbps then red.
+Other H.264 profiles have no recommendation; existing HEVC recommendations remain.

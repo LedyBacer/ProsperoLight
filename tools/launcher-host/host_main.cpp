@@ -14,7 +14,7 @@
 #include "fake_world.hpp"
 #include "app_storage.hpp"
 #include "presentation_preferences.hpp"
-#include "auto_close_preferences.hpp"
+#include "host_quit_preferences.hpp"
 #include "stream_profile.hpp"
 #include "lan_http_report.hpp"
 #include "connecting_plate.hpp"
@@ -566,7 +566,7 @@ int main(int argc, char **argv)
     session("games", {{80, 0, Direction::none, "stream-error"}}, "Sunshine closed the connection");
 
     // ---- Settings: custom FPS/bitrate use numeric prompts, not presets ----
-    (void)prosperolight::auto_close_set_enabled(false);
+    (void)prosperolight::host_quit_set_enabled(false);
     moonlight_config_t initial_settings{};
     (void)moonlight_config_load(&initial_settings);
     initial_settings.video_codec = MOONLIGHT_VIDEO_CODEC_PYROWAVE;
@@ -597,7 +597,7 @@ int main(int argc, char **argv)
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
                 {10, confirm},
-                {40, 0, Direction::none, "auto-close-on"},
+                {40, 0, Direction::none, "host-quit-on"},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
@@ -619,7 +619,7 @@ int main(int argc, char **argv)
         expect(saved.video_codec == MOONLIGHT_VIDEO_CODEC_H264 && saved.hdr_enabled == 0,
                "choosing H.264 turns HDR off");
         expect(moonlight::presentation_mode() == 2u, "the new pacing row persists Paced+VRR");
-        expect(prosperolight::auto_close_enabled(), "automatic close toggle persists");
+        expect(prosperolight::host_quit_enabled(), "host app quit toggle persists");
         expect(!prosperolight_logs_enabled(), "the new diagnostics row persists logs off");
     }
 

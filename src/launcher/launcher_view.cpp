@@ -10,7 +10,7 @@
 #include "presentation_preferences.hpp"
 #include "stream_profile.hpp"
 #include "ui_sound_preferences.hpp"
-#include "auto_close_preferences.hpp"
+#include "host_quit_preferences.hpp"
 #include "lan_http_report.hpp"
 
 #include <algorithm>
@@ -78,7 +78,7 @@ enum FormId
     kPacing,
     kLogging,
     kUiSound,
-    kAutoClose,
+    kHostQuit,
 };
 
 ui::Theme theme_by_id(const char *id)
@@ -430,9 +430,9 @@ void View::build()
         "48 kHz Opus, decoded on the console.";
     form_.add_toggle(kUiSound, "Menu sounds", true).description =
         "Menu navigation and confirmation sounds.";
-    form_.add_header("Application");
-    form_.add_toggle(kAutoClose, "Close app after stream", false).description =
-        "Close ProsperoLight after the stream ends. Off returns to the menu.";
+    form_.add_header("Host session");
+    form_.add_toggle(kHostQuit, "Quit host app after stream", false).description =
+        "Stop the game or app on the PC when leaving the stream.";
     form_.add_header("Display");
     form_.add_choice(kArea, "Picture size", {"TV safe", "Edge to edge"}, 0).description =
         "TV safe keeps a margin for televisions that crop the picture.";
@@ -773,7 +773,7 @@ void View::sync_settings_from_config()
     form_.set_choice(kPacing, static_cast<int>(moonlight::presentation_mode()));
     form_.set_toggle(kLogging, prosperolight_logs_enabled() != 0);
     form_.set_toggle(kUiSound, prosperolight::ui_sound_enabled());
-    form_.set_toggle(kAutoClose, prosperolight::auto_close_enabled());
+    form_.set_toggle(kHostQuit, prosperolight::host_quit_enabled());
     const bool native = config.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE;
     form_.row(kPipeline)->disabled = !native;
     form_.row(kCores)->disabled = !native;
@@ -817,9 +817,9 @@ void View::apply_setting(int id)
             toasts_.push(ui::StatusKind::danger, "Could not save logging", "Try again.");
         sync_settings_from_config();
         return;
-    case kAutoClose:
-        if (!prosperolight::auto_close_set_enabled(form_.toggle_value(kAutoClose)))
-            toasts_.push(ui::StatusKind::danger, "Could not save automatic close", "Try again.");
+    case kHostQuit:
+        if (!prosperolight::host_quit_set_enabled(form_.toggle_value(kHostQuit)))
+            toasts_.push(ui::StatusKind::danger, "Could not save host app quit", "Try again.");
         sync_settings_from_config();
         return;
     case kUiSound:
@@ -863,13 +863,26 @@ void View::sync_profile(bool snap)
     const bool pyro = config.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE;
     const bool hevc =
         !pyro && (config.video_codec == MOONLIGHT_VIDEO_CODEC_HEVC || config.hdr_enabled);
-    // The limits were measured for 4K HEVC; nothing is claimed for the rest.
-    limits_apply_ = config.stream_resolution == MOONLIGHT_STREAM_RESOLUTION_2160P && hevc;
-    const float scale = limits_apply_ ? limit.freezes * 1.3f : 1000.0f;
+    const bool h264 = !pyro && !hevc;
+    const bool h264_4k = h264 && config.stream_resolution == MOONLIGHT_STREAM_RESOLUTION_2160P;
+    const bool h264_red = h264_4k && config.stream_fps == 120;
+    const bool h264_yellow = h264_4k && config.stream_fps == 90;
+    const bool h264_60 = h264_4k && config.stream_fps == 60;
+    const bool hevc_limits = config.stream_resolution == MOONLIGHT_STREAM_RESOLUTION_2160P && hevc;
+    limits_apply_ = pyro || hevc_limits || h264_red || h264_yellow || h264_60;
+    const float scale = hevc_limits ? limit.freezes * 1.3f : 1000.0f;
     headroom_.label = limits_apply_ ? "Decoder load" : "Requested bitrate";
     headroom_.style.value_scale = scale;
-    headroom_.style.warning_at = limits_apply_ ? (limit.smooth + 2.0f) / scale : 2.0f;
-    headroom_.style.danger_at = limits_apply_ ? limit.freezes / scale : 2.0f;
+    headroom_.style.warning_at = pyro                      ? 0.500001f
+                                 : h264_red || h264_yellow ? 0.0f
+                                 : h264_60                 ? 0.080001f
+                                 : hevc_limits             ? (limit.smooth + 2.0f) / scale
+                                                           : 2.0f;
+    headroom_.style.danger_at = pyro          ? 0.7f
+                                : h264_red    ? 0.0f
+                                : h264_60     ? 0.080001f
+                                : hevc_limits ? limit.freezes / scale
+                                              : 2.0f;
     headroom_.style.zone_strip = limits_apply_;
     headroom_.set_value(std::min(bitrate / scale, 1.0f), snap);
 
@@ -903,14 +916,30 @@ void View::sync_profile(bool snap)
     }
     else
     {
-        warning_.title = "Above the decoder's limit";
-        std::snprintf(text, sizeof(text),
-                      "Smooth up to %.0f Mbps. Above %.0f Mbps the picture freezes about once a "
-                      "second.",
-                      static_cast<double>(limit.smooth), static_cast<double>(limit.freezes));
+        warning_.title = "Decoder load recommendation";
+        if (pyro)
+            std::snprintf(
+                text, sizeof(text),
+                "Up to 500 Mbps: green. 500-700: caution. 700-1000: high load. Use wired LAN.");
+        else if (h264_red)
+            std::snprintf(text, sizeof(text),
+                          "H.264 4K120: high decoder load at any bitrate. Lower the frame rate or "
+                          "use HEVC/PyroWave.");
+        else if (h264_yellow)
+            std::snprintf(text, sizeof(text), "H.264 4K90: caution at any bitrate.");
+        else if (h264_60)
+            std::snprintf(text, sizeof(text),
+                          "H.264 4K60: green up to 80 Mbps. Above 80 Mbps: high load.");
+        else
+            std::snprintf(
+                text, sizeof(text),
+                "Smooth up to %.0f Mbps. Above %.0f Mbps the picture freezes about once a second.",
+                static_cast<double>(limit.smooth), static_cast<double>(limit.freezes));
     }
     warning_.body = text;
-    const bool warn = no_pyro || no_hdr || no_hevc || (limits_apply_ && bitrate > limit.smooth);
+    const bool warn = no_pyro || no_hdr || no_hevc || (pyro && bitrate > 500.0f) || h264_red ||
+                      h264_yellow || (h264_60 && bitrate > 80.0f) ||
+                      (hevc_limits && bitrate > limit.smooth);
     warning_.set_shown(warn, snap);
 
     static const char *const kShort[] = {"1080p", "1440p", "4K"};
@@ -1844,11 +1873,13 @@ void View::draw_settings(ui::Canvas &canvas, ui::Painter &paint) const
     else
     {
         char text[120];
-        if (limits_apply_)
+        if (model_.config().video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
+            std::snprintf(text, sizeof(text), "Green up to 500 Mbps. Wired LAN recommended.");
+        else if (model_.config().video_codec == MOONLIGHT_VIDEO_CODEC_H264 && limits_apply_)
+            std::snprintf(text, sizeof(text), "H.264 4K60: green up to 80 Mbps.");
+        else if (limits_apply_)
             std::snprintf(text, sizeof(text), "Smooth up to %.0f Mbps at this frame rate.",
                           static_cast<double>(limit_for(model_.config().stream_fps).smooth));
-        else if (model_.config().video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
-            std::snprintf(text, sizeof(text), "High bitrate and wired LAN recommended.");
         else
             std::snprintf(text, sizeof(text), "No measured decoder limit for this profile.");
         paint.body(text, inside.x, inside.y + 214.0f, 22.0f, t.text_muted);

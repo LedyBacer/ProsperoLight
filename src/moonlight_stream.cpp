@@ -28,6 +28,7 @@
 #include "frame_pacing.hpp"
 #include "presentation_preferences.hpp"
 #include "app_storage.hpp"
+#include "host_quit_preferences.hpp"
 #include "connecting_plate.hpp"
 #include "moonlight_config.hpp"
 #include "moonlight_physical_input.hpp"
@@ -4620,7 +4621,7 @@ done:
              (uint32_t)physical_input.mouse_unload_result);
     (void)lan_http_report_text(notification.message);
     ps5_controller_shutdown(&controller);
-    if (session_started && !controller.requested_stop)
+    if (session_started && (!controller.requested_stop || prosperolight::host_quit_enabled()))
     {
         http_set_timeout_ms(2000);
         int quit_result = gs_quit_app(&gs_server);
