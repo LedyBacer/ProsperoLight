@@ -29,7 +29,6 @@ extern "C" int sceKernelMapDirectMemory(void **address, std::size_t length, int 
                                         int flags, std::int64_t direct_memory_start,
                                         std::size_t alignment);
 extern "C" int sceKernelReleaseDirectMemory(std::int64_t direct_memory_start, std::size_t length);
-extern "C" int sceSysmoduleLoadModule(std::uint16_t module_id);
 extern "C" int munmap(void *address, std::size_t length);
 extern "C" void prosperolight_release_splash(void);
 extern "C" int sceSystemServiceHideSplashScreen(void);
@@ -112,8 +111,6 @@ extern "C" char *strcasestr(const char *haystack, const char *needle)
 
 namespace
 {
-
-constexpr std::uint16_t kPngDecModule = 0x008c;
 
 [[noreturn]] void KeepProcessAlive()
 {
@@ -258,8 +255,6 @@ int main()
     RunVideoOutputSelfTest();
 #endif
 
-    // Box art is decoded with the console's PNG decoder.
-    (void)sceSysmoduleLoadModule(kPngDecModule);
     char stream_error[192]{};
     bool first_start = true;
     unsigned streams = 0;

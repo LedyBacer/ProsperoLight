@@ -40,6 +40,7 @@
 #include <string>
 #include <vector>
 
+extern "C" int sceSysmoduleLoadModule(std::uint16_t module_id);
 extern "C" int sceUserServiceGetLoginUserIdList(std::int32_t user_ids[4]);
 
 #ifndef PROSPEROLIGHT_STREAM_SELF_TEST_FPS
@@ -457,7 +458,17 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             audio::SoundBank &sounds = Sounds();
 
             Model model;
-            model.set_artwork_decoder(DecodePoster);
+            // A failed load leaves unresolved system imports. Never call them.
+            // Cache the result so returning from a stream does not add module references.
+            static const int png_module_result = []
+            {
+                const int result = sceSysmoduleLoadModule(0x008c);
+                std::fprintf(stderr, "[PL] PNG decoder load=%08x, artwork=%s\n",
+                             static_cast<unsigned>(result), result >= 0 ? "enabled" : "disabled");
+                return result;
+            }();
+            if (png_module_result >= 0)
+                model.set_artwork_decoder(DecodePoster);
             model.set_worker_start(PlaceWorker);
             // Once per launch of the app, not after every stream.
             if (first_start)
