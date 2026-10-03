@@ -17,6 +17,7 @@
 
 #include "bitmap_font_engine.hpp"
 #include "moonlight_app.hpp"
+#include "frame_cadence.hpp"
 #include "moonlight_stream.hpp"
 #include "native_agc_present.hpp"
 #include "ps5_pngdec.hpp"
@@ -33,6 +34,11 @@
 #include <new>
 #include <pthread.h>
 #include <vector>
+
+extern "C" int sceVideoOutOpen(int32_t user, int32_t bus, int32_t index, const void *parameters);
+extern "C" int sceVideoOutClose(int32_t handle);
+extern "C" int sceVideoOutConfigureOutput(int32_t handle, uint32_t request, const void *,
+                                         const void *, const void *);
 
 extern "C" int sceKernelUsleep(std::uint32_t microseconds);
 extern "C" std::int64_t sceKernelGetDirectMemorySize(void);
@@ -964,6 +970,15 @@ void RunVideoOutputSelfTest()
 MoonlightApp::Command RunLauncher(LauncherSelection *selection, const char *stream_error,
                                   bool play_open_sound)
 {
+    // Restore fixed default output before SDL opens its launcher VideoOut handle.
+    // Never retain streaming VRR/high-refresh state across a return to the menu.
+    const int launcher_video = sceVideoOutOpen(0xff, 0, 0, nullptr);
+    if (launcher_video >= 0)
+    {
+        const int reset = sceVideoOutConfigureOutput(launcher_video, 1u, nullptr, nullptr, nullptr);
+        std::fprintf(stderr, "Launcher fixed-output reset: rc=%08x\n", static_cast<unsigned>(reset));
+        (void)sceVideoOutClose(launcher_video);
+    }
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
     {
@@ -980,6 +995,21 @@ MoonlightApp::Command RunLauncher(LauncherSelection *selection, const char *stre
     SDL_Renderer *renderer = surface ? SDL_CreateSoftwareRenderer(surface) : nullptr;
     if (!window || !renderer)
         return MoonlightApp::Command::None;
+
+    const uint64_t launcher_clock = SDL_GetPerformanceFrequency();
+    moonlight::FrameCadence launcher_cadence;
+    launcher_cadence.reset(SDL_GetPerformanceCounter(), launcher_clock, 60);
+    const auto wait_launcher_frame = [&]()
+    {
+        const uint64_t now = SDL_GetPerformanceCounter();
+        const uint64_t deadline = launcher_cadence.next(now);
+        if (deadline > now && launcher_clock)
+        {
+            const uint64_t wait_us = (deadline - now) * 1000000 / launcher_clock;
+            if (wait_us)
+                sceKernelUsleep(static_cast<uint32_t>(wait_us));
+        }
+    };
 
     AppSystemInterface system_interface;
     AppFileInterface file_interface;
@@ -1036,7 +1066,7 @@ MoonlightApp::Command RunLauncher(LauncherSelection *selection, const char *stre
                 while (SDL_GetPerformanceCounter() < hold_until)
                 {
                     PresentLauncher(context, renderer, window);
-                    sceKernelUsleep(16667);
+                    wait_launcher_frame();
                 }
                 for (std::uint32_t frame = 1; frame <= kStartupFadeFrames; ++frame)
                 {
@@ -1045,7 +1075,7 @@ MoonlightApp::Command RunLauncher(LauncherSelection *selection, const char *stre
                                   1.0f - static_cast<float>(frame) / kStartupFadeFrames);
                     startup_splash->SetProperty("opacity", opacity);
                     PresentLauncher(context, renderer, window);
-                    sceKernelUsleep(16667);
+                    wait_launcher_frame();
                 }
                 startup_splash->SetClass("hidden", true);
             }
@@ -1104,7 +1134,7 @@ MoonlightApp::Command RunLauncher(LauncherSelection *selection, const char *stre
         if (running)
             app.Poll();
         PresentLauncher(context, renderer, window);
-        sceKernelUsleep(16667);
+        wait_launcher_frame();
     }
 
     app.Shutdown();

@@ -75,6 +75,7 @@ void native_agc_set_tv_safe_area(int enabled);
 // V-Sync off flips at the next hsync (tearing). Applies to the next submission;
 // a rejected immediate flip falls back to V-Sync for the rest of the process.
 void native_agc_set_vsync(int enabled);
+void native_agc_set_vrr(int enabled);
 int native_agc_vsync_active(void);
 int native_agc_flip_events_active(void);
 int native_agc_present_shutdown(void);

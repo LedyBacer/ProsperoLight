@@ -20,6 +20,8 @@
 #include <opus_multistream.h>
 
 #include "moonlight_stream.hpp"
+#include "frame_cadence.hpp"
+#include "presentation_preferences.hpp"
 #include "moonlight_config.hpp"
 #include "moonlight_physical_input.hpp"
 #include "moonlight_stream_input.hpp"
@@ -1984,8 +1986,18 @@ static void *video_decode_thread(void *context)
     return nullptr;
 }
 
+static moonlight::FrameCadence stream_cadence;
+static unsigned stream_presentation_mode = 1;
+
 static int submit_presentation(native_renderer_state_t *state, const stream_ready_frame_t &item)
 {
+    if (stream_presentation_mode)
+    {
+        const uint64_t now = monotonic_us();
+        const uint64_t deadline = stream_cadence.next(now);
+        if (deadline > now)
+            sceKernelUsleep(static_cast<uint32_t>(deadline - now));
+    }
     native_agc_metrics_t hud = item.hud;
     const native_video_mode_t *mode = state->mode;
     const uint64_t started = monotonic_us();
@@ -3901,6 +3913,9 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     std::atomic_store_explicit(&video_unrecoverable_frames, 0u, std::memory_order_relaxed);
     std::atomic_store_explicit(&connection_failed_stage, 0, std::memory_order_relaxed);
     prepare_video_callbacks(stream_slices, mode->codec_type == 1u);
+    stream_presentation_mode = moonlight::presentation_mode();
+    stream_cadence.reset(monotonic_us(), 1000000, renderer.stream_fps);
+    native_agc_set_vrr(stream_presentation_mode == 2);
     native_agc_set_vsync((int)vsync_enabled);
     // Keep every stream thread off the decoder's CPUs. New threads inherit the
     // creator's mask, so narrow this thread first; moonlight-common-c's thread

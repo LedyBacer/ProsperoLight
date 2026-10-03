@@ -166,6 +166,12 @@
                         <span class="setting-name">Decoder CPU cores</span><span id="setting-cores-help" class="setting-help">Reserved for decoding; stream threads use the remaining cores</span>
                         <span id="setting-cores-value" class="setting-value">3 cores</span>
                     </button>
+                    <button id="setting-pacing" class="setting-row setting-row-10">
+                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                        <span class="setting-name">Frame pacing</span><span class="setting-help">VRR uses synchronized flips; unsupported output falls back to fixed refresh</span>
+                        <span id="setting-pacing-value" class="setting-value">Paced</span>
+                    </button>
                     <span id="settings-note" class="settings-note">Stream shortcuts: Select+Triangle keyboard; Select+Square mouse; Select+R1 stats; Select+L1 return.</span>
                 </section>
 
