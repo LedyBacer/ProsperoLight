@@ -126,6 +126,14 @@ v0.40.2 and links statically with its dependencies. Their licence texts are in
 | zstd | 1.5.6 | BSD-3-Clause, Copyright (C) Meta Platforms, Inc. and affiliates | `zstd.txt` |
 | libpsl | 0.21.5 | MIT, Copyright (C) Tim Rühsen and contributors; its Public Suffix List data is MPL-2.0 | `libpsl.txt` |
 
+## Launcher artwork
+
+PNG box art is decoded by static libpng 1.6.43 from the pinned PacBrew v0.40.2
+sysroot. It uses the PNG Reference Library License; see
+`third_party/licenses/libpng.txt`. This avoids unavailable system PNG imports
+on some PS5 launch environments. Scaling and the 64 MiB pixel allocation limit
+remain in the application worker.
+
 ## Launcher
 
 The launcher is drawn with OpenGL through the

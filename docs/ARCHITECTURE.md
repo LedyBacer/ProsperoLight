@@ -52,7 +52,9 @@ draws nothing. `launcher_view.cpp` draws the four screens and their dialogs
 with the widgets of the UI kit in `third_party/ps5-homebrew-ui`, reads the
 model and asks it for things. `launcher_ps5.cpp` owns the console: the EGL
 display of the ps5-opengl SDK, the controller, the audio port, the sounds and
-the PNG decoder for box art. The model and the view have no console call in
+registers the portable `launcher_artwork.cpp` decoder for box art. It uses static
+libpng with bounded allocations on the model worker, without system PNG imports.
+The model and the view have no console call in
 them, so `tools/render-launcher.sh` runs both on a PC against a pretend
 Sunshine network, checks their behaviour and writes a picture of every state.
 

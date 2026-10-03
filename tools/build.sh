@@ -401,6 +401,7 @@ done
 mkdir -p "$app/licenses"
 cp "$root/LICENSE" "$app/licenses/ProsperoLight-GPL.txt"
 cp "$root/THIRD_PARTY_NOTICES.md" "$app/licenses/THIRD_PARTY_NOTICES.md"
+cp "$root/third_party/licenses/libpng.txt" "$app/licenses/libpng.txt"
 cp "$root/third_party/moonlight-common-c/LICENSE.txt" "$app/licenses/moonlight-common-c-LICENSE.txt"
 if [[ ${PYROWAVE:-0} == 1 ]]; then
     cp "$root/src/pyrowave/LICENSE-MIT.txt" "$app/licenses/PS5-PyroWave-PoC-MIT.txt"
