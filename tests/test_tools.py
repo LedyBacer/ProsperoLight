@@ -266,7 +266,7 @@ class ToolTests(unittest.TestCase):
         # Filesystem access is asked for before anything else runs.
         body = main[main.index("int main()") :]
         self.assertLess(body.index("storage::Initialize();"), body.index("RunVideoOutputSelfTest();"))
-        self.assertLess(body.index("storage::Initialize();"), body.index("sceSysmoduleLoadModule("))
+        self.assertLess(body.index("storage::Initialize();"), body.index("launcher::Run("))
         # The helper only answers this title, and the paths name it.
         self.assertIn(f'target_title_id[] = "{title}"', helper)
         self.assertIn(f'kTitleId[] = "{title}"', storage)
