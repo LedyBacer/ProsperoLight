@@ -9,6 +9,7 @@
 #include "moonlight_discovery.hpp"
 #include "radio_ime.hpp"
 #include "ui_sound.hpp"
+#include "server_endpoint.h"
 
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
@@ -90,7 +91,7 @@ const char *const kSettingFocus[] = {
     "setting-codec",   "setting-resolution", "setting-framerate",
     "setting-bitrate", "setting-chroma",     "setting-display-area",
     "setting-hdr",     "setting-audio",      "setting-vsync",
-    "setting-decoder", "setting-cores"};
+    "setting-decoder", "setting-cores", "setting-ui-sound"};
 
 FocusList FocusFor(unsigned screen)
 {
@@ -107,12 +108,19 @@ FocusList FocusFor(unsigned screen)
 
 bool NormalizeIpv4(const char *text, char output[MOONLIGHT_CONFIG_ADDRESS_SIZE])
 {
+    char hostname[MOONLIGHT_CONFIG_ADDRESS_SIZE];
+    uint16_t port;
+    if (!server_endpoint_parse(text, hostname, sizeof(hostname), 47989, &port))
+        return false;
     unsigned a, b, c, d;
     char extra;
-    if (!text || std::sscanf(text, " %u.%u.%u.%u %c", &a, &b, &c, &d, &extra) != 4 || a > 255 ||
-        b > 255 || c > 255 || d > 255)
+    if (std::sscanf(hostname, "%u.%u.%u.%u%c", &a, &b, &c, &d, &extra) != 4 ||
+        a > 255 || b > 255 || c > 255 || d > 255)
         return false;
-    std::snprintf(output, MOONLIGHT_CONFIG_ADDRESS_SIZE, "%u.%u.%u.%u", a, b, c, d);
+    if (std::strchr(text, ':'))
+        std::snprintf(output, MOONLIGHT_CONFIG_ADDRESS_SIZE, "%u.%u.%u.%u:%u", a, b, c, d, port);
+    else
+        std::snprintf(output, MOONLIGHT_CONFIG_ADDRESS_SIZE, "%u.%u.%u.%u", a, b, c, d);
     return true;
 }
 
@@ -762,6 +770,15 @@ void MoonlightApp::Activate()
                                         ? MOONLIGHT_DECODER_CORES_MAX
                                         : config_.decoder_cores - 1u;
         }
+        else if (std::strcmp(kSettingFocus[focus_], "setting-ui-sound") == 0)
+        {
+            if (!prosperolight::ui_sound_set_enabled(!prosperolight::ui_sound_enabled()))
+            {
+                prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+                SetText(document_, "settings-note", "Could not save UI sound setting.");
+                return;
+            }
+        }
         (void)moonlight_config_save(&config_);
         prosperolight::ui_sound_play(prosperolight::UiSoundCue::Setting);
         UpdateSettings();
@@ -819,7 +836,7 @@ void MoonlightApp::StartManualHostEntry()
 {
     const moonlight_config_host_t *host = SelectedHost();
     if (radio_ime_request(host && host->manual ? host->address : "", "Add Sunshine PC",
-                          "IPv4 address, for example 192.168.1.50", ManualHostResult, this))
+                          "IPv4 or IPv4:HTTP-port, e.g. 192.168.1.50:47989", ManualHostResult, this))
     {
         prosperolight::ui_sound_play(prosperolight::UiSoundCue::Confirm);
         manual_entry_active_ = true;
@@ -849,7 +866,7 @@ void MoonlightApp::AddManualHost(const char *text)
     if (index < 0)
     {
         prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
-        SetText(document_, "host-action-status", "Enter a valid IPv4 address such as 192.168.1.50");
+        SetText(document_, "host-action-status", "Enter IPv4 or IPv4:HTTP-port (1-65535)");
         return;
     }
     config_.selected_host = static_cast<uint32_t>(index);
@@ -1183,7 +1200,7 @@ void MoonlightApp::UpdateFocus()
                                "setting-chroma",    "setting-display-area",
                                "setting-hdr",       "setting-audio",
                                "setting-vsync",     "setting-decoder",
-                               "setting-cores"};
+                               "setting-cores", "setting-ui-sound"};
     for (const char *id : all)
         SetClass(document_, id, "focused", false);
 
@@ -1485,6 +1502,8 @@ void MoonlightApp::UpdateSettings()
                      : "Decodes one frame at a time");
     std::snprintf(text, sizeof(text), "%u cores", config_.decoder_cores);
     SetText(document_, "setting-cores-value", text);
+    SetText(document_, "setting-ui-sound-value",
+            prosperolight::ui_sound_enabled() ? "On" : "Off");
     SetText(document_, "setting-cores-help",
             config_.decoder_cores == MOONLIGHT_DECODER_CORES_MIN
                 ? "Reserved for decoding; stream threads use the remaining cores"

@@ -5,6 +5,7 @@
  */
 
 #include "moonlight_backend.hpp"
+#include "server_endpoint.h"
 
 #include "gamestream/certgen.h"
 #include "gamestream/client.h"
@@ -328,7 +329,14 @@ int moonlight_backend_fetch_app_artwork(const char *host, uint16_t https_port, i
     http_init(&identity, 0);
     http_set_timeout_ms(1500);
     snprintf(path, sizeof(path), "/appasset?appid=%d&AssetType=2&AssetIdx=0", app_id);
-    result = http_get(host, https_port, 1, path, &response);
+    char hostname[128];
+    uint16_t ignored_port;
+    if (!server_endpoint_parse(host, hostname, sizeof(hostname), 47989, &ignored_port))
+    {
+        identity_free(&identity);
+        return GS_INVALID;
+    }
+    result = http_get(hostname, https_port, 1, path, &response);
     http_set_timeout_ms(0);
     identity_free(&identity);
     if (result != GS_OK)

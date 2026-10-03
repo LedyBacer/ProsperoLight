@@ -22,6 +22,8 @@ enum class UiSoundCue {
 
 bool ui_sound_initialize();
 void ui_sound_play(UiSoundCue cue);
+bool ui_sound_set_enabled(bool enabled);
+bool ui_sound_enabled();
 void ui_sound_clear_for_stream();
 
 } // namespace prosperolight

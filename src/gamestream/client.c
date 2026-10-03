@@ -7,6 +7,7 @@
 #define MBEDTLS_ALLOW_PRIVATE_ACCESS
 
 #include "client.h"
+#include "server_endpoint.h"
 #include "gs_errors.h"
 #include "gs_http.h"
 #include "gs_log.h"
@@ -163,9 +164,9 @@ static int load_server_info(gs_server_t *server, bool https)
         snprintf(server->hostname, sizeof(server->hostname), "%s", hostname);
     if (unique_id)
         snprintf(server->unique_id, sizeof(server->unique_id), "%s", unique_id);
-    server->https_port = https_port ? (unsigned short)atoi(https_port) : 47984;
+    server->https_port = https_port ? (unsigned short)atoi(https_port) : (server->http_port > 5 ? server->http_port - 5 : 47984);
     if (!server->https_port)
-        server->https_port = 47984;
+        server->https_port = server->http_port > 5 ? server->http_port - 5 : 47984;
     if (!strstr(state, "_SERVER_BUSY"))
         server->current_game = 0;
     result = GS_OK;
@@ -192,8 +193,12 @@ int gs_init(gs_server_t *server, client_identity_t *identity, const char *addres
     gs_error = "";
     memset(server, 0, sizeof(*server));
     server->identity = identity;
-    snprintf(server->address, sizeof(server->address), "%s", address);
-    server->http_port = http_port ? http_port : 47989;
+    if (!server_endpoint_parse(address, server->address, sizeof(server->address),
+                               http_port, &server->http_port))
+    {
+        gs_error = "Invalid server address or HTTP port";
+        return GS_INVALID;
+    }
     result = load_server_info(server, false);
     if (result != GS_OK)
         return result;
