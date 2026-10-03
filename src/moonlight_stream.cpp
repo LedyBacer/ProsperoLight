@@ -1985,7 +1985,7 @@ static moonlight::FrameCadence stream_cadence;
 static unsigned stream_presentation_mode = 1;
 static uint32_t stream_cadence_rate = 0;
 
-static int submit_presentation(native_renderer_state_t *state, const stream_ready_frame_t &item)
+static bool wait_presentation_deadline(native_renderer_state_t *state)
 {
     if (stream_presentation_mode)
     {
@@ -2001,9 +2001,26 @@ static int submit_presentation(native_renderer_state_t *state, const stream_read
             stream_cadence.reset(now, 100000000, target);
         }
         const uint64_t deadline = stream_cadence.next(now);
-        if (deadline > now)
-            sceKernelUsleep(static_cast<uint32_t>(deadline - now));
+        // Leave the newest-frame mailbox replaceable throughout this wait.
+        // A selected decoder slot must not age while successors arrive.
+        uint64_t current = now;
+        while (deadline > current)
+        {
+            pthread_mutex_lock(&state->lock);
+            const bool stopping = state->stop_presenting;
+            pthread_mutex_unlock(&state->lock);
+            if (stopping)
+                return false;
+            const uint64_t remaining = deadline - current;
+            sceKernelUsleep(static_cast<uint32_t>(remaining > 1000 ? 1000 : remaining));
+            current = monotonic_us();
+        }
     }
+    return true;
+}
+
+static int submit_presentation(native_renderer_state_t *state, const stream_ready_frame_t &item)
+{
     native_agc_metrics_t hud = item.hud;
     const native_video_mode_t *mode = state->mode;
     const uint64_t started = monotonic_us();
@@ -2125,6 +2142,11 @@ static void *video_present_thread(void *context)
         pthread_mutex_lock(&state->lock);
         while (!state->mailbox.full && !state->stop_presenting)
             pthread_cond_wait(&state->wake, &state->lock);
+        // Wait before taking ownership; publishers can replace stale ready frames.
+        pthread_mutex_unlock(&state->lock);
+        if (!wait_presentation_deadline(state))
+            return nullptr;
+        pthread_mutex_lock(&state->lock);
         if (state->stop_presenting || !state->mailbox.take(&current))
         {
             pthread_mutex_unlock(&state->lock);
