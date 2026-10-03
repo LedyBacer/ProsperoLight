@@ -270,7 +270,7 @@ int main(int argc, char **argv)
                                    });
         model.Initialize(now_ms);
         launcher::View view(model, fonts);
-        view.set_version("01.000.083");
+        view.set_version("01.000.080");
         view.set_players(2);
         view.set_storage({true, "/data/prosperolight/config", "/data/prosperolight/pairing",
                           "/data/prosperolight/logs"});

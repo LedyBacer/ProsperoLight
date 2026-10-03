@@ -4,10 +4,11 @@
 
 <h1 align="center">ProsperoLight</h1>
 
-> **Experimental performance beta: [01.000.070](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.070).**
-> Decoding and presentation now run on separate threads: a stream that outruns the decoder
-> keeps playing at the decoder's pace instead of dropping to one frame every 100 ms.
-> The PS5 decoder still limits how much bitrate is usable: see [Bitrate limits](#bitrate-limits).
+> **Beta: [01.000.080](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.080).**
+> A new launcher drawn by the GPU, up to four controllers, a Sunshine port per PC, and settings
+> and pairing kept in `/data/prosperolight`. The streaming engine is the one of the 01.000.070
+> performance beta; the PS5 decoder still limits how much bitrate is usable: see
+> [Bitrate limits](#bitrate-limits).
 > [01.000.060 remains stable](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.060).
 > Please report results and regressions through [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues), using the checklist in the beta release notes.
 
@@ -134,8 +135,7 @@ tooling are maintained in this repository.
 | Shell title | `ProsperoLight` |
 | Title ID | `PPSA99002` |
 | Category | Game |
-| Experimental beta / stable | `01.000.070` / `01.000.060` |
-| In development, not released | `01.000.083`: new launcher; files under `/data/prosperolight`; up to four controllers, Sunshine port per PC |
+| Beta / stable | `01.000.080` / `01.000.060` |
 | Version source | [`sce_sys/param.json`](sce_sys/param.json) |
 | Writable data | `/data/prosperolight` (`/download0` when the console has no ELF loader) |
 

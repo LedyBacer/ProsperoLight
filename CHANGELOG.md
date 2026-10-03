@@ -1,179 +1,94 @@
 # Changelog
 
-## 01.000.083
-
-### Development build: faster start, no stutter on tabs, crash report
-
-Not released. Everything from 01.000.082 below is included.
-
-- **Faster start from the second launch on.** The launcher keeps the shaders
-  its graphics compile in `/data/prosperolight/cache`. The first try at this
-  stopped the app at its first shader: the cache writes through `mkstemp`,
-  which the OpenGL runtime takes from a system library the app does not load.
-  The app now has its own.
-- **New version notice.** Once per launch the app asks the homebrew.page
-  catalog whether a newer ProsperoLight is listed, and says so in a notice
-  that stays for ten seconds. It uses the update check of
-  ps5-native-app-boilerplate with libcurl; nothing is downloaded or
-  installed, and no network or no listing means no notice.
-- **Crash report.** A fault writes `logs/crash-last.txt` and the same text into
-  the log; `tools/symbolize-crash.py` names the functions. Stopping and
-  unpairing are written to the log too.
-- **Stopping an app no longer closes ProsperoLight** (expected; to be confirmed
-  on the console). Stopping and unpairing run on the launcher's worker thread
-  since 01.000.080, and nest a refresh inside a TLS request: the thread now has
-  a 1 MiB stack instead of the default.
-- **No more one-second freezes, and a faster start.** Each write to the log
-  file under `/data` takes tens of milliseconds, and the OpenGL runtime writes
-  some forty lines of statistics every ten thousand draws (about every nine
-  seconds in the launcher), plus a few lines per shader at start. The screen
-  waited for all of them. The log is now buffered in memory and written by a
-  thread of its own, five times a second. The screen's thread also has a core of its
-  own, and requests to Sunshine run on the other CPUs.
-- The log notes any launcher frame that takes longer than 50 ms, with the time
-  each part of it took, and how long each graphics program took to build.
-
-### What was tested
-
-On the PC: the build, the tests and the launcher render check. On the console:
-see the notes for this build.
-
-## 01.000.082
-
-### Development build: one connecting screen, and no black start
-
-Not released. Everything from 01.000.081 below is included.
-
-- **The connecting screen stays until the stream is there.** It used to stop
-  at a fixed point when the launcher handed the display to the stream. Now the
-  stream keeps the same screen on the television and moves the bar on with
-  each step: display ready, decoder ready, Sunshine has started the app,
-  connected. When the first picture arrives the bar runs to its end, the
-  screen fades out, and the stream appears. Touchpad + L1 still cancels.
-- **No black screen when the app opens.** The console's own splash picture
-  now stays until the launcher has drawn its first frame; before, it was
-  taken away about four seconds too early.
-- The log has a time for each step of opening the launcher.
-
-### What was tested
-
-On the PC only: the picture handed to the stream, the bar and the fade are
-drawn and checked by the launcher render check (three `stream-*.png`
-pictures) and by unit tests. Not yet seen on a console: the hand-over itself,
-and the splash picture staying up.
-
-## 01.000.081
-
-### Development build: files under `/data/prosperolight`, and an About page
-
-Not released, and not yet run on a console. Everything from 01.000.080 below
-is included.
-
-- **One folder for everything the app writes.** When it starts, ProsperoLight
-  asks the console's ELF loader for access to the filesystem, the way
-  ProsperoEden does. With it, saved PCs and settings are in
-  `/data/prosperolight/config`, the pairing in `/data/prosperolight/pairing`,
-  and the log and the last stream's performance report in
-  `/data/prosperolight/logs`. An update or a reinstall does not touch them.
-- **Nothing to pair again.** The first start copies the saved PCs, the settings
-  and the pairing from the title's own storage. The older copies stay there.
-- **Still works without it.** With no ELF loader on port 9021, or if the request
-  is refused, the app uses `/app0` and `/download0` as before. The first line
-  of the log says which it is.
-- The app folder has one more file, `sandbox-elevator.elf`: the helper the ELF
-  loader runs. It only answers title `PPSA99002`.
-- **One connecting screen.** After the launcher's connecting screen, the old
-  dark screen with the circling dots is gone. The picture stays black for the
-  moment it takes the television to change mode, then the stream appears.
-- **About.** A fourth tab, as in ProsperoEden: credits for Moonlight and
-  Sunshine, thanks, who made the PS5 edition, the version, three steps to get
-  started, and the folders the settings, the pairing and the logs are in.
-
-### What was tested
-
-On the PC only: the build, the checks of the helper's file, and the tests.
-What a console run must still show: access is given (`status=0` in the log),
-the launcher finds its fonts and sounds in the install folder, the saved PCs
-and the pairing come over, and a stream still starts and returns with the
-process outside its sandbox.
-
 ## 01.000.080
 
-### Development build: a new launcher
+### Beta: a new launcher, four controllers, files that survive updates
 
-Not released, and not yet run on a console. Everything from 01.000.071 below
-is included.
+Everything in experimental beta **01.000.070** is included; its notes below
+still apply to the stream itself.
 
-- **New look.** The launcher is drawn by the GPU with the widgets of
-  ps5-homebrew-ui, at up to 4K, in ProsperoLight's own Moonlight theme: frosted
-  panels over a night-blue sky. Tabs in the header replace the sidebar.
-- **PCs.** Every saved PC is on screen with its state: ready, needs pairing, or
-  offline. The panel beside the list shows the selected PC's address, port,
-  pairing, app count and running app. **Remove** must be held; **Unpair** asks
-  first. The Refresh button is gone: Triangle searches the network again.
-- **Games.** Box art is shown as posters, seven to a row, and the list scrolls.
-  The selected app's name is the headline and the page takes its colours from
-  the poster. The running app carries a badge.
-- **Settings.** Rows are grouped, left and right change a value, and bitrate is
-  a slider from 10 to 300 Mbps. At 4K a meter shows the bitrate against the
-  decoder's measured limit and a warning appears above it. The stream shortcuts
-  are listed with the buttons' shapes.
-- **Sounds.** Every widget has its sound: moving, choosing, switching, sliders,
+### New
+
+- **A new launcher.** It is drawn by the GPU with the widgets of
+  [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui), at
+  up to 4K, in ProsperoLight's own Moonlight theme: frosted panels over a
+  night-blue sky. Four tabs: PCs, Games, Settings, About.
+  - **PCs.** Every saved PC is on screen with its state: ready, needs pairing,
+    or offline. The panel beside the list shows its address, port, pairing, app
+    count and running app. **Remove** must be held; **Unpair** asks first.
+    Triangle searches the network again.
+  - **Games.** Box art is shown as posters and the list scrolls. The selected
+    app's name is the headline, the page takes its colours from the poster, and
+    the running app carries a badge.
+  - **Settings.** Rows are grouped, left and right change a value, and bitrate
+    is a slider from 10 to 300 Mbps. At 4K a meter shows the bitrate against
+    the decoder's measured limit.
+  - **About.** Credits, the version, three steps to get started, and the
+    folders the settings, the pairing and the logs are in.
+  - Address and port are typed on a number pad inside the launcher.
+  - The screen keeps moving while a PC is slow to answer.
+- **Sounds.** Every widget has its sound: moving, choosing, tabs, sliders,
   dialogs, notices, and starting a stream.
-- **Address and port** are typed on a number pad inside the launcher. The PS5
-  keyboard is no longer used.
-- The screen keeps moving while a PC is slow to answer: requests to Sunshine
-  run on their own thread.
-- Notices appear as toasts, and buttons are shown as glyphs, not named.
-- After a stream above 60 Hz or in HDR, the screen stays black for five seconds
-  before the launcher returns, while the television changes mode.
-- SDL2, RmlUi and FreeType are no longer part of the app. The launcher uses the
-  ps5-opengl SDK; the app file grows from 5 MB to 25 MB.
+- **Up to four controllers.** Every user signed in on the PS5 plays with their
+  own controller. Turn on another controller, choose a user for it when the PS5
+  asks, and it joins as the next one, before or during a stream. `Touchpad + L1`
+  (leave the stream) and `Touchpad + R1` (statistics) work on every controller;
+  mouse mode and the stream keyboard stay with the first one.
+- **Sunshine port per PC.** The PCs page has a **Change port** button, and
+  **Add a PC** accepts `address:port`. A PC found on the network uses the port
+  Sunshine advertises.
+- **One folder for everything the app writes.** When it starts, ProsperoLight
+  asks the console's ELF loader for access to the filesystem, the way
+  ProsperoEden does. Saved PCs and settings are then in
+  `/data/prosperolight/config`, the pairing in `/data/prosperolight/pairing`,
+  and the logs in `/data/prosperolight/logs`. An update or a reinstall does not
+  touch them, and the first start brings the settings and the pairing over, so
+  nothing is paired again. With no ELF loader on port 9021 the app uses its own
+  storage as before.
+- **One connecting screen.** The launcher's connecting screen stays on the
+  television while the stream connects, its bar moving with each step; when the
+  first picture arrives the bar runs to its end and the screen fades into the
+  stream. `Touchpad + L1` still cancels.
+- **New version notice.** Once per launch the app asks the homebrew.page
+  catalog whether a newer ProsperoLight is listed, and says so in a notice that
+  stays for ten seconds. Nothing is downloaded or installed.
+- **Crash report.** If the app faults it writes `logs/crash-last.txt`;
+  `tools/symbolize-crash.py` names the functions.
+- **The stream shortcuts are named after their button.** They were written
+  `Select + ...`; the button is the touchpad, so they are now `Touchpad + L1`,
+  `Touchpad + R1`, `Touchpad + Square` and `Touchpad + Triangle`. The shortcuts
+  themselves did not change, and buttons are shown as glyphs.
+
+### Fixed
+
+- No black screen when the app opens: the console's splash picture stays until
+  the launcher has drawn its first frame.
+- The launcher no longer stands still for a second every few seconds (its log
+  is written by a thread of its own).
+- Stopping a running app from the launcher no longer closes ProsperoLight.
+
+### Good to know
+
+- The app file grows from 5 MB to 32 MB: the launcher brings the ps5-opengl
+  runtime, and the update check brings libcurl. The app folder has one more
+  file, `sandbox-elevator.elf`, the helper the ELF loader runs.
+- Opening the app takes about five seconds; the splash picture covers it. After
+  a stream above 60 Hz or in HDR the screen stays black for five seconds before
+  the launcher returns, while the television changes mode.
 - PC and app names can use western and central European letters and Cyrillic.
   Other scripts are not drawn yet.
-
-### What was tested
-
-On the PC only: the launcher's logic and screens run against a pretend Sunshine
-network (first start, three PCs, pairing, port and address entry, removing,
-stopping an app, starting a stream, settings, a PC that does not answer), every
-state is rendered to a picture, and every sound a widget asks for has a
-recording. The console build links and imports nothing that an earlier console
-build did not. The hand-over between the launcher and the stream on one display
-has not run on a console.
-
-## 01.000.071
-
-### Development build — multiple controllers and a Sunshine port per PC
-
-Not released. It adds two features to experimental beta **01.000.070**; the
-01.000.070 notes below still apply.
-
-- **Up to four controllers.** Every user signed in on the PS5 plays with their
-  own controller. The user who started ProsperoLight is the first controller on
-  the PC. Turn on another controller, choose a user for it when the PS5 asks,
-  and it joins as the next one, before or during a stream. A controller that is
-  switched off, or whose user signs out, is removed from the PC.
-- `Touchpad + L1` (leave the stream) and `Touchpad + R1` (statistics) work on
-  every controller. Mouse mode and the stream keyboard stay with the first one.
-- **The stream shortcuts are named after their button.** They were written
-  `Select + ...`; the button is the touchpad, pressed down until it clicks, so
-  they are now `Touchpad + L1`, `Touchpad + R1`, `Touchpad + Square` and
-  `Touchpad + Triangle`. The shortcuts themselves did not change. Settings, the
-  launcher's footer and the README show the buttons as icons.
-- **Sunshine port per PC.** The PCs page has a **Port** button for the selected
-  PC, and **Add PC** accepts `address:port`. Use it when Sunshine's **Port**
-  setting is not 47989. One address can be saved with several ports.
-- A PC found on the network uses the port Sunshine advertises.
 - Saved PCs and settings from earlier versions are kept. Going back to an
   earlier version resets them; pairing is kept.
+- `pairing/key.pem` under `/data/prosperolight` is what lets this console
+  connect to a paired PC: keep it private.
 
 ### What was tested
 
-Host tests only: controller joining, leaving, numbering and shortcuts against a
-simulated PS5; saved-PC migration, address and port entry, and discovery
-against simulated replies and one reply from a real Sunshine. Neither feature
-has run on a console yet.
+On a PS5 with a 4K television: the launcher and its four tabs, filesystem
+access and the move of settings and pairing to `/data/prosperolight`, the
+connecting screen handed to the stream, a stream and the return to the
+launcher. On the PC: the launcher's screens and logic against a pretend
+Sunshine network, and the unit tests.
 
 ## 01.000.070
 
