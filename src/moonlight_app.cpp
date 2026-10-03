@@ -33,9 +33,9 @@
 #endif
 
 static_assert(PROSPEROLIGHT_STREAM_SELF_TEST_FPS == 0 ||
-                  PROSPEROLIGHT_STREAM_SELF_TEST_FPS == MOONLIGHT_STREAM_FPS_90 ||
-                  PROSPEROLIGHT_STREAM_SELF_TEST_FPS == MOONLIGHT_STREAM_FPS_120,
-              "STREAM_SELF_TEST_FPS must be 0, 90, or 120");
+                  (PROSPEROLIGHT_STREAM_SELF_TEST_FPS >= MOONLIGHT_STREAM_FPS_MIN &&
+                   PROSPEROLIGHT_STREAM_SELF_TEST_FPS <= MOONLIGHT_STREAM_FPS_MAX),
+              "STREAM_SELF_TEST_FPS must be 0 or 30-120");
 static_assert(PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION == MOONLIGHT_STREAM_RESOLUTION_1080P ||
                   PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION == MOONLIGHT_STREAM_RESOLUTION_1440P ||
                   PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION == MOONLIGHT_STREAM_RESOLUTION_2160P,
@@ -152,19 +152,6 @@ void StreamDimensions(unsigned resolution, unsigned &width, unsigned &height)
     {
         width = 1920;
         height = 1080;
-    }
-}
-
-unsigned NextFrameRate(unsigned current)
-{
-    switch (current)
-    {
-    case MOONLIGHT_STREAM_FPS_60:
-        return MOONLIGHT_STREAM_FPS_90;
-    case MOONLIGHT_STREAM_FPS_90:
-        return MOONLIGHT_STREAM_FPS_120;
-    default:
-        return MOONLIGHT_STREAM_FPS_60;
     }
 }
 
@@ -719,7 +706,8 @@ void MoonlightApp::Activate()
         }
         else if (focus_ == 5)
         {
-            config_.stream_fps = NextFrameRate(config_.stream_fps);
+            StartFrameRateEntry();
+            return;
         }
         else if (focus_ == 6)
         {
@@ -798,6 +786,45 @@ void MoonlightApp::Activate()
     default:
         break;
     }
+}
+
+void MoonlightApp::StartFrameRateEntry()
+{
+    char value[16];
+    std::snprintf(value, sizeof(value), "%u", config_.stream_fps);
+    if (!radio_ime_request(value, "Stream frame rate", "Enter FPS (30-120)", FrameRateResult, this))
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+        SetText(document_, "settings-note", "Text entry is currently unavailable");
+    }
+}
+
+void MoonlightApp::FrameRateResult(const char *text, void *user_data)
+{
+    MoonlightApp *app = static_cast<MoonlightApp *>(user_data);
+    if (!app || !text)
+        return;
+    uint16_t value = 0;
+    if (!server_port_parse(text, &value) || value < MOONLIGHT_STREAM_FPS_MIN ||
+        value > MOONLIGHT_STREAM_FPS_MAX)
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+        SetText(app->document_, "settings-note",
+                "Enter a whole number from 30 to 120 FPS; previous value retained");
+        return;
+    }
+    moonlight_config_t updated = app->config_;
+    updated.stream_fps = value;
+    if (!moonlight_config_save(&updated))
+    {
+        prosperolight::ui_sound_play(prosperolight::UiSoundCue::Error);
+        SetText(app->document_, "settings-note", "Could not save FPS; previous value retained");
+        return;
+    }
+    app->config_ = updated;
+    prosperolight::ui_sound_play(prosperolight::UiSoundCue::Setting);
+    app->UpdateSettings();
+    app->UpdateGames();
 }
 
 void MoonlightApp::StartBitrateEntry()

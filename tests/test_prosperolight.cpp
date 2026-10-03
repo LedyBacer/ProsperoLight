@@ -583,6 +583,25 @@ TEST(Configuration, MigratesVersionFiveAndDefaultsTheNewStreamSettings)
     EXPECT_EQ(config.vsync_enabled, 1U);
     EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_CLASSIC);
     EXPECT_EQ(config.decoder_cores, MOONLIGHT_DECODER_CORES_DEFAULT);
+    // The persisted reader must retain every entered target, not just presets.
+    kernel_read_data = reinterpret_cast<const std::uint8_t *>(&file);
+    kernel_read_size = sizeof(file);
+    for (uint32_t fps = 30; fps <= 120; ++fps)
+    {
+        file.config.stream_fps = fps;
+        file.checksum = checksum(&file.config, sizeof(file.config));
+        ASSERT_TRUE(moonlight_config_load(&config));
+        EXPECT_EQ(config.stream_fps, fps);
+    }
+    for (uint32_t fps : {0u, 29u, 121u, UINT32_MAX})
+    {
+        file.config.stream_fps = fps;
+        file.checksum = checksum(&file.config, sizeof(file.config));
+        ASSERT_TRUE(moonlight_config_load(&config));
+        EXPECT_EQ(config.stream_fps, MOONLIGHT_STREAM_FPS_60);
+    }
+    kernel_read_data = nullptr;
+    kernel_read_size = 0;
 }
 
 TEST(Configuration, MigratesVersionFourAndDefaultsToStereo)

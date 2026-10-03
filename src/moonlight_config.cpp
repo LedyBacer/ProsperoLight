@@ -369,9 +369,8 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->video_codec = MOONLIGHT_VIDEO_CODEC_H264;
     if (config->stream_resolution > MOONLIGHT_STREAM_RESOLUTION_2160P)
         config->stream_resolution = MOONLIGHT_STREAM_RESOLUTION_1080P;
-    if (config->stream_fps != MOONLIGHT_STREAM_FPS_60 &&
-        config->stream_fps != MOONLIGHT_STREAM_FPS_90 &&
-        config->stream_fps != MOONLIGHT_STREAM_FPS_120)
+    if (config->stream_fps < MOONLIGHT_STREAM_FPS_MIN ||
+        config->stream_fps > MOONLIGHT_STREAM_FPS_MAX)
         config->stream_fps = MOONLIGHT_STREAM_FPS_60;
     if (config->hdr_enabled > 1U)
         config->hdr_enabled = 0;

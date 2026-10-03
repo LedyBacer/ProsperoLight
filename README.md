@@ -20,7 +20,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-PlayStation%205-003791?logo=playstation&amp;logoColor=white" alt="PlayStation 5">
   <img src="https://img.shields.io/badge/video-H.264%20%7C%20HEVC%20%7C%20PyroWave-70E1DC" alt="H.264, HEVC and PyroWave">
-  <img src="https://img.shields.io/badge/frame%20rate-60%20%7C%2090%20%7C%20120%20FPS-5BBEFF" alt="60, 90, and 120 FPS">
+  <img src="https://img.shields.io/badge/frame%20rate-30--120%20FPS-5BBEFF" alt="30 to 120 FPS">
   <img src="https://img.shields.io/badge/audio-Stereo%20%7C%205.1%20Opus-7DD3FC" alt="Stereo and 5.1 Opus audio">
   <img src="https://img.shields.io/badge/UI-RmlUi-5DDFA4" alt="RmlUi">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
@@ -39,7 +39,7 @@ bitrate measurements below apply to H.264/HEVC, not the PyroWave GPU decoder.
 
 
 - Native PS5 hardware streaming through VideoDec2 and AGC at 1080p, 1440p,
-  and 2160p, with independently selectable 60, 90, and 120 FPS stream targets.
+  and 2160p, with keyboard entry for integer stream targets from 30 to 120 FPS.
 - Decoding and presentation on separate threads: a late flip never holds back
   decoding, and every display refresh shows the newest decoded frame. See the
   [measured bitrate limits](#bitrate-limits) before raising the bitrate.
@@ -160,7 +160,7 @@ tooling are maintained in this repository.
 - Browse up to 64 advertised Sunshine applications with paged artwork,
   launch/resume feedback, and active-application stop controls.
 - Decode H.264 High and HEVC Main streams through VideoDec2 at 1080p, 1440p,
-  and 2160p. Select 60, 90, or 120 FPS independently of resolution and bitrate;
+  and 2160p. Enter 30-120 FPS independently of resolution and bitrate;
   live 1440p/90 and 2160p/120 Sunshine sessions are hardware-validated.
 - Present decoded GPU surfaces directly through AGC, with edge-to-edge and
   television-safe display modes. At 60 FPS, 1440p is GPU-scaled into a

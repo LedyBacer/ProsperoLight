@@ -184,3 +184,14 @@ fix and do not establish active VRR. Confirmation after that fix, PyroWave
 pacing comparisons, and HEVC HDR regression checks are pending. H.264 4K120
 recorded decoder timing spikes and input-queue overflows even with Unpaced;
 these limits must not be represented as eliminated by pacing.
+
+### Manual frame-rate entry
+
+Select Stream frame rate and press Cross to open the same system keyboard used
+for bitrate. Enter any integer from 30 to 120 FPS. Cancel, invalid input and a
+failed save retain the previous value. The saved target is passed unchanged to
+H.264, HEVC or PyroWave and their pacing policy. No configuration-format change
+is required. This is a stream target, not a new fixed HDMI mode: VideoOut uses
+its fixed60/120Hz path or requests VRR. Arbitrary targets such as75FPS can have
+uneven display intervals with fixed-refresh VSync; sustained decoding capacity
+and active VRR still require console verification.

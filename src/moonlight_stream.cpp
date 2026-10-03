@@ -3667,7 +3667,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     const uint32_t bitrate_kbps = options && options->bitrate_kbps ? options->bitrate_kbps : 20000u;
     const uint32_t requested_fps = options ? options->stream_fps : MOONLIGHT_STREAM_FPS_60;
     const uint32_t stream_fps =
-        requested_fps == MOONLIGHT_STREAM_FPS_90 || requested_fps == MOONLIGHT_STREAM_FPS_120
+        requested_fps >= MOONLIGHT_STREAM_FPS_MIN && requested_fps <= MOONLIGHT_STREAM_FPS_MAX
             ? requested_fps
             : MOONLIGHT_STREAM_FPS_60;
     const uint32_t requested_audio =

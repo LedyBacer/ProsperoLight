@@ -104,6 +104,8 @@ class MoonlightApp
     void CycleHost(int direction);
     void Activate();
     void StartManualHostEntry();
+    void StartFrameRateEntry();
+    static void FrameRateResult(const char *text, void *user_data);
     void StartBitrateEntry();
     static void BitrateResult(const char *text, void *user_data);
     static void ManualHostResult(const char *text, void *user_data);
