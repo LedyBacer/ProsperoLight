@@ -152,7 +152,16 @@ class FramePacing
         // If fixed display output is slower, its own interval is the floor.
         uint64_t minimum = period_ * 98 / 100;
         if (fixed_refresh_x100)
-            minimum = (UINT64_C(100000000) / fixed_refresh_x100) * 98 / 100;
+        {
+            const uint64_t display_period = UINT64_C(100000000) / fixed_refresh_x100;
+            const uint64_t divisor =
+                std::max<uint64_t>(1, (period_ + display_period / 2) / display_period);
+            const uint64_t matched = display_period * divisor;
+            const uint64_t error = matched > period_ ? matched - period_ : period_ - matched;
+            // Divisible rates keep their source interval guard. Non-divisible
+            // rates need alternating display intervals (75/90 on 120 Hz).
+            minimum = (error <= period_ / 100 ? matched : display_period) * 98 / 100;
+        }
         if (display_ceiling_x100)
             minimum = std::max(minimum, UINT64_C(100000000) / display_ceiling_x100);
         if (submitted_)

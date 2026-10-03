@@ -55,6 +55,13 @@ int main() {
         assert(target>=previous+2000000 && target<=previous+2010000);
         assert(p.stats.resets);
     }
+    // Fixed 60-on-120 must not rush two frames into adjacent refreshes.
+    moonlight::FramePacing fixed;
+    fixed.reset(60);
+    auto first=fixed.target(1,16666,1000000,11988,991660);
+    fixed.submitted(first,first,0);
+    auto second=fixed.target(2,33333,1000001,11988,first+250);
+    assert(second-first>=16000);
     moonlight::FramePacing p;
     p.reset(120);
     uint64_t last=0;
