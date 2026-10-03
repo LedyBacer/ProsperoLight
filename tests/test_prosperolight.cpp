@@ -79,7 +79,10 @@ TEST(Pipeline, ThreadLayoutKeepsStreamThreadsOffDecoderCpus)
     EXPECT_EQ(five.other, 0x1800u);
     const ThreadLayout three = plan_thread_layout(kTitleCpuMask, kClassicDecoderCpuMask);
     EXPECT_EQ(three.receive, 0x40u);
-    EXPECT_EQ(three.other, 0x1f80u);
+    EXPECT_EQ(three.other, 0x300u);
+    EXPECT_EQ(three.other & (three.receive | three.decode | three.present), 0u);
+    const ThreadLayout four = plan_thread_layout(kTitleCpuMask, 0xffu);
+    EXPECT_EQ(four.other & (four.receive | four.decode | four.present), 0u);
     // One CPU left is shared; none left means "leave the inherited masks".
     const ThreadLayout single = plan_thread_layout(0x7u, 0x3u);
     EXPECT_EQ(single.receive, 0x4u);

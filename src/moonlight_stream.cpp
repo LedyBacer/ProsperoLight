@@ -622,6 +622,8 @@ typedef struct native_renderer_state
     uint32_t pending_video_high_water;
     uint32_t reassembly_invalid_samples;
     uint32_t observed_slices_min, observed_slices_max, observed_slices_last, layout_samples;
+    moonlight::TimingHistogram idr_decode_timing, inter_decode_timing;
+    uint64_t decode_over_budget, decode_first_us;
     uint32_t hdr_mismatch_reported;
     int32_t last_result;
     stream_submission_t submissions[SUBMISSION_QUEUE_CAPACITY];
@@ -1758,6 +1760,14 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     busy = elapsed;
     state->decode_total_us += elapsed;
     state->decode_timing.add(elapsed);
+    if (!state->decode_calls)
+        state->decode_first_us = elapsed;
+    else
+        (decode_unit->frameType == FRAME_TYPE_IDR ? state->idr_decode_timing
+                                                  : state->inter_decode_timing)
+            .add(elapsed);
+    if (state->stream_fps && elapsed * state->stream_fps > 1000000u)
+        ++state->decode_over_budget;
     if (trace)
         trace->decode_us = elapsed;
     if (elapsed > state->decode_max_us)
@@ -4339,6 +4349,27 @@ done:
         controller.last_event.left_y, controller.last_event.right_x, controller.last_event.right_y,
         controller.mouse_mode, controller.mouse_toggles, controller.mouse_motion_events,
         controller.mouse_button_events, controller.mouse_scroll_events, controller.mouse_errors);
+    (void)lan_http_report_text(notification.message);
+    snprintf(notification.message, sizeof(notification.message),
+             "Moonlight decode profile: first_us=%llu over_budget=%llu slices=%u-%u "
+             "slice_samples=%u IDR_calls=%llu IDR_avg_us=%llu IDR_p99_upper_us=%llu "
+             "P_calls=%llu P_avg_us=%llu P_p99_upper_us=%llu other_mask=%llx",
+             (unsigned long long)renderer.decode_first_us,
+             (unsigned long long)renderer.decode_over_budget, renderer.observed_slices_min,
+             renderer.observed_slices_max, renderer.layout_samples,
+             (unsigned long long)renderer.idr_decode_timing.count,
+             (unsigned long long)(renderer.idr_decode_timing.count
+                                      ? renderer.idr_decode_timing.total_us /
+                                            renderer.idr_decode_timing.count
+                                      : 0),
+             (unsigned long long)renderer.idr_decode_timing.percentile(99),
+             (unsigned long long)renderer.inter_decode_timing.count,
+             (unsigned long long)(renderer.inter_decode_timing.count
+                                      ? renderer.inter_decode_timing.total_us /
+                                            renderer.inter_decode_timing.count
+                                      : 0),
+             (unsigned long long)renderer.inter_decode_timing.percentile(99),
+             (unsigned long long)renderer.layout.other);
     (void)lan_http_report_text(notification.message);
     ps5_physical_input_shutdown(&physical_input);
     snprintf(notification.message, sizeof(notification.message),
