@@ -108,6 +108,24 @@ The streaming protocol and decoder integration use pinned source revisions of
 corresponding `third_party/` source trees. None of these dependencies is
 claimed to be project-authored.
 
+## Update check
+
+`third_party/update-check/` is the update check of
+[ps5-native-app-boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate)
+(`examples/update-check`), Copyright (C) 2026 BlackBearReloaded,
+GPL-3.0-or-later. It asks the [homebrew.page](https://homebrew.page) catalog
+through libcurl, which the build takes from the pinned PacBrew release
+v0.40.2 and links statically with its dependencies. Their licence texts are in
+`third_party/licenses/`:
+
+| Component | Version | Licence | Text |
+| --- | --- | --- | --- |
+| libcurl | 8.18.0 | curl licence (MIT/X derivative), Copyright (C) Daniel Stenberg and contributors | `curl.txt` |
+| OpenSSL | 3.5.2 | Apache License 2.0, Copyright (C) The OpenSSL Project Authors | `openssl.txt` |
+| zlib | 1.3.2 | zlib licence, Copyright (C) Jean-loup Gailly and Mark Adler | `zlib.txt` |
+| zstd | 1.5.6 | BSD-3-Clause, Copyright (C) Meta Platforms, Inc. and affiliates | `zstd.txt` |
+| libpsl | 0.21.5 | MIT, Copyright (C) Tim Rühsen and contributors; its Public Suffix List data is MPL-2.0 | `libpsl.txt` |
+
 ## Launcher
 
 The launcher is drawn with OpenGL through the

@@ -47,6 +47,7 @@ struct Notice
     NoticeKind kind = NoticeKind::info;
     std::string title;
     std::string body;
+    float seconds = 0.0f; // how long it stays; 0: the usual time for its kind
 };
 
 // One app's box art, decoded: RGBA, top row first.
@@ -159,6 +160,14 @@ class Model
     // Runs first on every worker thread. On the console it moves the thread
     // off the screen's CPU: threads there are never time-sliced, and a TLS
     // request froze the screen for a second.
+    // Asks the catalog whether a newer version exists; true with its name in
+    // version. It blocks for as long as the network takes, so it runs on the
+    // worker, once, when nothing else is waiting.
+    using UpdateCheck = bool (*)(char *version, std::size_t size);
+    void set_update_check(UpdateCheck check)
+    {
+        update_check_ = check;
+    }
     using WorkerStart = void (*)();
     void set_worker_start(WorkerStart start)
     {
@@ -182,6 +191,7 @@ class Model
         unpair,
         stop,
         artwork,
+        update, // is there a newer version: once, when idle
     };
     struct Job
     {
@@ -195,6 +205,8 @@ class Model
     struct JobResult
     {
         int result = 0;
+        bool update_available = false;
+        char update_version[40] = {};
         moonlight_backend_snapshot_t snapshot{};
         moonlight_discovered_host_t found[MOONLIGHT_DISCOVERY_MAX_HOSTS]{};
         std::uint32_t found_count = 0;
@@ -222,7 +234,7 @@ class Model
     bool Remember(const char *host, std::uint16_t port, const moonlight_backend_snapshot_t &state,
                   bool online);
     bool Upsert(const char *host, std::uint16_t port, const moonlight_backend_snapshot_t &state);
-    void Notify(NoticeKind kind, std::string title, std::string body = {});
+    void Notify(NoticeKind kind, std::string title, std::string body = {}, float seconds = 0.0f);
     void Save();
 
     moonlight_config_t config_{};
@@ -249,6 +261,8 @@ class Model
     std::deque<ArtworkImage> artwork_ready_;
     ArtworkDecoder artwork_decoder_ = nullptr;
     WorkerStart worker_start_ = nullptr;
+    UpdateCheck update_check_ = nullptr;
+    bool update_checked_ = false;
 
     bool pairing_requested_ = false;
     bool pairing_active_ = false;

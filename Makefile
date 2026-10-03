@@ -51,14 +51,15 @@ APP_DEFINITIONS += INPUT_POLL_US=$(INPUT_POLL_US)
 APP_DEFINITIONS += PROSPEROLIGHT_GPU_TIMESTAMPS=$(GPU_TIMESTAMPS)
 APP_DEFINITIONS += PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES=$(CATCHUP_QUEUE_FRAMES)
 APP_DEFINITIONS += PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION=$(REFERENCE_FRAME_INVALIDATION)
-APP_INCLUDE_PATHS ?= third_party/ps5-homebrew-ui .deps/ps5-opengl/current/include include src src/gamestream platform/ps5 third_party/moonlight-common-c/src third_party/moonlight-common-c/enet/include third_party/moonlight-common-c/nanors third_party/moonlight-common-c/nanors/deps third_party/moonlight-common-c/nanors/deps/obl third_party/mbedtls/include third_party/opus/include
+APP_INCLUDE_PATHS ?= third_party/ps5-homebrew-ui third_party/update-check .deps/ps5-opengl/current/include include src src/gamestream platform/ps5 third_party/moonlight-common-c/src third_party/moonlight-common-c/enet/include third_party/moonlight-common-c/nanors third_party/moonlight-common-c/nanors/deps third_party/moonlight-common-c/nanors/deps/obl third_party/mbedtls/include third_party/opus/include
 APP_STATIC_ARCHIVES ?= .deps/ps5-opengl/libps5opengl-group.a build/stream-deps/libmoonlight-common-c.a build/stream-deps/libopus.a build/stream-deps/libmbedtls.a build/stream-deps/libmbedx509.a build/stream-deps/libmbedcrypto.a
 # The launcher draws with ps5-opengl: its AGC import libraries replace the app's own.
 APP_IMPORT_STUBS ?= .deps/ps5-opengl/current/lib/libSceAgc.so .deps/ps5-opengl/current/lib/libSceAgcDriver.so
 # Empty selects the pinned ps5-opengl release (tools/fetch-opengl-sdk.sh).
 PS5_OPENGL_PREFIX ?=
 APP_RUNTIME_MODULES ?=
-PACBREW_PACKAGES ?=
+# The update check asks homebrew.page through libcurl (third_party/update-check).
+PACBREW_PACKAGES ?= libcurl
 PACBREW_INCLUDE_PATHS ?=
 PACBREW_STATIC_ARCHIVES ?=
 PS5_HOST ?=

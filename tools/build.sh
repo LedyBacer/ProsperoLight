@@ -101,7 +101,7 @@ mkdir -p "$build/host" "$build/obj" "$dist"
 
 # The launcher is built from the UI kit in third_party/ps5-homebrew-ui.
 mapfile -d '' -t source_paths < <(
-    find "$root/src" "$root/third_party/ps5-homebrew-ui" -type f \
+    find "$root/src" "$root/third_party/ps5-homebrew-ui" "$root/third_party/update-check" -type f \
         \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' \) \
         ! -path "$root/src/gamestream/*" \
         -print0 | sort -z
@@ -163,7 +163,7 @@ max_jobs=${BUILD_JOBS:-$(nproc 2>/dev/null || printf '2')}
 compile_failed=0
 objects=()
 for source in "${sources[@]}"; do
-    [[ $source =~ ^(src|third_party/ps5-homebrew-ui)/[A-Za-z0-9_./-]+\.(c|cc|cpp)$ && -f $root/$source ]] || {
+    [[ $source =~ ^(src|third_party/ps5-homebrew-ui|third_party/update-check)/[A-Za-z0-9_./-]+\.(c|cc|cpp)$ && -f $root/$source ]] || {
         echo "invalid source: $source" >&2; exit 2;
     }
     object="$build/obj/${source//\//_}.o"
@@ -265,6 +265,8 @@ for symbol in malloc calloc realloc free posix_memalign malloc_usable_size; do
 done
 # The splash picture is hidden when the launcher says so (src/runtime/runtime_shims.c).
 wrap_options+=("--wrap=sceSystemServiceHideSplashScreen")
+# libcurl's socket calls go through third_party/update-check/console_curl.c.
+wrap_options+=("--wrap=fcntl")
 "$sdk_root/bin/prospero-lld" -T "$native/ps5-pie.ld" --eh-frame-hdr "${wrap_options[@]}" \
     --version-script "$native/app-symbols.map" \
     --exclude-libs=ALL \

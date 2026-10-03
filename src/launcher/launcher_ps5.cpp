@@ -9,6 +9,7 @@
 #include "app_storage.hpp"
 #include "../../platform/ps5/ps5_thread_placement.h"
 #include "connecting_plate.hpp"
+#include "update_check.h"
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
 #include "native_agc_present.hpp"
@@ -317,6 +318,34 @@ void CaptureConnecting(gfx::Renderer &renderer, View &view, Frame &frame, Select
              static_cast<long long>((sys::monotonic_us() - started) / 1000));
 }
 
+// Asks the homebrew.page catalog whether a newer ProsperoLight exists
+// (third_party/update-check). One HTTPS request; it runs on the worker.
+bool CheckForUpdate(char *version, std::size_t size)
+{
+    char title[10] = {};
+    char installed[12] = {};
+    // The app's own param.json: /app0 does not exist outside the sandbox.
+    const std::string param = std::string(storage::paths().app) + "/sce_sys/param.json";
+    if (!update_check_read_param(param.c_str(), title, installed))
+    {
+        sys::log("[PL] update check: %s could not be read", param.c_str());
+        return false;
+    }
+    const std::int64_t started = sys::monotonic_us();
+    update_check_result result{};
+    update_check_run(title, installed, &result);
+    sys::log("[PL] update check: installed=%s state=%d reason=%s http=%d error=%d available=%s "
+             "version=%s in %lld ms",
+             installed, static_cast<int>(result.state), update_check_reason_text(result.reason),
+             result.http_status, result.platform_error,
+             result.available[0] ? result.available : "-", result.version[0] ? result.version : "-",
+             static_cast<long long>((sys::monotonic_us() - started) / 1000));
+    if (result.state != UPDATE_CHECK_AVAILABLE)
+        return false;
+    std::snprintf(version, size, "%s", result.version[0] ? result.version : result.available);
+    return true;
+}
+
 // Where the launcher's threads run. Threads on the console run first-in
 // first-out at one priority and are never time-sliced, so a worker busy with
 // a TLS handshake on the screen's CPU stopped the screen for a second. The
@@ -412,6 +441,9 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             Model model;
             model.set_artwork_decoder(DecodePoster);
             model.set_worker_start(PlaceWorker);
+            // Once per launch of the app, not after every stream.
+            if (first_start)
+                model.set_update_check(CheckForUpdate);
             model.Initialize(static_cast<std::uint64_t>(sys::monotonic_us() / 1000));
             View view(model, fonts);
             view.set_version(

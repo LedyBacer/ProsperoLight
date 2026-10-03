@@ -59,6 +59,7 @@ if (( ${#app_cpp_sources[@]} )); then
             -DGL_GLEXT_PROTOTYPES=1 -I"$root/include" -I"$root/src" \
             -I"$root/src/gamestream" -I"$root/platform/ps5" \
             -I"$root/third_party/ps5-homebrew-ui" \
+            -I"$root/third_party/update-check" \
             -isystem "$root/.deps/ps5-opengl/current/include" \
             -I"$root/third_party/moonlight-common-c/src" \
             -I"$root/third_party/moonlight-common-c/enet/include" \

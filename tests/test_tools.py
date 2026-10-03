@@ -711,6 +711,44 @@ class ToolTests(unittest.TestCase):
         self.assertIn("(void)write(g_log_file, g_text.data, g_text.size);", report)
         self.assertNotIn("write(1,", report)
 
+    def test_update_check_follows_the_boilerplate_kit(self):
+        model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        build = (ROOT / "tools/build.sh").read_text(encoding="utf-8")
+        curl = (ROOT / "third_party/update-check/console_curl.c").read_text(encoding="utf-8")
+        shims = (ROOT / "src/runtime/runtime_shims.c").read_text(encoding="utf-8")
+        notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+
+        # The kit's transport: libcurl with the fcntl wrap.
+        self.assertIn("PACBREW_PACKAGES ?= libcurl", makefile)
+        self.assertIn('wrap_options+=("--wrap=fcntl")', build)
+        self.assertIn("int __wrap_fcntl(int descriptor, int command, ...)", curl)
+        # One definition of each function the app and the kit both had.
+        for name in ("int isatty(", "int mkstemp(", "FILE *popen(", "void openlog("):
+            self.assertNotIn(name, curl)
+            self.assertIn(name, shims)
+        self.assertNotIn("int getaddrinfo(", curl)
+        # Asked once per launch, on the worker, when nothing else waits; the
+        # app's own param.json is read from where the app really is.
+        self.assertIn("if (first_start)\n                model.set_update_check(CheckForUpdate);", platform)
+        check = platform[platform.index("bool CheckForUpdate(") :]
+        self.assertIn('std::string(storage::paths().app) + "/sce_sys/param.json"', check)
+        self.assertNotIn("update_check_run_self", platform)
+        next_job = model[model.index("bool Model::StartNext()") :]
+        self.assertLess(next_job.index("next.kind = JobKind::artwork;"),
+                        next_job.index("next.kind = JobKind::update;"))
+        # Only an available update is shown, for ten seconds.
+        self.assertIn("constexpr float kUpdateNoticeSeconds = 10.0f;", model)
+        self.assertIn("if (result.update_available)", model)
+        self.assertIn("notice.seconds > 0.0f", view)
+        # Shipping libcurl means shipping its notices.
+        for name in ("libcurl", "OpenSSL", "zlib", "zstd", "libpsl"):
+            self.assertIn(name, notices)
+        for name in ("curl.txt", "openssl.txt", "zlib.txt", "zstd.txt", "libpsl.txt"):
+            self.assertTrue((ROOT / "third_party/licenses" / name).is_file(), name)
+
     def test_crash_report_is_installed_first(self):
         main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
         report = (ROOT / "src/crash_report.cpp").read_text(encoding="utf-8")

@@ -949,7 +949,9 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
 
     for (const Notice &notice : model_.TakeNotices())
         toasts_.push(toast_kind(notice.kind), notice.title, notice.body,
-                     notice.kind == NoticeKind::error ? 7.0f : 4.0f);
+                     notice.seconds > 0.0f              ? notice.seconds
+                     : notice.kind == NoticeKind::error ? 7.0f
+                                                        : 4.0f);
     if (!pending_error_.empty() && age_ > 0.6f)
     {
         show(1, nullptr);

@@ -148,6 +148,9 @@ tooling are maintained in this repository.
   `/data/prosperolight` across application restarts and updates.
 - Pair with a two-minute PIN dialog with a countdown, and unpair after a
   confirmation.
+- Tell you when a newer version is listed on
+  [homebrew.page](https://homebrew.page): one notice for ten seconds, once per
+  launch. Nothing is downloaded or installed.
 - See every saved PC and its state in one list, and browse up to 64 advertised
   Sunshine applications as posters with launch/resume and stop controls.
 - Decode H.264 High and HEVC Main streams through VideoDec2 at 1080p, 1440p,

@@ -17,6 +17,8 @@ namespace
 {
 // The worker's stack: the TLS requests to Sunshine run on it.
 constexpr std::size_t kWorkerStackBytes = 1u << 20;
+// How long the notice of a newer version stays on screen.
+constexpr float kUpdateNoticeSeconds = 10.0f;
 } // namespace
 
 namespace
@@ -125,9 +127,9 @@ float Model::pairing_seconds_left() const
     return std::max(0.0f, static_cast<float>(MOONLIGHT_BACKEND_PAIR_TIMEOUT_SECONDS) - elapsed);
 }
 
-void Model::Notify(NoticeKind kind, std::string title, std::string body)
+void Model::Notify(NoticeKind kind, std::string title, std::string body, float seconds)
 {
-    notices_.push_back({kind, std::move(title), std::move(body)});
+    notices_.push_back({kind, std::move(title), std::move(body), seconds});
 }
 
 std::vector<Notice> Model::TakeNotices()
@@ -479,6 +481,10 @@ void Model::Run(const Job &job, JobResult *result)
         std::printf("[PL] launcher: stop answered %d (online=%u running=%d)\n", result->result,
                     result->snapshot.online, result->snapshot.current_app_id);
         break;
+    case JobKind::update:
+        result->update_available =
+            update_check_ && update_check_(result->update_version, sizeof(result->update_version));
+        break;
     case JobKind::artwork:
     {
         // The backend keeps a few pictures; this is the only thread that
@@ -525,6 +531,12 @@ bool Model::StartNext()
         next.https_port = backend_.https_port;
         next.app_id = artwork_wanted_.front();
         artwork_wanted_.pop_front();
+    }
+    else if (update_check_ && !update_checked_)
+    {
+        // Last of all, once: nothing the player asked for waits behind it.
+        update_checked_ = true;
+        next.kind = JobKind::update;
     }
     else
     {
@@ -793,6 +805,14 @@ void Model::Apply(const Job &job, JobResult &result)
     case JobKind::artwork:
         if (IsSelected(job.host, job.port) && !result.image.rgba.empty())
             artwork_ready_.push_back(std::move(result.image));
+        return;
+    case JobKind::update:
+        // Only good news is shown; no network or "not listed" is silence.
+        if (result.update_available)
+            Notify(NoticeKind::info, "Update available",
+                   std::string("ProsperoLight ") + result.update_version +
+                       " is out. Get it from homebrew.page.",
+                   kUpdateNoticeSeconds);
         return;
     default:
         break;

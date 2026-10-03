@@ -11,6 +11,11 @@ Not released. Everything from 01.000.082 below is included.
   stopped the app at its first shader: the cache writes through `mkstemp`,
   which the OpenGL runtime takes from a system library the app does not load.
   The app now has its own.
+- **New version notice.** Once per launch the app asks the homebrew.page
+  catalog whether a newer ProsperoLight is listed, and says so in a notice
+  that stays for ten seconds. It uses the update check of
+  ps5-native-app-boilerplate with libcurl; nothing is downloaded or
+  installed, and no network or no listing means no notice.
 - **Crash report.** A fault writes `logs/crash-last.txt` and the same text into
   the log; `tools/symbolize-crash.py` names the functions. Stopping and
   unpairing are written to the log too.

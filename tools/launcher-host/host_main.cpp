@@ -246,6 +246,10 @@ int main(int argc, char **argv)
     std::size_t cue_count = 0;
     std::size_t missing_cues = 0;
 
+    // A pretend catalog: when set, the launcher is told a newer version exists.
+    static int update_checks = 0;
+    bool offer_update = false;
+
     // The picture a session that starts a stream hands to the stream.
     std::vector<unsigned char> plate;
     launcher::View::ConnectBar plate_bar;
@@ -257,6 +261,13 @@ int main(int argc, char **argv)
     {
         launcher::Model model;
         model.set_artwork_decoder(make_poster);
+        if (offer_update)
+            model.set_update_check([](char *version, std::size_t size)
+                                   {
+                                       ++update_checks;
+                                       std::snprintf(version, size, "01.000.090");
+                                       return true;
+                                   });
         model.Initialize(now_ms);
         launcher::View view(model, fonts);
         view.set_version("01.000.083");
@@ -556,6 +567,18 @@ int main(int argc, char **argv)
         expect(saved.video_codec == MOONLIGHT_VIDEO_CODEC_H264 && saved.hdr_enabled == 0,
                "choosing H.264 turns HDR off");
     }
+
+    // ---- a newer version in the catalog: one notice, for ten seconds ----
+    offer_update = true;
+    session("update",
+            {
+                {150, 0, Direction::none, "notice"},
+                {420, 0, Direction::none, "notice-after-nine-seconds"},
+                {120, 0, Direction::none, "notice-gone"},
+            },
+            "");
+    offer_update = false;
+    expect(update_checks == 1, "the catalog is asked once per launch");
 
     // ---- About: one step back from the first tab ----
     session("about", {{30, previous}, {60, 0, Direction::none, "page"}, {10, back}, {30, 0}}, "");
