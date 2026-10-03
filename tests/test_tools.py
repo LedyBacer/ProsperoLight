@@ -199,7 +199,7 @@ class ToolTests(unittest.TestCase):
         frame_rate = frame_rate[: frame_rate.index("else if (focus_ == 6)")]
 
         self.assertNotIn("stream_fps", resolution)
-        self.assertIn("config_.stream_fps = NextFrameRate(config_.stream_fps);", frame_rate)
+        self.assertIn("StartFrameRateEntry();", frame_rate)
         self.assertNotIn("stream_resolution", frame_rate)
         self.assertNotIn("bitrate", frame_rate)
 
