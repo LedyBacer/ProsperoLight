@@ -1,5 +1,5 @@
 /*
- * ProsperoLight - Native module lifetime regression check.
+ * ps5-native-app-boilerplate / ProsperoLight - Native module lifetime regression check.
  * Copyright (C) 2026 BlackBearReloaded
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
