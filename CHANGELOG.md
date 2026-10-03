@@ -22,8 +22,8 @@ Not released. Everything from 01.000.082 below is included.
   file under `/data` takes tens of milliseconds, and the OpenGL runtime writes
   some forty lines of statistics every ten thousand draws (about every nine
   seconds in the launcher), plus a few lines per shader at start. The screen
-  waited for all of them. The log is now written by a thread of its own; the
-  screen only hands the lines over. The screen's thread also has a core of its
+  waited for all of them. The log is now buffered in memory and written by a
+  thread of its own, five times a second. The screen's thread also has a core of its
   own, and requests to Sunshine run on the other CPUs.
 - The log notes any launcher frame that takes longer than 50 ms, with the time
   each part of it took, and how long each graphics program took to build.

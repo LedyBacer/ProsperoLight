@@ -699,13 +699,15 @@ class ToolTests(unittest.TestCase):
         storage = (ROOT / "src/app_storage.cpp").read_text(encoding="utf-8")
         report = (ROOT / "src/crash_report.cpp").read_text(encoding="utf-8")
 
-        # Writes to /data take tens of milliseconds: the screen's thread only
-        # writes into a pipe, and a thread of its own fills the file.
+        # Writes to /data take tens of milliseconds: the streams are buffered
+        # and a thread of its own flushes them. No stream internals (fileno):
+        # the console's C library lays its FILE out differently.
         opened = storage[storage.index("void open_log(") :]
-        self.assertIn("dup2(ends[1], fileno(stdout));", opened)
-        self.assertIn("dup2(ends[1], fileno(stderr));", opened)
-        self.assertLess(opened.index("pthread_create(&writer"), opened.index("dup2(ends[1]"))
-        # The crash report goes to the file itself, not into the pipe.
+        self.assertIn("pthread_create(&flusher", opened)
+        self.assertIn("std::setvbuf(stdout, nullptr, started ? _IOFBF : _IONBF", opened)
+        self.assertNotIn("fileno(", storage)
+        self.assertNotIn("dup2(", storage)
+        # The crash report goes to the file itself.
         self.assertIn("(void)write(g_log_file, g_text.data, g_text.size);", report)
         self.assertNotIn("write(1,", report)
 
