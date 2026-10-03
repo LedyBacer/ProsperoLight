@@ -695,6 +695,20 @@ class ToolTests(unittest.TestCase):
         self.assertLess(platform.index("display.close();"),
                         platform.index("(void)ps5_thread_affinity_set(main_cpus);"))
 
+    def test_log_is_written_by_its_own_thread(self):
+        storage = (ROOT / "src/app_storage.cpp").read_text(encoding="utf-8")
+        report = (ROOT / "src/crash_report.cpp").read_text(encoding="utf-8")
+
+        # Writes to /data take tens of milliseconds: the screen's thread only
+        # writes into a pipe, and a thread of its own fills the file.
+        opened = storage[storage.index("void open_log(") :]
+        self.assertIn("dup2(ends[1], fileno(stdout));", opened)
+        self.assertIn("dup2(ends[1], fileno(stderr));", opened)
+        self.assertLess(opened.index("pthread_create(&writer"), opened.index("dup2(ends[1]"))
+        # The crash report goes to the file itself, not into the pipe.
+        self.assertIn("(void)write(g_log_file, g_text.data, g_text.size);", report)
+        self.assertNotIn("write(1,", report)
+
     def test_crash_report_is_installed_first(self):
         main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
         report = (ROOT / "src/crash_report.cpp").read_text(encoding="utf-8")

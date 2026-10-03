@@ -16,7 +16,8 @@ namespace crash
 {
 
 // Once, early in main, after the log is open.
-void Install(const char *logs_dir);
+// log_file also receives the report (-1: only the report file).
+void Install(const char *logs_dir, int log_file);
 // Names the calling thread in reports. The name must outlive the thread.
 void NameThread(const char *name);
 

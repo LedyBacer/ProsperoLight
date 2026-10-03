@@ -253,7 +253,7 @@ int main()
     // the app reads or writes is settled here (app_storage.hpp).
     storage::Initialize();
     // From here a fault leaves a report beside the log.
-    crash::Install(storage::paths().logs);
+    crash::Install(storage::paths().logs, storage::log_descriptor());
 #if PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS != 0
     RunVideoOutputSelfTest();
 #endif

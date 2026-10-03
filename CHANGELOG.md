@@ -18,10 +18,13 @@ Not released. Everything from 01.000.082 below is included.
   on the console). Stopping and unpairing run on the launcher's worker thread
   since 01.000.080, and nest a refresh inside a TLS request: the thread now has
   a 1 MiB stack instead of the default.
-- **No more one-second freezes.** Every few seconds the launcher checks the PC
-  over TLS on its worker thread. Console threads are never time-sliced, and the
-  worker could land on the screen's CPU: the screen then stood still for about
-  a second. The screen's thread now has its own core and the worker the rest.
+- **No more one-second freezes, and a faster start.** Each write to the log
+  file under `/data` takes tens of milliseconds, and the OpenGL runtime writes
+  some forty lines of statistics every ten thousand draws (about every nine
+  seconds in the launcher), plus a few lines per shader at start. The screen
+  waited for all of them. The log is now written by a thread of its own; the
+  screen only hands the lines over. The screen's thread also has a core of its
+  own, and requests to Sunshine run on the other CPUs.
 - The log notes any launcher frame that takes longer than 50 ms, with the time
   each part of it took, and how long each graphics program took to build.
 

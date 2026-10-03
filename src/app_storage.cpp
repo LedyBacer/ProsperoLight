@@ -11,8 +11,11 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <cerrno>
 #include <cstring>
 #include <initializer_list>
+#include <fcntl.h>
+#include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -107,6 +110,35 @@ void kept_path(char *path, std::size_t size, const Kept &kept)
     std::snprintf(path, size, "%s/%s/%s", kDataDir, kept.folder, kept.name);
 }
 
+int g_log_file = -1;
+int g_log_pipe = -1;
+
+// Copies what the app writes to its standard output into the log file. A
+// write to a file under /data takes tens of milliseconds; the OpenGL runtime
+// writes some forty lines of statistics every ten thousand draws, and the
+// screen stood still for a second each time. The pipe takes them at once.
+void *log_writer(void *)
+{
+    static char buffer[64 * 1024];
+    for (;;)
+    {
+        const ssize_t count = read(g_log_pipe, buffer, sizeof(buffer));
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count <= 0)
+            return nullptr;
+        ssize_t done = 0;
+        while (done < count)
+        {
+            const ssize_t written =
+                write(g_log_file, buffer + done, static_cast<size_t>(count - done));
+            if (written <= 0)
+                break;
+            done += written;
+        }
+    }
+}
+
 void open_log(const char *folder)
 {
     char path[176];
@@ -116,8 +148,7 @@ void open_log(const char *folder)
     // Keep the previous launch's log: it is the one that explains a crash.
     std::rename(path, previous);
     std::FILE *stream = std::freopen(path, "w", stdout);
-    // Start a fresh file, then make both streams append-only and unbuffered so
-    // the log survives a close from the home screen or a GPU fail-stop.
+    // Start a fresh file, then make both streams append-only and unbuffered.
     if (stream != nullptr)
         stream = std::freopen(path, "a", stdout);
     if (stream != nullptr)
@@ -125,6 +156,35 @@ void open_log(const char *folder)
     stream = std::freopen(path, "a", stderr);
     if (stream != nullptr)
         std::setvbuf(stream, nullptr, _IONBF, 0);
+
+    // Both streams now write into a pipe, and a thread of its own moves what
+    // arrives into the file.
+    g_log_file = open(path, O_WRONLY | O_APPEND);
+    int ends[2] = {-1, -1};
+    if (g_log_file < 0 || pipe(ends) != 0)
+        return;
+    // The first write into a new pipe can fail: prime it.
+    char byte = 0;
+    if (write(ends[1], &byte, 1) == 1)
+        (void)read(ends[0], &byte, 1);
+    g_log_pipe = ends[0];
+    pthread_attr_t attributes;
+    pthread_attr_init(&attributes);
+    pthread_attr_setstacksize(&attributes, 64u * 1024u);
+    pthread_t writer;
+    const bool started = pthread_create(&writer, &attributes, log_writer, nullptr) == 0;
+    pthread_attr_destroy(&attributes);
+    if (!started)
+    {
+        close(ends[0]);
+        close(ends[1]);
+        g_log_pipe = -1;
+        return;
+    }
+    pthread_detach(writer);
+    dup2(ends[1], fileno(stdout));
+    dup2(ends[1], fileno(stderr));
+    close(ends[1]);
 }
 
 void say(const char *line)
@@ -149,6 +209,11 @@ bool make_data_folders()
 }
 
 } // namespace
+
+int storage::log_descriptor()
+{
+    return g_log_file;
+}
 
 void storage::Initialize()
 {

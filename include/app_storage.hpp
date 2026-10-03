@@ -49,5 +49,8 @@ inline const Paths &paths()
 // over what an earlier version kept in the sandbox, and opens the log. Call it
 // once, first, while the process still has a single thread.
 void Initialize();
+// The log file itself (not the pipe that feeds it), for the crash report; -1
+// when there is none.
+int log_descriptor();
 
 } // namespace storage

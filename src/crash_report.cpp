@@ -62,6 +62,7 @@ std::atomic<int> g_reporting{0};
 char g_report_path[200];
 char g_previous_path[200];
 int g_probe[2] = {-1, -1}; // memory that may be unreadable is read through it
+int g_log_file = -1;
 
 std::uintptr_t CodeStart()
 {
@@ -314,8 +315,10 @@ void Handler(int signal, siginfo_t *info, void *context)
         PutCalls(m[23]);
         rename(g_report_path, g_previous_path);
         Write(g_report_path);
-        // The same text in the log, and one line in the kernel log.
-        (void)write(1, g_text.data, g_text.size);
+        // The same text in the log, and one line in the kernel log. Not through
+        // the log's pipe: its thread may not run again.
+        if (g_log_file >= 0)
+            (void)write(g_log_file, g_text.data, g_text.size);
         (void)sceKernelDebugOutText(0, "[PL] crash report written to logs/crash-last.txt\n");
         g_reporting.store(2);
     }
@@ -337,8 +340,9 @@ void Handler(int signal, siginfo_t *info, void *context)
 
 } // namespace
 
-void crash::Install(const char *logs_dir)
+void crash::Install(const char *logs_dir, int log_file)
 {
+    g_log_file = log_file;
     std::snprintf(g_report_path, sizeof(g_report_path), "%s/crash-last.txt", logs_dir);
     std::snprintf(g_previous_path, sizeof(g_previous_path), "%s/crash-prev.txt", logs_dir);
     if (pipe(g_probe) == 0)
