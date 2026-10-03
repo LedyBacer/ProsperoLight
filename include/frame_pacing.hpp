@@ -30,7 +30,7 @@ class FramePacing
 
     uint64_t target(int32_t frame, uint64_t source_us, uint64_t ready_us,
                     uint32_t fixed_refresh_x100 = 0, uint64_t flip_anchor_us = 0,
-                    uint32_t display_ceiling_x100 = 0)
+                    uint32_t display_ceiling_x100 = 0, uint64_t preparation_lead_us = 1000)
     {
         if (!initialized_)
         {
@@ -127,7 +127,7 @@ class FramePacing
         if (fixed_refresh_x100 && flip_anchor_us)
         {
             const uint64_t display_period = UINT64_C(100000000) / fixed_refresh_x100;
-            const uint64_t lead = std::min<uint64_t>(1000, display_period / 8);
+            const uint64_t lead = std::min<uint64_t>(preparation_lead_us, display_period / 4);
             const uint64_t required = deadline + lead;
             const uint64_t ticks =
                 required > flip_anchor_us
@@ -149,10 +149,21 @@ class FramePacing
             stats.spacing_error_max_us = std::max(stats.spacing_error_max_us, error);
         }
         if (actual_us > planned_us)
-            stats.late_max_us = std::max(stats.late_max_us, actual_us - planned_us);
+        {
+            const uint64_t late = actual_us - planned_us;
+            stats.late_max_us = std::max(stats.late_max_us, late);
+            wake_lead_ = std::clamp<uint64_t>((wake_lead_ * 7 + late) / 8, 50, 250);
+        }
+        else
+            wake_lead_ = std::max<uint64_t>(50, wake_lead_ - 1);
         submitted_ = actual_us;
         stats.wait_total_us += wait_us;
         ++stats.submissions;
+    }
+
+    uint64_t wake_lead_us() const
+    {
+        return wake_lead_;
     }
 
     uint64_t stale_limit_us() const
@@ -163,7 +174,7 @@ class FramePacing
   private:
     uint64_t period_q16_ = (UINT64_C(1000000) << 16) / 60, fractional_{};
     uint64_t period_ = 16666, slot_{}, submitted_{}, last_source_{};
-    uint64_t reserve_ = 1500, candidate_{};
+    uint64_t reserve_ = 1500, candidate_{}, wake_lead_ = 100;
     unsigned candidate_count_{}, clean_{};
     int32_t last_frame_{};
     bool initialized_{};

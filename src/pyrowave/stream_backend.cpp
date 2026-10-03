@@ -85,9 +85,19 @@ void wait_prepared_frame(void *context)
         const uint64_t current = now_us();
         if (current >= deadline)
             break;
-        s.wake.wait_for(lock,
-                        std::chrono::microseconds(std::min<uint64_t>(deadline - current, 1000)),
-                        [&] { return !s.running; });
+        const uint64_t remaining = deadline - current;
+        const uint64_t lead = wait.pacer->wake_lead_us();
+        if (remaining > lead)
+            s.wake.wait_for(lock,
+                            std::chrono::microseconds(std::min<uint64_t>(remaining - lead, 1000)),
+                            [&] { return !s.running; });
+        else
+        {
+            lock.unlock();
+            while (now_us() < deadline)
+                __builtin_ia32_pause();
+            lock.lock();
+        }
     }
     const uint64_t submitted = now_us();
     wait.pacer->submitted(deadline, submitted, submitted - started);

@@ -2016,7 +2016,9 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
     const uint64_t started = monotonic_us();
     const uint64_t deadline =
         stream_pacer.target(item.frame, item.pts_us, started, fixed ? refresh : 0,
-                            fixed ? state->last_present_us : 0, fixed ? 0 : refresh);
+                            fixed ? state->last_present_us : 0, fixed ? 0 : refresh,
+                            std::max<uint64_t>(250, state->present_call_timing.percentile(99) +
+                                                        stream_pacer.wake_lead_us()));
     uint64_t now = started;
     while (now < deadline)
     {
@@ -2025,7 +2027,12 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
         pthread_mutex_unlock(&state->lock);
         if (stopping)
             return false;
-        sceKernelUsleep(static_cast<uint32_t>(std::min<uint64_t>(1000, deadline - now)));
+        const uint64_t remaining = deadline - now;
+        const uint64_t lead = stream_pacer.wake_lead_us();
+        if (remaining > lead)
+            sceKernelUsleep(static_cast<uint32_t>(std::min<uint64_t>(1000, remaining - lead)));
+        else
+            __builtin_ia32_pause(); // Active tail is bounded to at most 250 us.
         now = monotonic_us();
     }
     stream_pacer.submitted(deadline, now, now - started);
