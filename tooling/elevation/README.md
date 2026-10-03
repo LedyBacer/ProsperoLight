@@ -11,3 +11,8 @@ from `src/elevation`. The build makes the helper with the PS5 payload SDK and sh
 for `Capability::filesystem` once at startup, and with it the app keeps everything it writes
 under `/data/prosperolight`. Without an ELF loader on the console the request fails and the app
 keeps its sandbox paths (`/app0`, `/download0`).
+
+Native Videodec2, keyboard and mouse modules are loaded before the filesystem
+request. They remain resident until process exit, because the title loader's
+original library namespace must not be used after changing root/jail. Stream
+teardown still frees decoder resources and closes physical input handles.

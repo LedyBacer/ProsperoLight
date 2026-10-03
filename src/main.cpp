@@ -10,6 +10,7 @@
 #include "launcher/launcher.hpp"
 #include "moonlight_stream.hpp"
 #include "native_agc_present.hpp"
+#include "native_modules.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -246,9 +247,10 @@ void RunVideoOutputSelfTest()
 
 int main()
 {
-    // Filesystem access first, while the process has one thread: every path
-    // the app reads or writes is settled here (app_storage.hpp).
+    // Resolve process-owned system modules before storage leaves the title jail.
+    prosperolight::native_modules::PrepareBeforeStorage();
     storage::Initialize();
+    prosperolight::native_modules::LogResults();
     // From here a fault leaves a report beside the log.
     crash::Install(storage::paths().logs, storage::log_descriptor());
 #if PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS != 0

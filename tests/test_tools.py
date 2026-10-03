@@ -377,6 +377,23 @@ class ToolTests(unittest.TestCase):
         )
         self.assertLess(failure, stream.index("prepare_native_session("))
 
+    def test_native_modules_keep_process_references_across_storage_and_reconnect(self):
+        main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        self.assertLess(main.index("native_modules::PrepareBeforeStorage();"),
+                        main.index("storage::Initialize();"))
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+        self.assertNotIn("sceSysmoduleLoadModule(", stream)
+        self.assertNotIn("sceSysmoduleUnloadModule(", stream)
+        compiler = shutil.which("clang++") or shutil.which("c++")
+        self.assertIsNotNone(compiler)
+        with tempfile.TemporaryDirectory() as folder:
+            executable = str(Path(folder) / "native-modules")
+            subprocess.run([compiler, "-std=c++20", "-Wall", "-Wextra", "-Werror",
+                            "-I", str(ROOT / "include"), str(ROOT / "src/native_modules.cpp"),
+                            str(ROOT / "tests/test_native_modules.cpp"), "-o", executable],
+                           check=True)
+            subprocess.run([executable], check=True)
+
     def test_physical_input_loads_modules_and_batch_drains_all_handles(self):
         source = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
         start = source.index("static int ps5_physical_input_init(")
@@ -384,11 +401,11 @@ class ToolTests(unittest.TestCase):
         physical_input = source[start:end]
 
         self.assertLess(
-            physical_input.index("sceSysmoduleLoadModule(UINT32_C(0x0106))"),
+            physical_input.index("native_modules::Result(prosperolight::native_modules::keyboard)"),
             physical_input.index("sceKeyboardInit()"),
         )
         self.assertLess(
-            physical_input.index("sceSysmoduleLoadModule(UINT32_C(0x00a9))"),
+            physical_input.index("native_modules::Result(prosperolight::native_modules::mouse)"),
             physical_input.index("sceMouseInit()"),
         )
         self.assertIn("sceKeyboardRead(", physical_input)
@@ -618,7 +635,7 @@ class ToolTests(unittest.TestCase):
         # The stream shows it before anything slow, and moves the bar on at
         # each step of the connection.
         begin = run.index("result = connecting_screen_begin(")
-        self.assertLess(begin, run.index("sceSysmoduleLoadModule(207)"))
+        self.assertLess(begin, run.index("native_modules::Result(prosperolight::native_modules::video_decoder)"))
         steps = [run.index(f"connecting_screen_stage({step}") for step in
                  ("connecting_screen.progress, 0.45f", "0.45f, 0.70f", "0.70f, 0.88f", "0.88f, 0.97f")]
         self.assertEqual(steps, sorted(steps))

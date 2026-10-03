@@ -29,6 +29,7 @@
 #include "presentation_preferences.hpp"
 #include "app_storage.hpp"
 #include "host_quit_preferences.hpp"
+#include "native_modules.hpp"
 #include "connecting_plate.hpp"
 #include "moonlight_config.hpp"
 #include "moonlight_physical_input.hpp"
@@ -161,8 +162,6 @@ extern "C"
     int32_t sceKernelSendNotificationRequest(uint32_t device, void *request, size_t size,
                                              int32_t blocking);
     int sceSystemServiceHideSplashScreen(void);
-    int32_t sceSysmoduleLoadModule(uint32_t id);
-    int32_t sceSysmoduleUnloadModule(uint32_t id);
     int32_t sceUserServiceInitialize(void *params);
     int32_t sceUserServiceGetInitialUser(int32_t *user_id);
     int32_t sceUserServiceTerminate(void);
@@ -2990,7 +2989,8 @@ static int ps5_physical_input_init(ps5_physical_input_state_t *state, int32_t us
          ++index)
         state->mouse_handles[index] = -1;
 
-    state->keyboard_module_result = sceSysmoduleLoadModule(UINT32_C(0x0106));
+    state->keyboard_module_result =
+        prosperolight::native_modules::Result(prosperolight::native_modules::keyboard);
     if (state->keyboard_module_result >= 0)
         state->keyboard_init_result = sceKeyboardInit();
     if (state->keyboard_init_result >= 0)
@@ -3008,7 +3008,8 @@ static int ps5_physical_input_init(ps5_physical_input_state_t *state, int32_t us
         }
     }
 
-    state->mouse_module_result = sceSysmoduleLoadModule(UINT32_C(0x00a9));
+    state->mouse_module_result =
+        prosperolight::native_modules::Result(prosperolight::native_modules::mouse);
     if (state->mouse_module_result >= 0)
         state->mouse_init_result = sceMouseInit();
     if (state->mouse_init_result >= 0)
@@ -3110,9 +3111,9 @@ static void ps5_physical_input_shutdown(ps5_physical_input_state_t *state)
         state->mouse_handles[index] = -1;
     }
     if (state->mouse_module_result == 0)
-        state->mouse_unload_result = sceSysmoduleUnloadModule(UINT32_C(0x00a9));
+        state->mouse_unload_result = 0; // Process-owned module remains loaded.
     if (state->keyboard_module_result == 0)
-        state->keyboard_unload_result = sceSysmoduleUnloadModule(UINT32_C(0x0106));
+        state->keyboard_unload_result = 0; // Process-owned module remains loaded.
     state->initialization_attempted = 0;
 }
 
@@ -3844,7 +3845,6 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     int32_t delete_result = -1;
     int32_t release_compute_result = -1;
     int32_t unload_result = -1;
-    int sysmodule_loaded = 0;
     uint64_t live_elapsed_us = 0;
     uint64_t first_frame_wait_start_us = 0;
     uint64_t last_input_poll_us = 0;
@@ -3992,13 +3992,17 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         stop_connection_loading();
         goto configure_stream;
     }
-    result = sceSysmoduleLoadModule(207);
+    result = prosperolight::native_modules::Result(prosperolight::native_modules::video_decoder);
     snprintf(notification.message, sizeof(notification.message),
              "Native zero-copy stage 2: sysmodule207=%08x", (uint32_t)result);
     (void)lan_http_report_text(notification.message);
     if (result != 0)
+    {
+        snprintf(stream_error, sizeof(stream_error),
+                 "Local video decoder module failed to load (0x%08x). Restart ProsperoLight.",
+                 (uint32_t)result);
         goto done;
-    sysmodule_loaded = 1;
+    }
 
     compute_memory.size = sizeof(compute_memory);
     result = sceVideodec2QueryComputeMemoryInfo(&compute_memory);
@@ -4681,8 +4685,7 @@ done:
         if (compute_queue)
             release_compute_result = sceVideodec2ReleaseComputeQueue(compute_queue);
         release_direct(compute_memory.cpu_gpu, compute_start, compute_size);
-        if (sysmodule_loaded)
-            unload_result = sceSysmoduleUnloadModule(207);
+        unload_result = 0; // Native modules are retained across streams.
     }
     else
     {
