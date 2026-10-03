@@ -25,9 +25,9 @@ void PrepareBeforeStorage()
 {
     if (prepared)
         return;
-    // Storage elevation changes root/jail and credential state. Sysmodule's
-    // loader must resolve system PRXs before that transition. Keep references
-    // alive so stream exit/reconnect never needs to load them outside the jail.
+    // Resolve modules before granting filesystem access and keep process-owned
+    // references across reconnects. The helper must also preserve root/jail:
+    // VideoDec2 lazily loads VdecCore and codec PRXs after this initial load.
     for (Module &module : modules)
         module.result = sceSysmoduleLoadModule(module.id);
     prepared = true;

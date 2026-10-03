@@ -247,7 +247,7 @@ void RunVideoOutputSelfTest()
 
 int main()
 {
-    // Resolve process-owned system modules before storage leaves the title jail.
+    // Resolve process-owned system modules before storage grants filesystem access.
     prosperolight::native_modules::PrepareBeforeStorage();
     storage::Initialize();
     prosperolight::native_modules::LogResults();

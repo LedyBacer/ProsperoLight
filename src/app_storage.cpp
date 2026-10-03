@@ -233,6 +233,7 @@ void storage::Initialize()
 
     paths.status = static_cast<int>(elevation::request(elevation::Capability::filesystem));
     const bool granted = paths.status == 0;
+    const bool sandboxed = is_file("/app0/eboot.bin");
     // Elevation leaves the effective group apart from the real one, and the
     // OpenGL runtime turns its shader cache off for such a process.
     const bool group_matched = getegid() == getgid() || setegid(getgid()) == 0;
@@ -240,16 +241,18 @@ void storage::Initialize()
     bool data_ready = false;
     if (granted)
     {
-        // The console's root has no /app0: the sandbox mounts it from the
-        // folder the app was installed in (or from the image it came as).
+        // Keep /app0 when the helper preserves the title jail. Retain the
+        // global-path fallback for older helpers that escaped the namespace.
         char probe[160];
         std::snprintf(probe, sizeof(probe), "%s/eboot.bin", kInstallDir);
         std::snprintf(paths.app, sizeof(paths.app), "%s",
-                      is_file(probe) ? kInstallDir : kSandboxApp);
+                      sandboxed        ? "/app0"
+                      : is_file(probe) ? kInstallDir
+                                       : kSandboxApp);
         data_ready = make_data_folders();
         // Without its folders the app keeps the sandbox's storage, by the
         // name it has outside the sandbox.
-        const char *base = data_ready ? kDataDir : kSandboxData;
+        const char *base = data_ready ? kDataDir : sandboxed ? "/download0" : kSandboxData;
         std::snprintf(paths.config, sizeof(paths.config), "%s/%sprosperolight-config.bin", base,
                       data_ready ? "config/" : "");
         std::snprintf(paths.config_temporary, sizeof(paths.config_temporary),
@@ -274,7 +277,7 @@ void storage::Initialize()
     // The OpenGL runtime keeps the shaders it compiled, so later launches, and
     // the first visit to each screen, skip that work.
     char shaders[176];
-    const char *base = !granted ? "/download0" : data_ready ? kDataDir : kSandboxData;
+    const char *base = data_ready ? kDataDir : sandboxed ? "/download0" : kSandboxData;
     std::snprintf(shaders, sizeof(shaders), "%s/cache", base);
     mkdir(shaders, 0777);
     std::snprintf(shaders, sizeof(shaders), "%s/cache/%s", base, kShaderCache);
@@ -286,7 +289,9 @@ void storage::Initialize()
                   "[PL] storage: title=%s status=%d app=%s data=%s uid=%d/%d gid=%d/%d "
                   "group_matched=%d shader_cache=%d\n",
                   kTitleId, paths.status, paths.app,
-                  granted ? (data_ready ? kDataDir : kSandboxData) : "/download0",
+                  data_ready  ? kDataDir
+                  : sandboxed ? "/download0"
+                              : kSandboxData,
                   static_cast<int>(getuid()), static_cast<int>(geteuid()),
                   static_cast<int>(getgid()), static_cast<int>(getegid()), group_matched ? 1 : 0,
                   cache_ready ? 1 : 0);

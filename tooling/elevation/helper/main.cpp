@@ -130,14 +130,10 @@ bool write_state(const Target &target, const State &state) noexcept
 Status grant_filesystem(const Target &target, const State &original) noexcept
 {
     State desired = original;
-    desired.root = kernel_get_root_vnode();
-    if (!kernel_pointer(desired.root))
-        return Status::unavailable;
-    desired.jail = desired.root;
+    // /data is already mounted inside the title jail. Grant filesystem UID/GID
+    // access without changing root/jail or SCE module-loading credentials.
+    // Lazy loads (VdecCore/Savc/Shevc, HID) need the original library namespace.
     desired.identity.fill(0);
-    // Filesystem access must retain the application's module-loading identity.
-    // Replacing its SCE authority/capabilities also affects native sysmodules.
-    // Root credentials and filesystem roots are sufficient for /data access.
 
     State verified{};
     if (write_state(target, desired) && read_state(target, verified) && verified == desired)

@@ -310,10 +310,11 @@ follow `/data/prosperolight/logs`; the fallback is `/download0`.
 ### Native setup fails before the host connection
 
 `sysmodule207=80020063` is a local module-loading failure, not a Sunshine
-encoder/bitrate failure. Native modules are loaded once before storage elevation
-changes the title's root/jail. Their references live for the process: stream
-cleanup releases decoder queues, memory and input handles, without unloading
-the system modules needed for reconnect. The launcher log records all three
-startup results as `native modules: phase=before-storage`. A failed video module
-gets a local decoder error instead of a misleading Sunshine connection error.
-Keep this startup line and the stage-specific log when diagnosing a failure.
+encoder/bitrate failure. Filesystem elevation preserves the title root/jail and
+SCE credentials: `/data` is already mounted inside the jail. Otherwise even
+preloaded Videodec2 can fail at its first compute query (`811d0111`) while lazily
+loading VdecCore or codec libraries. Native modules are loaded once before the
+filesystem permission grant and retained across streams. Decoder resources and
+input handles still close at stream exit. Startup results are logged as
+`native modules: phase=before-storage`; keep this line and the compute-query
+result when diagnosing a failure.

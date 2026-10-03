@@ -12,7 +12,9 @@ for `Capability::filesystem` once at startup, and with it the app keeps everythi
 under `/data/prosperolight`. Without an ELF loader on the console the request fails and the app
 keeps its sandbox paths (`/app0`, `/download0`).
 
-Native Videodec2, keyboard and mouse modules are loaded before the filesystem
-request. They remain resident until process exit, because the title loader's
-original library namespace must not be used after changing root/jail. Stream
-teardown still frees decoder resources and closes physical input handles.
+The helper grants filesystem UID/GID access while preserving the title's
+root/jail and SCE credentials. `/data` is mounted inside the jail already.
+Changing root/jail breaks lazy system-library loads, including VideoDec2's
+VdecCore and codec libraries. Storage keeps `/app0` as the resource path.
+Native Videodec2, keyboard and mouse references remain process-owned, while
+stream teardown frees decoder resources and closes physical input handles.

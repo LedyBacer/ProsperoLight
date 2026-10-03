@@ -377,6 +377,16 @@ class ToolTests(unittest.TestCase):
         )
         self.assertLess(failure, stream.index("prepare_native_session("))
 
+    def test_filesystem_permission_grant_preserves_lazy_module_namespace(self):
+        helper = (ROOT / "tooling/elevation/helper/main.cpp").read_text(encoding="utf-8")
+        grant = helper[helper.index("Status grant_filesystem("):helper.index("bool send_message(")]
+        self.assertIn("State desired = original;", grant)
+        self.assertNotIn("desired.root =", grant)
+        self.assertNotIn("desired.jail =", grant)
+        self.assertNotIn("desired.authority =", grant)
+        storage = (ROOT / "src/app_storage.cpp").read_text(encoding="utf-8")
+        self.assertRegex(storage, r'sandboxed\s*\?\s*"/app0"')
+
     def test_native_modules_keep_process_references_across_storage_and_reconnect(self):
         main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
         self.assertLess(main.index("native_modules::PrepareBeforeStorage();"),
