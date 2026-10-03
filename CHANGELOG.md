@@ -22,6 +22,10 @@ Not released. Everything from 01.000.082 below is included.
   on the console). Stopping and unpairing run on the launcher's worker thread
   since 01.000.080, and nest a refresh inside a TLS request: the thread now has
   a 1 MiB stack instead of the default.
+- **No more one-second freezes.** Every few seconds the launcher checks the PC
+  over TLS on its worker thread. Console threads are never time-sliced, and the
+  worker could land on the screen's CPU: the screen then stood still for about
+  a second. The screen's thread now has its own core and the worker the rest.
 - The log notes any launcher frame that takes longer than 50 ms.
 
 ### What was tested

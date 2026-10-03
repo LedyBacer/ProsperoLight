@@ -682,6 +682,22 @@ class ToolTests(unittest.TestCase):
         self.assertLess(action.index("memset(&identity, 0, sizeof(identity));"),
                         action.index("identity_init(&identity"))
 
+    def test_launcher_worker_stays_off_the_screens_cpu(self):
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+
+        # Console threads are never time-sliced: a TLS request on the screen's
+        # CPU froze the launcher. The screen gets a core, the worker the rest,
+        # and the main thread's mask is given back before the stream.
+        self.assertEqual(int(re.search(r"kScreenCpus = (0x[0-9a-f]+);", platform).group(1), 16)
+                         & int(re.search(r"kWorkerCpus = (0x[0-9a-f]+);", platform).group(1), 16), 0)
+        self.assertIn("model.set_worker_start(PlaceWorker);", platform)
+        worker = model[model.index("void *Model::Worker(") :]
+        self.assertLess(worker.index("model->worker_start_();"), worker.index("model->Run("))
+        self.assertLess(platform.index("display.open("), platform.index("ps5_thread_affinity_set(kScreenCpus)"))
+        self.assertLess(platform.index("display.close();"),
+                        platform.index("(void)ps5_thread_affinity_set(main_cpus);"))
+
     def test_crash_report_is_installed_first(self):
         main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
         report = (ROOT / "src/crash_report.cpp").read_text(encoding="utf-8")

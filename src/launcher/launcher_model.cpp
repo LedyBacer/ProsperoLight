@@ -448,6 +448,8 @@ bool Model::TakeArtwork(ArtworkImage *image)
 void *Model::Worker(void *self)
 {
     Model *model = static_cast<Model *>(self);
+    if (model->worker_start_)
+        model->worker_start_();
     model->Run(model->job_, &model->result_);
     __atomic_store_n(&model->worker_done_, 1, __ATOMIC_RELEASE);
     return nullptr;

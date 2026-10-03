@@ -7,6 +7,7 @@
 #include "launcher/launcher.hpp"
 
 #include "app_storage.hpp"
+#include "../../platform/ps5/ps5_thread_placement.h"
 #include "connecting_plate.hpp"
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
@@ -324,8 +325,10 @@ void WarmUp(gfx::Renderer &renderer, View &view, Frame &frame, int width, int he
 {
     const std::int64_t started = sys::monotonic_us();
     const int shown = view.screen();
+    long long spent[View::kScreenCount] = {};
     for (int screen = 0; screen < View::kScreenCount; ++screen)
     {
+        const std::int64_t screen_started = sys::monotonic_us();
         view.warm(screen);
         frame.reset();
         frame.glass_texture = renderer.glass_texture();
@@ -339,11 +342,26 @@ void WarmUp(gfx::Renderer &renderer, View &view, Frame &frame, int width, int he
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
         renderer.present(0, width, height);
+        glFinish();
+        spent[screen] = static_cast<long long>((sys::monotonic_us() - screen_started) / 1000);
     }
     view.warm(shown);
-    glFinish();
-    sys::log("[PL] launcher: screens warmed up in %lld ms",
-             static_cast<long long>((sys::monotonic_us() - started) / 1000));
+    sys::log("[PL] launcher: screens warmed up in %lld ms (%lld, %lld, %lld, %lld)",
+             static_cast<long long>((sys::monotonic_us() - started) / 1000), spent[0], spent[1],
+             spent[2], spent[3]);
+}
+
+// Where the launcher's threads run. Threads on the console run first-in
+// first-out at one priority and are never time-sliced, so a worker busy with
+// a TLS handshake on the screen's CPU stopped the screen for a second. The
+// screen gets one core (CPU 0 and its twin); requests to Sunshine run on the
+// other eleven CPUs. The stream sets its own placement.
+constexpr std::uint64_t kScreenCpus = 0x0003;
+constexpr std::uint64_t kWorkerCpus = 0x1ffc;
+
+void PlaceWorker()
+{
+    (void)ps5_thread_affinity_set(kWorkerCpus);
 }
 
 // The recorded sounds are read once and kept: a stream does not need the
@@ -366,6 +384,10 @@ audio::SoundBank &Sounds()
 Result Run(Selection *selection, const char *stream_error, bool first_start)
 {
     const std::int64_t opened_at = sys::monotonic_us();
+    // The screen's thread gets its own core while the launcher runs; the
+    // stream finds the mask it had.
+    std::uint64_t main_cpus = 0;
+    const bool main_cpus_known = ps5_thread_affinity_get(&main_cpus) == 0;
     // Milliseconds since the launcher began to open, for the log.
     const auto elapsed = [opened_at]
     { return static_cast<long long>((sys::monotonic_us() - opened_at) / 1000); };
@@ -381,6 +403,11 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
     }
     sys::log("[PL] launcher: display %dx%d after %lld ms", display.width(), display.height(),
              elapsed());
+    // After the display: the graphics runtime's own threads keep the full mask.
+    const int placed = ps5_thread_affinity_set(kScreenCpus);
+    sys::log("[PL] launcher: screen thread on CPUs %llx (was %llx), result %d",
+             static_cast<unsigned long long>(kScreenCpus),
+             static_cast<unsigned long long>(main_cpus), placed);
 
     Result outcome = Result::failed;
     {
@@ -390,12 +417,14 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
         gfx::Font headline;
         gfx::Font mono;
         ui::Fonts fonts;
-        const bool ready =
-            renderer.init() &&
-            LoadFont(renderer, "inter-regular.huifont", &regular, &fonts.regular) &&
-            LoadFont(renderer, "inter-semibold.huifont", &semibold, &fonts.semibold) &&
-            LoadFont(renderer, "montserrat-medium.huifont", &headline, &fonts.display) &&
-            LoadFont(renderer, "dejavu-sans-mono.huifont", &mono, &fonts.mono);
+        bool ready = renderer.init();
+        sys::log("[PL] launcher: renderer after %lld ms", elapsed());
+        ready = ready && LoadFont(renderer, "inter-regular.huifont", &regular, &fonts.regular) &&
+                LoadFont(renderer, "inter-semibold.huifont", &semibold, &fonts.semibold);
+        sys::log("[PL] launcher: two fonts after %lld ms", elapsed());
+        ready = ready &&
+                LoadFont(renderer, "montserrat-medium.huifont", &headline, &fonts.display) &&
+                LoadFont(renderer, "dejavu-sans-mono.huifont", &mono, &fonts.mono);
         // The launcher's theme uses neither of these two faces.
         fonts.pixel = fonts.mono;
         fonts.hand = fonts.regular;
@@ -416,6 +445,7 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
 
             Model model;
             model.set_artwork_decoder(DecodePoster);
+            model.set_worker_start(PlaceWorker);
             model.Initialize(static_cast<std::uint64_t>(sys::monotonic_us() / 1000));
             View view(model, fonts);
             view.set_version(
@@ -563,6 +593,8 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
         renderer.release();
     }
     display.close();
+    if (main_cpus_known)
+        (void)ps5_thread_affinity_set(main_cpus);
     sys::log("[PL] launcher: closed");
     return outcome;
 }

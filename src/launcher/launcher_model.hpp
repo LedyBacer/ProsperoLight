@@ -156,6 +156,14 @@ class Model
     {
         artwork_decoder_ = decoder;
     }
+    // Runs first on every worker thread. On the console it moves the thread
+    // off the screen's CPU: threads there are never time-sliced, and a TLS
+    // request froze the screen for a second.
+    using WorkerStart = void (*)();
+    void set_worker_start(WorkerStart start)
+    {
+        worker_start_ = start;
+    }
     // Asks for one app's box art from the selected PC (once per app).
     void RequestArtwork(int app_id);
     // The next picture that arrived, if any.
@@ -240,6 +248,7 @@ class Model
     std::vector<int> artwork_asked_;
     std::deque<ArtworkImage> artwork_ready_;
     ArtworkDecoder artwork_decoder_ = nullptr;
+    WorkerStart worker_start_ = nullptr;
 
     bool pairing_requested_ = false;
     bool pairing_active_ = false;
