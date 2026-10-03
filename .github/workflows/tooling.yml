@@ -10,6 +10,7 @@ on:
       - main
       # Let contributors validate fork branches before upstream workflow approval.
       - "feature/**"
+      - dev
     tags:
       - "[0-9][0-9].[0-9][0-9][0-9].[0-9][0-9][0-9]"
   pull_request:

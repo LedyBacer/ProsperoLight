@@ -19,6 +19,7 @@ if [[ $# -gt 1 || ( $# -eq 1 && $1 != --ensure ) ]]; then
     echo 'usage: tools/build-stream-deps.sh [--ensure]' >&2
     exit 2
 fi
+bash "$root/tools/controllers/apply-haptics.sh"
 bash "$root/tools/setup-native-dependencies.sh" >/dev/null
 sdk=${PS5_PAYLOAD_SDK:-$root/.deps/native/ps5-payload-sdk}
 cc="$sdk/bin/prospero-clang"

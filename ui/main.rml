@@ -172,7 +172,7 @@
                         <span class="setting-name">Decoder CPU cores</span><span id="setting-cores-help" class="setting-help">Reserved for decoding; stream threads use the remaining cores</span>
                         <span id="setting-cores-value" class="setting-value">3 cores</span>
                     </button>
-                    <span id="settings-note" class="settings-note">Stream shortcuts: Select+Triangle keyboard; Select+Square mouse; Select+R1 stats; Select+L1 return.</span>
+                    <span id="settings-note" class="settings-note">Hold touchpad click: Triangle keyboard; Square mouse; R1 stats; L1 return. Host: touchpad click+L3 Select/Back; touchpad click+R3 PS/Guide.</span>
                 </section>
 
             </main>
