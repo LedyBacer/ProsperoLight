@@ -1,3 +1,5 @@
+#include "frame_cadence.hpp"
+#include "presentation_preferences.hpp"
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "stream_backend.hpp"
 #include "video/pyrowave_video_backend.hpp"
@@ -9,6 +11,7 @@
 #include <atomic>
 #include <pthread.h>
 #include <ctime>
+#include <chrono>
 #include <exception>
 
 extern "C" int wsi_ps5_release_videoout(void);
@@ -61,6 +64,9 @@ uint64_t now_us()
 void *worker(void *)
 {
     auto &s = *session;
+    moonlight::FrameCadence cadence;
+    cadence.reset(now_us(), 1000000, s.fps);
+    const bool paced = moonlight::presentation_mode() != 0;
     uint64_t last = now_us(), incoming = 0, decoded = 0, shown = 0, bytes = 0;
     double decode_ms = 0, render_ms = 0;
     uint64_t samples = 0;
@@ -78,6 +84,16 @@ void *worker(void *)
                 s.wake.wait(lock, [&] { return !s.running || !s.queue.empty(); });
                 if (!s.running)
                     break;
+                if (paced)
+                {
+                    const uint64_t now = now_us();
+                    const uint64_t deadline = cadence.next(now);
+                    if (deadline > now)
+                        s.wake.wait_for(lock, std::chrono::microseconds(deadline - now),
+                                        [&] { return !s.running; });
+                    if (!s.running)
+                        break;
+                }
                 // All frames are independent: consume newest and retire older work.
                 frame = std::move(s.queue.back());
                 s.stale += s.queue.size() - 1;

@@ -1,0 +1,40 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -221,6 +221,7 @@
+    /* The flip thread and its queue. */
+    bool hdr;
+    bool prefer_high_refresh;
++   bool prefer_vrr;
+    uint32_t flip_mode;
+    bool stopping;
+    int64_t physical;
+@@ -229,6 +230,8 @@
+    struct wsi_videoout_present queue[VIDEOOUT_BUFFERS * 2];
+    uint32_t queue_head, queue_count;
+ };
++
++extern int sceVideoOutVrrUnpegFromFixedRate(int32_t handle);
+ 
+ static struct wsi_videoout_output videoout_output = {
+    .handle = -1,
+@@ -339,6 +342,12 @@
+             ? sceVideoOutConfigureOutput(out->handle, PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE, NULL, NULL, NULL)
+             : supported;
+       out->high_frame_rate = configured == 0;
++      if (out->high_frame_rate && out->prefer_vrr) {
++         const int vrr = sceVideoOutVrrUnpegFromFixedRate(out->handle);
++         fprintf(stderr, "wsi/videoout: VRR request rc=%08x\n", (unsigned)vrr);
++         if (vrr != 0)
++            sceVideoOutConfigureOutput(out->handle, PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE, NULL, NULL, NULL);
++      }
+       if (out->high_frame_rate) {
+          const uint64_t period = videoout_vblank_period_ns(out->handle);
+          if (period > VIDEOOUT_HIGH_REFRESH_LIMIT_NS) {
+@@ -1243,6 +1252,7 @@
+    }
+    out->hdr = hdr != 0;
+    out->prefer_high_refresh = high_refresh != 0;
++   out->prefer_vrr = (high_refresh & 2) != 0;
+    out->flip_mode = vsync ? 1u : 2u;
+    mtx_unlock(&out->lock);
+    return 0;

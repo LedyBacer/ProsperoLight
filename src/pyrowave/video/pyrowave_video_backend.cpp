@@ -1,3 +1,4 @@
+#include "presentation_preferences.hpp"
 // SPDX-License-Identifier: MIT
 #include "pyrowave_video_backend.hpp"
 #include <ctime>
@@ -12,10 +13,12 @@ static double clock_ms()
 void PyroWaveVideoBackend::initialize(unsigned width, unsigned height, unsigned fps, bool chroma444,
                                       bool hdr, bool vsync, bool tv_safe)
 {
-    const bool prefer_high_refresh = fps > 60;
+    const bool request_vrr = moonlight::presentation_mode() == 2;
+    const int output_flags = (fps > 60 || request_vrr ? 1 : 0) | (request_vrr ? 2 : 0);
+    vsync = vsync || request_vrr;
     refresh_ = 0;
     requested_ = 0;
-    if (wsi_ps5_configure_output(hdr, vsync, prefer_high_refresh) != 0)
+    if (wsi_ps5_configure_output(hdr, vsync, output_flags) != 0)
         fail("VideoOut still owned by previous session");
     if (!decoder_.initialize(c_, width, height, chroma444))
         fail("decoder initialize");
