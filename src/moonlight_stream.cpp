@@ -806,13 +806,15 @@ static bool write_performance_bytes(int descriptor, const char *data, size_t len
     return true;
 }
 
-static void save_frame_trace()
+static void save_frame_trace(unsigned mode)
 {
     if (!prosperolight_logs_enabled())
         return;
 #if PROSPEROLIGHT_PERFORMANCE_DETAIL
-    constexpr auto temporary = "/download0/performance-frames.csv.tmp";
-    constexpr auto destination = "/download0/performance-frames.csv";
+    char temporary[96], destination[96];
+    snprintf(destination, sizeof(destination), "/download0/performance-frames-mode%u.csv",
+             mode);
+    snprintf(temporary, sizeof(temporary), "%s.tmp", destination);
     // Rows are batched: one write per row cost tens of thousands of system calls.
     static char batch[65536];
     const int descriptor = sceKernelOpen(temporary, 0x601, 0644);
@@ -4456,7 +4458,7 @@ done:
     if (renderer.access_units)
     {
         log_performance_windows(renderer.stream_fps);
-        save_frame_trace();
+        save_frame_trace(stream_presentation_mode);
     }
     ps5_thread_placement_clear();
     if (main_mask_changed)

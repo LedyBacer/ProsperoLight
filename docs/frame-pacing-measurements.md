@@ -8,10 +8,13 @@ one run as proof of improvement.
 After stopping, download these files through FTP from the mounted app's
 `download0` directory:
 
-- H.264 / HEVC: `performance-frames.csv` and `performance-last.json`.
-- PyroWave: `pyrowave-output.csv` and `prosperolight-pyrowave.log`.
+- H.264 / HEVC: `performance-frames-modeN.csv` and `performance-last.json`.
+- PyroWave: `pyrowave-output-modeN.csv` and `prosperolight-pyrowave.log`.
 
-Each new stream of the corresponding backend replaces its previous trace.
+`N` is 0 (Unpaced), 1 (Paced), or 2 (Paced+VRR). Each new stream replaces
+its previous trace for that backend and mode, so all three modes can be tested
+before collecting files. H.264 and HEVC share native traces: collect one codec
+before testing the other. There are at most three native and three PyroWave traces.
 Recording stops at 32,768 samples (about 273 seconds at 120 FPS); the header
 reports omitted samples. Capture uses bounded memory and does not write files
 in the streaming loop. Turning logs off prevents export. The previous native

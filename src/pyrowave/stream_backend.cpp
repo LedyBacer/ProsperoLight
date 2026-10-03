@@ -106,8 +106,9 @@ struct OutputTrace
                  (unsigned long long)pacer.stats.spacing_error_max_us);
         if (!samples || !prosperolight_logs_enabled())
             return;
-        const char *temporary = "/download0/pyrowave-output.csv.tmp";
-        const char *destination = "/download0/pyrowave-output.csv";
+        char temporary[96], destination[96];
+        snprintf(destination, sizeof(destination), "/download0/pyrowave-output-mode%u.csv", mode);
+        snprintf(temporary, sizeof(temporary), "%s.tmp", destination);
         FILE *file = fopen(temporary, "w");
         if (!file)
             return;
