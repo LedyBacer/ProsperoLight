@@ -873,7 +873,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
                                      const moonlight::TimingHistogram &input_intervals,
                                      const moonlight_stream_options_t *options, int result)
 {
-    if (!state.mode || !options || !state.access_units)
+    if (!prosperolight_logs_enabled() || !state.mode || !options || !state.access_units)
         return;
     static char report[12288];
     const auto &agc = native_agc_performance();

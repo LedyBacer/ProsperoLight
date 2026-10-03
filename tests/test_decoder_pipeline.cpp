@@ -62,6 +62,10 @@ extern "C"
     void gs_logf(const char *, const char *, ...)
     {
     }
+    int prosperolight_logs_enabled(void)
+    {
+        return 1;
+    }
     int lan_http_report_text(const char *)
     {
         return 0;
