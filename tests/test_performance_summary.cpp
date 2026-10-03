@@ -42,7 +42,7 @@ extern "C"
     }
     int sceKernelOpen(const char *, int flags, uint16_t mode)
     {
-        assert(flags == 0x601 && mode == 0600);
+        assert(flags == 0x601 && mode == 0644);
         temporary_report.clear();
         return open_failure ? -1 : 1;
     }
@@ -188,17 +188,17 @@ int main()
     sample->bytes = 1234;
     sample->outcome = 2;
     sample->host_us = 700;
-    save_frame_trace();
+    save_frame_trace(1);
     assert(saved_report.find("# schema=2,count=1,omitted=0\n") == 0);
     assert(saved_report.find("\n42,1234,0,2,") != std::string::npos);
     assert(saved_report.rfind(",700\n") == saved_report.size() - 5);
     const std::string trace_report = saved_report;
     write_failure = true;
-    save_frame_trace();
+    save_frame_trace(1);
     assert(saved_report == trace_report);
     write_failure = false;
     close_failure = true;
-    save_frame_trace();
+    save_frame_trace(1);
     assert(saved_report == trace_report);
     close_failure = false;
     // Rows are batched: a full trace is written in a few large chunks, with
@@ -211,7 +211,7 @@ int main()
         frame_trace.samples[i].receive_us = UINT64_C(1000000000000) + i;
     }
     write_calls = 0;
-    save_frame_trace();
+    save_frame_trace(1);
     size_t rows = 0;
     for (char c : saved_report)
         rows += c == '\n';
@@ -261,7 +261,7 @@ int main()
     diagnostic_logs = false;
     const unsigned writes_before = write_calls;
     save_performance_summary(state, input, &options, 0);
-    save_frame_trace();
+    save_frame_trace(1);
     log_performance_windows(120);
     assert(write_calls == writes_before && kernel_records.empty());
     puts(original.c_str()); // The runner parses and validates the actual JSON.
