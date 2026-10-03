@@ -15,6 +15,7 @@
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/StringUtilities.h>
+#include <RmlUi/Core/ScrollTypes.h>
 
 #include <SDL2/SDL.h>
 
@@ -1220,6 +1221,9 @@ void MoonlightApp::UpdateFocus()
     if (focus_ >= list.count)
         focus_ = 0;
     SetClass(document_, list.ids[focus_], "focused", true);
+    if (screen_ == Screen::Settings && focus_ >= 3)
+        if (Rml::Element *row = Find(document_, list.ids[focus_]))
+            row->ScrollIntoView(Rml::ScrollIntoViewOptions{Rml::ScrollAlignment::Nearest});
 }
 
 void MoonlightApp::UpdateHost()

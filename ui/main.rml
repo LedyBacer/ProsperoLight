@@ -105,85 +105,87 @@
 
                 <section id="screen-settings" class="screen hidden">
                     <span class="screen-heading">Settings</span>
-                    <span class="screen-copy">Recommended local-network values are selected.</span>
-                    <button id="setting-codec" class="setting-row setting-row-0">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Video codec</span><span id="setting-codec-help" class="setting-help">H.264 High hardware decode</span>
-                        <span id="setting-codec-value" class="setting-value">H.264 High</span>
-                    </button>
-                    <button id="setting-resolution" class="setting-row setting-row-1">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Stream resolution</span><span class="setting-help">Cross cycles 1080p / 1440p / 4K beta</span>
-                        <span id="setting-resolution-value" class="setting-value">1920 x 1080</span>
-                    </button>
-                    <button id="setting-framerate" class="setting-row setting-row-2">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Stream frame rate</span><span class="setting-help">60 / 90 / 120 FPS; HFR uses PS5 high-refresh output</span>
-                        <span id="setting-framerate-value" class="setting-value">60 FPS</span>
-                    </button>
-                    <button id="setting-bitrate" class="setting-row setting-row-3">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Video bitrate</span><span class="setting-help">Press Cross to enter 1-1000 Mbps</span>
-                        <span id="setting-bitrate-value" class="setting-value">20 Mbps</span>
-                    </button>
-                    <button id="setting-chroma" class="setting-row setting-row-4">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Chroma sampling</span><span id="setting-chroma-help" class="setting-help">Cross switches 4:2:0 / 4:4:4 for PyroWave</span>
-                        <span id="setting-chroma-value" class="setting-value">4:2:0</span>
-                    </button>
-                    <button id="setting-display-area" class="setting-row setting-row-5">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Display area</span><span class="setting-help">TV safe preserves edges; Edge to edge may be cropped by TVs</span>
-                        <span id="setting-display-area-value" class="setting-value">TV safe</span>
-                    </button>
-                    <button id="setting-hdr" class="setting-row setting-row-6">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">HDR</span><span id="setting-hdr-help" class="setting-help">HEVC Main10 / BT.2020 PQ at the selected resolution</span>
-                        <span id="setting-hdr-value" class="setting-value">Off / SDR</span>
-                    </button>
-                    <button id="setting-audio" class="setting-row setting-row-7">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Audio</span><span class="setting-help">48 kHz Opus; surround uses PS5 multichannel AudioOut</span>
-                        <span id="setting-audio-value" class="setting-value">Stereo</span>
-                    </button>
-                    <button id="setting-vsync" class="setting-row setting-row-8">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">V-Sync</span><span id="setting-vsync-help" class="setting-help">On shows whole frames at each refresh</span>
-                        <span id="setting-vsync-value" class="setting-value">On</span>
-                    </button>
-                    <button id="setting-decoder" class="setting-row setting-row-9">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Decoder pipeline</span><span id="setting-decoder-help" class="setting-help">Decodes one frame at a time</span>
-                        <span id="setting-decoder-value" class="setting-value">Classic</span>
-                    </button>
-                    <button id="setting-cores" class="setting-row setting-row-10">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Decoder CPU cores</span><span id="setting-cores-help" class="setting-help">Reserved for decoding; stream threads use the remaining cores</span>
-                        <span id="setting-cores-value" class="setting-value">3 cores</span>
-                    </button>
-                    <button id="setting-ui-sound" class="setting-row setting-row-11">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">UI sounds</span><span class="setting-help">Menu navigation and confirmation sounds</span>
-                        <span id="setting-ui-sound-value" class="setting-value">On</span>
-                    </button>
-                    <button id="setting-pacing" class="setting-row setting-row-12">
-                        <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
-                        <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
-                        <span class="setting-name">Frame pacing</span><span class="setting-help">VRR uses synchronized flips; unsupported output falls back to fixed refresh</span>
-                        <span id="setting-pacing-value" class="setting-value">Paced</span>
-                    </button>
+                    <span class="screen-copy">Up / down selects and scrolls. Cross changes the selected setting.</span>
+                    <div id="settings-list" class="settings-list">
+                        <button id="setting-codec" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Video codec</span><span id="setting-codec-help" class="setting-help">H.264 High hardware decode</span>
+                            <span id="setting-codec-value" class="setting-value">H.264 High</span>
+                        </button>
+                        <button id="setting-resolution" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Stream resolution</span><span class="setting-help">Cross cycles 1080p / 1440p / 4K beta</span>
+                            <span id="setting-resolution-value" class="setting-value">1920 x 1080</span>
+                        </button>
+                        <button id="setting-framerate" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Stream frame rate</span><span class="setting-help">60 / 90 / 120 FPS; HFR uses PS5 high-refresh output</span>
+                            <span id="setting-framerate-value" class="setting-value">60 FPS</span>
+                        </button>
+                        <button id="setting-bitrate" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Video bitrate</span><span class="setting-help">Press Cross to enter 1-1000 Mbps</span>
+                            <span id="setting-bitrate-value" class="setting-value">20 Mbps</span>
+                        </button>
+                        <button id="setting-chroma" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Chroma sampling</span><span id="setting-chroma-help" class="setting-help">Cross switches 4:2:0 / 4:4:4 for PyroWave</span>
+                            <span id="setting-chroma-value" class="setting-value">4:2:0</span>
+                        </button>
+                        <button id="setting-display-area" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Display area</span><span class="setting-help">TV safe preserves edges; Edge to edge may be cropped by TVs</span>
+                            <span id="setting-display-area-value" class="setting-value">TV safe</span>
+                        </button>
+                        <button id="setting-hdr" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">HDR</span><span id="setting-hdr-help" class="setting-help">HEVC Main10 / BT.2020 PQ at the selected resolution</span>
+                            <span id="setting-hdr-value" class="setting-value">Off / SDR</span>
+                        </button>
+                        <button id="setting-audio" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Audio</span><span class="setting-help">48 kHz Opus; surround uses PS5 multichannel AudioOut</span>
+                            <span id="setting-audio-value" class="setting-value">Stereo</span>
+                        </button>
+                        <button id="setting-vsync" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">V-Sync</span><span id="setting-vsync-help" class="setting-help">On shows whole frames at each refresh</span>
+                            <span id="setting-vsync-value" class="setting-value">On</span>
+                        </button>
+                        <button id="setting-decoder" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Decoder pipeline</span><span id="setting-decoder-help" class="setting-help">Decodes one frame at a time</span>
+                            <span id="setting-decoder-value" class="setting-value">Classic</span>
+                        </button>
+                        <button id="setting-cores" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Decoder CPU cores</span><span id="setting-cores-help" class="setting-help">Reserved for decoding; stream threads use the remaining cores</span>
+                            <span id="setting-cores-value" class="setting-value">3 cores</span>
+                        </button>
+                        <button id="setting-ui-sound" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">UI sounds</span><span class="setting-help">Menu navigation and confirmation sounds</span>
+                            <span id="setting-ui-sound-value" class="setting-value">On</span>
+                        </button>
+                        <button id="setting-pacing" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Frame pacing</span><span class="setting-help">VRR uses synchronized flips; unsupported output falls back to fixed refresh</span>
+                            <span id="setting-pacing-value" class="setting-value">Paced</span>
+                        </button>
+                    </div>
                     <span id="settings-note" class="settings-note">Hold touchpad click: Triangle keyboard; Square mouse; R1 stats; L1 return. Host: touchpad click+L3 Select/Back; touchpad click+R3 PS/Guide.</span>
                 </section>
 

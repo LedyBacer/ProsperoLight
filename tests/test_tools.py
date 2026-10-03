@@ -649,7 +649,7 @@ class ToolTests(unittest.TestCase):
 
     def test_launcher_screens_share_the_same_body_top(self):
         styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
-        for selector in (".host-card", ".game-card-0", ".setting-row-0"):
+        for selector in (".host-card", ".game-card-0", ".settings-list"):
             rule = styles[styles.index(selector) :]
             rule = rule[: rule.index("}")]
             self.assertIn("top: 164px;", rule)
@@ -659,18 +659,18 @@ class ToolTests(unittest.TestCase):
         styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
 
         import re
-        rows = dict((int(index), int(top)) for index, top in
-                    re.findall(r"\.setting-row-(\d+) \{ top: (\d+)px; \}", styles))
-        row_height = int(re.search(r"\.setting-row \{[^}]*?height: (\d+)px", styles)[1])
+        viewport = re.search(r"\.settings-list \{([^}]+)\}", styles)[1]
+        top = int(re.search(r"top: (\d+)px", viewport)[1])
+        height = int(re.search(r"height: (\d+)px", viewport)[1])
         note_top = int(re.search(r"\.settings-note \{[^}]*?top: (\d+)px", styles)[1])
-        footer_top = int(re.search(r"#controller-footer \{[^}]*?top: (\d+)px", styles)[1])
-        self.assertEqual(sorted(rows), list(range(len(rows))))
-        self.assertEqual(markup.count('class="button-chrome setting-chrome'), len(rows) * 2)
-        for index, top in rows.items():
-            self.assertLessEqual(top + row_height, note_top)
-            if index:
-                self.assertGreaterEqual(top, rows[index - 1] + row_height)
-        self.assertLess(note_top, footer_top)
+        self.assertLessEqual(top + height, note_top)
+        self.assertIn("overflow-y: auto", viewport)
+        self.assertIn('id="settings-list"', markup)
+        self.assertNotRegex(styles, r"\.setting-row-\d+")
+        self.assertIn(".setting-row { display: block; position: relative;", styles)
+        source = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
+        self.assertIn("row->ScrollIntoView", source)
+        self.assertIn("Rml::ScrollAlignment::Nearest", source)
         for setting in ("chroma", "vsync", "decoder", "cores"):
             self.assertIn(f'id="setting-{setting}"', markup)
             self.assertIn(f'id="setting-{setting}-value"', markup)

@@ -142,3 +142,9 @@ after title deletion or cache-management actions is not guaranteed.
 
 Native SaveData initialization is not part of this baseline; see
 [Platform findings](PLATFORM_NOTES.md).
+
+### Settings list navigation
+
+The settings page scrolls vertically as the selected row moves out of view. Use
+Up / Down to select a setting and Cross to change it. The scrollbar shows your
+position; stream shortcuts and the footer stay visible outside the list.
