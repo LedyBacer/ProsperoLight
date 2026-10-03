@@ -155,3 +155,32 @@ Use **Add PC** and enter `IPv4:HTTP-port`, for example `192.168.1.5:48000`.
 This is the HTTP port (47989 by default), not the browser administration port.
 The selected PC's address always shows its port. Automatic discovery retains
 explicitly saved endpoints; the port is not a global streaming setting.
+
+### Frame pacing and VSync
+
+| Policy | Scheduling | VSync preference |
+| --- | --- | --- |
+| Unpaced | Submit the newest ready frame without a cadence timer. | On synchronizes flips; Off requests immediate output. |
+| Paced | Schedule by stream FPS, matching 59.94/119.88 Hz fixed output where appropriate. Overdue frames do not wait another full period. | On/Off is retained independently. |
+| Paced + VRR | Schedule by stream FPS and request variable-rate VideoOut before opening the loading renderer. | Synchronized flips are required; the saved preference is restored when another policy is selected. |
+
+VRR is a request, not proof that the display accepted it. A rejected request
+falls back to fixed output and is recorded in the session log. Native
+immediate flips can also fall back to VSync if the system rejects them.
+The launcher requests fixed 60 Hz when its own VideoOut handle opens.
+
+Menu sounds and the presentation policy are stored separately from the paired
+host configuration in `prosperolight-ui-sound.bin` and
+`prosperolight-presentation.bin` under `/download0`.
+
+The scrolling list contains settings only; two permanent lines below it show
+local touchpad-click combinations and the host Select/Back and PS/Guide
+shortcuts. These lines use the loaded 20 px bitmap font.
+
+Current hardware evidence: H.264 4K60 completed Unpaced, Paced, and
+Paced + VRR selected-policy sessions with zero decoded frames discarded
+before presentation. Those measurements preceded the VRR initialization-order
+fix and do not establish active VRR. Confirmation after that fix, PyroWave
+pacing comparisons, and HEVC HDR regression checks are pending. H.264 4K120
+recorded decoder timing spikes and input-queue overflows even with Unpaced;
+these limits must not be represented as eliminated by pacing.
