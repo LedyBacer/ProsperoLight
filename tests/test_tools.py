@@ -907,6 +907,8 @@ class ToolTests(unittest.TestCase):
         self.assertIn("constexpr int kScreens = 4;", view)
         # About gives credit, as ProsperoEden's page does, and names the folders.
         about = view[view.index("void View::draw_about(") : view.index("void View::draw_pairing(")]
+        # C++ concatenates adjacent literals, including across formatted lines.
+        about = re.sub(r'"\s*"', "", about)
         for text in ("Powered by Moonlight", "moonlight-stream.org", "Sunshine developers",
                      "brought to you by BlackBearReloaded", "made with ElevenLabs",
                      '"Version " + version_', "files_.draw(canvas);"):
