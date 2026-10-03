@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="20" viewBox="0 0 56 40" role="img" aria-label="Touchpad">
+  <title>Touchpad</title>
+  <rect x="2.75" y="6.75" width="50.5" height="26.5" rx="9" fill="#101c36" stroke="#2f4470" stroke-width="1.5"/>
+  <rect x="11" y="12.5" width="34" height="15" rx="5" fill="none" stroke="#F2F7F8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M28 12.5v15" fill="none" stroke="#F2F7F8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

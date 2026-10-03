@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 40 40" role="img" aria-label="Triangle">
+  <title>Triangle</title>
+  <circle cx="20" cy="20" r="18.25" fill="#101c36" stroke="#2f4470" stroke-width="1.5"/>
+  <path d="M20 11.6 28.4 26.2H11.6Z" fill="none" stroke="#69D997" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

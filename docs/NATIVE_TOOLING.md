@@ -63,15 +63,16 @@ zlib is the only directly linked host library.
 ## Target C++ profile
 
 Application `.cpp` files compile as C++20 with exceptions and RTTI disabled.
-The public SDK's libc++ headers provide zero-cost vocabulary types and
-`std::unique_ptr`; the build does not link the full libc++, libc++abi, or unwind
-archives. Repository-owned replacement allocation operators use the clean-room
-runtime for small objects and anonymous page mappings for allocations of 64 KiB
-or more. All returned storage is at least 32-byte aligned because optimized
-RmlUi constructors use aligned AVX stores. This keeps expanded RmlUi textures
-out of the bounded libc heap without weakening the platform allocation
-contract. The operators are localized before PS5 conversion, so they do not
-become loader-visible application exports.
+The public SDK's libc++ headers provide the C++ library. The launcher's OpenGL
+runtime is linked statically, together with the SDK's libc++, libc++abi and
+unwind archives (`tools/prepare-opengl.sh` writes the link group). That runtime
+needs a process heap of its own: `src/runtime/app_heap.c` is linked with
+`--wrap` for the malloc family, so every allocation of the executable goes to a
+128 MiB arena that is never unmapped and continues on the libc heap when the
+arena is full. Repository-owned replacement allocation operators use that heap
+for small objects and anonymous page mappings for allocations of 64 KiB or
+more, with at least 32-byte alignment. The operators are localized before PS5
+conversion, so they do not become loader-visible application exports.
 
 Throwing `new` deliberately traps on allocation failure. Nothrow allocation
 returns `nullptr`. Prefer value semantics and allocation-free RAII in steady
@@ -120,3 +121,17 @@ The loader-visible comment record and the unmapped trailing note intentionally
 have zero memory size. Firmware 6.02 rejects those records before entry when
 their file size is incorrectly copied into `p_memsz`; the static validator
 enforces the tested convention.
+
+## Linking OpenGL and RADV together
+
+The launcher SDK and RADV contain independent Mesa versions. PyroWave builds
+run `tools/pyrowave/isolate-opengl.py` to rename colliding private OpenGL symbols
+in build-local archive copies, including Mesa template/type metadata. RADV's
+embedded compression functions are separately isolated from libcurl's zlib
+and zstd dependencies. Public EGL/OpenGL/Vulkan entry points stay unchanged;
+verified SDK/dependency archives are never edited. The generated caches are
+keyed by the tool and all input archive contents. All paths share the RADV
+platform's C++ runtime ABI and complete wrapped allocator family. The
+OpenGL-only mspace allocator is excluded in PyroWave builds, so aligned
+allocations and free/realloc always agree on pointer ownership. The host integration test links distinct synthetic
+implementations and verifies that each backend still calls its own dependency.

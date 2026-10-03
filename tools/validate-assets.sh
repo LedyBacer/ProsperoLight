@@ -92,15 +92,13 @@ if sound.exists():
             f"{sound} must be looped 48 kHz ATRAC9 within the supported bitrate"
         )
 
-sfx_root = root.parent / "assets" / "sfx"
-sfx_names = (
-    "ui_open.wav", "ui_move.wav", "ui_confirm.wav", "ui_setting.wav",
-    "ui_back.wav", "ui_success.wav", "ui_error.wav", "ui_stream_start.wav",
-)
-for name in sfx_names:
-    path = sfx_root / name
-    if not path.is_file():
-        raise SystemExit(f"required launcher sound not found: {path}")
+# The launcher's sounds: one or more recordings per cue, "<cue>_NN.wav".
+sfx_root = root.parent / "assets" / "audio" / "sfx" / "glass"
+sounds = sorted(sfx_root.glob("*.wav")) if sfx_root.is_dir() else []
+for cue in ("focus", "select", "back", "tab", "error", "notify", "launch", "welcome"):
+    if not any(path.name.startswith(cue + "_") for path in sounds):
+        raise SystemExit(f"required launcher sound not found: {sfx_root}/{cue}_01.wav")
+for path in sounds:
     data = path.read_bytes()
     if (len(data) < 44 or len(data) > 2_097_152 or data[:4] != b"RIFF"
             or data[8:12] != b"WAVE"
@@ -119,11 +117,10 @@ for name in sfx_names:
     if b"fmt " not in chunks or b"data" not in chunks:
         raise SystemExit(f"{path} is missing PCM format or sample data")
     fmt, fmt_size = chunks[b"fmt "]
-    if (fmt_size < 16
-            or struct.unpack_from("<HHIIHH", data, fmt)
-            != (1, 2, 48_000, 192_000, 4, 16)
-            or chunks[b"data"][1] == 0):
-        raise SystemExit(f"{path} must be 48 kHz stereo signed 16-bit PCM")
+    encoding, channels, rate, _, _, bits = struct.unpack_from("<HHIIHH", data, fmt)
+    if (fmt_size < 16 or encoding != 1 or channels not in (1, 2) or rate != 48_000
+            or bits != 16 or chunks[b"data"][1] == 0):
+        raise SystemExit(f"{path} must be 48 kHz signed 16-bit PCM, mono or stereo")
 
 print(f"Presentation assets validated: {root}")
 PY

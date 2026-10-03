@@ -13,34 +13,34 @@
 #define MOONLIGHT_PS5_PAD_R1        UINT32_C(0x000800)
 #define MOONLIGHT_PS5_PAD_TRIANGLE  UINT32_C(0x001000)
 #define MOONLIGHT_PS5_PAD_SQUARE    UINT32_C(0x008000)
-#define MOONLIGHT_PS5_PAD_SELECT    UINT32_C(0x100000)
+#define MOONLIGHT_PS5_PAD_TOUCHPAD  UINT32_C(0x100000)
 
 #define MOONLIGHT_MOUSE_EMULATION_POLL_US UINT64_C(50000)
 
 static inline int moonlight_stream_disconnect_requested(uint32_t buttons)
 {
-    const uint32_t mask = MOONLIGHT_PS5_PAD_SELECT |
+    const uint32_t mask = MOONLIGHT_PS5_PAD_TOUCHPAD |
                           MOONLIGHT_PS5_PAD_L1;
     return (buttons & mask) == mask;
 }
 
 static inline int moonlight_stream_hud_toggle_requested(uint32_t buttons)
 {
-    const uint32_t mask = MOONLIGHT_PS5_PAD_SELECT |
+    const uint32_t mask = MOONLIGHT_PS5_PAD_TOUCHPAD |
                           MOONLIGHT_PS5_PAD_R1;
     return (buttons & mask) == mask;
 }
 
 static inline int moonlight_stream_keyboard_requested(uint32_t buttons)
 {
-    const uint32_t mask = MOONLIGHT_PS5_PAD_SELECT |
+    const uint32_t mask = MOONLIGHT_PS5_PAD_TOUCHPAD |
                           MOONLIGHT_PS5_PAD_TRIANGLE;
     return (buttons & mask) == mask;
 }
 
 static inline int moonlight_stream_mouse_toggle_requested(uint32_t buttons)
 {
-    const uint32_t mask = MOONLIGHT_PS5_PAD_SELECT |
+    const uint32_t mask = MOONLIGHT_PS5_PAD_TOUCHPAD |
                           MOONLIGHT_PS5_PAD_SQUARE;
     return (buttons & mask) == mask;
 }

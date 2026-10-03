@@ -3,13 +3,14 @@
 ProsperoLight keeps the application boundary small and explicit:
 
 ```text
-RmlUi launcher (main.cpp, moonlight_app.cpp)
+OpenGL launcher (main.cpp, src/launcher/)
         |
 configuration, discovery, pairing, application control
         |
 Moonlight stream coordinator (moonlight_stream.cpp)
    |                 |                 |
 VideoDec2 -> AGC     Opus -> AudioOut   DualSense + USB HID -> Moonlight input
+PyroWave -> RADV
 ```
 
 `moonlight_stream.cpp` owns the live session and its cleanup. Video access
@@ -45,30 +46,54 @@ C-compatible names. Its upstream dependencies are pinned as submodules and
 compiled in their native languages. This is a dependency boundary, not a
 second application architecture.
 
+The launcher is three parts. `launcher_model.cpp` holds what is known (saved
+PCs, settings, Sunshine's state, pairing) and every request to the network; it
+draws nothing. `launcher_view.cpp` draws the four screens and their dialogs
+with the widgets of the UI kit in `third_party/ps5-homebrew-ui`, reads the
+model and asks it for things. `launcher_ps5.cpp` owns the console: the EGL
+display of the ps5-opengl SDK, the controller, the audio port, the sounds and
+the PNG decoder for box art. The model and the view have no console call in
+them, so `tools/render-launcher.sh` runs both on a PC against a pretend
+Sunshine network, checks their behaviour and writes a picture of every state.
+
 The launcher treats Sunshine availability as a sampled health state rather
-than a permanent result. It refreshes the saved host address on a worker
-thread every five seconds without repeating mDNS discovery. A failed check
-retains the last successful host and application snapshot, displays
-`RECONNECTING`, and retries after one second. Three consecutive failures are
-required before the launcher displays `OFFLINE`; polling continues so a host
-that restarts during an RDP or Windows-session transition recovers without a
-manual refresh. Pairing, artwork downloads, and health checks are serialized
-because the compact NVHTTP transport has process-global timeout/error state.
+than a permanent result. It asks the selected PC again every five seconds
+without repeating mDNS discovery. A failed check retains the last successful
+host and application snapshot, shows "Reconnecting", and retries after one
+second. Three consecutive failures are required before the launcher shows the
+PC as not answering; polling continues so a host that restarts during an RDP
+or Windows-session transition recovers without a manual search. The other
+saved PCs are asked once each so the list can show their state. Every request
+(search, refresh, health check, unpair, stop, box art) runs on one worker
+thread, one at a time, because the compact NVHTTP transport has process-global
+timeout/error state; pairing waits for that thread to be idle. The screen keeps
+drawing while a PC is slow to answer.
+
+The launcher and the stream never own the display together. `main.cpp` runs
+the launcher until the player starts a stream; the launcher then stops its
+worker thread, closes its audio port and controller, deletes its graphics
+objects and closes the EGL display, and only then does the stream open
+VideoOut, the controllers and its own audio port. When the stream ends the
+launcher is built again from nothing. After a stream above 60 Hz or in HDR the
+display is left alone for five seconds first (`HFR_SETTLE_MS`), because the
+television is changing mode. AGC is initialised once per process, by the
+OpenGL runtime when the launcher draws its first frame; the stream's presenter
+uses that initialisation.
 
 The build creates minimal linker-only import stubs from
 `vendor/ps5/sdk/stubs/*_link_stub.c` for PS5 system modules that are not in the
 bundled SDK stub set. They only describe unresolved imports to the native
 linker; the console resolves the actual system modules at run time.
 
-`sce_sys/param.json` provides title identity and `contentVersion`. `tools/build.sh`
-stages `ui/main.rml` and replaces `@PROSPEROLIGHT_VERSION@` with that same
-version before packaging.
+`sce_sys/param.json` provides title identity and `contentVersion`; the launcher
+reads the version from the installed copy and shows it on the Settings screen.
 
-The launcher owns a small queued-audio sound-effect player backed by SDL's
-hardware-validated PS5 AudioOut driver. All cues are 48 kHz stereo signed
-16-bit PCM and are loaded from `assets/sfx`. The opening cue plays only on
-process startup; returning from a stream does not replay it. Before returning a
-stream command, the launcher clears the UI queue and tears down only SDL video.
+Every widget asks for a sound by what happened (the focus moved, a switch
+flipped, a dialog opened), not by file name. The launcher plays those cues
+from the recordings in `assets/audio/sfx/glass` (48 kHz signed 16-bit PCM,
+`<cue>_NN.wav`) through a small mixer on its own AudioOut thread. The welcome
+cue plays only when the app opens; returning from a stream plays a shorter
+one. The thread is joined and the port closed before a stream starts.
 
 Stream audio is independent of the launcher cues. Stereo uses two-channel
 signed 16-bit AudioOut. The optional 5.1 mode negotiates Moonlight's standard
@@ -76,6 +101,24 @@ six-channel Opus layout (`FL FR FC LFE BL BR`) and writes it to PS5's validated
 eight-channel AudioOut layout, with `SL` and `SR` zero-filled. If the
 eight-channel port cannot be opened before negotiation, the session requests
 stereo instead.
-The SDL audio device remains open and silent for the process lifetime because
-the PS5 SDL backend faults while closing a device that has played queued audio.
-Moonlight uses its independent native Opus/AudioOut port during the stream.
+
+## Where files are kept
+
+`storage::Initialize()` (`src/app_storage.cpp`) is the first call in `main`,
+while the process has one thread. It reads what an earlier version kept in
+`/download0`, asks for filesystem access (`src/elevation`: the bundled helper
+`sandbox-elevator.elf` is sent to the console's ELF loader on port 9021), and
+settles every path in `storage::paths()`: the install folder for the app's own
+files and `/data/prosperolight` for what it writes. It then opens the log. No
+other source names a sandbox path; without access the same structure holds
+`/app0` and `/download0`.
+
+## Integrated video and input extensions
+
+Explicit profile resolution in `stream_profile.hpp` selects native or PyroWave
+callbacks. PyroWave owns Vulkan/RADV presentation after the connecting plate
+releases AGC VideoOut; native video keeps the plate until the first picture.
+Both backends use `frame_pacing.hpp`; decoder ownership and teardown remain
+backend-specific. `ps5_dualsense.cpp` is the sole owner of additional pad handles
+and extended controller feedback. See [PyroWave](PYROWAVE.md),
+[DualSense](DUALSENSE.md) and [frame pacing](CONFIGURATION.md#source-clock-frame-pacing).

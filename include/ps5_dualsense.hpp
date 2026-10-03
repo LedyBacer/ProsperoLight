@@ -37,6 +37,14 @@ static_assert(offsetof(PadSample, timestamp_us) == 0x50);
 static_assert(offsetof(PadSample, connected_count) == 0x68);
 void Init(int32_t primary_user, int32_t primary_handle);
 uint16_t ActiveMask();
+struct Statistics
+{
+    uint32_t peak, arrivals, removals, open_errors, send_errors, scan_errors;
+};
+Statistics GetStatistics();
+// Local shortcuts on secondary controllers, consumed by the stream owner.
+constexpr unsigned ToggleStatistics = 1u, StopStream = 2u;
+unsigned TakeLocalActions();
 int RemoteShortcuts(uint32_t raw_buttons, int mapped_buttons);
 void PrimarySample(const PadSample &sample, bool suppressed);
 int SendPrimary(int buttons, uint8_t left_trigger, uint8_t right_trigger, int16_t left_x,

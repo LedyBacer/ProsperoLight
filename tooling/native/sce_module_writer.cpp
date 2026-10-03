@@ -329,7 +329,9 @@ ParameterBlocks build_parameter_blocks()
         if (counts[i] != 0)
             write_u64(result.data, result.offsets[i] + 8, counts[i]);
     }
-    write_u64(result.data, result.heap_size, std::numeric_limits<std::uint64_t>::max());
+    // OpenGL apps: the OpenGL runtime needs a bounded 256 MiB process heap
+    // (ps5-opengl native-app recipe); the boilerplate default is unbounded.
+    write_u64(result.data, result.heap_size, 0x10000000ULL);
     write_u32(result.data, result.heap_extended, 1);
     return result;
 }
@@ -402,6 +404,25 @@ Bytes build_version(std::span<const std::string> components, std::uint32_t modul
         }
     }
     return output;
+}
+
+// RELRO begins at its lowest section. lld drops an empty .data.rel.ro, so a
+// program without relocated read-only data starts RELRO at the GOT or an
+// initializer array instead; the anchor must follow whichever section lld kept.
+const Section &relro_origin(const Image &image, std::uint64_t relro_start)
+{
+    const Section *origin = nullptr;
+    for (const Section &input : image.sections)
+    {
+        if (!input.allocated() || !relro_section(input.name) || input.address != relro_start)
+            continue;
+        if (input.name == ".data.rel.ro")
+            return input;
+        if (origin == nullptr)
+            origin = &input;
+    }
+    require(origin != nullptr, "RELRO mapping has no section at its start address");
+    return *origin;
 }
 
 struct Import
@@ -841,9 +862,9 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
         copy_bytes(output, input.file_offset, input.data);
     }
     // A mapped LOAD must preserve the address/file-offset residue at the
-    // hardware 16 KiB page size. The GOT is inside RELRO, not its beginning.
-    const Section &relro_source = section(image, ".data.rel.ro");
-    require(relro_source.address == relro_start, "RELRO mapping must begin at .data.rel.ro");
+    // hardware 16 KiB page size. The GOT is inside RELRO, not necessarily its
+    // beginning: the region starts at .data.rel.ro when that section exists.
+    const Section &relro_source = relro_origin(image, relro_start);
     const std::uint64_t relro_file = relro_source.file_offset;
     copy_bytes(output, relro_file + process_address - relro_start, process_parameters);
     copy_bytes(output, relro_file + blocks_address - relro_start, blocks.data);

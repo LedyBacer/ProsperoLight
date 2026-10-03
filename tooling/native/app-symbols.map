@@ -3,12 +3,11 @@
  * Copyright (C) 2026 BlackBearReloaded
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Keeps application glue internal so the module writer only sees PS5 imports.
+ * The app keeps every symbol internal to the executable, as the
+ * statically linked OpenGL runtime requires (ps5-opengl native-app policy).
  */
 
 {
     local:
-        _Zn*;
-        _Zd*;
         *;
 };

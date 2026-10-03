@@ -46,7 +46,7 @@ jobs:
       - name: Install native toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install --yes clang-18 clang-format-18 clang-tidy-18 llvm-18-dev cmake lld-18 make pkg-config python3-venv tar unzip wget ninja-build bison flex libclang-18-dev libclang-cpp18-dev libclc-18-dev libclc-18 libllvmspirvlib-18-dev spirv-tools glslang-tools
+          sudo apt-get install --yes clang-18 clang-format-18 clang-tidy-18 llvm-18-dev cmake lld-18 make pkg-config python3-venv tar unzip wget ninja-build bison flex libclang-18-dev libclang-cpp18-dev libclc-18-dev libclc-18 libllvmspirvlib-18-dev spirv-tools glslang-tools libegl-dev libgl-dev libgl1-mesa-dri
 
       - name: Read app identity and version
         shell: bash
@@ -71,6 +71,9 @@ jobs:
       - name: Run host integration tests
         run: make test-integration
 
+      - name: Check launcher behavior and layout with software OpenGL
+        run: make launcher-check
+
       - name: Verify scalar and SIMD streaming dependencies on the host
         run: make test-stream-performance
 
@@ -84,7 +87,7 @@ jobs:
         run: |
           # Performance betas ship with the measured flag set.
           case "$CONTENT_VERSION" in
-            01.000.062|01.000.070)
+            01.000.062|01.000.070|01.000.080)
               make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8
               ;;
             *)
@@ -192,7 +195,7 @@ jobs:
           checksum_name="${CHECKSUM##*/}"
           release_flags=()
           case "$GITHUB_REF_NAME" in
-            01.000.062|01.000.070)
+            01.000.062|01.000.070|01.000.080)
               release_flags=(--prerelease --latest=false)
               ;;
           esac

@@ -23,6 +23,8 @@ for command in python3 sha256sum; do
     }
 done
 bash "$root/tools/setup-native-dependencies.sh" >/dev/null
+# The launcher draws with ps5-opengl: fetch the pinned SDK and write its link group.
+bash "$root/tools/prepare-opengl.sh"
 
 param="$root/sce_sys/param.json"
 title_id=$(python3 - "$param" <<'PY'
@@ -68,13 +70,6 @@ if not isinstance(title, str) or not title.strip():
 print(title_id)
 PY
 )
-content_version=$(python3 - "$param" <<'PY'
-import json, sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    print(json.load(source)["contentVersion"])
-PY
-)
 
 # Loader/container constants validated on firmware 6.02 and 12.70. These are
 # deliberately separate from the public application version in param.json.
@@ -104,8 +99,10 @@ mkdir -p "$build/host" "$build/obj" "$dist"
     "$native/elf_object.cpp" "$native/sce_module_writer.cpp" \
     "$zlib_archive" -o "$tool"
 
+# The launcher is built from the UI kit in third_party/ps5-homebrew-ui.
 mapfile -d '' -t source_paths < <(
-    find "$root/src" -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' \) \
+    find "$root/src" "$root/third_party/ps5-homebrew-ui" "$root/third_party/update-check" -type f \
+        \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' \) \
         ! -path "$root/src/gamestream/*" \
         -print0 | sort -z
 )
@@ -114,6 +111,9 @@ bash "$root/tools/pyrowave/apply-transport.sh"
 sources=()
 for source in "${source_paths[@]}"; do
     [[ ${PYROWAVE:-0} == 1 || $source != "$root/src/pyrowave/"* ]] || continue
+    # RADV's platform supplies the complete wrapped allocation family. Mixing
+    # it with the upstream OpenGL-only mspace would cross-free heap pointers.
+    [[ ${PYROWAVE:-0} != 1 || $source != "$root/src/runtime/app_heap.c" ]] || continue
     sources+=("${source#"$root/"}")
 done
 (( ${#sources[@]} > 0 )) || { echo "src/ has no C or C++ sources" >&2; exit 2; }
@@ -121,12 +121,14 @@ done
 definitions=()
 includes=()
 archives=()
+import_stubs=()
 pacbrew_packages=()
 pacbrew_includes=()
 pacbrew_archives=()
 [[ -z ${APP_DEFINITIONS:-} ]] || read -r -a definitions <<< "$APP_DEFINITIONS"
 [[ -z ${APP_INCLUDE_PATHS:-} ]] || read -r -a includes <<< "$APP_INCLUDE_PATHS"
 [[ -z ${APP_STATIC_ARCHIVES:-} ]] || read -r -a archives <<< "$APP_STATIC_ARCHIVES"
+[[ -z ${APP_IMPORT_STUBS:-} ]] || read -r -a import_stubs <<< "$APP_IMPORT_STUBS"
 [[ -z ${PACBREW_PACKAGES:-} ]] || read -r -a pacbrew_packages <<< "$PACBREW_PACKAGES"
 [[ -z ${PACBREW_INCLUDE_PATHS:-} ]] || read -r -a pacbrew_includes <<< "$PACBREW_INCLUDE_PATHS"
 [[ -z ${PACBREW_STATIC_ARCHIVES:-} ]] || read -r -a pacbrew_archives <<< "$PACBREW_STATIC_ARCHIVES"
@@ -169,6 +171,34 @@ link_script=(-T "$native/ps5-pie.ld")
 if [[ ${PYROWAVE:-0} == 1 ]]; then
     source "$root/tools/pyrowave/build-deps.sh"
     prepare_pyrowave_build
+    # The app layout includes both libunwind bounds and crash-report text bounds.
+    link_script=(-T "$native/ps5-pie.ld")
+    # The OpenGL launcher and RADV ship different Mesa versions. Namespace the
+    # launcher's private symbols in derived archives before either is linked.
+    isolated_graphics=$(python3 "$root/tools/pyrowave/isolate-opengl.py" \
+        "$root/.deps/ps5-opengl/current" \
+        "$PS5_VULKAN_ROOT/.deps/native/radv-release/lib/libvulkan_radeon.ps5.a" \
+        "$root/build/pyrowave/opengl-isolated" "${pacbrew_libs[@]}")
+    mapfile -t isolated_paths <<< "$isolated_graphics"
+    isolated_gl=${isolated_paths[0]}
+    radv_archive="$PS5_VULKAN_ROOT/.deps/native/radv-release/lib/libvulkan_radeon.ps5.a"
+    for index in "${!radv_link_inputs[@]}"; do
+        if [[ ${radv_link_inputs[index]} == "$radv_archive" ]]; then
+            radv_link_inputs[index]=${isolated_paths[1]}
+        fi
+    done
+    gl_group="$root/build/pyrowave/libps5opengl-isolated-group.a"
+    printf 'SEARCH_DIR("%s")\nEXTERN(ps5_agc_gate2_run)\nGROUP ("%s/libPS5OpenGL.a")\n' \
+        "$isolated_gl" "$isolated_gl" > "$gl_group"
+    rewritten_archives=()
+    for archive in "${archives[@]}"; do
+        if [[ $archive == .deps/ps5-opengl/libps5opengl-group.a ]]; then
+            rewritten_archives+=("build/pyrowave/libps5opengl-isolated-group.a")
+        else
+            rewritten_archives+=("$archive")
+        fi
+    done
+    archives=("${rewritten_archives[@]}")
     # Use one C++ ABI, matching the platform library required by RADV.
     filtered_archives=()
     for archive in "${archives[@]}"; do
@@ -176,17 +206,24 @@ if [[ ${PYROWAVE:-0} == 1 ]]; then
     done
     archives=("${filtered_archives[@]}")
 fi
+# Sources are compiled side by side, as many at once as BUILD_JOBS allows.
+max_jobs=${BUILD_JOBS:-$(nproc 2>/dev/null || printf '2')}
+[[ $max_jobs =~ ^[1-9][0-9]*$ ]] || { echo "BUILD_JOBS must be positive" >&2; exit 2; }
+compile_failed=0
 objects=()
 for source in "${sources[@]}"; do
-    [[ $source =~ ^src/[A-Za-z0-9_./-]+\.(c|cc|cpp)$ && -f $root/$source ]] || {
+    [[ $source =~ ^(src|third_party/ps5-homebrew-ui|third_party/update-check)/[A-Za-z0-9_./-]+\.(c|cc|cpp)$ && -f $root/$source ]] || {
         echo "invalid source: $source" >&2; exit 2;
     }
     object="$build/obj/${source//\//_}.o"
     if [[ $source == *.c ]]; then standard=-std=c11; else standard=-std=c++20; fi
     args=("$standard" -O2 -Wall -Wextra -ffunction-sections -fdata-sections)
-    # RmlUi was built with the platform C++ ABI and requires RTTI and exception
-    # metadata in consuming translation units. The app still does not throw.
-    [[ $source == *.c ]] || args+=(-fexceptions -frtti)
+    # Neither the app nor the UI kit throws or asks for a type at run time.
+    if [[ $source == src/pyrowave/* ]]; then
+        args+=(-fexceptions -frtti)
+    elif [[ $source != *.c ]]; then
+        args+=(-fno-exceptions -fno-rtti)
+    fi
     for definition in "${definitions[@]}"; do
         [[ $definition =~ ^[A-Za-z_][A-Za-z0-9_]*(=[A-Za-z0-9_]+)?$ ]] || {
             echo "invalid compile definition: $definition" >&2; exit 2;
@@ -200,10 +237,17 @@ for source in "${sources[@]}"; do
         args+=("-I$root/$include")
     done
     args+=("${pacbrew_cflags[@]}" "${pyrowave_cflags[@]}")
+    while (( $(jobs -rp | wc -l) >= max_jobs )); do
+        wait -n || compile_failed=1
+    done
     PS5_PAYLOAD_SDK="$sdk_root" sh "$root/tooling/prospero-clang18" \
-        "${args[@]}" -c "$root/$source" -o "$object"
+        "${args[@]}" -c "$root/$source" -o "$object" &
     objects+=("$object")
 done
+while (( $(jobs -rp | wc -l) > 0 )); do
+    wait -n || compile_failed=1
+done
+(( compile_failed == 0 )) || { echo "compilation failed" >&2; exit 1; }
 
 PS5_PAYLOAD_SDK="$sdk_root" sh "$root/tooling/prospero-clang18" \
     -std=c++20 -O2 -Wall -Wextra -fno-exceptions -fno-rtti \
@@ -241,15 +285,13 @@ build_system_link_stub() {
 
 pngdec_stub=$(build_system_link_stub libScePngDec vendor/ps5/sdk/stubs/pngdec_link_stub.c)
 videodec2_stub=$(build_system_link_stub libSceVideodec2 vendor/ps5/sdk/stubs/videodec2_link_stub.c)
-common_dialog_stub=$(build_system_link_stub libSceCommonDialog vendor/ps5/sdk/stubs/common_dialog_link_stub.c)
-agc_stub=$(build_system_link_stub libSceAgc vendor/ps5/sdk/stubs/agc_link_stub.c)
-agc_driver_stub=$(build_system_link_stub libSceAgcDriver vendor/ps5/sdk/stubs/agc_driver_link_stub.c)
 mouse_stub=$(build_system_link_stub libSceMouse vendor/ps5/sdk/stubs/mouse_link_stub.c)
 videoout_stub=$(build_system_link_stub libSceVideoOut vendor/ps5/sdk/stubs/videoout_link_stub.c)
+# Superset of the five SDK driver declarations plus RADV's tessellation setters.
+agc_driver_stub=$(build_system_link_stub libSceAgcDriver vendor/ps5/sdk/stubs/agc_driver_link_stub.c)
 
 link_inputs=("$build/obj/app_crt.o" "$build/obj/app_cpp_runtime.o" "${objects[@]}" \
-    "$pngdec_stub" "$videodec2_stub" "$common_dialog_stub" "$agc_stub" "$agc_driver_stub" \
-    "$mouse_stub" "$videoout_stub")
+    "$pngdec_stub" "$videodec2_stub" "$mouse_stub" "$videoout_stub")
 for archive in "${archives[@]}"; do
     [[ $archive =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.a$ && -f $root/$archive ]] || {
         echo "invalid static archive: $archive" >&2; exit 2;
@@ -259,22 +301,41 @@ done
 if (( ${#pacbrew_libs[@]} > 0 )); then
     link_inputs+=(--start-group "${pacbrew_libs[@]}" --end-group)
 fi
-"$sdk_root/bin/prospero-lld" "${link_script[@]}" --eh-frame-hdr "${radv_link_flags[@]}" \
+# The OpenGL SDK's import libraries (AGC) are linked like the SDK stubs and
+# handed to the converter so their imports resolve to system modules.
+stub_paths=()
+stub_options=()
+for stub in "${import_stubs[@]}"; do
+    [[ $stub =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.so$ && -f $root/$stub ]] || {
+        echo "invalid import stub: $stub" >&2; exit 2;
+    }
+    stub_paths+=("$root/$stub")
+    stub_options+=(--stub "$root/$stub")
+done
+# The OpenGL runtime needs the process heap in src/runtime/app_heap.c: every
+# allocation of the executable goes through it.
+wrap_options=()
+for symbol in malloc calloc realloc free posix_memalign malloc_usable_size; do
+    wrap_options+=("--wrap=$symbol")
+done
+# The splash picture is hidden when the launcher says so (src/runtime/runtime_shims.c).
+wrap_options+=("--wrap=sceSystemServiceHideSplashScreen")
+# libcurl's socket calls go through third_party/update-check/console_curl.c.
+wrap_options+=("--wrap=fcntl")
+"$sdk_root/bin/prospero-lld" "${link_script[@]}" --eh-frame-hdr "${wrap_options[@]}" "${radv_link_flags[@]}" \
     --version-script "$native/app-symbols.map" \
     --exclude-libs=ALL \
     -L "$build/obj" \
     -e _start -o "$build/llvm-pie.elf" "${link_inputs[@]}" \
     --start-group "${pyrowave_archives[@]}" --end-group "${radv_link_inputs[@]}" \
-    --as-needed "$sdk_root"/target/lib/*.so
+    --as-needed "${stub_paths[@]}" "$sdk_root"/target/lib/*.so
 "$tool" link --in "$build/llvm-pie.elf" --out "$build/eboot.elf" \
     --stub-dir "$sdk_root/target/lib" \
     --stub "$pngdec_stub" \
     --stub "$videodec2_stub" \
-    --stub "$common_dialog_stub" \
-    --stub "$agc_stub" \
-    --stub "$agc_driver_stub" \
     --stub "$mouse_stub" \
     --stub "$videoout_stub" \
+    "${stub_options[@]}" \
     --module-sdk "$module_sdk" \
     --companion-sdk "$companion_sdk" --file-name eboot.elf
 
@@ -284,25 +345,27 @@ mkdir -p "$app/sce_sys" "$app/sce_module"
 "$tool" self --sign --in "$build/eboot.elf" --out "$app/eboot.bin" \
     --magic "$fself_magic"
 
+# Filesystem access (tooling/elevation): the console's ELF loader runs this
+# helper when the app starts. It only answers the title it was built for.
+grep -Fq "target_title_id[] = \"$title_id\"" "$root/tooling/elevation/helper/main.cpp" || {
+    echo "tooling/elevation/helper/main.cpp is not built for $title_id" >&2; exit 2;
+}
+make -s -C "$root/tooling/elevation/helper" PS5_PAYLOAD_SDK="$sdk_root" \
+    OUTPUT="$build/elevation/sandbox-elevator.elf"
+python3 "$root/tooling/elevation/validate-helper.py" "$build/elevation/sandbox-elevator.elf"
+cp "$build/elevation/sandbox-elevator.elf" "$app/sandbox-elevator.elf"
+
 cp "$param" "$app/sce_sys/param.json"
 for asset in icon0.png pic0.dds pic1.dds snd0.at9; do
     [[ -f $root/sce_sys/$asset ]] && cp "$root/sce_sys/$asset" "$app/sce_sys/$asset"
 done
 [[ ! -d $root/assets ]] || cp -a "$root/assets" "$app/assets"
-if [[ -d $root/ui ]]; then
-    cp -a "$root/ui" "$app/ui"
-    python3 - "$app/ui/main.rml" "$content_version" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-token = "@PROSPEROLIGHT_VERSION@"
-if token not in text:
-    raise SystemExit("ProsperoLight UI version token is missing")
-path.write_text(text.replace(token, sys.argv[2]), encoding="utf-8")
-PY
-fi
+# Directory listing returns nothing under /app0 on the console, so each sound
+# folder carries an index of its files (read by the kit's save::list_files).
+for dir in "$app"/assets/audio/sfx/*/; do
+    [[ -d $dir ]] || continue
+    (cd "$dir" && find . -maxdepth 1 -type f ! -name index.txt -printf '%f\n' | LC_ALL=C sort > index.txt)
+done
 
 [[ -f $root/runtime/libc.prx ]] || bash "$root/tools/rebuild-libc.sh"
 (cd "$root/runtime" && sha256sum --check --strict libc.prx.sha256)

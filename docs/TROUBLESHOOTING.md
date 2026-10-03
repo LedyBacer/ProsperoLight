@@ -115,6 +115,12 @@ Nothing is installed globally by these optional bootstrappers.
   `RECONNECTING`, not temporarily collapse to an empty catalogue.
 - Verify the same address answers `http://<host>:47989/serverinfo` from another
   LAN client before changing Sunshine or the PS5.
+- If Sunshine's **Port** setting is not 47989, the saved PC must use the same
+  number: select the PC, choose **Port** and enter it, then use that number in
+  the URL above. A PC added by discovery already has the advertised port; a PC
+  added by address has 47989 unless a port was typed as `address:port`. The
+  refresh message names a refused or timed-out connection, which is what a
+  wrong port looks like.
 - PS5 network descriptors must be configured through `libSceNet`. In
   particular, use the platform adapter's `ioctl(FIONBIO)` path; libc `fcntl()`
   handles filesystem descriptors and may reject a network handle before
@@ -122,12 +128,38 @@ Nothing is installed globally by these optional bootstrappers.
 - The launcher includes the failed TCP stage and numeric error in its refresh
   message. Preserve that text when reporting a failure.
 
-## Launching a stream stays black before the Connecting screen
+## A second controller does not reach the PC
+
+- The PS5 gives a controller to a signed-in user. Turn the controller on and
+  choose a user when the PS5 asks; a controller without a user is not visible
+  to ProsperoLight. The notification `Controller 2 connected` confirms that
+  the PC now has it.
+- The first controller is the user who started ProsperoLight. The others get
+  the next free number in the order they join, up to four in total.
+- Sunshine must be able to create another virtual controller. If the first
+  controller works and the second is confirmed on the PS5 but missing on the
+  PC, check Sunshine's log for a failed gamepad allocation and the installed
+  virtual-controller driver.
+- After a stream, `performance-last.json` records `controllers_peak`,
+  `controller_arrivals`, `controller_removals`, `controller_open_errors` and
+  `user_scan_errors`. A peak of 1 with no errors means the PS5 never reported a
+  second signed-in user with a connected controller.
+
+## Launching a stream stays black
+
+The connecting screen stays on the television, its bar moving, until the first
+frame of the stream arrives; then the bar runs to its end and the screen fades
+into the stream. The picture goes black for a moment when the launcher hands
+the display to the stream, and for longer if the television has to change mode
+(120 Hz or HDR). After twenty seconds without a connection the app returns to
+the launcher with a message, and Touchpad + L1 returns sooner. If the screen is
+black for the whole connection, the launcher could not take the picture of its
+connecting screen: the log says `connecting picture not available`.
 
 Normal and release builds keep the optional LAN telemetry sink disabled. Older
 development builds tried to open TCP port `8767` on the selected Sunshine host
 before decoder setup; a silently filtered connection could block before the
-loading renderer and `Touchpad click + L1` monitor were available.
+connection watcher and `Touchpad + L1` monitor were available.
 
 Only diagnostics workstations running the telemetry receiver should build with
 `LAN_TELEMETRY=1`. Never enable it in a distributed package.
@@ -187,18 +219,35 @@ Square or the Games-screen action.
 - Consult loader diagnostics; the home-screen message alone is not a root
   cause.
 
-## Moving focus crashes the launcher
+## The launcher does not appear, or does not come back after a stream
 
-Symbolicate the fatal instruction and backtrace against `build/llvm-pie.elf`.
-RmlUi loads hidden button-state textures lazily when focus changes, so a trap in
-`operator new` followed by `SdlRenderInterface::LoadTexture` indicates that the
-large-allocation mapping path was lost or failed. The launcher must keep
-allocations of 64 KiB or more outside the bounded libc heap.
+The launcher writes what it does to
+`/data/prosperolight/logs/prosperolight-launcher.log` (the previous launch is
+kept as `prosperolight-launcher.prev.log`; without filesystem access both are
+in the title's `/download0`): opening the display, the first frame,
+closing before a stream, each stream's start and end, and how long the display
+was left to settle. The OpenGL runtime writes its own lines to the same file.
+A launcher that cannot open the display tries twice more, two seconds apart,
+then waits to be closed. After a stream above 60 Hz or in HDR, five seconds of
+black screen before the launcher returns are intended (`HFR_SETTLE_MS`).
 
-A startup `SIGBUS` at an aligned AVX store inside
-`Rml::ElementInstancerPools::Initialize()` means the replacement `operator new`
-returned insufficiently aligned storage. Its allocation header and small-object
-backing allocation must preserve the runtime's 32-byte alignment guarantee.
+## The app closed by itself
+
+If the app faulted, it wrote `logs/crash-last.txt` (the one before is kept as
+`crash-prev.txt`) and the same text at the end of the launcher log: what
+happened, where, and the calls found on the stack, as offsets into the build's
+`build/llvm-pie.elf`. `python3 tools/symbolize-crash.py crash-last.txt
+build/llvm-pie.elf` names the functions; it needs the ELF of the same build.
+
+## The app does not use `/data/prosperolight`
+
+The first line of the log is `[PL] storage: title=... status=N app=... data=...`.
+`status=0` means the console gave filesystem access. `status=5` means the helper
+`sandbox-elevator.elf` is missing beside `eboot.bin`; `status=9` means nothing
+answered on port 9021: load an ELF loader (elfldr) before starting the app. With
+any status other than 0 the app keeps its files in `/download0` and reads its
+own files from `/app0`. The helper also writes one line to klog:
+`[sandbox-elevator] fw=... pid=... capability=1 result=N`.
 
 ## `/download0` is missing
 
@@ -208,7 +257,7 @@ new generated directory. Do not attempt to write to `/app0`.
 ## Collecting performance metrics through klog
 
 Start a klog capture before testing and leave it connected until after returning
-from the stream with Touchpad click+L1. ProsperoLight emits its performance summary after
+from the stream with Touchpad + L1. ProsperoLight emits its performance summary after
 the streaming workers stop, with no per-frame kernel logging during gameplay.
 Filter for `[ProsperoLight perf]`. Each record includes a session number and
 `part=N/total`; concatenate the text after `json=` in part order to recover the
@@ -240,3 +289,20 @@ Settings and return them to Classic and 3: those are the defaults and the
 it On. Freezes about once a second at a high bitrate are the decoder's limit:
 see [Bitrate limits](../README.md#bitrate-limits). Report which setting made
 the difference together with `performance-last.json` or the klog summary.
+
+## PyroWave profiles and local shortcuts
+
+A PyroWave profile is explicitly selected by codec, chroma sampling and HDR.
+The host must advertise that exact profile; enable it in Vibepollo/Vibeshine
+and disable compression. Use wired LAN and a high bitrate. Native HEVC bitrate
+limits do not describe the PyroWave GPU decoder. See [PyroWave](PYROWAVE.md).
+
+Hold the touchpad down until it clicks, then press the left stick for host
+Select/Back or the right stick for host PS/Guide. The physical PS/share buttons
+remain owned by PS5. Settings shows all six click combinations beside the
+scrolling list. See [controls](../README.md#controls) and [DualSense](DUALSENSE.md).
+
+For frame pacing comparison, enable diagnostic logs and collect a bounded
+capture for each mode; [the plotting tool](frame-pacing-measurements.md) shows
+intervals and timing distributions. With filesystem elevation, logs and traces
+follow `/data/prosperolight/logs`; the fallback is `/download0`.

@@ -1,6 +1,7 @@
 #include "frame_cadence.hpp"
 #include "frame_pacing.hpp"
 #include "lan_http_report.hpp"
+#include "app_storage.hpp"
 #include <cstdio>
 #include <new>
 #include "presentation_preferences.hpp"
@@ -106,8 +107,9 @@ struct OutputTrace
                  (unsigned long long)pacer.stats.spacing_error_max_us);
         if (!samples || !prosperolight_logs_enabled())
             return;
-        char temporary[96], destination[96];
-        snprintf(destination, sizeof(destination), "/download0/pyrowave-output-mode%u.csv", mode);
+        char temporary[176], destination[176];
+        snprintf(destination, sizeof(destination), "%s/pyrowave-output-mode%u.csv",
+                 storage::paths().performance, mode);
         snprintf(temporary, sizeof(temporary), "%s.tmp", destination);
         FILE *file = fopen(temporary, "w");
         if (!file)

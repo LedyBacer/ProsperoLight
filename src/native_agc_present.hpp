@@ -63,9 +63,17 @@ int native_agc_present_main10(const void *source, size_t source_bytes, uint32_t 
                               uint32_t surface_height, uint32_t visible_width,
                               uint32_t visible_height, uint32_t requested_fps,
                               const native_agc_metrics_t *metrics);
-int native_agc_present_loading(void *surface, size_t surface_bytes, uint32_t phase, int hdr,
-                               uint32_t output_source_width, uint32_t output_source_height,
-                               uint32_t requested_fps);
+// A black frame that opens the output in the stream's mode.
+int native_agc_present_blank(void *surface, size_t surface_bytes, int hdr,
+                             uint32_t output_source_width, uint32_t output_source_height,
+                             uint32_t requested_fps);
+// The connecting screen: a 1920 x 1088 picture, drawn edge to edge whatever
+// the picture-size setting is. It returns once the television shows it.
+int native_agc_present_still(const void *surface, size_t surface_bytes, int hdr,
+                             uint32_t output_source_width, uint32_t output_source_height,
+                             uint32_t requested_fps);
+// Makes bytes the CPU wrote into a picture visible to the GPU.
+void native_agc_flush_source(const void *data, size_t bytes);
 int native_agc_wait_source_idle(const void *source);
 int native_agc_finish_frame(void);
 // Query only on the presentation owner thread, or after the stream worker joins.
@@ -82,6 +90,10 @@ int native_agc_vsync_active(void);
 int native_agc_vrr_active(void);
 int native_agc_flip_events_active(void);
 int native_agc_present_shutdown(void);
+/* The launcher's OpenGL runtime initialises AGC for the process when it draws
+   its first frame. Call this once it has: the stream's presenter then uses
+   that initialisation and does not ask for a second one. */
+void native_agc_note_initialized(void);
 
 // Codec-independent physical output status: -1 unknown, 0 SDR, 1 HDR.
 int native_videoout_hdr_active(int32_t handle);

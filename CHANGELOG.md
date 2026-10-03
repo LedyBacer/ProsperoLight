@@ -1,5 +1,95 @@
 # Changelog
 
+## 01.000.080
+
+### Beta: a new launcher, four controllers, files that survive updates
+
+Everything in experimental beta **01.000.070** is included; its notes below
+still apply to the stream itself.
+
+### New
+
+- **A new launcher.** It is drawn by the GPU with the widgets of
+  [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui), at
+  up to 4K, in ProsperoLight's own Moonlight theme: frosted panels over a
+  night-blue sky. Four tabs: PCs, Games, Settings, About.
+  - **PCs.** Every saved PC is on screen with its state: ready, needs pairing,
+    or offline. The panel beside the list shows its address, port, pairing, app
+    count and running app. **Remove** must be held; **Unpair** asks first.
+    Triangle searches the network again.
+  - **Games.** Box art is shown as posters and the list scrolls. The selected
+    app's name is the headline, the page takes its colours from the poster, and
+    the running app carries a badge.
+  - **Settings.** Rows are grouped, left and right change a value, and bitrate
+    is a slider from 10 to 300 Mbps. At 4K a meter shows the bitrate against
+    the decoder's measured limit.
+  - **About.** Credits, the version, three steps to get started, and the
+    folders the settings, the pairing and the logs are in.
+  - Address and port are typed on a number pad inside the launcher.
+  - The screen keeps moving while a PC is slow to answer.
+- **Sounds.** Every widget has its sound: moving, choosing, tabs, sliders,
+  dialogs, notices, and starting a stream.
+- **Up to four controllers.** Every user signed in on the PS5 plays with their
+  own controller. Turn on another controller, choose a user for it when the PS5
+  asks, and it joins as the next one, before or during a stream. `Touchpad + L1`
+  (leave the stream) and `Touchpad + R1` (statistics) work on every controller;
+  mouse mode and the stream keyboard stay with the first one.
+- **Sunshine port per PC.** The PCs page has a **Change port** button, and
+  **Add a PC** accepts `address:port`. A PC found on the network uses the port
+  Sunshine advertises.
+- **One folder for everything the app writes.** When it starts, ProsperoLight
+  asks the console's ELF loader for access to the filesystem, the way
+  ProsperoEden does. Saved PCs and settings are then in
+  `/data/prosperolight/config`, the pairing in `/data/prosperolight/pairing`,
+  and the logs in `/data/prosperolight/logs`. An update or a reinstall does not
+  touch them, and the first start brings the settings and the pairing over, so
+  nothing is paired again. With no ELF loader on port 9021 the app uses its own
+  storage as before.
+- **One connecting screen.** The launcher's connecting screen stays on the
+  television while the stream connects, its bar moving with each step; when the
+  first picture arrives the bar runs to its end and the screen fades into the
+  stream. `Touchpad + L1` still cancels.
+- **New version notice.** Once per launch the app asks the homebrew.page
+  catalog whether a newer ProsperoLight is listed, and says so in a notice that
+  stays for ten seconds. Nothing is downloaded or installed.
+- **Crash report.** If the app faults it writes `logs/crash-last.txt`;
+  `tools/symbolize-crash.py` names the functions.
+- **The stream shortcuts are named after their button.** They were written
+  `Select + ...`; the button is the touchpad, so they are now `Touchpad + L1`,
+  `Touchpad + R1`, `Touchpad + Square` and `Touchpad + Triangle`. The shortcuts
+  themselves did not change, and buttons are shown as glyphs.
+
+### Fixed
+
+- No black screen when the app opens: the console's splash picture stays until
+  the launcher has drawn its first frame.
+- The launcher no longer stands still for a second every few seconds (its log
+  is written by a thread of its own).
+- Stopping a running app from the launcher no longer closes ProsperoLight.
+
+### Good to know
+
+- The app file grows from 5 MB to 32 MB: the launcher brings the ps5-opengl
+  runtime, and the update check brings libcurl. The app folder has one more
+  file, `sandbox-elevator.elf`, the helper the ELF loader runs.
+- Opening the app takes about five seconds; the splash picture covers it. After
+  a stream above 60 Hz or in HDR the screen stays black for five seconds before
+  the launcher returns, while the television changes mode.
+- PC and app names can use western and central European letters and Cyrillic.
+  Other scripts are not drawn yet.
+- Saved PCs and settings from earlier versions are kept. Going back to an
+  earlier version resets them; pairing is kept.
+- `pairing/key.pem` under `/data/prosperolight` is what lets this console
+  connect to a paired PC: keep it private.
+
+### What was tested
+
+On a PS5 with a 4K television: the launcher and its four tabs, filesystem
+access and the move of settings and pairing to `/data/prosperolight`, the
+connecting screen handed to the stream, a stream and the return to the
+launcher. On the PC: the launcher's screens and logic against a pretend
+Sunshine network, and the unit tests.
+
 ## 01.000.070
 
 ### Experimental performance beta — new decode and presentation threads
@@ -50,7 +140,7 @@ Use [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues) a
 - Codec/HDR, resolution/FPS, bitrate, stereo/5.1, Ethernet or Wi-Fi.
 - The three new settings, and whether this beta is smoother, unchanged, or
   worse than `.062` or `.060` in the same game.
-- With the overlay on (Select+R1): the "Decoder", "Decode (last second)" and
+- With the overlay on (Touchpad + R1): the "Decoder", "Decode (last second)" and
   both "Frames dropped" lines.
 - If available, attach `performance-last.json` and `performance-frames.csv` from
   the app's `/download0/moonlight/` save directory. These are overwritten by the
@@ -104,7 +194,7 @@ Use [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues) a
 - Codec/HDR, resolution/FPS, bitrate, stereo/5.1, Ethernet or Wi-Fi.
 - Game and whether this beta is smoother, unchanged, or worse than `.060`.
 - Complete Windows/RDP login first, reconnect, then warm up for 30 seconds and
-  play the same area for two minutes. Return with Select+L1 and close the app.
+  play the same area for two minutes. Return with Touchpad + L1 and close the app.
   Separate login/menu/teardown time from gameplay. Stop early if unusable.
 - If available, attach `performance-last.json` and `performance-frames.csv` from
   the app's `/download0/moonlight/` save directory. These are overwritten by the

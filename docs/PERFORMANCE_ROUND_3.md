@@ -562,7 +562,7 @@ and source-slot waiting; `decode_us` measures only the decode call.
 
 For the next run: restart the uploaded client, use 4K120 HEVC SDR / 80 Mbps,
 launch the game fresh, warm up for 30 seconds and play the same area for two
-minutes. Return using Touchpad click+L1 and collect both files before changing codec.
+minutes. Return using Touchpad + L1 and collect both files before changing codec.
 Analyze only the steady window and correlate arrival/PTS intervals, frame sizes,
 decode tails, backlog and previous-flip waits; exclude startup/teardown. Repeat
 with H.264 afterward. The probe itself has overhead and requires comparison

@@ -67,6 +67,7 @@ struct Slot
     PadSample previous{};
     uint16_t motion_rate[2]{};
     uint64_t motion_next[2]{}, last_input = 0;
+    uint32_t local_buttons = 0;
     uint8_t rumble[2]{}, color[3]{};
     bool rumble_dirty = false, led_dirty = false, trigger_dirty = false;
     TriggerParam triggers{};
@@ -84,6 +85,8 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 bool initialized = false, live = false;
 uint64_t next_discovery = 0, next_report = 0;
 uint16_t active_mask = 0;
+Statistics statistics{};
+unsigned local_actions = 0;
 struct Lock
 {
     Lock()
@@ -154,10 +157,16 @@ int Disconnect(unsigned index)
     CancelTouches(index);
     int result = 0;
     if (live && slot.announced)
+    {
         result = LiSendMultiControllerEvent(index, active_mask, 0, 0, 0, 0, 0, 0, 0);
+        ++statistics.removals;
+        if (result != 0)
+            ++statistics.send_errors;
+    }
     ResetOutput(slot);
     slot.connected = slot.announced = false;
     slot.last_input = 0;
+    slot.local_buttons = 0;
     return result;
 }
 void SetConnection(unsigned index, const PadSample &sample)
@@ -179,6 +188,9 @@ void SetConnection(unsigned index, const PadSample &sample)
         // Select legacy motor emulation explicitly for scePadSetVibration.
         OutputResult(slot, "enable rumble mode", scePadSetVibrationMode(slot.handle, 2));
         active_mask |= 1u << index;
+        const unsigned count = __builtin_popcount(active_mask);
+        if (count > statistics.peak)
+            statistics.peak = count;
         alignas(8) uint8_t info_buffer[256]{};
         PadInfo info{};
         const int info_result = scePadGetControllerInformation(slot.handle, info_buffer);
@@ -206,11 +218,14 @@ int Announce(unsigned index)
     if (result == 0)
     {
         slot.announced = true;
+        ++statistics.arrivals;
         // Public scePad data has no verified battery field. Never invent a
         // percentage, and don't advertise battery reporting as a capability.
         LiSendControllerBatteryEvent(index, LI_BATTERY_STATE_UNKNOWN,
                                      LI_BATTERY_PERCENTAGE_UNKNOWN);
     }
+    if (result != 0)
+        ++statistics.send_errors;
     return result;
 }
 void ApplyOutput(Slot &slot)
@@ -361,7 +376,10 @@ void Discover()
 {
     int32_t users[4] = {-1, -1, -1, -1};
     if (sceUserServiceGetLoginUserIdList(users) < 0)
+    {
+        ++statistics.scan_errors;
         return;
+    }
     for (unsigned i = 1; i < MaxControllers; ++i)
     {
         Slot &slot = slots[i];
@@ -393,7 +411,10 @@ void Discover()
                 continue;
             const int handle = scePadOpen(user, 0, 0, nullptr);
             if (handle < 0)
+            {
+                ++statistics.open_errors;
                 break;
+            }
             slot.user = user;
             slot.handle = handle;
             PadSample sample{};
@@ -489,6 +510,8 @@ void Init(int32_t user, int32_t handle)
     for (Slot &slot : slots)
         slot = Slot{};
     active_mask = 0;
+    statistics = {};
+    local_actions = 0;
     live = false;
     initialized = true;
     slots[0].user = user;
@@ -504,6 +527,18 @@ uint16_t ActiveMask()
 {
     Lock lock;
     return active_mask;
+}
+Statistics GetStatistics()
+{
+    Lock lock;
+    return statistics;
+}
+unsigned TakeLocalActions()
+{
+    Lock lock;
+    const unsigned actions = local_actions;
+    local_actions = 0;
+    return actions;
 }
 void PrimarySample(const PadSample &sample, bool suppressed)
 {
@@ -522,7 +557,10 @@ int SendPrimary(int buttons, uint8_t lt, uint8_t rt, int16_t lx, int16_t ly, int
     int result = Announce(0);
     if (result != 0)
         return result;
-    return LiSendMultiControllerEvent(0, active_mask, buttons, lt, rt, lx, ly, rx, ry);
+    result = LiSendMultiControllerEvent(0, active_mask, buttons, lt, rt, lx, ly, rx, ry);
+    if (result != 0)
+        ++statistics.send_errors;
+    return result;
 }
 void Poll()
 {
@@ -571,7 +609,19 @@ void Poll()
                 for (int n = 1; n < count; ++n)
                     if (samples[n].timestamp_us >= newest->timestamp_us)
                         newest = &samples[n];
+                PadSample forwarded = *newest;
                 const bool suppressed = (newest->buttons & 0x80000000u) != 0;
+                const uint32_t chords =
+                    !suppressed && (newest->buttons & 0x100000u) ? newest->buttons & 0xc00u : 0;
+                const uint32_t pressed = chords & ~slot.local_buttons;
+                slot.local_buttons = chords;
+                if (pressed & 0x800u)
+                    local_actions ^= ToggleStatistics;
+                if (pressed & 0x400u)
+                    local_actions |= StopStream;
+                if (chords)
+                    forwarded.buttons &= ~(0x100000u | 0xc00u);
+                newest = &forwarded;
                 ExtendedInput(i, *newest, suppressed);
                 if (slot.connected && Announce(i) == 0)
                 {
@@ -588,19 +638,23 @@ void Poll()
                         ++slot.input_events;
                         slot.last_input = now;
                     }
+                    else
+                        ++statistics.send_errors;
                 }
             }
             else if (slot.connected && now - slot.last_input >= 100000 && slot.announced)
             {
                 const PadSample &sample = slot.previous;
-                LiSendMultiControllerEvent(i, active_mask,
-                                           slot.intercepted ? 0 : Buttons(sample.buttons),
-                                           slot.intercepted ? 0 : sample.left_trigger,
-                                           slot.intercepted ? 0 : sample.right_trigger,
-                                           slot.intercepted ? 0 : Axis(sample.left_x, false),
-                                           slot.intercepted ? 0 : Axis(sample.left_y, true),
-                                           slot.intercepted ? 0 : Axis(sample.right_x, false),
-                                           slot.intercepted ? 0 : Axis(sample.right_y, true));
+                const int result = LiSendMultiControllerEvent(
+                    i, active_mask, slot.intercepted ? 0 : Buttons(sample.buttons),
+                    slot.intercepted ? 0 : sample.left_trigger,
+                    slot.intercepted ? 0 : sample.right_trigger,
+                    slot.intercepted ? 0 : Axis(sample.left_x, false),
+                    slot.intercepted ? 0 : Axis(sample.left_y, true),
+                    slot.intercepted ? 0 : Axis(sample.right_x, false),
+                    slot.intercepted ? 0 : Axis(sample.right_y, true));
+                if (result != 0)
+                    ++statistics.send_errors;
                 slot.last_input = now;
             }
         }

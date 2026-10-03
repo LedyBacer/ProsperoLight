@@ -4,10 +4,10 @@
 
 <h1 align="center">ProsperoLight</h1>
 
-> **Experimental performance beta: [01.000.070](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.070).**
-> Decoding and presentation now run on separate threads: a stream that outruns the decoder
-> keeps playing at the decoder's pace instead of dropping to one frame every 100 ms.
-> The PS5 decoder still limits how much bitrate is usable: see [Bitrate limits](#bitrate-limits).
+> **Upstream beta: [01.000.080](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.080).**
+> This development branch integrates that release's GPU launcher and persistent
+> storage with PyroWave, extended DualSense support and frame pacing. It is not
+> the unchanged upstream release. Native HEVC limits remain documented below.
 > [01.000.060 remains stable](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.060).
 > Please report results and regressions through [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues), using the checklist in the beta release notes.
 
@@ -20,42 +20,38 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-PlayStation%205-003791?logo=playstation&amp;logoColor=white" alt="PlayStation 5">
   <img src="https://img.shields.io/badge/video-H.264%20%7C%20HEVC%20%7C%20PyroWave-70E1DC" alt="H.264, HEVC and PyroWave">
-  <img src="https://img.shields.io/badge/frame%20rate-30--120%20FPS-5BBEFF" alt="30 to 120 FPS">
+  <img src="https://img.shields.io/badge/frame%20rate-30%E2%80%93120%20FPS-5BBEFF" alt="30 to 120 FPS">
   <img src="https://img.shields.io/badge/audio-Stereo%20%7C%205.1%20Opus-7DD3FC" alt="Stereo and 5.1 Opus audio">
-  <img src="https://img.shields.io/badge/UI-RmlUi-5DDFA4" alt="RmlUi">
+  <img src="https://img.shields.io/badge/UI-OpenGL-5DDFA4" alt="OpenGL launcher">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
 </p>
 
-Demo available by clicking the image below.
+![ProsperoLight's Games screen: the selected app as a headline over a row of posters](docs/images/prosperolight.png)
 
-[![ProsperoLight Games screen configured for 4K HDR](docs/images/prosperolight.png)](https://imgur.com/a/19lB0sX)
+The picture is the launcher of the development version drawn on a PC with
+sample apps. A [video of the released version](https://imgur.com/a/19lB0sX)
+shows a stream on the console.
 
 ## Highlights
 
-The PyroWave integration adds explicit codec/chroma/HDR selection and
-manual bitrate entry. See [integration details](docs/PYROWAVE.md) and the
-[console validation report and checklist](docs/PYROWAVE-REGRESSION.md). Existing VideoDec2
-bitrate measurements below apply to H.264/HEVC, not the PyroWave GPU decoder.
-
-
 - Native PS5 hardware streaming through VideoDec2 and AGC at 1080p, 1440p,
-  and 2160p, with keyboard entry for integer stream targets from 30 to 120 FPS.
+  and 2160p, with independently selectable integer stream targets from 30 to 120 FPS.
 - Decoding and presentation on separate threads: a late flip never holds back
   decoding, and every display refresh shows the newest decoded frame. See the
   [measured bitrate limits](#bitrate-limits) before raising the bitrate.
 - H.264 High, HEVC Main, and HEVC Main10 HDR10 support at every available
   resolution.
-- Low-latency DualSense, physical USB keyboard and mouse, controller-driven
-  mouse mode, and an on-screen password keyboard.
-- Automatic Sunshine discovery, manual-IP fallback, persistent multi-PC
-  pairing, application artwork, and launch/resume/stop controls.
+- Low-latency DualSense input for up to four controllers, physical USB keyboard
+  and mouse, controller-driven mouse mode, and an on-screen password keyboard.
+- Automatic Sunshine discovery, manual address and port entry, persistent
+  multi-PC pairing, application artwork, and launch/resume/stop controls.
 - Persistent stream preferences, edge-to-edge or TV-safe presentation,
-  independent frame-rate selection, and manual bitrate input from 1 to 1000 Mbps.
-- Selectable 48 kHz stereo or 5.1 surround Opus audio, native launcher sound
-  effects, live performance metrics, and graceful connection recovery.
+  independent frame-rate selection, and numeric bitrate entry from 1 to 1000 Mbps.
+- Selectable 48 kHz stereo or 5.1 surround Opus audio, a sound for every
+  launcher widget, live performance metrics, and graceful connection recovery.
 
 ProsperoLight is a native PS5 client for the open Moonlight/Sunshine streaming
-protocol. Its RmlUi launcher discovers and pairs with Sunshine hosts, browses
+protocol. Its OpenGL launcher discovers and pairs with Sunshine hosts, browses
 their applications, and starts a native streaming session. Video access units
 are decoded by PS5 VideoDec2 and the resulting GPU-visible surfaces are
 presented by AGC without copying decoded pixels through a CPU framebuffer.
@@ -66,21 +62,13 @@ presented by AGC without copying decoded pixels through a CPU framebuffer.
 > This repository does not include an exploit, proprietary Sony SDK, system
 > module, encryption key, firmware file, or game asset.
 
-## Presentation and connection preferences
-
-The integrated development branch adds **Unpaced**, **Paced**, and
-**Paced + VRR** output policies with a shared source-clock controller and bounded readiness reserve, an independent VSync preference, an option to
-disable menu sounds, and manual **IPv4:HTTP-port** connections through Add PC.
-Settings scroll while the touchpad shortcut hints remain visible. See
-[configuration and current validation boundaries](docs/CONFIGURATION.md#frame-pacing-and-vsync).
-
 ## Bitrate limits
 
 > [!WARNING]
 > **A higher bitrate is not always better.** The PS5 video decoder takes longer
 > for larger frames. Past the limits below it cannot keep up: latency grows,
 > then the stream freezes about once a second. At 4K and 120 FPS, set
-> **80 Mbps or lower**.
+> **80 Mbps or lower** for the measured native HEVC path. These limits do not apply to PyroWave.
 
 ![4K HEVC bitrate limits by frame rate: smooth up to 80 Mbps at 120 FPS, 115 Mbps at 90 and 60 FPS](docs/images/bitrate-limits.svg)
 
@@ -102,15 +90,44 @@ Settings scroll while the touchpad shortcut hints remain visible. See
   delay. When 15 frames are waiting they are all discarded and a keyframe is
   requested. At the 300 Mbps setting this happened 13 times in 17 seconds, and
   the decoder still only managed 90 FPS.
-- **How to tell.** With the overlay on (`Touchpad click + R1`), "Frames dropped by
-  decoder backlog" rises and "Decode (last second)" shows a load near 100%.
+- **How to tell.** With the overlay on (![Touchpad][touchpad] + ![R1][r1]), "Frames dropped
+  by decoder backlog" rises and "Decode (last second)" shows a load near 100%.
   "Frames dropped by your network connection" is a different problem.
-- VideoDec2 settings of 300, 400 and 500 Mbps are beyond the 4K decoder at every frame rate.
+- Bitrates of 300 Mbps and above are beyond these measured native HEVC limits.
 
 Measured on a PS5 with HEVC SDR and eight slices per frame, decoding one frame
 at a time (the default). HDR, H.264 and the lower resolutions are not measured
 yet. `python3 tools/plot-bitrate-limits.py` redraws the chart from the model;
 [round 4](docs/PERFORMANCE_ROUND_4.md) has the measurements.
+
+## PyroWave, pacing and controller extensions
+
+PyroWave is an explicitly selected GPU decoder and RADV presentation backend.
+It requires a compatible Vibepollo/Vibeshine host advertising the selected
+4:2:0/4:4:4 and SDR/HDR profile; compression must be disabled. Unsupported
+profiles are reported instead of silently changing codecs. HEVC and H.264
+remain available for ordinary Sunshine hosts. See [PyroWave](docs/PYROWAVE.md).
+
+Use wired Ethernet and a high bitrate for PyroWave. On one PS5 13.60 setup,
+4K120 SDR/HDR playback and codec changes without restarting were validated;
+500-600 Mbps was stable, while 700-800 Mbps sometimes had network loss.
+These observations are not a quality or latency guarantee for other hosts.
+
+Settings offer **Unpaced**, **Paced**, and **Paced+VRR**, alongside independent
+V-Sync. Both video backends use the shared source-clock pacing policy; physical
+presentation measurements depend on the backend. See
+[configuration](docs/CONFIGURATION.md#frame-pacing-and-vsync) and
+[interval traces and graphs](docs/frame-pacing-measurements.md).
+
+DualSense forwarding includes touch, accelerometer/gyro, RGB lightbar, rumble
+and host-provided adaptive trigger effects, with up to four connected users.
+Host emulation and game support determine which effects are available.
+Native high-definition waveform playback and controller speaker audio are
+not implemented; see [controller support](docs/DUALSENSE.md).
+
+Diagnostic logs can be disabled in Settings. Text logs retain bounded current
+and previous files; output traces retain the latest bounded capture per backend
+and pacing mode. Menu sounds also have a persistent toggle.
 
 ## Project foundation
 
@@ -146,19 +163,24 @@ tooling are maintained in this repository.
 | Shell title | `ProsperoLight` |
 | Title ID | `PPSA99002` |
 | Category | Game |
-| Experimental beta / stable | `01.000.070` / `01.000.060` |
+| Beta / stable | `01.000.080` / `01.000.060` |
 | Version source | [`sce_sys/param.json`](sce_sys/param.json) |
-| Writable data | `/download0` only |
+| Writable data | `/data/prosperolight` (`/download0` when the console has no ELF loader) |
 
 ## Features
 
 - Discover Sunshine hosts on the LAN or add an IPv4 address manually.
+- Reach a Sunshine that does not use the default port 47989: each saved PC has
+  its own port, and a discovered PC uses the port it advertises.
 - Remember up to eight PCs, pairing identities, and stream preferences under
-  `/download0` across application restarts.
-- Pair with a two-minute PIN dialog and unpair through explicit two-press
+  `/data/prosperolight` across application restarts and updates.
+- Pair with a two-minute PIN dialog with a countdown, and unpair after a
   confirmation.
-- Browse up to 64 advertised Sunshine applications with paged artwork,
-  launch/resume feedback, and active-application stop controls.
+- Tell you when a newer version is listed on
+  [homebrew.page](https://homebrew.page): one notice for ten seconds, once per
+  launch. Nothing is downloaded or installed.
+- See every saved PC and its state in one list, and browse up to 64 advertised
+  Sunshine applications as posters with launch/resume and stop controls.
 - Decode H.264 High and HEVC Main streams through VideoDec2 at 1080p, 1440p,
   and 2160p. Enter 30-120 FPS independently of resolution and bitrate;
   live 1440p/90 and 2160p/120 Sunshine sessions are hardware-validated.
@@ -167,8 +189,9 @@ tooling are maintained in this repository.
   3840x2160 target and 2160p is presented 1:1. High-refresh streams retain the
   same 4K output geometry: 1440p is GPU-scaled to 4K, while 2160p/120 is
   presented through the PS5's native 3840x2160 119.88 Hz output path.
-- Enter a bitrate from 1 to 1000 Mbps. The best setting depends on the host,
-  encoder, network, and selected codec rather than link speed alone.
+- Enter a bitrate from 1 to 1000 Mbps with the numeric keyboard. For native HEVC at 4K the Settings screen
+  shows how close the bitrate is to the decoder's measured limit and warns
+  above it.
 - Choose V-Sync, the decoder pipeline (Classic, or the experimental Adaptive),
   and how many CPU cores decoding may use.
 - Enable HEVC Main10 HDR10 output at any available resolution and frame-rate
@@ -177,6 +200,8 @@ tooling are maintained in this repository.
   surround through PS5 AudioOut.
 - Forward low-latency DualSense controls, with controller/mouse switching and
   a stream keyboard that works at Windows sign-in.
+- Play with up to four controllers: every user signed in on the PS5 is a
+  separate controller on the PC, and controllers can join or leave mid-stream.
 - Forward a physical USB keyboard and mouse directly to Sunshine during a
   stream, including modifiers, navigation/function keys, five mouse buttons,
   and vertical/horizontal scrolling.
@@ -184,10 +209,10 @@ tooling are maintained in this repository.
   packet loss, network/host latency, and decode time.
 - Recover from connection failures and return from a stream to the launcher
   without leaving a stale session running.
-- Use original 4K launcher artwork, icon, loading presentation, and selection
-  music in a controller-first RmlUi interface.
-- Play distinct opening, navigation, action, setting, back, success, error, and
-  stream-start cues through the native PS5 SDL audio backend.
+- Use original 4K artwork, icon, loading presentation, and selection music.
+- Use a launcher drawn by the GPU at up to 4K: frosted panels, the selected
+  app's colours behind them, button glyphs in place of button names, and a
+  sound for every move, choice, switch, dialog and notice.
 
 ## Current status
 
@@ -303,9 +328,9 @@ again, then publishes the `.ffpfsc` image, app-folder `.zip`, and `SHA256SUMS`.
    bar.
 
 Do not relaunch immediately after replacing the same pathname: ShadowMountPlus
-may still have the previous image mounted. Keeping the title ID as `PPSA99002`
-preserves the title's `/download0` pairing and settings data; `/app0` comes from
-the replacement image, while Shell presentation metadata may remain cached.
+may still have the previous image mounted. Pairing and settings are kept in
+`/data/prosperolight` (see [Files on the console](#files-on-the-console)) and
+are not touched by an update; Shell presentation metadata may remain cached.
 
 ## Deploy
 
@@ -334,22 +359,50 @@ behavior.
 
 1. Start Sunshine on a PC connected to the same trusted LAN. Wired Ethernet
    for both the PC and PS5 is strongly recommended.
-2. Open ProsperoLight and choose a discovered PC, or select **Add PC** and enter
-   its IPv4 address.
-3. Select **Pair PC**, then enter the displayed PIN in Sunshine within two
+2. Open ProsperoLight and choose a discovered PC, or choose **Add a PC** and
+   type its IPv4 address (see [Sunshine on another port](#sunshine-on-another-port)
+   if Sunshine does not use port 47989).
+3. Choose **Pair this PC**, then enter the displayed PIN in Sunshine within two
    minutes.
 4. Open **Games**, choose Desktop or another advertised application, and press
-   Cross.
-5. Use `Touchpad click + L1` to end the stream and return to ProsperoLight.
+   ![Cross][cross].
+5. Press ![Touchpad][touchpad] + ![L1][l1] to end the stream and return to ProsperoLight.
 
 Pairing credentials and settings are title-scoped. Installing under a different
 title ID intentionally requires pairing again.
 
-To forget an old PC, select it on **PCs**, choose **Remove PC**, then press Cross
-again to confirm. This works while the PC is offline and removes only that saved
-entry; it does not revoke pairing on the host or affect other saved PCs. Use
-**Refresh** or **Add PC** to find and pair with the replacement host. A host
-advertising itself on the network may appear again after refresh.
+To forget an old PC, select it on **PCs**, move to **Remove** and hold
+![Cross][cross] until the button fills. This works while the PC is offline and
+removes only that saved entry; it does not revoke pairing on the host or affect
+other saved PCs. Press ![Triangle][triangle] to search the network again, or
+choose **Add a PC**, to find and pair with the replacement host. A host
+advertising itself on the network may appear again after a search.
+
+### Sunshine on another port
+
+Sunshine listens on port 47989 unless its **Port** setting (Configuration →
+Network in the Sunshine web UI) was changed. ProsperoLight keeps one port per
+saved PC:
+
+- A PC found on the network uses the port Sunshine advertises. Nothing needs
+  to be typed.
+- Select a PC on **PCs** and choose **Change port**. An empty entry restores
+  47989.
+- **Add a PC** also accepts an address with a port, for example
+  `192.168.1.50:48989`.
+
+Only this one number is needed: Sunshine derives its other ports from it and
+reports them to ProsperoLight. The same address can be saved more than once
+with different ports, for example for two Sunshine instances on one PC.
+
+### More than one controller
+
+Each user signed in on the PS5 plays with their own controller, up to four.
+The user who started ProsperoLight is the first controller on the PC. To add a
+player, turn on another controller and choose a user for it when the PS5 asks,
+before or during a stream; a notification confirms that the controller joined.
+A controller that is switched off, or whose user signs out, is removed from the
+PC, and the next controller to join takes its place.
 
 > [!TIP]
 > For the smoothest 90 or 120 FPS result, choose the resolution, frame rate,
@@ -362,60 +415,110 @@ advertising itself on the network may appear again after refresh.
 
 ## Controls
 
+The physical system/share buttons remain owned by PS5. Use the streaming
+shortcuts below for host Select/Back and PS/Guide.
+
+The icons are the controller's buttons. ![Touchpad][touchpad] is the touchpad button: press the
+touchpad down until it clicks.
+
 ### Launcher
 
 | Input | Action |
 | --- | --- |
-| D-pad / left analog stick | Move focus or change the selected PC/application/setting |
-| Cross | Activate, pair, launch, resume, or change a setting |
-| Circle | Return to the PCs page |
-| Square | Stop the active Sunshine application |
-| Triangle | Refresh the selected Sunshine host |
-| L1 / R1 | Change between PCs, Games, and Settings |
-| Options | Open Settings |
+| ![D-pad][dpad] / left ![analog stick][stick] | Move focus or change the selected PC/application/setting |
+| ![Cross][cross] | Activate, pair, launch, resume, or change a setting |
+| ![Circle][circle] | Return to the PCs page |
+| ![Square][square] | Stop the active Sunshine application |
+| ![Triangle][triangle] | Search the network for Sunshine again |
+| ![L1][l1] / ![R1][r1] | Change between PCs, Games, Settings, and About |
+| ![Options][options] | Open Settings |
 
 ### Streaming
 
-Touchpad means pressing the touchpad, not touching its surface. L3/R3 mean
-clicking the left/right stick. Native PS and Create buttons remain controlled
-by the PS5 system; use the chords below for host Select/Back and PS/Guide.
-These two host chords work on all controller slots; local UI shortcuts belong
-to the primary controller. Host overlay behavior depends on Steam/game settings.
-
 | Input | Action |
 | --- | --- |
-| `Touchpad click + R1` | Toggle the metrics overlay |
-| `Touchpad click + L1` | End the stream and return to ProsperoLight |
-| `Touchpad click + Square` | Toggle mouse/controller mode |
-| `Touchpad click + Triangle` | Toggle ProsperoLight's stream keyboard |
-| `Touchpad click + L3` | Send Select/Back to the host |
-| `Touchpad click + R3` | Send PS/Guide to the host (for example, Steam overlay) |
+| ![Touchpad][touchpad] + ![R1][r1] | Toggle the metrics overlay |
+| ![Touchpad][touchpad] + ![L1][l1] | End the stream and return to ProsperoLight |
+| ![Touchpad][touchpad] + ![Square][square] | Toggle mouse/controller mode |
+| ![Touchpad][touchpad] + ![Triangle][triangle] | Toggle ProsperoLight's stream keyboard |
+| ![Touchpad][touchpad] + ![L3][l3] | Send Select/Back to the host |
+| ![Touchpad][touchpad] + ![R3][r3] | Send PS/Guide to the host |
 | Physical USB keyboard | Forward keys and modifiers directly to Sunshine |
 | Physical USB mouse | Move, click, and scroll directly on the Sunshine host |
-| Either analog stick in mouse mode | Move the pointer |
-| Cross / Circle / Square in mouse mode | Left / right / middle mouse button |
-| L1 / R1 in mouse mode | Mouse X1 / X2 button |
-| D-pad in mouse mode | Vertical / horizontal scroll |
-| D-pad while keyboard is open | Move between keys |
-| Cross while keyboard is open | Type the selected key |
-| Triangle while keyboard is open | Toggle Shift |
-| Square while keyboard is open | Send Backspace |
-| Options while keyboard is open | Send Enter and close the keyboard |
-| Circle while keyboard is open | Close the keyboard |
+| Either ![analog stick][stick] in mouse mode | Move the pointer |
+| ![Cross][cross] / ![Circle][circle] / ![Square][square] in mouse mode | Left / right / middle mouse button |
+| ![L1][l1] / ![R1][r1] in mouse mode | Mouse X1 / X2 button |
+| ![D-pad][dpad] in mouse mode | Vertical / horizontal scroll |
+| ![D-pad][dpad] while keyboard is open | Move between keys |
+| ![Cross][cross] while keyboard is open | Type the selected key |
+| ![Triangle][triangle] while keyboard is open | Toggle Shift |
+| ![Square][square] while keyboard is open | Send Backspace |
+| ![Options][options] while keyboard is open | Send Enter and close the keyboard |
+| ![Circle][circle] while keyboard is open | Close the keyboard |
+
+![Touchpad][touchpad] + ![R1][r1] and ![Touchpad][touchpad] + ![L1][l1] work on every controller. Mouse mode and
+the stream keyboard belong to the first controller; on the others those two
+shortcuts are ordinary button presses for the game.
+
+[cross]: docs/images/buttons/cross.svg "Cross"
+[circle]: docs/images/buttons/circle.svg "Circle"
+[square]: docs/images/buttons/square.svg "Square"
+[triangle]: docs/images/buttons/triangle.svg "Triangle"
+[options]: docs/images/buttons/options.svg "Options"
+[l1]: docs/images/buttons/l1.svg "L1"
+[r1]: docs/images/buttons/r1.svg "R1"
+[l3]: docs/images/buttons/l3.svg "L3"
+[r3]: docs/images/buttons/r3.svg "R3"
+[dpad]: docs/images/buttons/dpad.svg "D-pad"
+[stick]: docs/images/buttons/stick.svg "Analog stick"
+[touchpad]: docs/images/buttons/touchpad.svg "Touchpad button"
 
 The stream keyboard contains every printable US-ASCII character used by
 standard passwords. It is not currently a multilingual or Unicode input
 method. Keyboard text is sent directly as Moonlight key events and is not
 stored by ProsperoLight or written to its configuration.
 
+## Files on the console
+
+When it starts, ProsperoLight asks the console's ELF loader for access to the
+filesystem (the method ProsperoEden uses, see
+[`tooling/elevation`](tooling/elevation/README.md)). With it, everything the
+app writes is in one folder that an update, a reinstall or a new title image
+does not touch:
+
+| Path | Contents |
+| --- | --- |
+| `/data/prosperolight/config/prosperolight-config.bin` | Saved PCs and stream settings |
+| `/data/prosperolight/pairing/` | `cert.pem` and `key.pem`, the identity Sunshine paired with |
+| `/data/prosperolight/logs/prosperolight-launcher.log` | This launch's log; the previous one is `prosperolight-launcher.prev.log` |
+| `/data/prosperolight/logs/performance-last.json` | The last stream's performance report |
+| `/data/prosperolight/logs/crash-last.txt` | Written only if the app crashes: where it happened |
+| `/data/prosperolight/cache/` | The shaders the launcher compiled, so later launches are faster; safe to delete |
+
+The first start with filesystem access copies the saved PCs, the settings and
+the pairing from the title's own storage, so nothing has to be paired again.
+The older copies stay where they were. To start over, delete
+`/data/prosperolight` while the app is closed. Keep `pairing/key.pem` private:
+it is what lets this console connect to a paired PC.
+
+Without an ELF loader listening on the console (port 9021), or if the request
+is refused, the app keeps working from its sandbox as before: `/app0` and
+`/download0`. The first line of the log says which it is (`status=0` means
+access was given).
+
 ## Source layout
 
 ```text
-src/main.cpp                         SDL2/RmlUi lifetime and stream handoff
-src/moonlight_app.cpp                launcher state, navigation, and feedback
+src/main.cpp                         launcher and stream take turns
+src/launcher/launcher_model.cpp      launcher state and requests, no drawing
+src/launcher/launcher_view.cpp       the four screens and their dialogs
+src/launcher/launcher_ps5.cpp        display, controller, sound, box art
 src/moonlight_backend.cpp            pairing, app listing, artwork, and control
 src/moonlight_discovery.cpp          LAN discovery
-src/moonlight_config.cpp             /download0 host and preference persistence
+src/moonlight_config.cpp             host and preference persistence
+src/app_storage.cpp                  where files are kept: /data/prosperolight
+src/elevation/                       request for filesystem access
+tooling/elevation/                   the helper the console's ELF loader runs
 src/moonlight_stream.cpp             Moonlight session, VideoDec2, audio, input
 include/moonlight_physical_input.hpp USB-HID to Moonlight input mapping
 src/native_agc_present.cpp           zero-copy AGC presentation and overlays
@@ -423,7 +526,9 @@ src/gamestream/                      retained Moonlight-compatible C boundary
 include/*.hpp                        application-owned public interfaces
 platform/ps5/                        narrow Moonlight PS5 compatibility adapters
 third_party/                         pinned Moonlight, mbedTLS, and Opus sources
-ui/                                  RML, RCSS, fonts, icons, and chrome assets
+third_party/ps5-homebrew-ui/         the UI kit the launcher is drawn with
+assets/                              launcher fonts and sounds
+tools/launcher-host/                 the launcher on the PC, for tests and pictures
 sce_sys/                             launcher metadata, 4K artwork, icon, music
 runtime/libc.prx                     generated clean-room loader runtime
 tooling/native/                      native ELF/FSELF and runtime build tools

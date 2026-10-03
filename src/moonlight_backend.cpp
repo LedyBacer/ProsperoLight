@@ -7,6 +7,8 @@
 #include "moonlight_backend.hpp"
 #include "server_endpoint.h"
 
+#include "app_storage.hpp"
+
 #include "gamestream/certgen.h"
 #include "gamestream/client.h"
 #include "gamestream/gs_errors.h"
@@ -17,7 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MOONLIGHT_IDENTITY_DIRECTORY "/download0/moonlight"
+#define MOONLIGHT_IDENTITY_DIRECTORY (storage::paths().pairing)
 #define MOONLIGHT_ARTWORK_SLOTS 6
 
 typedef struct artwork_slot
@@ -40,6 +42,7 @@ typedef struct pairing_job
 {
     volatile int state;
     char host[128];
+    uint16_t http_port;
     char pin[5];
     moonlight_backend_snapshot_t snapshot;
     client_identity_t identity;
@@ -48,7 +51,8 @@ typedef struct pairing_job
 
 static pairing_job_t pairing_job;
 
-int moonlight_backend_refresh(const char *host, moonlight_backend_snapshot_t *snapshot)
+int moonlight_backend_refresh(const char *host, uint16_t http_port,
+                              moonlight_backend_snapshot_t *snapshot)
 {
     client_identity_t identity;
     gs_server_t server;
@@ -63,6 +67,7 @@ int moonlight_backend_refresh(const char *host, moonlight_backend_snapshot_t *sn
     memset(&identity, 0, sizeof(identity));
     memset(&server, 0, sizeof(server));
     snprintf(snapshot->host, sizeof(snapshot->host), "%s", host);
+    snapshot->http_port = http_port;
 
     result = identity_init(&identity, MOONLIGHT_IDENTITY_DIRECTORY);
     if (result != GS_OK)
@@ -70,7 +75,7 @@ int moonlight_backend_refresh(const char *host, moonlight_backend_snapshot_t *sn
 
     http_init(&identity, 0);
     http_set_timeout_ms(3000);
-    result = gs_init(&server, &identity, host, 47989);
+    result = gs_init(&server, &identity, host, http_port);
     if (result != GS_OK)
         goto done;
 
@@ -125,7 +130,7 @@ static void *pairing_thread(void *unused)
         goto done;
     http_init(identity, 0);
     http_set_timeout_ms(3000);
-    result = gs_init(server, identity, pairing_job.host, 47989);
+    result = gs_init(server, identity, pairing_job.host, pairing_job.http_port);
     if (result == GS_OK && !server->paired)
         result = rng_fill(identity, random, sizeof(random));
     if (result == GS_OK && !server->paired)
@@ -141,7 +146,8 @@ static void *pairing_thread(void *unused)
 done:
     identity_free(identity);
     if (result == GS_OK)
-        result = moonlight_backend_refresh(pairing_job.host, &pairing_job.snapshot);
+        result = moonlight_backend_refresh(pairing_job.host, pairing_job.http_port,
+                                           &pairing_job.snapshot);
     pairing_job.snapshot.result = result;
     if (result != GS_OK)
     {
@@ -156,7 +162,7 @@ done:
     return NULL;
 }
 
-int moonlight_backend_pair_start(const char *host)
+int moonlight_backend_pair_start(const char *host, uint16_t http_port)
 {
     void *thread = NULL;
     int create_result;
@@ -169,7 +175,9 @@ int moonlight_backend_pair_start(const char *host)
 
     memset(&pairing_job, 0, sizeof(pairing_job));
     snprintf(pairing_job.host, sizeof(pairing_job.host), "%s", host);
+    pairing_job.http_port = http_port;
     snprintf(pairing_job.snapshot.host, sizeof(pairing_job.snapshot.host), "%s", host);
+    pairing_job.snapshot.http_port = http_port;
     __atomic_store_n(&pairing_job.state, MOONLIGHT_BACKEND_PAIR_PREPARING, __ATOMIC_RELEASE);
 
     create_result = scePthreadCreate(&thread, NULL, pairing_thread, NULL, "moonlight-pair");
@@ -204,8 +212,9 @@ moonlight_backend_pair_state_t moonlight_backend_pair_poll(moonlight_backend_sna
     return state;
 }
 
-static int run_paired_action(const char *host, moonlight_backend_snapshot_t *snapshot,
-                             int (*action)(gs_server_t *), const char *not_paired_error)
+static int run_paired_action(const char *host, uint16_t http_port,
+                             moonlight_backend_snapshot_t *snapshot, int (*action)(gs_server_t *),
+                             const char *not_paired_error)
 {
     client_identity_t identity;
     gs_server_t server;
@@ -216,7 +225,10 @@ static int run_paired_action(const char *host, moonlight_backend_snapshot_t *sna
         return GS_INVALID;
 
     memset(snapshot, 0, sizeof(*snapshot));
+    memset(&identity, 0, sizeof(identity));
+    memset(&server, 0, sizeof(server));
     snprintf(snapshot->host, sizeof(snapshot->host), "%s", host);
+    snapshot->http_port = http_port;
     result = identity_init(&identity, MOONLIGHT_IDENTITY_DIRECTORY);
     if (result != GS_OK)
     {
@@ -225,7 +237,7 @@ static int run_paired_action(const char *host, moonlight_backend_snapshot_t *sna
     }
     http_init(&identity, 0);
     http_set_timeout_ms(3000);
-    result = gs_init(&server, &identity, host, 47989);
+    result = gs_init(&server, &identity, host, http_port);
     if (result == GS_OK && !server.paired)
     {
         gs_error = not_paired_error;
@@ -238,9 +250,9 @@ static int run_paired_action(const char *host, moonlight_backend_snapshot_t *sna
     http_set_timeout_ms(0);
     identity_free(&identity);
     if (result == GS_OK)
-        return moonlight_backend_refresh(host, snapshot);
+        return moonlight_backend_refresh(host, http_port, snapshot);
 
-    (void)moonlight_backend_refresh(host, snapshot);
+    (void)moonlight_backend_refresh(host, http_port, snapshot);
     snapshot->result = result;
     snprintf(snapshot->error, sizeof(snapshot->error), "%s", action_error);
     return result;
@@ -251,9 +263,10 @@ done:
     return result;
 }
 
-int moonlight_backend_unpair(const char *host, moonlight_backend_snapshot_t *snapshot)
+int moonlight_backend_unpair(const char *host, uint16_t http_port,
+                             moonlight_backend_snapshot_t *snapshot)
 {
-    int result = run_paired_action(host, snapshot, gs_unpair, "Client is not paired");
+    int result = run_paired_action(host, http_port, snapshot, gs_unpair, "Client is not paired");
     if (result != GS_UNSUPPORTED_VERSION)
         return result;
 
@@ -267,12 +280,13 @@ int moonlight_backend_unpair(const char *host, moonlight_backend_snapshot_t *sna
                  gs_error ? gs_error : "Could not forget client identity");
         return result;
     }
-    return moonlight_backend_refresh(host, snapshot);
+    return moonlight_backend_refresh(host, http_port, snapshot);
 }
 
-int moonlight_backend_stop_app(const char *host, moonlight_backend_snapshot_t *snapshot)
+int moonlight_backend_stop_app(const char *host, uint16_t http_port,
+                               moonlight_backend_snapshot_t *snapshot)
 {
-    return run_paired_action(host, snapshot, gs_quit_app,
+    return run_paired_action(host, http_port, snapshot, gs_quit_app,
                              "Pair this client before stopping an app");
 }
 

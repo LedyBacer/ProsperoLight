@@ -135,7 +135,9 @@ the application. Do not commit credentials; `.env` is ignored by Git.
 
 ## Persistent configuration
 
-Use `/download0` for configuration, pairing state, caches, and logs. Write a
+Files live under `/data/prosperolight` after filesystem elevation, with
+`/download0` as the sandbox fallback. Configuration version 8 migrates both
+the upstream and PyroWave version 7 layouts, preserving saved hosts and ports. Write a
 temporary file and rename it into place to avoid partial writes. Provide an
 application-level export/import mechanism for important data because retention
 after title deletion or cache-management actions is not guaranteed.

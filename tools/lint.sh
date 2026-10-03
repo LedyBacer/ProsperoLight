@@ -10,6 +10,8 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 bash tools/setup-native-dependencies.sh >/dev/null
+# The launcher static analysis needs the verified OpenGL SDK headers.
+bash tools/prepare-opengl.sh >/dev/null
 bash tools/run_clang_format.sh --check
 bash tools/run_clang_tidy.sh
 

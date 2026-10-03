@@ -7,6 +7,7 @@
 /* LAN-only development telemetry. Disabled in normal builds. */
 
 #include "lan_http_report.hpp"
+#include "app_storage.hpp"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -21,13 +22,16 @@ std::mutex log_mutex;
 bool logs_loaded = false;
 bool logs_enabled = true;
 constexpr size_t log_limit = 1024 * 1024;
-constexpr const char *log_settings = "/download0/prosperolight-logging.bin";
+std::string log_settings()
+{
+    return storage::setting_file("prosperolight-logging.bin");
+}
 void load_logs()
 {
     if (logs_loaded)
         return;
     logs_loaded = true;
-    if (FILE *file = fopen(log_settings, "rb"))
+    if (FILE *file = fopen(log_settings().c_str(), "rb"))
     {
         unsigned char data[5]{};
         if (fread(data, 1, sizeof(data), file) == sizeof(data) && memcmp(data, "PLL\1", 4) == 0 &&
@@ -49,16 +53,17 @@ int prosperolight_logs_set_enabled(int enabled)
 {
     std::lock_guard<std::mutex> guard(log_mutex);
     load_logs();
-    const char *temporary = "/download0/prosperolight-logging.tmp";
-    FILE *file = fopen(temporary, "wb");
+    const auto destination = log_settings();
+    const auto temporary = destination + ".tmp";
+    FILE *file = fopen(temporary.c_str(), "wb");
     if (!file)
         return 0;
     const unsigned char data[] = {'P', 'L', 'L', 1, static_cast<unsigned char>(enabled != 0)};
     const bool written = fwrite(data, 1, sizeof(data), file) == sizeof(data);
     const int closed = fclose(file);
-    if (!written || closed || rename(temporary, log_settings) != 0)
+    if (!written || closed || rename(temporary.c_str(), destination.c_str()) != 0)
     {
-        remove(temporary);
+        remove(temporary.c_str());
         return 0;
     }
     logs_enabled = enabled != 0;
@@ -69,6 +74,9 @@ void prosperolight_log_append(const char *path, const char *message)
 {
     if (!path || !message)
         return;
+    const std::string resolved = std::string(storage::paths().logs) + "/" +
+                                 (strrchr(path, '/') ? strrchr(path, '/') + 1 : path);
+    path = resolved.c_str();
     std::lock_guard<std::mutex> guard(log_mutex);
     load_logs();
     if (!logs_enabled)
@@ -182,7 +190,7 @@ int lan_http_report_text(const char *message)
 {
     if (!prosperolight_logs_enabled())
         return 0;
-    prosperolight_log_append("/download0/prosperolight-session.log", message);
+    prosperolight_log_append("prosperolight-session.log", message);
 #if PROSPEROLIGHT_LAN_TELEMETRY
     char request[256];
     size_t message_length;

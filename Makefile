@@ -30,7 +30,10 @@ INPUT_POLL_US ?= 2000
 GPU_TIMESTAMPS ?= 0
 CATCHUP_QUEUE_FRAMES ?= 0
 REFERENCE_FRAME_INVALIDATION ?= 0
-APP_DEFINITIONS ?= SDL_MAIN_HANDLED SDL_STATIC_LIB USING_GENERATED_CONFIG_H RMLUI_STATIC_LIB
+# Milliseconds the display is left alone after a stream above 60 Hz or in HDR.
+HFR_SETTLE_MS ?= 5000
+APP_DEFINITIONS ?= GL_GLEXT_PROTOTYPES=1
+APP_DEFINITIONS += PROSPEROLIGHT_HFR_SETTLE_MS=$(HFR_SETTLE_MS)
 APP_DEFINITIONS += PROSPEROLIGHT_PYROWAVE=$(PYROWAVE)
 APP_DEFINITIONS += PROSPEROLIGHT_LAN_TELEMETRY=$(LAN_TELEMETRY)
 APP_DEFINITIONS += PROSPEROLIGHT_STREAM_SELF_TEST_FPS=$(STREAM_SELF_TEST_FPS)
@@ -50,10 +53,15 @@ APP_DEFINITIONS += INPUT_POLL_US=$(INPUT_POLL_US)
 APP_DEFINITIONS += PROSPEROLIGHT_GPU_TIMESTAMPS=$(GPU_TIMESTAMPS)
 APP_DEFINITIONS += PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES=$(CATCHUP_QUEUE_FRAMES)
 APP_DEFINITIONS += PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION=$(REFERENCE_FRAME_INVALIDATION)
-APP_INCLUDE_PATHS ?= vendor/ps5/sdl/include vendor/ps5/rmlui/include include src src/gamestream platform/ps5 third_party/moonlight-common-c/src third_party/moonlight-common-c/enet/include third_party/moonlight-common-c/nanors third_party/moonlight-common-c/nanors/deps third_party/moonlight-common-c/nanors/deps/obl third_party/mbedtls/include third_party/opus/include
-APP_STATIC_ARCHIVES ?= vendor/ps5/sdl/lib/libSDL2.a vendor/ps5/rmlui/lib/librmlui.a vendor/ps5/freetype/lib/libfreetype.a build/stream-deps/libmoonlight-common-c.a build/stream-deps/libopus.a build/stream-deps/libmbedtls.a build/stream-deps/libmbedx509.a build/stream-deps/libmbedcrypto.a vendor/ps5/sdk/lib/libunwind.a vendor/ps5/sdk/lib/libcxx.a vendor/ps5/sdk/lib/libcxxabi.a
+APP_INCLUDE_PATHS ?= third_party/ps5-homebrew-ui third_party/update-check .deps/ps5-opengl/current/include include src src/gamestream platform/ps5 third_party/moonlight-common-c/src third_party/moonlight-common-c/enet/include third_party/moonlight-common-c/nanors third_party/moonlight-common-c/nanors/deps third_party/moonlight-common-c/nanors/deps/obl third_party/mbedtls/include third_party/opus/include
+APP_STATIC_ARCHIVES ?= .deps/ps5-opengl/libps5opengl-group.a build/stream-deps/libmoonlight-common-c.a build/stream-deps/libopus.a build/stream-deps/libmbedtls.a build/stream-deps/libmbedx509.a build/stream-deps/libmbedcrypto.a
+# The launcher draws with ps5-opengl: its AGC import libraries replace the app's own.
+APP_IMPORT_STUBS ?= .deps/ps5-opengl/current/lib/libSceAgc.so build/stubs/libSceAgcDriver.so
+# Empty selects the pinned ps5-opengl release (tools/fetch-opengl-sdk.sh).
+PS5_OPENGL_PREFIX ?=
 APP_RUNTIME_MODULES ?=
-PACBREW_PACKAGES ?=
+# The update check asks homebrew.page through libcurl (third_party/update-check).
+PACBREW_PACKAGES ?= libcurl
 PACBREW_INCLUDE_PATHS ?=
 PACBREW_STATIC_ARCHIVES ?=
 PS5_HOST ?=
@@ -72,7 +80,8 @@ HOST_TEST_CXXFLAGS ?= -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror \
 HOST_TEST_LDFLAGS ?= -Wl,--gc-sections
 GTEST_ARGS ?=
 export FEC_SIMD OPUS_SIMD PYROWAVE
-export APP_DEFINITIONS APP_INCLUDE_PATHS APP_STATIC_ARCHIVES APP_RUNTIME_MODULES
+export APP_DEFINITIONS APP_INCLUDE_PATHS APP_STATIC_ARCHIVES APP_IMPORT_STUBS APP_RUNTIME_MODULES
+export PS5_OPENGL_PREFIX
 export PACBREW_PACKAGES PACBREW_INCLUDE_PATHS PACBREW_STATIC_ARCHIVES
 export PS5_HOST FTP_PORT DEPLOY_FORMAT PS5_FTP_USER PS5_FTP_PASSWORD DEPLOY_DRY_RUN
 export TITLE_ID APP_NAME APP_CATEGORY CONTENT_SUFFIX
@@ -127,7 +136,9 @@ $(HOST_UNIT_TEST): tests/test_prosperolight.cpp include/moonlight_config.hpp \
 		include/moonlight_health.hpp \
 		include/moonlight_physical_input.hpp \
 		include/moonlight_stream_input.hpp src/moonlight_config.cpp \
+		include/moonlight_discovery.hpp src/moonlight_discovery.cpp \
 		include/lan_http_report.hpp src/lan_http_report.cpp \
+		include/connecting_plate.hpp src/connecting_plate.cpp \
 		tools/setup-test-dependencies.sh | test-deps transport-deps
 	@printf '%s\n' '==> [test-unit] Compiling the host-native GoogleTest binary'
 	@mkdir -p -- $(@D)
@@ -140,7 +151,8 @@ $(HOST_UNIT_TEST): tests/test_prosperolight.cpp include/moonlight_config.hpp \
 			-c "$$gtest/googletest/src/gtest_main.cc" -o $(@D)/gtest-main.o; \
 		$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Iinclude \
 			-isystem "$$gtest/googletest/include" \
-			tests/test_prosperolight.cpp src/moonlight_config.cpp src/lan_http_report.cpp \
+			tests/test_prosperolight.cpp src/moonlight_config.cpp src/moonlight_discovery.cpp \
+			src/lan_http_report.cpp src/connecting_plate.cpp \
 			$(@D)/gtest-all.o $(@D)/gtest-main.o \
 			$(HOST_TEST_LDFLAGS) -o $@
 
@@ -154,6 +166,16 @@ $(HOST_RUNTIME_TEST): tests/test_cpp_runtime.cpp tooling/native/app_cpp_runtime.
 test-integration:
 	@printf '%s\n' '==> [test-integration] Running host tooling integration tests'
 	@python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+.PHONY: launcher-check fonts
+# The launcher on the PC: behaviour checks and a picture of every state.
+launcher-check:
+	@printf '%s\n' '==> [launcher-check] Running the launcher against a pretend Sunshine network'
+	@bash tools/render-launcher.sh build/launcher-pictures
+
+fonts:
+	@printf '%s\n' '==> [fonts] Baking the launcher fonts from third_party/fonts'
+	@bash tools/bake-fonts.sh
 
 .PHONY: test-stream-performance
 test-stream-performance:
@@ -179,6 +201,11 @@ test-performance-guards: | transport-deps
 		tests/test_decoder_pipeline.cpp build/tests/fake_callbacks.o $(HOST_TEST_LDFLAGS) \
 		-o build/tests/decoder_pipeline
 	@build/tests/decoder_pipeline
+	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Wno-unused-function -Wno-missing-field-initializers \
+		-Iinclude -Isrc -Iplatform/ps5 \
+		-Ithird_party/opus/include -Ithird_party/mbedtls/include -Ithird_party/moonlight-common-c/src \
+		tests/test_controllers.cpp $(HOST_TEST_LDFLAGS) -o build/tests/controllers
+	@build/tests/controllers
 	@clang -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fvisibility=hidden \
 		tests/test_socket_metrics.c -Wl,--gc-sections -o build/tests/socket_metrics
 	@build/tests/socket_metrics
@@ -195,7 +222,7 @@ test-performance-guards: | transport-deps
 		-Iinclude -Isrc -Iplatform/ps5 -Ithird_party/opus/include -Ithird_party/mbedtls/include \
 		-Ithird_party/moonlight-common-c/src \
 		tests/test_performance_summary.cpp $(HOST_TEST_LDFLAGS) -o build/tests/performance_summary
-	@build/tests/performance_summary | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["schema"]==3 and r["present_overlap"]==1 and r["presented"]==95 and r["refresh_x100"]==11988 and r["client_refresh_x100"]==11988; t=r["timings_us"]; assert t["decode"]["count"]==100 and t["decode"]["mean"]==3000; assert t["receive_to_enqueue"]["mean"]==3000 and r["reassembly_invalid_samples"]==1; assert len(t)==20; assert r["performance_detail"]==1 and r["stream_bytes"]==123456 and r["flip_queries"]==7 and r["flip_sleeps"]==3; assert t["agc_prepare"]["mean"]==150 and t["agc_cache_flush"]["mean"]==50 and t["agc_submit"]["mean"]==250 and t["flush"]["mean"]==1250 and t["completion_wait"]["mean"]==500 and t["ready_to_present"]["mean"]==100; assert r["decoded"]==99 and r["not_displayed"]==4 and r["network_frame_gaps"]==2 and r["decoder_frame_gaps"]==30; assert r["decoder_mode"]=="adaptive" and r["decoder_pipeline_depth"]==3 and r["decoder_drain"]==1 and r["drain_calls"]==40 and r["decoder_cores"]==5 and r["decoder_cpu_affinity"]==1023; assert r["placement_applied"]==11 and r["placement_failed"]==1 and r["receive_placement_verified"]==1024; assert r["vsync_requested"]==1 and r["vsync_active"]==1 and r["flip_events_active"]==1 and r["flip_event_wakeups"]==2; print("Performance JSON / partial-write failure checks PASS")'
+	@build/tests/performance_summary | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["schema"]==3 and r["present_overlap"]==1 and r["presented"]==95 and r["refresh_x100"]==11988 and r["client_refresh_x100"]==11988; t=r["timings_us"]; assert t["decode"]["count"]==100 and t["decode"]["mean"]==3000; assert t["receive_to_enqueue"]["mean"]==3000 and r["reassembly_invalid_samples"]==1; assert len(t)==20; assert r["performance_detail"]==1 and r["stream_bytes"]==123456 and r["flip_queries"]==7 and r["flip_sleeps"]==3; assert t["agc_prepare"]["mean"]==150 and t["agc_cache_flush"]["mean"]==50 and t["agc_submit"]["mean"]==250 and t["flush"]["mean"]==1250 and t["completion_wait"]["mean"]==500 and t["ready_to_present"]["mean"]==100; assert r["decoded"]==99 and r["not_displayed"]==4 and r["network_frame_gaps"]==2 and r["decoder_frame_gaps"]==30; assert r["decoder_mode"]=="adaptive" and r["decoder_pipeline_depth"]==3 and r["decoder_drain"]==1 and r["drain_calls"]==40 and r["decoder_cores"]==5 and r["decoder_cpu_affinity"]==1023; assert r["placement_applied"]==11 and r["placement_failed"]==1 and r["receive_placement_verified"]==1024; assert r["vsync_requested"]==1 and r["vsync_active"]==1 and r["flip_events_active"]==1 and r["flip_event_wakeups"]==2; assert r["controllers_peak"]==3 and r["controller_arrivals"]==2 and r["controller_removals"]==1 and r["controller_open_errors"]==4 and r["controller_send_errors"]==5 and r["user_scan_errors"]==6; print("Performance JSON / partial-write failure checks PASS")'
 
 deps: test-deps
 	@printf '%s\n' '==> [deps] Fetching declared native dependencies'
@@ -297,6 +324,8 @@ help:
 	  'make pacbrew         Fetch the pinned PacBrew ports sysroot' \
 	  'make pacbrew-list    List PacBrew pkg-config module names' \
 	  'make assets-check    Validate the current presentation assets' \
+	  'make launcher-check  Run the launcher on the PC and write a picture of every state' \
+	  'make fonts           Bake the launcher fonts from third_party/fonts' \
 	  'make libc            Force a deterministic runtime/libc.prx rebuild' \
 	  'make format          Apply the shared Clang formatting policy' \
 	  'make format-check    Check formatting without modifying files' \

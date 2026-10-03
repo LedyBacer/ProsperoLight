@@ -8,6 +8,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -104,29 +105,32 @@ class ToolTests(unittest.TestCase):
         )
 
     def test_stop_refresh_preserves_the_last_application_catalog(self):
-        source = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
-        start = source.index("void MoonlightApp::FinishStopActiveApp()")
-        end = source.index("void MoonlightApp::RefreshBackend(", start)
-        stop = source[start:end]
+        source = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+        run = source[source.index("void Model::Run(") : source.index("bool Model::StartNext()")]
+        apply = source[source.index("bool Model::ApplySelected(") :]
+        apply = apply[: apply.index("void Model::Apply(const Job")]
 
-        self.assertIn("moonlight_backend_snapshot_t refreshed{};", stop)
         self.assertIn(
-            "moonlight_backend_stop_app(SelectedHostAddress(), &refreshed)", stop
+            "moonlight_backend_stop_app(job.host, job.port, &result->snapshot)", run
         )
-        self.assertIn("if (result == 0 || refreshed.app_count)", stop)
-        self.assertNotIn(
-            "moonlight_backend_stop_app(SelectedHostAddress(), &backend_)", stop
+        # A stop that failed but still listed the apps keeps that list.
+        self.assertIn(
+            "if (success || (job.kind != JobKind::health && result.snapshot.app_count))", apply
         )
+        self.assertIn("backend_ = result.snapshot;", apply)
 
     def test_stop_status_renders_before_the_sunshine_request(self):
-        source = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
-        start = source.index("void MoonlightApp::RequestStopActiveApp()")
-        end = source.index("void MoonlightApp::FinishStopActiveApp()", start)
-        request = source[start:end]
+        source = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        start = source.index("void Model::StopApp()")
+        request = source[start : source.index("bool Model::RequestStream()", start)]
 
-        self.assertIn('SetText(document_, "stop-app-label", "Stopping...")', request)
-        self.assertIn("stop_due_ms_ = SDL_GetTicks64() + 50", request)
+        # The request is queued for the worker thread; the screen keeps drawing
+        # and says what it is waiting for.
+        self.assertIn("job.kind = JobKind::stop;", request)
+        self.assertIn("requests_.push_back(job);", request)
         self.assertNotIn("moonlight_backend_stop_app", request)
+        self.assertIn('busy == Busy::stopping     ? "Stopping the app"', view)
 
     def test_hdr_supports_every_stream_resolution(self):
         stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
@@ -136,11 +140,9 @@ class ToolTests(unittest.TestCase):
         self.assertIn("MOONLIGHT_STREAM_RESOLUTION_1440P, VIDEO_FORMAT_H265_MAIN10", modes)
         self.assertIn("MOONLIGHT_STREAM_RESOLUTION_2160P, VIDEO_FORMAT_H265_MAIN10", modes)
 
-        launcher = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
-        settings = launcher[launcher.index("case Screen::Settings:") :]
-        settings = settings[: settings.index("default:")]
-        resolution = settings[settings.index("else if (focus_ == 4)") :]
-        resolution = resolution[: resolution.index("else if (focus_ == 5)")]
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        settings = view[view.index("void View::apply_setting(int id)") :]
+        resolution = settings[settings.index("case kResolution:") : settings.index("case kCodec:")]
         self.assertNotIn("hdr_enabled", resolution)
 
     def test_hdr_overlay_identifies_hdr_on_the_first_line(self):
@@ -154,35 +156,41 @@ class ToolTests(unittest.TestCase):
         config = (ROOT / "include/moonlight_config.hpp").read_text(encoding="utf-8")
         launcher = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
         stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
-        ui = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
 
         for fps in (60, 90, 120):
             self.assertIn(f"#define MOONLIGHT_STREAM_FPS_{fps} {fps}U", config)
-        self.assertIn('id="setting-framerate"', ui)
-        self.assertIn("selection->stream_fps = app.StreamFps();", launcher)
+        self.assertIn('form_.add_action(kFrameRate, "Frame rate")', view)
+        self.assertIn('number_prompt_.keyboard.set_layouts({ui::KeyboardLayout::numeric()});', view)
+        self.assertIn('MOONLIGHT_STREAM_FPS_MIN', view)
+        self.assertIn('MOONLIGHT_STREAM_FPS_MAX', view)
+        self.assertIn("selection->stream_fps = config.stream_fps;", platform)
         self.assertIn("options.stream_fps = selection.stream_fps;", launcher)
         self.assertIn("stream_config.fps = (int)stream_fps;", stream)
         self.assertIn(
-            "moonlight::client_refresh_x100(stream_fps, loading.output_refresh_x100)", stream
+            "moonlight::client_refresh_x100(stream_fps, connecting_screen.output_refresh_x100)",
+            stream,
         )
         self.assertIn("stream_config.clientRefreshRateX100 = (int)renderer.client_refresh_x100;", stream)
         negotiation = stream.index("stream_config.clientRefreshRateX100 =")
-        self.assertLess(stream.index("start_connection_loading(&loading, frame_memory"), negotiation)
+        self.assertLess(stream.index("result = connecting_screen_begin("), negotiation)
         self.assertLess(negotiation, stream.index("result = prepare_native_session(&client_identity"))
         self.assertLess(negotiation, stream.index("connection_result = LiStartConnection("))
-        loading = stream[stream.index("static int start_connection_loading("):]
-        self.assertLess(loading.index("native_agc_output_status("), loading.index("pthread_create("))
+        begin = stream[stream.index("static int connecting_screen_begin("):]
+        self.assertLess(begin.index("native_agc_output_status("), begin.index("pthread_create("))
         self.assertIn("redraw_rate != (int)state->stream_fps", stream)
 
     def test_selectable_surround_audio_reaches_sunshine_and_ps5_audioout(self):
         config = (ROOT / "include/moonlight_config.hpp").read_text(encoding="utf-8")
         launcher = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
         stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
-        ui = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
 
         self.assertIn("#define MOONLIGHT_AUDIO_51_SURROUND 1U", config)
-        self.assertIn('id="setting-audio"', ui)
-        self.assertIn("selection->audio_configuration = app.AudioConfiguration();", launcher)
+        self.assertIn('form_.add_choice(kAudio, "Audio", {"Stereo", "5.1 surround"}, 0)', view)
+        self.assertIn("selection->audio_configuration = config.audio_configuration;", platform)
         self.assertIn("options.audio_configuration = selection.audio_configuration;", launcher)
         self.assertIn("audio_configuration = AUDIO_CONFIGURATION_51_SURROUND;", stream)
         self.assertIn("#define PS5_AUDIO_FORMAT_S16_8CH 2", stream)
@@ -190,22 +198,19 @@ class ToolTests(unittest.TestCase):
         self.assertIn("state->output_channels - state->channels", stream)
 
     def test_frame_rate_is_independent_of_resolution_and_bitrate(self):
-        source = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
-        settings = source[source.index("case Screen::Settings:") :]
-        settings = settings[: settings.index("default:")]
-        resolution = settings[settings.index("else if (focus_ == 4)") :]
-        resolution = resolution[: resolution.index("else if (focus_ == 5)")]
-        frame_rate = settings[settings.index("else if (focus_ == 5)") :]
-        frame_rate = frame_rate[: frame_rate.index("else if (focus_ == 6)")]
-
+        source = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        settings = source[source.index("void View::apply_setting(int id)"):]
+        resolution = settings[settings.index("case kResolution:"):settings.index("case kCodec:")]
         self.assertNotIn("stream_fps", resolution)
-        self.assertIn("StartFrameRateEntry();", frame_rate)
-        self.assertNotIn("stream_resolution", frame_rate)
-        self.assertNotIn("bitrate", frame_rate)
+        numeric = source[source.index("else if (number_prompt_.is_open())"):]
+        numeric = numeric[:numeric.index("else if (port_prompt_.is_open())")]
+        self.assertIn("config.stream_fps = value;", numeric)
+        self.assertNotIn("stream_resolution", numeric)
+        self.assertIn("config.bitrate_mbps = value;", numeric)
 
     def test_high_refresh_self_test_is_compile_time_disabled(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        app = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
+        app = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
 
         self.assertIn("STREAM_SELF_TEST_FPS ?= 0", makefile)
         self.assertIn("STREAM_SELF_TEST_RESOLUTION ?= 0", makefile)
@@ -244,43 +249,85 @@ class ToolTests(unittest.TestCase):
         )
         self.assertIn("stop_active_app_self_test_consumed", app)
         self.assertIn(
-            "config_.stream_resolution = PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION", app
+            "selection->stream_resolution = PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION", app
         )
-        poll_body = app[
-            app.index("void MoonlightApp::Poll()") : app.index("void MoonlightApp::Shutdown()")
-        ]
-        self.assertNotIn("moonlight_config_save(&config_)", poll_body)
+        # The self-test streams with its own values and saves none of them.
+        self_test = app[app.index("#if PROSPEROLIGHT_STREAM_SELF_TEST_FPS != 0") :]
+        self_test = self_test[: self_test.index("#endif")]
+        self.assertNotIn("SettingsChanged", self_test)
+
+    def test_files_are_kept_under_data_prosperolight(self):
+        main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        storage = (ROOT / "src/app_storage.cpp").read_text(encoding="utf-8")
+        helper = (ROOT / "tooling/elevation/helper/main.cpp").read_text(encoding="utf-8")
+        build = (ROOT / "tools/build.sh").read_text(encoding="utf-8")
+        title = json.loads((ROOT / "sce_sys/param.json").read_text(encoding="utf-8"))["titleId"]
+
+        # Filesystem access is asked for before anything else runs.
+        body = main[main.index("int main()") :]
+        self.assertLess(body.index("storage::Initialize();"), body.index("RunVideoOutputSelfTest();"))
+        self.assertLess(body.index("storage::Initialize();"), body.index("sceSysmoduleLoadModule("))
+        # The helper only answers this title, and the paths name it.
+        self.assertIn(f'target_title_id[] = "{title}"', helper)
+        self.assertIn(f'kTitleId[] = "{title}"', storage)
+        self.assertIn(f'kInstallDir[] = "/data/homebrew/{title}"', storage)
+        self.assertIn('kDataDir[] = "/data/prosperolight"', storage)
+        # What the sandbox kept is read before the process leaves it, and the
+        # log opens once its folder is known.
+        initialize = storage[storage.index("void storage::Initialize()") :]
+        self.assertLess(initialize.index("remember(kept);"), initialize.index("elevation::request("))
+        self.assertLess(initialize.index("elevation::request("), initialize.index("open_log("))
+        self.assertIn("setegid(getgid())", initialize)
+        # The build checks the helper and ships it beside eboot.bin.
+        self.assertIn('validate-helper.py" "$build/elevation/sandbox-elevator.elf"', build)
+        self.assertIn('"$app/sandbox-elevator.elf"', build)
+        # No other source names a sandbox path.
+        for path in sorted((ROOT / "src").rglob("*")):
+            if path.suffix not in {".c", ".cpp", ".h", ".hpp"} or "elevation" in path.parts:
+                continue
+            if path.name == "app_storage.cpp":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            self.assertNotIn('"/download0', text, path)
+            self.assertNotIn('"/app0', text, path)
 
     def test_launcher_presents_before_refreshing_sunshine(self):
-        app = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
-        launcher = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
-        initialize = app[app.index("bool MoonlightApp::Initialize(") :]
-        initialize = initialize[: initialize.index("void MoonlightApp::ShowStreamError")]
-        run_launcher = launcher[launcher.index("MoonlightApp::Command RunLauncher(") :]
-        run_launcher = run_launcher[: run_launcher.index("} // namespace")]
+        model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        initialize = model[model.index("void Model::Initialize(") : model.index("void Model::Shutdown()")]
 
-        self.assertNotIn("RefreshBackend();", initialize)
-        self.assertIn("initial_discovery_pending_ = true;", initialize)
-        self.assertNotIn("PresentColor(renderer, window, 2, 9, 20);", run_launcher)
-        self.assertLess(
-            run_launcher.index("PresentLauncher(context, renderer, window);"),
-            run_launcher.index("sceSystemServiceHideSplashScreen();"),
+        # Nothing asks the network before the first frame: requests are queued
+        # for the worker thread, and the splash goes after the first swap.
+        self.assertNotIn("moonlight_backend_", initialize)
+        self.assertNotIn("moonlight_discover_hosts", initialize)
+        self.assertIn("QueueSelectedRefresh();", initialize)
+        self.assertLess(platform.index("const bool swapped = display.swap();"),
+                        platform.index("sys::hide_splash_screen()"))
+
+    def test_launcher_and_stream_take_turns_with_the_display(self):
+        main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        presenter = (ROOT / "src/native_agc_present.cpp").read_text(encoding="utf-8")
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+        # The launcher gives back the audio port, the controller and the
+        # display, in that order, before the stream opens them for itself.
+        close = platform[platform.index("model.Shutdown();") :]
+        self.assertLess(close.index("audio_out.stop();"), close.index("pad.close();"))
+        self.assertLess(close.index("pad.close();"), close.index("display.close();"))
+        loop = main[main.index("for (;;)", main.index("int main()")) :]
+        self.assertLess(loop.index("launcher::Run("), loop.index("moonlight_stream_run("))
+        # After a stream above 60 Hz the television is left to switch back.
+        self.assertIn("HFR_SETTLE_MS ?= 5000", makefile)
+        self.assertIn("APP_DEFINITIONS += PROSPEROLIGHT_HFR_SETTLE_MS=$(HFR_SETTLE_MS)", makefile)
+        self.assertIn(
+            "selection.stream_fps > MOONLIGHT_STREAM_FPS_60 || selection.hdr_enabled != 0;", main
         )
-
-    def test_launcher_bridges_the_hfr_hdmi_resync_with_app_side_artwork(self):
-        launcher = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
-        markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
-        styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
-
-        self.assertIn('id="startup-splash"', markup)
-        self.assertIn('src="startup-background.tga"', markup)
-        self.assertIn("#startup-splash", styles)
-        self.assertIn("document && play_open_sound", launcher)
-        self.assertIn("kStartupHoldMilliseconds = 1500", launcher)
-        self.assertIn("kStartupFadeFrames = 45", launcher)
-        self.assertIn('startup_splash->SetProperty("opacity", opacity);', launcher)
-        self.assertIn('startup_splash->SetClass("hidden", true);', launcher)
-        self.assertTrue((ROOT / "ui/startup-background.tga").is_file())
+        self.assertIn("mode_changed ? PROSPEROLIGHT_HFR_SETTLE_MS : 100;", main)
+        # AGC is initialised once per process, by whichever renderer drew first.
+        self.assertIn("native_agc_note_initialized();", platform)
+        self.assertEqual(presenter.count("sceAgcInit(8)"), 1)
+        self.assertIn("if (!agc_initialized)", presenter)
 
     def test_main10_descriptors_follow_the_visible_resolution(self):
         source = (ROOT / "src/native_agc_present.cpp").read_text(encoding="utf-8")
@@ -299,9 +346,7 @@ class ToolTests(unittest.TestCase):
 
     def test_stream_opens_pad_after_decoder_loading_worker_stops(self):
         source = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
-        early_loading = source.index(
-            "start_connection_loading(&loading, NULL, 0, profile.hdr, stream_width, stream_height,"
-        )
+        early_loading = source.index("result = start_connection_loading(&loading, NULL);")
         early_loading_stop = source.index("stop_connection_loading();", early_loading)
         pad_init = source.index("controller_result = ps5_controller_init(&controller)")
         self.assertLess(early_loading, early_loading_stop)
@@ -446,7 +491,7 @@ class ToolTests(unittest.TestCase):
         self.assertNotIn("sceVideoOutWaitVblank", wait)
         self.assertIn("#define PROSPEROLIGHT_FLIP_POLL_US 500", presenter)
         self.assertIn("sceKernelUsleep(PROSPEROLIGHT_FLIP_POLL_US);", presenter)
-        self.assertIn("requested_fps > 60u", presenter)
+        self.assertIn("requested_fps > 60u ? VIDEO_OUT_REQUEST_120_HZ : VIDEO_OUT_REQUEST_DEFAULT", presenter)
         self.assertIn("sceVideoOutIsOutputSupported", presenter)
         self.assertIn("sceVideoOutConfigureOutput", presenter)
         self.assertNotIn("sceVideoOutSysConfigureOutput", presenter)
@@ -557,13 +602,172 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(source.count("kNativeAgcBilinearSamplerWord"), 2)
         self.assertNotIn("descriptor[18] = descriptor[22] = 0x08000000", source)
 
-    def test_loading_labels_match_the_embedded_dimensions(self):
-        expected = {
-            "loading-prosperolight-alpha.bin": (232, 35),
-            "loading-connecting-alpha.bin": (287, 52),
-        }
-        for name, (width, height) in expected.items():
-            self.assertEqual((ROOT / "assets/private" / name).stat().st_size, width * height)
+    def test_connecting_screen_stays_until_the_first_picture(self):
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+        presenter = (ROOT / "src/native_agc_present.cpp").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        run = stream[stream.index("int moonlight_stream_run(") :]
+
+        # The launcher takes a picture of its connecting screen, without the
+        # bar's fill, and the stream is given it.
+        self.assertIn("CaptureConnecting(renderer, view, frame, selection);", platform)
+        self.assertIn("if (!plate_ && load_progress_ > 0.0f)", view)
+        self.assertIn("options.connecting = &picture;", main)
+        # The stream shows it before anything slow, and moves the bar on at
+        # each step of the connection.
+        begin = run.index("result = connecting_screen_begin(")
+        self.assertLess(begin, run.index("sceSysmoduleLoadModule(207)"))
+        steps = [run.index(f"connecting_screen_stage({step}") for step in
+                 ("connecting_screen.progress, 0.45f", "0.45f, 0.70f", "0.70f, 0.88f", "0.88f, 0.97f")]
+        self.assertEqual(steps, sorted(steps))
+        self.assertLess(steps[2], run.index("connection_result = LiStartConnection("))
+        self.assertLess(run.index("connection_result = LiStartConnection("), steps[3])
+        # It leaves when the first picture is about to be shown, on the thread
+        # that shows it, and never later than the stream's own teardown.
+        present = stream[stream.index("static void *video_present_thread(") :]
+        self.assertLess(present.index("connecting_screen_finish();"),
+                        present.index("submit_presentation(state, current)"))
+        done = run[run.index("\ndone:") :]
+        self.assertLess(done.index("connecting_screen_stop();"),
+                        done.index("native_agc_present_shutdown();"))
+        self.assertLess(done.index("native_agc_present_shutdown();"),
+                        done.index("connecting_screen_release();"))
+        # The picture is drawn edge to edge, whatever the picture-size setting.
+        still = presenter[presenter.index("int native_agc_present_still(") :]
+        still = still[: still.index("void native_agc_flush_source(")]
+        self.assertIn("std::atomic_exchange_explicit(&tv_safe_area, 0", still)
+        self.assertIn("std::atomic_store_explicit(&tv_safe_area, safe_area", still)
+        # Cancelling and the set-up timeout are watched on their own thread.
+        worker = stream[stream.index("static void *connection_loading_thread(") :]
+        worker = worker[: worker.index("static int start_connection_loading(")]
+        self.assertIn("CONNECTION_SETUP_TIMEOUT_US", worker)
+        self.assertIn("LiInterruptConnection();", worker)
+        self.assertNotIn("native_agc_present", worker)
+        self.assertFalse((ROOT / "assets/private/loading-connecting-alpha.bin").exists())
+
+    def test_splash_stays_until_the_launcher_has_drawn(self):
+        build = (ROOT / "tools/build.sh").read_text(encoding="utf-8")
+        shims = (ROOT / "src/runtime/runtime_shims.c").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        storage = (ROOT / "src/app_storage.cpp").read_text(encoding="utf-8")
+
+        # Every request to hide the splash picture goes through the app, which
+        # lets it through once the launcher's first frame is on screen.
+        self.assertIn('wrap_options+=("--wrap=sceSystemServiceHideSplashScreen")', build)
+        self.assertIn("int __wrap_sceSystemServiceHideSplashScreen(void)", shims)
+        first = platform[platform.index("if (++frames == 1)") :]
+        self.assertLess(first.index("prosperolight_release_splash();"),
+                        first.index("sys::hide_splash_screen();"))
+        self.assertLess(platform.index("display.swap();"), platform.index("if (++frames == 1)"))
+        # Compiled shaders are kept between launches, per OpenGL runtime version, and
+        # the temporary file the cache writes through is made by the app itself.
+        fetch = (ROOT / "tools/fetch-opengl-sdk.sh").read_text(encoding="utf-8")
+        self.assertIn('setenv("PS5_SHADER_CACHE_DIR", shaders, 1)', storage)
+        version = re.search(r"^version=(\S+)$", fetch, re.M).group(1)
+        self.assertIn(f'kShaderCache[] = "opengl-{version}"', storage)
+        self.assertIn("int mkstemp(char *template_name)", shims)
+        self.assertIn("int isatty(int descriptor)", shims)
+
+    def test_launcher_worker_has_room_for_tls_requests(self):
+        model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+        backend = (ROOT / "src/moonlight_backend.cpp").read_text(encoding="utf-8")
+
+        # Stop and unpair nest a refresh inside a TLS request on the worker.
+        self.assertIn("constexpr std::size_t kWorkerStackBytes = 1u << 20;", model)
+        self.assertIn("pthread_attr_setstacksize(&attributes, kWorkerStackBytes);", model)
+        action = backend[backend.index("static int run_paired_action(") :]
+        self.assertLess(action.index("memset(&identity, 0, sizeof(identity));"),
+                        action.index("identity_init(&identity"))
+
+    def test_launcher_worker_stays_off_the_screens_cpu(self):
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+
+        # Console threads are never time-sliced: a TLS request on the screen's
+        # CPU froze the launcher. The screen gets a core, the worker the rest,
+        # and the main thread's mask is given back before the stream.
+        self.assertEqual(int(re.search(r"kScreenCpus = (0x[0-9a-f]+);", platform).group(1), 16)
+                         & int(re.search(r"kWorkerCpus = (0x[0-9a-f]+);", platform).group(1), 16), 0)
+        self.assertIn("model.set_worker_start(PlaceWorker);", platform)
+        worker = model[model.index("void *Model::Worker(") :]
+        self.assertLess(worker.index("model->worker_start_();"), worker.index("model->Run("))
+        self.assertLess(platform.index("display.open("), platform.index("ps5_thread_affinity_set(kScreenCpus)"))
+        self.assertLess(platform.index("display.close();"),
+                        platform.index("(void)ps5_thread_affinity_set(main_cpus);"))
+
+    def test_log_is_written_by_its_own_thread(self):
+        storage = (ROOT / "src/app_storage.cpp").read_text(encoding="utf-8")
+        report = (ROOT / "src/crash_report.cpp").read_text(encoding="utf-8")
+
+        # Writes to /data take tens of milliseconds: the streams are buffered
+        # and a thread of its own flushes them. No stream internals (fileno):
+        # the console's C library lays its FILE out differently.
+        opened = storage[storage.index("void open_log(") :]
+        self.assertIn("pthread_create(&flusher", opened)
+        self.assertIn("std::setvbuf(file, nullptr, _IOFBF", storage)
+        self.assertIn("bound_log(g_log_file);", storage)
+        self.assertIn("prosperolight_logs_enabled()", storage)
+        self.assertNotIn("fileno(", storage)
+        self.assertNotIn("dup2(", storage)
+        # The crash report goes to the file itself.
+        self.assertIn("(void)write(g_log_file, g_text.data, g_text.size);", report)
+        self.assertNotIn("write(1,", report)
+
+    def test_update_check_follows_the_boilerplate_kit(self):
+        model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        build = (ROOT / "tools/build.sh").read_text(encoding="utf-8")
+        curl = (ROOT / "third_party/update-check/console_curl.c").read_text(encoding="utf-8")
+        shims = (ROOT / "src/runtime/runtime_shims.c").read_text(encoding="utf-8")
+        notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+
+        # The kit's transport: libcurl with the fcntl wrap.
+        self.assertIn("PACBREW_PACKAGES ?= libcurl", makefile)
+        self.assertIn('wrap_options+=("--wrap=fcntl")', build)
+        self.assertIn("int __wrap_fcntl(int descriptor, int command, ...)", curl)
+        # One definition of each function the app and the kit both had.
+        for name in ("int isatty(", "int mkstemp(", "FILE *popen(", "void openlog("):
+            self.assertNotIn(name, curl)
+            self.assertIn(name, shims)
+        self.assertNotIn("int getaddrinfo(", curl)
+        # Asked once per launch, on the worker, when nothing else waits; the
+        # app's own param.json is read from where the app really is.
+        self.assertIn("if (first_start)\n                model.set_update_check(CheckForUpdate);", platform)
+        check = platform[platform.index("bool CheckForUpdate(") :]
+        self.assertIn('std::string(storage::paths().app) + "/sce_sys/param.json"', check)
+        self.assertNotIn("update_check_run_self", platform)
+        next_job = model[model.index("bool Model::StartNext()") :]
+        self.assertLess(next_job.index("next.kind = JobKind::artwork;"),
+                        next_job.index("next.kind = JobKind::update;"))
+        # Only an available update is shown, for ten seconds.
+        self.assertIn("constexpr float kUpdateNoticeSeconds = 10.0f;", model)
+        self.assertIn("if (result.update_available)", model)
+        self.assertIn("notice.seconds > 0.0f", view)
+        # Shipping libcurl means shipping its notices.
+        for name in ("libcurl", "OpenSSL", "zlib", "zstd", "libpsl"):
+            self.assertIn(name, notices)
+        for name in ("curl.txt", "openssl.txt", "zlib.txt", "zstd.txt", "libpsl.txt"):
+            self.assertTrue((ROOT / "third_party/licenses" / name).is_file(), name)
+
+    def test_crash_report_is_installed_first(self):
+        main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        report = (ROOT / "src/crash_report.cpp").read_text(encoding="utf-8")
+        script = (ROOT / "tooling/native/ps5-pie.ld").read_text(encoding="utf-8")
+        tool = (ROOT / "tools/symbolize-crash.py").read_text(encoding="utf-8")
+
+        body = main[main.index("int main()") :]
+        self.assertLess(body.index("storage::Initialize();"), body.index("crash::Install("))
+        self.assertLess(body.index("crash::Install("), body.index("launcher::Run("))
+        for name in ("SIGSEGV", "SIGBUS", "SIGILL", "SIGFPE", "SIGABRT"):
+            self.assertIn(f"{{{name}, \"{name}\"", report)
+        self.assertIn("PROVIDE_HIDDEN(__pl_text_start = .);", script)
+        self.assertIn("PROVIDE_HIDDEN(__pl_text_end = .);", script)
+        self.assertIn("(code size 0x", report)
+        self.assertIn("code size 0x", tool)
 
     def test_release_metadata_preserves_hdr_and_high_resolution_hfr_capabilities(self):
         configured = json.loads(
@@ -626,103 +830,147 @@ class ToolTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(configured["titleId"], readme)
         self.assertIn(configured["contentVersion"], readme)
-        for shortcut in (
-            "Touchpad click + L1",
-            "Touchpad click + R1",
-            "Touchpad click + Square",
-            "Touchpad click + Triangle",
-        ):
-            self.assertIn(shortcut, readme)
+        for button, label in (("L1", "l1"), ("R1", "r1"), ("Square", "square"),
+                              ("Triangle", "triangle")):
+            self.assertIn(f"| ![Touchpad][touchpad] + ![{button}][{label}] |", readme)
 
-    def test_launcher_has_no_diagnostics_page(self):
-        markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
-        styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
-        header = (ROOT / "include/moonlight_app.hpp").read_text(encoding="utf-8")
-        source = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
+    def test_stream_shortcuts_are_named_after_the_touchpad(self):
+        # The button was once written "Select"; the changelog keeps one note of it.
+        old_name = re.compile(r"Select ?\+")
+        for name in ("README.md", "docs/TROUBLESHOOTING.md", "docs/VALIDATION.md",
+                     "docs/PERFORMANCE_ROUND_3.md", "src/launcher/launcher_view.cpp",
+                     "src/moonlight_stream.cpp", "include/moonlight_stream_input.hpp"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIsNone(old_name.search(text), name)
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertEqual(len(old_name.findall(changelog)), 1)
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+        self.assertIn("Touchpad + Square switches to %s.", stream)
 
-        self.assertEqual(markup.count('id="nav-'), 3)
-        self.assertNotIn("nav-diagnostics", markup + styles + source)
-        self.assertNotIn("screen-diagnostics", markup + source)
-        self.assertNotIn("Screen::Diagnostics", source)
-        self.assertNotIn("Diagnostics,", header)
-        self.assertFalse((ROOT / "ui/chrome/panel-diagnostic.tga").exists())
+    def test_buttons_are_shown_as_icons(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools/generate-button-icons.py"), "--check"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        references = dict(re.findall(r"^\[(\w+)\]: (docs/images/buttons/\w+\.svg) ", readme, re.M))
+        self.assertEqual(len(references), 12)
+        for label, path in references.items():
+            self.assertTrue((ROOT / path).is_file(), path)
+            self.assertIn(f"][{label}]", readme)
+        controls = readme[readme.index("## Controls"):]
+        controls = controls[: controls.index("[cross]:")]
+        for name in ("Cross", "Circle", "Square", "Triangle", "Options", "L1", "R1", "D-pad"):
+            self.assertIsNone(re.search(rf"(?<!\[){name}(?!\])", controls), name)
 
-    def test_launcher_screens_share_the_same_body_top(self):
-        styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
-        for selector in (".host-card", ".game-card-0", ".settings-list"):
-            rule = styles[styles.index(selector) :]
-            rule = rule[: rule.index("}")]
-            self.assertIn("top: 164px;", rule)
+        # The launcher draws the buttons' glyphs and names none of them in text.
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        self.assertEqual(view.count("ui::Button::touchpad"), 4)
+        self.assertIn("ui::draw_hints(list, canvas.fonts, glyphs(paint), hints, count, kRight, true);",
+                      view)
+        for text in re.findall(r'"((?:[^"\\]|\\.)*)"', view):
+            for name in ("Cross", "Circle", "Square", "Triangle", "Options", "Touchpad", "L1", "R1"):
+                self.assertIsNone(re.search(rf"\b{name}\b", text), text)
 
-    def test_settings_rows_fit_above_the_footer(self):
-        markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
-        styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
+    def test_launcher_has_four_screens(self):
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        self.assertIn('tabs_.set_tabs({{"PCs"}, {"Games"}, {"Settings"}, {"About"}});', view)
+        self.assertIn("constexpr int kScreens = 4;", view)
+        # About gives credit, as ProsperoEden's page does, and names the folders.
+        about = view[view.index("void View::draw_about(") : view.index("void View::draw_pairing(")]
+        for text in ("Powered by Moonlight", "moonlight-stream.org", "Sunshine developers",
+                     "brought to you by BlackBearReloaded", "made with ElevenLabs",
+                     '"Version " + version_', "files_.draw(canvas);"):
+            self.assertIn(text, about)
+        self.assertIn("view.set_storage(StorageFolders());", platform)
+        self.assertIn('form_.add_header("Diagnostics");', view)
 
-        import re
-        viewport = re.search(r"\.settings-list \{([^}]+)\}", styles)[1]
-        top = int(re.search(r"top: (\d+)px", viewport)[1])
-        height = int(re.search(r"height: (\d+)px", viewport)[1])
-        note_top = int(re.search(r"\.settings-note \{[^}]*?top: (\d+)px", styles)[1])
-        self.assertLessEqual(top + height, note_top)
-        note_height = int(re.search(r"\.settings-note \{[^}]*?height: (\d+)px", styles)[1])
-        screen_height = int(re.search(r"\.screen \{[^}]*?height: (\d+)px", styles)[1])
-        self.assertLessEqual(note_top + note_height, screen_height)
-        combos = re.search(r"\.settings-combos \{([^}]+)\}", styles)[1]
-        combo_top = int(re.search(r"top: (\d+)px", combos)[1])
-        combo_height = int(re.search(r"height: (\d+)px", combos)[1])
-        self.assertLessEqual(note_top + note_height, combo_top)
-        self.assertLessEqual(combo_top + combo_height, screen_height)
-        self.assertIn("settings-combo-local", markup)
-        self.assertIn("settings-combo-host", markup)
-        self.assertIn("overflow-y: auto", viewport)
-        self.assertIn('id="settings-list"', markup)
-        self.assertNotRegex(styles, r"\.setting-row-\d+")
-        self.assertIn(".setting-row { display: block; position: relative;", styles)
-        source = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
-        self.assertIn("row->ScrollIntoView", source)
-        self.assertIn("Rml::ScrollAlignment::Nearest", source)
-        self.assertIn("Rml::ScrollParentage::Closest", source)
-        for setting in ("chroma", "vsync", "decoder", "cores"):
-            self.assertIn(f'id="setting-{setting}"', markup)
-            self.assertIn(f'id="setting-{setting}-value"', markup)
-
-    def test_games_hide_placeholder_catalog_while_initial_refresh_is_pending(self):
-        markup = (ROOT / "ui/main.rml").read_text(encoding="utf-8")
-        source = (ROOT / "src/moonlight_app.cpp").read_text(encoding="utf-8")
-        initialize = source[source.index("bool MoonlightApp::Initialize(") :]
-        initialize = initialize[: initialize.index("void MoonlightApp::ShowStreamError")]
-        update_games = source[source.index("void MoonlightApp::UpdateGames()") :]
-        update_games = update_games[: update_games.index("void MoonlightApp::UpdateSettings()")]
-
-        for slot in range(6):
-            self.assertIn(
-                f'id="app-card-{slot}" class="game-card game-card-{slot} hidden"',
-                markup,
-            )
-        self.assertIn("UpdateGames();", initialize)
-        self.assertIn("const bool refreshing =", update_games)
-        self.assertIn('"REFRESHING APPLICATIONS..."', update_games)
-        self.assertIn('"Refreshing the Sunshine application list..."', update_games)
-
-    def test_game_actions_match_the_selected_app_panel_edges(self):
-        styles = (ROOT / "ui/styles/app.rcss").read_text(encoding="utf-8")
-        self.assertIn(".games-stop { left: 884px;", styles)
-        self.assertIn(".games-back { left: 1164px;", styles)
-
-    def test_launcher_quiets_process_scoped_ui_audio_before_streaming(self):
+    def test_every_sunshine_request_uses_the_port_saved_for_that_pc(self):
+        config = (ROOT / "include/moonlight_config.hpp").read_text(encoding="utf-8")
+        backend = (ROOT / "src/moonlight_backend.cpp").read_text(encoding="utf-8")
+        app = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
         launcher = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
         stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
-        sound = (ROOT / "src/ui_sound.cpp").read_text(encoding="utf-8")
-        start = launcher.index("MoonlightApp::Command RunLauncher(")
-        end = launcher.index("} // namespace", start)
-        run_launcher = launcher[start:end]
+        client = (ROOT / "src/gamestream/client.c").read_text(encoding="utf-8")
 
-        self.assertIn("prosperolight::ui_sound_clear_for_stream();", run_launcher)
-        self.assertIn("SDL_QuitSubSystem(SDL_INIT_VIDEO);", run_launcher)
-        clear = sound[sound.index("void ui_sound_clear_for_stream()") :]
-        self.assertIn("SDL_ClearQueuedAudio(device);", clear)
-        self.assertNotIn("SDL_CloseAudioDevice", clear)
-        self.assertNotIn("ui_sound_clear_for_stream", stream)
+        # One default, in the configuration and in the protocol client.
+        self.assertIn("#define MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT 47989U", config)
+        self.assertIn("server_endpoint_parse(address, server->address, sizeof(server->address), http_port,", client)
+        self.assertIn("uint16_t value = fallback_port ? fallback_port : 47989;", (ROOT / "include/server_endpoint.h").read_text())
+        for source in (backend, app, launcher, stream):
+            self.assertNotIn("47989)", source)
+        calls = [line for line in backend.splitlines() if "gs_init(" in line]
+        self.assertEqual(len(calls), 3)
+        for call in calls:
+            self.assertIn("http_port);", call)
+        self.assertIn("result = gs_init(server, identity, host, host_port);", stream)
+        self.assertIn("selection->host_port = moonlight_config_host_port(host);", platform)
+        self.assertIn("options.host_port = selection.host_port;", launcher)
+        # Every request to a PC carries that PC's port, and an answer from
+        # another endpoint than the selected one never becomes its state.
+        self.assertEqual(app.count("job.port = moonlight_config_host_port("), 4)
+        self.assertEqual(app.count("next.port = moonlight_config_host_port("), 2)
+        self.assertIn("moonlight_backend_refresh(job.host, job.port, &result->snapshot)", app)
+        self.assertIn("if (!IsSelected(job.host, job.port))", app)
+
+    def test_pcs_page_offers_the_port_of_the_selected_pc(self):
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+
+        self.assertIn('host_actions_.set_items({{"Change port"}, {"Unpair"}});', view)
+        self.assertIn('port_prompt_.set_title("Sunshine port");', view)
+        self.assertIn("port_prompt_.keyboard.set_layouts({ui::KeyboardLayout::numeric()});", view)
+        # An empty entry means Sunshine's default port.
+        self.assertIn("port_prompt_.style.allow_empty = true;", view)
+        self.assertIn("model_.SetPort(text.c_str(), &error)", view)
+        set_port = model[model.index("bool Model::SetPort(") : model.index("void Model::StopApp()")]
+        # Requests queued for the old endpoint are dropped when the port changes.
+        self.assertLess(set_port.index("moonlight_config_set_host_port("),
+                        set_port.index("DropSelectedRequests();"))
+        self.assertIn("QueueSelectedRefresh();", set_port)
+
+    def test_stream_forwards_a_pad_for_every_signed_in_user(self):
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text()
+        controller = (ROOT / "src/ps5_dualsense.cpp").read_text()
+        self.assertIn("prosperolight::dualsense::Poll();", stream)
+        self.assertIn("controller_ready ? prosperolight::dualsense::ActiveMask() : 0", stream)
+        self.assertIn("sceUserServiceGetLoginUserIdList(users)", controller)
+        self.assertIn("LiSendControllerArrivalEvent(index, active_mask", controller)
+        self.assertNotIn("LiSendMultiControllerEvent(0, 1,", stream + controller)
+        self.assertNotIn("ps5_controller_launch_mask", stream)
+        self.assertIn("controller_summary = prosperolight::dualsense::GetStatistics();", stream)
+
+    def test_games_show_no_apps_while_the_first_answer_is_pending(self):
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+        games = view[view.index("void View::draw_games(") : view.index("void View::draw_settings(")]
+
+        self.assertIn("backend_valid_ = false;", model)
+        self.assertIn(
+            "const bool waiting = host && (!model_.backend_valid() || model_.busy() == Busy::refreshing);",
+            games,
+        )
+        self.assertIn('"Asking the PC for its apps"', games)
+
+    def test_launcher_sounds_come_from_the_widgets(self):
+        platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+
+        # Each widget asks for a cue; the launcher plays it from its sound set.
+        self.assertIn("for (const audio::CueEvent &event : feedback.cues)", platform)
+        self.assertIn("sounds.play(mixer,", platform)
+        self.assertIn("t.sounds = audio::SoundSet::glass;", view)
+        recordings = sorted(path.name for path in (ROOT / "assets/audio/sfx/glass").glob("*.wav"))
+        for cue in ("focus", "select", "back", "tab", "toggle", "slider", "error", "notify",
+                    "modal_open", "modal_close", "launch", "welcome", "saved"):
+            self.assertTrue(any(name.startswith(cue + "_") for name in recordings), cue)
+        # The audio port is closed before the stream opens its own.
+        self.assertIn("audio_out.stop();", platform)
+        self.assertNotIn("SoundBank", stream)
 
     def run_init(self, param, **values):
         environment = os.environ.copy()

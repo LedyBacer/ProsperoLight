@@ -30,7 +30,7 @@ extern "C" int __wrap_sceVideoOutOpen(int32_t user, int32_t bus, int32_t index, 
             char message[128];
             std::snprintf(message, sizeof(message), "fixed_output handle=%d rc=%08x", handle,
                           static_cast<unsigned>(configured));
-            prosperolight_log_append("/download0/prosperolight-menu-output.log", message);
+            prosperolight_log_append("prosperolight-menu-output.log", message);
         }
         video_handle.store(handle);
         flips.store(0);
