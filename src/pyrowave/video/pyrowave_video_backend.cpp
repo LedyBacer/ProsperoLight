@@ -138,7 +138,7 @@ bool PyroWaveVideoBackend::ingest(const uint8_t *data,
                                                                     0, 0.9f, nullptr, 0)
                    : decoder_.frame_ready();
 }
-VideoFrameTiming PyroWaveVideoBackend::present(const std::function<void()> &before_present)
+VideoFrameTiming PyroWaveVideoBackend::present(void (*before_present)(void *), void *context)
 {
     double start = clock_ms();
     unsigned index = 0;
@@ -177,7 +177,7 @@ VideoFrameTiming PyroWaveVideoBackend::present(const std::function<void()> &befo
     if (before_present)
     {
         VK_OK(vkWaitForFences(c_.device, 1, &c_.fence, VK_TRUE, 30000000000ull));
-        before_present();
+        before_present(context);
     }
     VK_OK(vkQueuePresentKHR(c_.queue, &pi));
     ++requested_;

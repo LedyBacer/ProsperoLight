@@ -3,7 +3,6 @@
 #include "pyrowave_renderer.hpp"
 #include "../pyrowave/pyrowave_decoder.hpp"
 #include <memory>
-#include <functional>
 #include "../pyrowaveframing.h"
 struct VideoFrameTiming
 {
@@ -18,7 +17,7 @@ class PyroWaveVideoBackend
     void initialize(unsigned width, unsigned height, unsigned fps, bool chroma444, bool hdr,
                     bool vsync, bool tv_safe);
     bool ingest(const uint8_t *data, const std::vector<PyroWaveFraming::Span> &spans, bool partial);
-    VideoFrameTiming present(const std::function<void()> &before_present = {});
+    VideoFrameTiming present(void (*before_present)(void *) = nullptr, void *context = nullptr);
     void update_hud(const char *text, bool enabled)
     {
         renderer_.update_hud(text, enabled);

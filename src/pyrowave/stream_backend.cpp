@@ -62,6 +62,37 @@ uint64_t now_us()
     return uint64_t(t.tv_sec) * 1000000 + t.tv_nsec / 1000;
 }
 
+struct PacingWait
+{
+    Session *session;
+    moonlight::FramePacing *pacer;
+    const Frame *frame;
+    unsigned mode;
+    uint32_t refresh;
+};
+
+void wait_prepared_frame(void *context)
+{
+    auto &wait = *static_cast<PacingWait *>(context);
+    auto &s = *wait.session;
+    const uint64_t started = now_us();
+    const uint64_t deadline = wait.pacer->target(
+        wait.frame->number, wait.frame->presentation_us, started,
+        wait.mode == 1 && selected_vsync ? wait.refresh : 0, 0, wait.mode == 2 ? wait.refresh : 0);
+    std::unique_lock<std::mutex> lock(s.mutex);
+    while (s.running)
+    {
+        const uint64_t current = now_us();
+        if (current >= deadline)
+            break;
+        s.wake.wait_for(lock,
+                        std::chrono::microseconds(std::min<uint64_t>(deadline - current, 1000)),
+                        [&] { return !s.running; });
+    }
+    const uint64_t submitted = now_us();
+    wait.pacer->submitted(deadline, submitted, submitted - started);
+}
+
 void *worker(void *)
 {
     auto &s = *session;
@@ -127,31 +158,8 @@ void *worker(void *)
                 ++s.partial;
             ++s.decoded;
             s.backend->update_hud(nullptr, native_agc_hud_enabled() != 0);
-            auto timing = s.backend->present(
-                paced ? std::function<void()>(
-                            [&]
-                            {
-                                const uint64_t started = now_us();
-                                const uint64_t deadline =
-                                    pacer.target(frame.number, frame.presentation_us, started,
-                                                 mode == 1 && selected_vsync ? refresh : 0, 0,
-                                                 mode == 2 ? refresh : 0);
-                                std::unique_lock<std::mutex> lock(s.mutex);
-                                while (s.running && now_us() < deadline)
-                                {
-                                    const uint64_t current = now_us();
-                                    if (current >= deadline)
-                                        break;
-                                    const uint64_t remaining = deadline - current;
-                                    s.wake.wait_for(lock,
-                                                    std::chrono::microseconds(
-                                                        std::min<uint64_t>(remaining, 1000)),
-                                                    [&] { return !s.running; });
-                                }
-                                const uint64_t submitted = now_us();
-                                pacer.submitted(deadline, submitted, submitted - started);
-                            })
-                      : std::function<void()>{});
+            PacingWait wait{&s, &pacer, &frame, mode, refresh};
+            auto timing = s.backend->present(paced ? wait_prepared_frame : nullptr, &wait);
             decode_ms += timing.decode_ms;
             render_ms += timing.render_ms;
             ++samples;
