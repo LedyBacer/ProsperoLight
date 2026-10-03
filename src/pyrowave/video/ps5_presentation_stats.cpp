@@ -2,6 +2,7 @@
 #include "ps5_presentation_stats.hpp"
 #include "../common.hpp"
 #include "native_agc_present.hpp"
+#include "lan_http_report.hpp"
 #include <atomic>
 #include <cstdio>
 #ifdef __PROSPERO__
@@ -26,12 +27,10 @@ extern "C" int __wrap_sceVideoOutOpen(int32_t user, int32_t bus, int32_t index, 
                 sceVideoOutConfigureOutput(handle, 1u, nullptr, nullptr, nullptr);
             std::fprintf(stderr, "Launcher SDL fixed-output handle=%d rc=%08x\n", handle,
                          static_cast<unsigned>(configured));
-            if (FILE *log = std::fopen("/download0/prosperolight-menu-output.log", "a"))
-            {
-                std::fprintf(log, "fixed_output handle=%d rc=%08x\n", handle,
-                             static_cast<unsigned>(configured));
-                std::fclose(log);
-            }
+            char message[128];
+            std::snprintf(message, sizeof(message), "fixed_output handle=%d rc=%08x", handle,
+                          static_cast<unsigned>(configured));
+            prosperolight_log_append("/download0/prosperolight-menu-output.log", message);
         }
         video_handle.store(handle);
         flips.store(0);

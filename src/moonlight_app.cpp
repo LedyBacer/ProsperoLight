@@ -5,6 +5,7 @@
  */
 
 #include "moonlight_app.hpp"
+#include "lan_http_report.hpp"
 #include "stream_profile.hpp"
 #include "moonlight_discovery.hpp"
 #include "radio_ime.hpp"
@@ -94,7 +95,7 @@ const char *const kSettingFocus[] = {
     "setting-bitrate", "setting-chroma",     "setting-display-area",
     "setting-hdr",     "setting-audio",      "setting-vsync",
     "setting-decoder", "setting-cores",      "setting-ui-sound",
-    "setting-pacing"};
+    "setting-pacing",  "setting-logging"};
 
 FocusList FocusFor(unsigned screen)
 {
@@ -770,6 +771,14 @@ void MoonlightApp::Activate()
                 return;
             }
         }
+        else if (std::strcmp(kSettingFocus[focus_], "setting-logging") == 0)
+        {
+            if (!prosperolight_logs_set_enabled(!prosperolight_logs_enabled()))
+            {
+                SetText(document_, "settings-note", "Could not save logging setting.");
+                return;
+            }
+        }
         else if (std::strcmp(kSettingFocus[focus_], "setting-pacing") == 0)
         {
             if (!moonlight::save_presentation_mode((moonlight::presentation_mode() + 1) % 3))
@@ -1240,7 +1249,7 @@ void MoonlightApp::UpdateFocus()
                                "setting-hdr",       "setting-audio",
                                "setting-vsync",     "setting-decoder",
                                "setting-cores",     "setting-ui-sound",
-                               "setting-pacing"};
+                               "setting-pacing",    "setting-logging"};
     for (const char *id : all)
         SetClass(document_, id, "focused", false);
 
@@ -1557,6 +1566,7 @@ void MoonlightApp::UpdateSettings()
                      : "Decodes one frame at a time");
     std::snprintf(text, sizeof(text), "%u cores", config_.decoder_cores);
     SetText(document_, "setting-cores-value", text);
+    SetText(document_, "setting-logging-value", prosperolight_logs_enabled() ? "On" : "Off");
     SetText(document_, "setting-ui-sound-value", prosperolight::ui_sound_enabled() ? "On" : "Off");
     const unsigned pacing = moonlight::presentation_mode();
     SetText(document_, "setting-pacing-value",

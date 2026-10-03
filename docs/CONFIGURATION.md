@@ -195,3 +195,9 @@ is required. This is a stream target, not a new fixed HDMI mode: VideoOut uses
 its fixed60/120Hz path or requests VRR. Arbitrary targets such as75FPS can have
 uneven display intervals with fixed-refresh VSync; sustained decoding capacity
 and active VRR still require console verification.
+
+### Diagnostic logs
+
+`Diagnostic logs` enables or disables application diagnostic files, LAN diagnostic telemetry, and end-of-stream performance exports. It defaults to On and is stored independently in `/download0/prosperolight-logging.bin`. Disabling keeps existing files for inspection; it does not erase them or disable the statistics overlay.
+
+Session, PyroWave and menu-output text logs rotate at 1 MiB each, retaining one `.previous` file per log (up to 6 MiB total). Rotation is size-based and can occur within a long stream; files are not reset on every connection. Legacy oversized current logs are discarded on their next write. Performance JSON/CSV files replace the previous report rather than accumulating sessions. System/etaHEN logs are outside this switch.

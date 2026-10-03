@@ -13,12 +13,7 @@ void log_line(const char *fmt, ...)
     va_start(args, fmt);
     vsnprintf(text, sizeof(text), fmt, args);
     va_end(args);
-    FILE *f = fopen("/download0/prosperolight-pyrowave.log", "a");
-    if (f)
-    {
-        fprintf(f, "%s\n", text);
-        fclose(f);
-    }
+    prosperolight_log_append("/download0/prosperolight-pyrowave.log", text);
     (void)lan_http_report_text(text);
 }
 [[noreturn]] void fail(const char *reason)

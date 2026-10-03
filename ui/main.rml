@@ -185,6 +185,12 @@
                             <span class="setting-name">Frame pacing</span><span class="setting-help">VRR uses synchronized flips; unsupported output falls back to fixed refresh</span>
                             <span id="setting-pacing-value" class="setting-value">Paced</span>
                         </button>
+                        <button id="setting-logging" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Diagnostic logs</span><span class="setting-help">Keep bounded logs and end-of-stream performance reports</span>
+                            <span id="setting-logging-value" class="setting-value">On</span>
+                        </button>
                     </div>
                     <span id="settings-note" class="settings-note"></span>
                     <div id="settings-combos" class="settings-combos">

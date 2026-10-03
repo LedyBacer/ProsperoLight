@@ -678,6 +678,8 @@ static bool presentation_faulted;
 // key events or payloads; no per-frame file/network I/O. Failure is nonfatal.
 static void log_performance_summary(const char *report, size_t length, bool new_session = true)
 {
+    if (!prosperolight_logs_enabled())
+        return;
     // Bound each kernel record; never dump the per-frame trace into klog.
     constexpr size_t chunk_bytes = 384;
     static unsigned session = 0;
@@ -804,6 +806,8 @@ static bool write_performance_bytes(int descriptor, const char *data, size_t len
 
 static void save_frame_trace()
 {
+    if (!prosperolight_logs_enabled())
+        return;
 #if PROSPEROLIGHT_PERFORMANCE_DETAIL
     constexpr auto temporary = MOONLIGHT_IDENTITY_DIRECTORY "/performance-frames.csv.tmp";
     constexpr auto destination = MOONLIGHT_IDENTITY_DIRECTORY "/performance-frames.csv";
@@ -1020,6 +1024,8 @@ static void save_performance_summary(const native_renderer_state_t &state,
     memcpy(report + length, "}}\n", 3);
     length += 3;
     log_performance_summary(report, length);
+    if (!prosperolight_logs_enabled())
+        return;
     constexpr auto temporary = MOONLIGHT_IDENTITY_DIRECTORY "/performance-last.json.tmp";
     constexpr auto destination = MOONLIGHT_IDENTITY_DIRECTORY "/performance-last.json";
     const int descriptor = sceKernelOpen(temporary, 0x601, 0600);
@@ -3694,7 +3700,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
                                          ? options->decoder_cores
                                          : MOONLIGHT_DECODER_CORES_DEFAULT;
     const uint32_t vsync_enabled = !options || options->vsync_enabled ? 1u : 0u;
-    // More slices lower the per-kilobyte decode cost at every resolution.
+    // Request slice parallelism; the best count depends on codec and workload.
     const uint32_t stream_slices = VIDEO_SLICES_PER_FRAME;
 
     controller.user_service_result = -1;
