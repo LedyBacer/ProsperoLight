@@ -138,7 +138,7 @@ bool PyroWaveVideoBackend::ingest(const uint8_t *data,
                                                                     0, 0.9f, nullptr, 0)
                    : decoder_.frame_ready();
 }
-VideoFrameTiming PyroWaveVideoBackend::present()
+VideoFrameTiming PyroWaveVideoBackend::present(const std::function<void()> &before_present)
 {
     double start = clock_ms();
     unsigned index = 0;
@@ -172,6 +172,13 @@ VideoFrameTiming PyroWaveVideoBackend::present()
     pi.swapchainCount = 1;
     pi.pSwapchains = &swapchain_;
     pi.pImageIndices = &index;
+    // Decode/render are submitted immediately. Pace only the prepared image;
+    // this fence is GPU completion, not physical display completion.
+    if (before_present)
+    {
+        VK_OK(vkWaitForFences(c_.device, 1, &c_.fence, VK_TRUE, 30000000000ull));
+        before_present();
+    }
     VK_OK(vkQueuePresentKHR(c_.queue, &pi));
     ++requested_;
     VK_OK(vkWaitForFences(c_.device, 1, &c_.fence, VK_TRUE, 30000000000ull));

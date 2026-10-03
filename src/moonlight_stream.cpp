@@ -24,6 +24,7 @@
 #include "moonlight_stream.hpp"
 #include "stream_profile.hpp"
 #include "frame_cadence.hpp"
+#include "frame_pacing.hpp"
 #include "presentation_preferences.hpp"
 #include "moonlight_config.hpp"
 #include "moonlight_physical_input.hpp"
@@ -543,7 +544,7 @@ typedef struct stream_ready_frame
     size_t buffer_size;
     uint32_t pitch, height;
     int32_t frame;
-    uint64_t arrival_us, enqueue_us, ready_us;
+    uint64_t arrival_us, enqueue_us, ready_us, pts_us;
     moonlight::FrameTrace::Sample *trace;
     native_agc_metrics_t hud;
 } stream_ready_frame_t;
@@ -641,7 +642,7 @@ typedef struct native_renderer_state
     pthread_mutex_t lock;
     pthread_cond_t wake;
     moonlight::SlotPool<FRAME_SLOT_COUNT> frames;
-    moonlight::LatestMailbox<stream_ready_frame_t> mailbox;
+    moonlight::ReadyMailbox<stream_ready_frame_t> mailbox;
     bool stop_presenting;
 
     // Presentation worker.
@@ -1432,8 +1433,8 @@ static void snapshot_hud_metrics(const native_renderer_state_t *state, int pendi
     hud->decoder_cpu_mask = state->decoder_cpu_mask;
 }
 
-// Newest wins: a picture the presenter has not taken yet is replaced, and its
-// slot returns to the decoder.
+// Unpaced replaces the pending picture; paced modes retain two ready
+// pictures. Capacity overflow retires the oldest surface without blocking decode.
 static void publish_ready_frame(native_renderer_state_t *state, const stream_ready_frame_t &ready)
 {
     stream_ready_frame_t displaced{};
@@ -1539,6 +1540,7 @@ static int32_t settle_decoder_call(native_renderer_state_t *state, int offered,
         ready.arrival_us = submission.arrival_us;
         ready.enqueue_us = submission.enqueue_us;
         ready.ready_us = completed_us;
+        ready.pts_us = submission.pts_us;
         ready.trace = submission.trace;
         snapshot_hud_metrics(state, pending, &ready.hud);
         publish_ready_frame(state, ready);
@@ -1997,43 +1999,36 @@ static void *video_decode_thread(void *context)
     return nullptr;
 }
 
-static moonlight::FrameCadence stream_cadence;
+static moonlight::FramePacing stream_pacer;
 static unsigned stream_presentation_mode = 1;
-static uint32_t stream_cadence_rate = 0;
 
-static bool wait_presentation_deadline(native_renderer_state_t *state)
+static bool wait_presentation_deadline(native_renderer_state_t *state,
+                                       const stream_ready_frame_t &item)
 {
-    if (stream_presentation_mode)
+    if (!stream_presentation_mode)
+        return true;
+    uint32_t width = 0, height = 0, refresh = 0;
+    native_agc_output_status(&width, &height, &refresh);
+    // VRR uses source cadence, not the changing observed display rate. Fixed
+    // VSync uses completed-flip observations as a best-effort phase anchor.
+    const bool fixed =
+        native_agc_vsync_active() && (stream_presentation_mode == 1 || !native_agc_vrr_active());
+    const uint64_t started = monotonic_us();
+    const uint64_t deadline =
+        stream_pacer.target(item.frame, item.pts_us, started, fixed ? refresh : 0,
+                            fixed ? state->last_present_us : 0, fixed ? 0 : refresh);
+    uint64_t now = started;
+    while (now < deadline)
     {
-        const uint64_t now = monotonic_us();
-        uint32_t width = 0, height = 0, refresh = 0;
-        native_agc_output_status(&width, &height, &refresh);
-        const uint32_t target = stream_presentation_mode == 1
-                                    ? moonlight::fixed_cadence_rate(state->stream_fps, refresh)
-                                    : state->stream_fps * 100;
-        if (target != stream_cadence_rate)
-        {
-            stream_cadence_rate = target;
-            stream_cadence.reset(now, 100000000, target);
-            LOGI("Moonlight pacing: mode=%u target_x100=%u refresh_x100=%u",
-                 stream_presentation_mode, target, refresh);
-        }
-        const uint64_t deadline = stream_cadence.next(now);
-        // Leave the newest-frame mailbox replaceable throughout this wait.
-        // A selected decoder slot must not age while successors arrive.
-        uint64_t current = now;
-        while (deadline > current)
-        {
-            pthread_mutex_lock(&state->lock);
-            const bool stopping = state->stop_presenting;
-            pthread_mutex_unlock(&state->lock);
-            if (stopping)
-                return false;
-            const uint64_t remaining = deadline - current;
-            sceKernelUsleep(static_cast<uint32_t>(remaining > 1000 ? 1000 : remaining));
-            current = monotonic_us();
-        }
+        pthread_mutex_lock(&state->lock);
+        const bool stopping = state->stop_presenting;
+        pthread_mutex_unlock(&state->lock);
+        if (stopping)
+            return false;
+        sceKernelUsleep(static_cast<uint32_t>(std::min<uint64_t>(1000, deadline - now)));
+        now = monotonic_us();
     }
+    stream_pacer.submitted(deadline, now, now - started);
     return true;
 }
 
@@ -2046,6 +2041,9 @@ static int submit_presentation(native_renderer_state_t *state, const stream_read
 
     hud.rendering_fps_x100 = state->rendering_rate.fps_x100;
     hud.vsync_enabled = native_agc_vsync_active() ? 1u : 0u;
+    hud.pacing_mode = stream_presentation_mode;
+    hud.vrr_api_active = native_agc_vrr_active();
+    hud.pacing_reserve_us = stream_pacer.stats.reserve_us;
     if (PROSPEROLIGHT_PERFORMANCE_DETAIL)
         state->present_wait_timing.add(waited);
     if (item.trace)
@@ -2160,18 +2158,31 @@ static void *video_present_thread(void *context)
         pthread_mutex_lock(&state->lock);
         while (!state->mailbox.full && !state->stop_presenting)
             pthread_cond_wait(&state->wake, &state->lock);
-        // Wait before taking ownership; publishers can replace stale ready frames.
-        pthread_mutex_unlock(&state->lock);
-        if (!wait_presentation_deadline(state))
-            return nullptr;
-        pthread_mutex_lock(&state->lock);
         if (state->stop_presenting || !state->mailbox.take(&current))
         {
             pthread_mutex_unlock(&state->lock);
             return nullptr;
         }
+        // Only discard an old ready image if a decoded replacement exists.
+        // GPU/decoder service is not counted as replaceable queue residence.
+        while (stream_presentation_mode && state->mailbox.full &&
+               monotonic_us() > current.ready_us + stream_pacer.stale_limit_us())
+        {
+            state->frames.release(current.slot);
+            if (current.trace)
+                current.trace->outcome = 2;
+            ++state->not_displayed;
+            state->mailbox.take(&current);
+        }
         state->frames.state[static_cast<size_t>(current.slot)] = Pool::Presenting;
         pthread_mutex_unlock(&state->lock);
+        if (!wait_presentation_deadline(state, current))
+        {
+            pthread_mutex_lock(&state->lock);
+            state->frames.release(current.slot);
+            pthread_mutex_unlock(&state->lock);
+            return nullptr;
+        }
         if (submit_presentation(state, current) == 0)
         {
             flip_pending = true;
@@ -4026,10 +4037,10 @@ configure_stream:
                                                                    MOONLIGHT_DISPLAY_AREA_TV_SAFE);
     }
 #endif
-    stream_cadence_rate = renderer.stream_fps * 100;
-    LOGI("Moonlight pacing: mode=%u requested_fps=%u target_x100=%u", stream_presentation_mode,
-         renderer.stream_fps, stream_cadence_rate);
-    stream_cadence.reset(monotonic_us(), 100000000, stream_cadence_rate);
+    stream_pacer.reset(renderer.stream_fps);
+    renderer.mailbox.capacity = stream_presentation_mode ? 2u : 1u;
+    LOGI("Moonlight pacing: mode=%u requested_fps=%u ready_capacity=%u source_clock=1",
+         stream_presentation_mode, renderer.stream_fps, renderer.mailbox.capacity);
     // Keep every stream thread off the decoder's CPUs. New threads inherit the
     // creator's mask, so narrow this thread first; moonlight-common-c's thread
     // hook then gives the video receive thread a CPU of its own.
@@ -4422,6 +4433,16 @@ done:
     if (use_pyrowave)
         prosperolight::pyrowave::cleanup();
 #endif
+    LOGI("Moonlight pacing result: mode=%u period_us=%llu reserve_us=%llu submissions=%llu "
+         "misses=%llu resets=%llu wait_total_us=%llu late_max_us=%llu spacing_error_max_us=%llu",
+         stream_presentation_mode, (unsigned long long)stream_pacer.stats.period_us,
+         (unsigned long long)stream_pacer.stats.reserve_us,
+         (unsigned long long)stream_pacer.stats.submissions,
+         (unsigned long long)stream_pacer.stats.misses,
+         (unsigned long long)stream_pacer.stats.resets,
+         (unsigned long long)stream_pacer.stats.wait_total_us,
+         (unsigned long long)stream_pacer.stats.late_max_us,
+         (unsigned long long)stream_pacer.stats.spacing_error_max_us);
     save_performance_summary(renderer, input_intervals, options, result);
     if (renderer.access_units)
     {

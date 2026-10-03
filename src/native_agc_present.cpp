@@ -393,9 +393,15 @@ static void refresh_hud_surface(uint8_t *surface, const native_agc_metrics_t *me
              metrics->incoming_fps_x100 % 100u, metrics->video_codec ? "HEVC" : "H.264",
              hdr ? " / HDR" : "", metrics->slices_observed, metrics->slices_requested);
     hud_line(luma, 0, text_luma, line);
-    snprintf(line, sizeof(line), "Output: %ux%u @ %u.%02u Hz / V-Sync %s", output_width,
-             output_height, output_refresh_x100 / 100u, output_refresh_x100 % 100u,
-             metrics->vsync_enabled ? "on" : "off (tearing)");
+    snprintf(line, sizeof(line), "Output %ux%u %u.%02u Hz / %s / VSync %s / reserve %llu us%s",
+             output_width, output_height, output_refresh_x100 / 100u, output_refresh_x100 % 100u,
+             metrics->pacing_mode == 2 ? "Paced+VRR"
+             : metrics->pacing_mode    ? "Paced"
+                                       : "Unpaced",
+             metrics->vsync_enabled ? "on" : "off", (unsigned long long)metrics->pacing_reserve_us,
+             metrics->pacing_mode == 2
+                 ? (metrics->vrr_api_active ? " / VRR API ok" : " / fixed fallback")
+                 : "");
     hud_line(luma, 1, text_luma, line);
     if (metrics->pipeline_depth > 1u)
         snprintf(line, sizeof(line), "Decoder: Videodec2 adaptive x%u / %u cores (mask 0x%llx)",
@@ -978,6 +984,12 @@ static std::atomic<uint32_t> keyboard_generation = 0;
 static std::atomic<uint32_t> requested_flip_mode = VIDEO_OUT_FLIP_MODE_VSYNC;
 static std::atomic<int> hsync_rejected = 0;
 static std::atomic<int> vrr_requested = 0;
+static std::atomic<int> vrr_active = 0;
+
+int native_agc_vrr_active(void)
+{
+    return vrr_active.load(std::memory_order_relaxed);
+}
 
 static uint32_t effective_flip_mode(void)
 {
@@ -988,6 +1000,7 @@ static uint32_t effective_flip_mode(void)
 
 void native_agc_set_vrr(int enabled)
 {
+    vrr_active.store(0, std::memory_order_relaxed);
     vrr_requested.store(enabled != 0, std::memory_order_relaxed);
 }
 
@@ -1187,6 +1200,7 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
                                          int32_t *support_result, int32_t *preset_result,
                                          int32_t *vrr_result)
 {
+    vrr_active.store(0, std::memory_order_relaxed);
     *support_result = 0;
     *preset_result = 0;
     *vrr_result = 0;
@@ -1200,6 +1214,7 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
     if (vrr_requested.load(std::memory_order_relaxed))
     {
         *vrr_result = sceVideoOutVrrUnpegFromFixedRate(handle);
+        vrr_active.store(*vrr_result == 0, std::memory_order_relaxed);
         if (*vrr_result != 0)
         {
             const uint32_t fixed_mode =

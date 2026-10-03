@@ -228,6 +228,10 @@ void native_agc_output_status(uint32_t *width, uint32_t *height, uint32_t *refre
     *height = 2160;
     *refresh_x100 = 11988;
 }
+int native_agc_vrr_active(void)
+{
+    return 0;
+}
 int native_agc_vsync_active(void)
 {
     return 1;

@@ -146,7 +146,7 @@ TEST(Pipeline, SlotsAreOnlyReusedAfterReleaseAndNeverTheLatestOutput)
 
 TEST(Pipeline, MailboxKeepsOnlyTheNewestPicture)
 {
-    moonlight::LatestMailbox<int> mailbox;
+    moonlight::ReadyMailbox<int> mailbox;
     int out = 0, displaced = 0;
     EXPECT_FALSE(mailbox.take(&out));
     EXPECT_FALSE(mailbox.publish(1, &displaced));

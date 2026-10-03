@@ -174,19 +174,37 @@ template <size_t N> struct SlotPool
 };
 
 // One-slot "newest wins" handoff from decoding to presentation.
-template <typename T> struct LatestMailbox
+template <typename T> struct ReadyMailbox
 {
     bool full{};
-    T item{};
+    T item{}, following{};
+    unsigned capacity = 1;
+    bool second{};
 
     bool publish(const T &next, T *displaced)
     {
-        const bool replaced = full;
-        if (replaced && displaced)
+        if (!full)
+        {
+            item = next;
+            full = true;
+            return false;
+        }
+        if (capacity > 1 && !second)
+        {
+            following = next;
+            second = true;
+            return false;
+        }
+        if (displaced)
             *displaced = item;
-        item = next;
-        full = true;
-        return replaced;
+        if (second)
+        {
+            item = following;
+            following = next;
+        }
+        else
+            item = next;
+        return true;
     }
 
     bool take(T *out)
@@ -195,7 +213,13 @@ template <typename T> struct LatestMailbox
             return false;
         if (out)
             *out = item;
-        full = false;
+        if (second)
+        {
+            item = following;
+            second = false;
+        }
+        else
+            full = false;
         return true;
     }
 };

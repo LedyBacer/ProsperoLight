@@ -50,6 +50,8 @@ typedef struct native_agc_metrics
     uint32_t pipeline_depth;
     uint32_t decoder_cores;
     uint32_t vsync_enabled;
+    uint32_t pacing_mode, vrr_api_active;
+    uint64_t pacing_reserve_us;
     uint64_t decoder_cpu_mask;
 } native_agc_metrics_t;
 
@@ -77,6 +79,7 @@ void native_agc_set_tv_safe_area(int enabled);
 void native_agc_set_vsync(int enabled);
 void native_agc_set_vrr(int enabled);
 int native_agc_vsync_active(void);
+int native_agc_vrr_active(void);
 int native_agc_flip_events_active(void);
 int native_agc_present_shutdown(void);
 

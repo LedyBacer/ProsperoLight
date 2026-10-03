@@ -1,4 +1,5 @@
 #include "frame_cadence.hpp"
+#include "frame_pacing.hpp"
 #include "presentation_preferences.hpp"
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "stream_backend.hpp"
@@ -23,7 +24,7 @@ struct Frame
 {
     std::vector<uint8_t> bytes;
     std::vector<PyroWaveFraming::Segment> segments;
-    uint64_t presentation_us{}, receive_us{}, enqueue_us{};
+    uint64_t presentation_us{}, receive_us{}, enqueue_us{}, queued_us{};
     uint16_t critical{};
     int number{};
 };
@@ -64,14 +65,13 @@ uint64_t now_us()
 void *worker(void *)
 {
     auto &s = *session;
-    moonlight::FrameCadence cadence;
+    moonlight::FramePacing pacer;
     const unsigned mode = moonlight::presentation_mode();
     const uint32_t refresh = static_cast<uint32_t>(s.backend->refresh_hz() * 100 + 0.5);
-    const uint32_t rate = mode == 1 ? moonlight::fixed_cadence_rate(s.fps, refresh) : s.fps * 100;
-    cadence.reset(now_us(), 100000000, rate);
+    pacer.reset(s.fps);
     const bool paced = mode != 0;
-    log_line("PyroWave pacing: mode=%u target_x100=%u selected_refresh_x100=%u", mode, rate,
-             refresh);
+    log_line("PyroWave pacing: mode=%u requested_fps=%u selected_refresh_x100=%u source_clock=1",
+             mode, s.fps, refresh);
     uint64_t last = now_us(), incoming = 0, decoded = 0, shown = 0, bytes = 0;
     double decode_ms = 0, render_ms = 0;
     uint64_t samples = 0;
@@ -91,19 +91,25 @@ void *worker(void *)
                     break;
                 if (paced)
                 {
-                    const uint64_t now = now_us();
-                    const uint64_t deadline = cadence.next(now);
-                    if (deadline > now)
-                        s.wake.wait_for(lock, std::chrono::microseconds(deadline - now),
-                                        [&] { return !s.running; });
-                    if (!s.running)
-                        break;
+                    // Keep a small FIFO reserve; independent frames may be
+                    // skipped before decode only when a successor exists.
+                    while (s.queue.size() > 1 &&
+                           now_us() > s.queue.front().queued_us + pacer.stale_limit_us())
+                    {
+                        s.queue.pop_front();
+                        ++s.stale;
+                    }
+                    frame = std::move(s.queue.front());
+                    s.queue.pop_front();
                 }
-                // All frames are independent: consume newest and retire older work.
-                frame = std::move(s.queue.back());
-                s.stale += s.queue.size() - 1;
-                s.queue.clear();
+                else
+                {
+                    frame = std::move(s.queue.back());
+                    s.stale += s.queue.size() - 1;
+                    s.queue.clear();
+                }
             }
+
             PyroWaveFraming::Frame parsed;
             std::string error;
             if (!PyroWaveFraming::parse(frame.bytes.data(), frame.bytes.size(), frame.segments,
@@ -121,7 +127,31 @@ void *worker(void *)
                 ++s.partial;
             ++s.decoded;
             s.backend->update_hud(nullptr, native_agc_hud_enabled() != 0);
-            auto timing = s.backend->present();
+            auto timing = s.backend->present(
+                paced ? std::function<void()>(
+                            [&]
+                            {
+                                const uint64_t started = now_us();
+                                const uint64_t deadline =
+                                    pacer.target(frame.number, frame.presentation_us, started,
+                                                 mode == 1 && selected_vsync ? refresh : 0, 0,
+                                                 mode == 2 ? refresh : 0);
+                                std::unique_lock<std::mutex> lock(s.mutex);
+                                while (s.running && now_us() < deadline)
+                                {
+                                    const uint64_t current = now_us();
+                                    if (current >= deadline)
+                                        break;
+                                    const uint64_t remaining = deadline - current;
+                                    s.wake.wait_for(lock,
+                                                    std::chrono::microseconds(
+                                                        std::min<uint64_t>(remaining, 1000)),
+                                                    [&] { return !s.running; });
+                                }
+                                const uint64_t submitted = now_us();
+                                pacer.submitted(deadline, submitted, submitted - started);
+                            })
+                      : std::function<void()>{});
             decode_ms += timing.decode_ms;
             render_ms += timing.render_ms;
             ++samples;
@@ -132,6 +162,15 @@ void *worker(void *)
                 log_line("PyroWave worker failed: VideoOut presentation counters unavailable");
                 if (error_callback)
                     error_callback(-1);
+                log_line("PyroWave pacing result: period_us=%llu reserve_us=%llu submissions=%llu "
+                         "misses=%llu resets=%llu late_max_us=%llu spacing_error_max_us=%llu",
+                         (unsigned long long)pacer.stats.period_us,
+                         (unsigned long long)pacer.stats.reserve_us,
+                         (unsigned long long)pacer.stats.submissions,
+                         (unsigned long long)pacer.stats.misses,
+                         (unsigned long long)pacer.stats.resets,
+                         (unsigned long long)pacer.stats.late_max_us,
+                         (unsigned long long)pacer.stats.spacing_error_max_us);
                 return nullptr;
             }
             s.shown = counters.flip_count;
@@ -304,6 +343,7 @@ int submit(PDECODE_UNIT unit)
     Frame frame;
     frame.bytes.resize(unit->fullLength);
     frame.presentation_us = unit->presentationTimeUs;
+    frame.queued_us = now_us();
     frame.receive_us = unit->receiveTimeUs;
     frame.enqueue_us = unit->enqueueTimeUs;
     frame.critical = unit->pyrowaveCriticalPackets;

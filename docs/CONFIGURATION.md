@@ -201,3 +201,13 @@ and active VRR still require console verification.
 `Diagnostic logs` enables or disables application diagnostic files, LAN diagnostic telemetry, and end-of-stream performance exports. It defaults to On and is stored independently in `/download0/prosperolight-logging.bin`. Disabling keeps existing files for inspection; it does not erase them or disable the statistics overlay.
 
 Session, PyroWave and menu-output text logs rotate at 1 MiB each, retaining one `.previous` file per log (up to 6 MiB total). Rotation is size-based and can occur within a long stream; files are not reset on every connection. Legacy oversized current logs are discarded on their next write. Performance JSON/CSV files replace the previous report rather than accumulating sessions. System/etaHEN logs are outside this switch.
+
+### Source-clock frame pacing
+
+Unpaced keeps the latest-frame policy without an extra software wait. Paced and Paced+VRR share a source-clock controller, learn the source interval from presentation timestamps, and carry a small bounded readiness reserve (up to the smaller of 10 ms or one source interval). The ready queue holds at most two decoded native images. Old decoded images are discarded only when a decoded successor exists; compressed H.264/HEVC references are preserved.
+
+Native fixed-VSync pacing uses completed-flip observations as a best-effort phase estimate and submits with a preparation margin. These observations are not a precise scanout clock. VRR API failure uses the fixed-output timing policy. The HUD distinguishes successful VRR API activation from fixed fallback; API success does not prove physical panel VRR.
+
+PyroWave submits GPU decode/render immediately, waits for preparation completion, then paces presentation. Its two-entry compressed queue preserves brief arrival bursts; it does not claim two prepared GPU surfaces or asynchronous decode/present overlap. GPU fences measure work completion, not physical display completion. Independent stale compressed PyroWave frames may be skipped, while the sole remaining frame is retained.
+
+Per-stream pacing summaries report learned period, reserve, missed readiness targets, re-anchors, wake lateness and submission-spacing error. These counters remain controlled by Diagnostic logs. Compare completed-flip intervals and end-to-end latency, not only submission spacing, during console validation.
