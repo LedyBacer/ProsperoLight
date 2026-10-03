@@ -317,40 +317,6 @@ void CaptureConnecting(gfx::Renderer &renderer, View &view, Frame &frame, Select
              static_cast<long long>((sys::monotonic_us() - started) / 1000));
 }
 
-// Every screen drawn once into the display's back buffer before the first
-// frame (nothing is shown: the next frame covers it). The driver compiles the
-// shaders a screen needs the first time it draws it; done here, behind the
-// splash picture, a tab no longer stutters the first time it opens.
-void WarmUp(gfx::Renderer &renderer, View &view, Frame &frame, int width, int height)
-{
-    const std::int64_t started = sys::monotonic_us();
-    const int shown = view.screen();
-    long long spent[View::kScreenCount] = {};
-    for (int screen = 0; screen < View::kScreenCount; ++screen)
-    {
-        const std::int64_t screen_started = sys::monotonic_us();
-        view.warm(screen);
-        frame.reset();
-        frame.glass_texture = renderer.glass_texture();
-        view.draw(frame);
-        renderer.begin();
-        renderer.backdrop(frame.backdrop);
-        renderer.draw(frame.scene);
-        renderer.glass();
-        renderer.draw(frame.overlay);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-        renderer.present(0, width, height);
-        glFinish();
-        spent[screen] = static_cast<long long>((sys::monotonic_us() - screen_started) / 1000);
-    }
-    view.warm(shown);
-    sys::log("[PL] launcher: screens warmed up in %lld ms (%lld, %lld, %lld, %lld)",
-             static_cast<long long>((sys::monotonic_us() - started) / 1000), spent[0], spent[1],
-             spent[2], spent[3]);
-}
-
 // Where the launcher's threads run. Threads on the console run first-in
 // first-out at one priority and are never time-sliced, so a worker busy with
 // a TLS handshake on the screen's CPU stopped the screen for a second. The
@@ -455,8 +421,6 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             view.show_stream_error(stream_error);
             view.set_players(SignedInUsers());
             sys::log("[PL] launcher: sound, controller and screens after %lld ms", elapsed());
-            Frame warm_frame;
-            WarmUp(renderer, view, warm_frame, display.width(), display.height());
 
             Frame frame;
             ui::Feedback feedback;
@@ -480,11 +444,20 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                 last_frame = now;
                 if (dt > 0.05f)
                     dt = 0.05f; // a hitch must not teleport the animations
+                std::int64_t mark = now;
+                long long parts[6] = {};
+                const auto lap = [&mark](long long &part)
+                {
+                    const std::int64_t at = sys::monotonic_us();
+                    part = static_cast<long long>(at - mark);
+                    mark = at;
+                };
                 const std::size_t count = pad.read(samples);
                 const InputFrame input = tracker.update(std::span<const PadSample>(samples, count),
                                                         static_cast<std::uint64_t>(now));
 
                 model.Poll(static_cast<std::uint64_t>(now / 1000));
+                lap(parts[0]);
                 ArtworkImage image;
                 while (model.TakeArtwork(&image))
                 {
@@ -503,6 +476,7 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                 }
                 if (frames % 60 == 30)
                     view.set_players(SignedInUsers());
+                lap(parts[1]);
 
                 feedback.clear();
                 view.update(input, dt, feedback);
@@ -512,9 +486,11 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                                                                     : event.set,
                                 event);
 
+                lap(parts[2]);
                 frame.reset();
                 frame.glass_texture = renderer.glass_texture();
                 view.draw(frame);
+                lap(parts[3]);
                 renderer.begin();
                 renderer.backdrop(frame.backdrop);
                 renderer.draw(frame.scene);
@@ -524,7 +500,19 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                 glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
                 renderer.present(0, display.width(), display.height());
-                if (!display.swap())
+                lap(parts[4]);
+                const bool swapped = display.swap();
+                lap(parts[5]);
+                if (parts[0] + parts[1] + parts[2] + parts[3] + parts[4] + parts[5] > 50000 &&
+                    slow_frames < 60)
+                {
+                    ++slow_frames;
+                    sys::log("[PL] launcher: frame %llu took (us) poll %lld, artwork %lld, update "
+                             "%lld, draw %lld, render %lld, swap %lld",
+                             static_cast<unsigned long long>(frames), parts[0], parts[1], parts[2],
+                             parts[3], parts[4], parts[5]);
+                }
+                if (!swapped)
                 {
                     sys::log("[PL] launcher: swap failed frame=%llu error=%s",
                              static_cast<unsigned long long>(frames),

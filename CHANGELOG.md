@@ -11,10 +11,6 @@ Not released. Everything from 01.000.082 below is included.
   stopped the app at its first shader: the cache writes through `mkstemp`,
   which the OpenGL runtime takes from a system library the app does not load.
   The app now has its own.
-- **No stutter the first time a tab opens.** Every screen is drawn once,
-  unseen, before the first frame, while the console's splash picture is still
-  up; the graphics driver compiled each screen's shaders on its first visit
-  before.
 - **Crash report.** A fault writes `logs/crash-last.txt` and the same text into
   the log; `tools/symbolize-crash.py` names the functions. Stopping and
   unpairing are written to the log too.
@@ -26,7 +22,8 @@ Not released. Everything from 01.000.082 below is included.
   over TLS on its worker thread. Console threads are never time-sliced, and the
   worker could land on the screen's CPU: the screen then stood still for about
   a second. The screen's thread now has its own core and the worker the rest.
-- The log notes any launcher frame that takes longer than 50 ms.
+- The log notes any launcher frame that takes longer than 50 ms, with the time
+  each part of it took, and how long each graphics program took to build.
 
 ### What was tested
 

@@ -299,7 +299,7 @@ class ToolTests(unittest.TestCase):
         self.assertNotIn("moonlight_backend_", initialize)
         self.assertNotIn("moonlight_discover_hosts", initialize)
         self.assertIn("QueueSelectedRefresh();", initialize)
-        self.assertLess(platform.index("if (!display.swap())"),
+        self.assertLess(platform.index("const bool swapped = display.swap();"),
                         platform.index("sys::hide_splash_screen()"))
 
     def test_launcher_and_stream_take_turns_with_the_display(self):
@@ -658,7 +658,7 @@ class ToolTests(unittest.TestCase):
         first = platform[platform.index("if (++frames == 1)") :]
         self.assertLess(first.index("prosperolight_release_splash();"),
                         first.index("sys::hide_splash_screen();"))
-        self.assertLess(platform.index("display.swap()"), platform.index("if (++frames == 1)"))
+        self.assertLess(platform.index("display.swap();"), platform.index("if (++frames == 1)"))
         # Compiled shaders are kept between launches, per OpenGL runtime version, and
         # the temporary file the cache writes through is made by the app itself.
         fetch = (ROOT / "tools/fetch-opengl-sdk.sh").read_text(encoding="utf-8")
@@ -667,9 +667,6 @@ class ToolTests(unittest.TestCase):
         self.assertIn(f'kShaderCache[] = "opengl-{version}"', storage)
         self.assertIn("int mkstemp(char *template_name)", shims)
         self.assertIn("int isatty(int descriptor)", shims)
-        # Every screen is drawn once before the first frame.
-        self.assertLess(platform.index("WarmUp(renderer, view, warm_frame"),
-                        platform.index("if (++frames == 1)"))
 
     def test_launcher_worker_has_room_for_tls_requests(self):
         model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")

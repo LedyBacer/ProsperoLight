@@ -4,6 +4,8 @@
 
 #include "gfx/gl_program.hpp"
 
+#include <cstdint>
+
 #include "platform/ps5/system.hpp"
 
 namespace hui::gfx
@@ -46,6 +48,8 @@ GLuint compile(const char *label, GLenum stage, const char *source)
 
 GLuint build_program(const char *label, const char *vertex_source, const char *fragment_source)
 {
+    // ProsperoLight: how long each program takes, for the start-up time.
+    const std::int64_t started = sys::monotonic_us();
     GLuint vertex = compile(label, GL_VERTEX_SHADER, vertex_source);
     GLuint fragment = vertex != 0 ? compile(label, GL_FRAGMENT_SHADER, fragment_source) : 0;
     if (fragment == 0)
@@ -62,6 +66,8 @@ GLuint build_program(const char *label, const char *vertex_source, const char *f
     glDeleteShader(fragment);
     GLint ok = GL_FALSE;
     glGetProgramiv(program, GL_LINK_STATUS, &ok);
+    sys::log("[HUI] program %s built in %lld ms", label,
+             static_cast<long long>((sys::monotonic_us() - started) / 1000));
     if (ok == GL_TRUE)
         return program;
     char info[512] = {};
