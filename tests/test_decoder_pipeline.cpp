@@ -59,6 +59,9 @@ static DECODE_UNIT queued_unit;
 
 extern "C"
 {
+    void gs_logf(const char *, const char *, ...)
+    {
+    }
     int lan_http_report_text(const char *)
     {
         return 0;
@@ -214,6 +217,12 @@ void native_agc_reset_performance()
 int native_agc_finish_frame(void)
 {
     return 0;
+}
+void native_agc_output_status(uint32_t *width, uint32_t *height, uint32_t *refresh_x100)
+{
+    *width = 3840;
+    *height = 2160;
+    *refresh_x100 = 11988;
 }
 int native_agc_vsync_active(void)
 {
