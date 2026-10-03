@@ -148,3 +148,11 @@ Native SaveData initialization is not part of this baseline; see
 The settings page scrolls vertically as the selected row moves out of view. Use
 Up / Down to select a setting and Cross to change it. The scrollbar shows your
 position; stream shortcuts and the footer stay visible outside the list.
+
+### Custom server port
+
+Select the PC, open Settings, and choose **Server HTTP port**. Enter the server's
+HTTP port (47989 by default), not its browser administration port. The endpoint
+is saved for this PC and immediately refreshed without deleting its identity or
+local pairing credentials. Automatic discovery retains explicitly saved endpoints.
+You can also enter `IPv4:HTTP-port` when adding a PC manually.

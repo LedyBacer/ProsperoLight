@@ -714,6 +714,19 @@ TEST(Configuration, UpsertUpdatesAHostByStableIdentity)
     EXPECT_EQ(config.hosts[0].manual, 1U);
 }
 
+TEST(Configuration, DiscoveryPreservesAnExplicitCustomPort)
+{
+    moonlight_config_t config{};
+    moonlight_config_defaults(&config);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10:48000", "PC", "host-1", true), 0);
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", "PC discovered", "host-1", false), 0);
+    EXPECT_EQ(config.host_count, 1u);
+    EXPECT_STREQ(config.hosts[0].address, "192.168.1.10:48000");
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10:49000", "PC", "host-1", true), 0);
+    EXPECT_STREQ(config.hosts[0].address, "192.168.1.10:49000");
+}
+
 TEST(Configuration, UpsertRejectsAHostBeyondCapacity)
 {
     moonlight_config_t config{};

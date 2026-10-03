@@ -173,6 +173,12 @@
                             <span class="setting-name">Decoder CPU cores</span><span id="setting-cores-help" class="setting-help">Reserved for decoding; stream threads use the remaining cores</span>
                             <span id="setting-cores-value" class="setting-value">3 cores</span>
                         </button>
+                        <button id="setting-server-port" class="setting-row">
+                            <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
+                            <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>
+                            <span class="setting-name">Server HTTP port</span><span class="setting-help">Selected PC only; HTTP port, not the host Web UI port</span>
+                            <span id="setting-server-port-value" class="setting-value">47989</span>
+                        </button>
                         <button id="setting-ui-sound" class="setting-row">
                             <img class="button-chrome setting-chrome base-chrome" src="chrome/setting-normal.tga" width="1380" height="88" alt=""/>
                             <img class="button-chrome setting-chrome focused-chrome" src="chrome/setting-focused.tga" width="1380" height="88" alt=""/>

@@ -435,7 +435,9 @@ int moonlight_config_upsert_host(moonlight_config_t *config, const char *address
     memset(host, 0, sizeof(*host));
 
 update:
-    copy_text(host->address, sizeof(host->address), input_address);
+    // Discovery must not replace an explicitly configured endpoint or custom port.
+    if (!host->manual || manual)
+        copy_text(host->address, sizeof(host->address), input_address);
     if (input_name[0])
         copy_text(host->name, sizeof(host->name), input_name);
     else if (!host->name[0])

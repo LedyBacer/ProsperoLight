@@ -89,12 +89,12 @@ const char *const kGameFocus[] = {"nav-hosts",  "nav-games",  "nav-settings", "a
                                   "app-card-1", "app-card-2", "app-card-3",   "app-card-4",
                                   "app-card-5", "stop-app",   "back-hosts"};
 const char *const kSettingFocus[] = {
-    "nav-hosts",       "nav-games",          "nav-settings",
-    "setting-codec",   "setting-resolution", "setting-framerate",
-    "setting-bitrate", "setting-chroma",     "setting-display-area",
-    "setting-hdr",     "setting-audio",      "setting-vsync",
-    "setting-decoder", "setting-cores",      "setting-ui-sound",
-    "setting-pacing"};
+    "nav-hosts",        "nav-games",          "nav-settings",
+    "setting-codec",    "setting-resolution", "setting-framerate",
+    "setting-bitrate",  "setting-chroma",     "setting-display-area",
+    "setting-hdr",      "setting-audio",      "setting-vsync",
+    "setting-decoder",  "setting-cores",      "setting-server-port",
+    "setting-ui-sound", "setting-pacing"};
 
 FocusList FocusFor(unsigned screen)
 {
@@ -773,6 +773,11 @@ void MoonlightApp::Activate()
                                         ? MOONLIGHT_DECODER_CORES_MAX
                                         : config_.decoder_cores - 1u;
         }
+        else if (std::strcmp(kSettingFocus[focus_], "setting-server-port") == 0)
+        {
+            StartServerPortEntry();
+            return;
+        }
         else if (std::strcmp(kSettingFocus[focus_], "setting-ui-sound") == 0)
         {
             if (!prosperolight::ui_sound_set_enabled(!prosperolight::ui_sound_enabled()))
@@ -798,6 +803,64 @@ void MoonlightApp::Activate()
     default:
         break;
     }
+}
+
+void MoonlightApp::StartServerPortEntry()
+{
+    const moonlight_config_host_t *host = SelectedHost();
+    char address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
+    uint16_t port = 47989;
+    if (!host || !server_endpoint_parse(host->address, address, sizeof(address), 47989, &port))
+    {
+        SetText(document_, "settings-note", "Select or add a PC before changing its server port.");
+        return;
+    }
+    std::snprintf(port_entry_address_, sizeof(port_entry_address_), "%s", host->address);
+    char value[8];
+    std::snprintf(value, sizeof(value), "%u", port);
+    if (!radio_ime_request(value, "Server HTTP port", "HTTP port (1-65535), not the Web UI port",
+                           ServerPortResult, this))
+        SetText(document_, "settings-note", "Text entry is currently unavailable");
+}
+
+void MoonlightApp::ServerPortResult(const char *text, void *user_data)
+{
+    auto *app = static_cast<MoonlightApp *>(user_data);
+    if (!app)
+        return;
+    const moonlight_config_host_t *host = app->SelectedHost();
+    uint16_t port = 0, previous = 0;
+    char address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
+    if (!server_port_parse(text, &port) || !host ||
+        std::strcmp(host->address, app->port_entry_address_) != 0 ||
+        !server_endpoint_parse(host->address, address, sizeof(address), 47989, &previous))
+    {
+        SetText(app->document_, "settings-note",
+                "Port not changed. Select a PC and enter 1-65535.");
+        return;
+    }
+    moonlight_config_t updated = app->config_;
+    auto &changed = updated.hosts[updated.selected_host];
+    const int length =
+        std::snprintf(changed.address, sizeof(changed.address), "%s:%u", address, port);
+    if (length < 0 || static_cast<size_t>(length) >= sizeof(changed.address))
+    {
+        SetText(app->document_, "settings-note", "Server address is too long; port not changed.");
+        return;
+    }
+    changed.manual = 1;
+    if (!moonlight_config_save(&updated))
+    {
+        SetText(app->document_, "settings-note",
+                "Could not save server port; previous value retained.");
+        return;
+    }
+    app->FinishHealthWorker();
+    app->FinishArtworkWorker(true);
+    app->config_ = updated;
+    app->selected_app_ = 0;
+    app->RefreshBackend(false);
+    app->UpdateSettings();
 }
 
 void MoonlightApp::StartBitrateEntry()
@@ -1212,8 +1275,8 @@ void MoonlightApp::UpdateFocus()
                                "setting-chroma",    "setting-display-area",
                                "setting-hdr",       "setting-audio",
                                "setting-vsync",     "setting-decoder",
-                               "setting-cores",     "setting-ui-sound",
-                               "setting-pacing"};
+                               "setting-cores",     "setting-server-port",
+                               "setting-ui-sound",  "setting-pacing"};
     for (const char *id : all)
         SetClass(document_, id, "focused", false);
 
@@ -1518,6 +1581,15 @@ void MoonlightApp::UpdateSettings()
                      : "Decodes one frame at a time");
     std::snprintf(text, sizeof(text), "%u cores", config_.decoder_cores);
     SetText(document_, "setting-cores-value", text);
+    const moonlight_config_host_t *port_host = SelectedHost();
+    char port_address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
+    uint16_t server_port = 47989;
+    if (port_host && server_endpoint_parse(port_host->address, port_address, sizeof(port_address),
+                                           47989, &server_port))
+        std::snprintf(text, sizeof(text), "%u", server_port);
+    else
+        std::snprintf(text, sizeof(text), "No PC selected");
+    SetText(document_, "setting-server-port-value", text);
     SetText(document_, "setting-ui-sound-value", prosperolight::ui_sound_enabled() ? "On" : "Off");
     const unsigned pacing = moonlight::presentation_mode();
     SetText(document_, "setting-pacing-value",

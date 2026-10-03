@@ -41,7 +41,10 @@ class MoonlightApp
     unsigned StreamResolution() const;
     unsigned StreamFps() const;
     unsigned HdrEnabled() const;
-    unsigned ChromaSampling() const { return config_.chroma_sampling; }
+    unsigned ChromaSampling() const
+    {
+        return config_.chroma_sampling;
+    }
     unsigned AudioConfiguration() const;
     unsigned VsyncEnabled() const;
     unsigned DecoderPipeline() const;
@@ -102,6 +105,9 @@ class MoonlightApp
     void Activate();
     void StartManualHostEntry();
     void StartBitrateEntry();
+    void StartServerPortEntry();
+    static void ServerPortResult(const char *text, void *user_data);
+    char port_entry_address_[MOONLIGHT_CONFIG_ADDRESS_SIZE]{};
     static void BitrateResult(const char *text, void *user_data);
     static void ManualHostResult(const char *text, void *user_data);
     void AddManualHost(const char *text);
