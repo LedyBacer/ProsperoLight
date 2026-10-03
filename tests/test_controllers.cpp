@@ -1,5 +1,5 @@
 /*
- * ProsperoLight - Controller lifecycle checks against the native DualSense backend.
+ * ps5-native-app-boilerplate / ProsperoLight - Controller lifecycle checks against the native DualSense backend.
  * Copyright (C) 2026 BlackBearReloaded
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

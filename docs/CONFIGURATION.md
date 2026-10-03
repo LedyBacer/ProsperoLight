@@ -200,9 +200,9 @@ and active VRR still require console verification.
 
 ### Diagnostic logs
 
-`Diagnostic logs` enables or disables application diagnostic files, LAN diagnostic telemetry, and end-of-stream performance exports. It defaults to On and is stored independently in `/download0/prosperolight-logging.bin`. Disabling keeps existing files for inspection; it does not erase them or disable the statistics overlay.
+`Diagnostic logs` enables or disables application diagnostic files, LAN diagnostic telemetry, and end-of-stream performance exports. It defaults to On and is stored independently beside the main config (`config/prosperolight-logging.bin` under `/data/prosperolight`, or `/download0/prosperolight-logging.bin` in the sandbox). Disabling keeps existing files for inspection; it does not erase them or disable the statistics overlay.
 
-Session, PyroWave and menu-output text logs rotate at 1 MiB each, retaining one `.previous` file per log (up to 6 MiB total). Rotation is size-based and can occur within a long stream; files are not reset on every connection. Legacy oversized current logs are discarded on their next write. Performance JSON/CSV files replace the previous report rather than accumulating sessions. System/etaHEN logs are outside this switch.
+Session, PyroWave and menu-output text logs rotate at 1 MiB each, retaining one `.previous` file per log (up to 6 MiB for those three logs). Rotation is size-based and can occur within a long stream; files are not reset on every connection. Legacy oversized current logs are discarded on their next write. Performance JSON/CSV files replace the previous report rather than accumulating sessions. System/etaHEN logs are outside this switch.
 
 ### Source-clock frame pacing
 
@@ -213,3 +213,7 @@ Native fixed-VSync pacing uses completed-flip observations as a best-effort phas
 PyroWave submits GPU decode/render immediately, waits for preparation completion, then paces presentation. Its two-entry compressed queue preserves brief arrival bursts; it does not claim two prepared GPU surfaces or asynchronous decode/present overlap. GPU fences measure work completion, not physical display completion. Independent stale compressed PyroWave frames may be skipped, while the sole remaining frame is retained.
 
 Per-stream pacing summaries report learned period, reserve, missed readiness targets, re-anchors, wake lateness and submission-spacing error. These counters remain controlled by Diagnostic logs. Compare completed-flip intervals and end-to-end latency, not only submission spacing, during console validation.
+
+The upstream OpenGL launcher log additionally retains the current and previous
+launch, bounded by a periodic flush/size check. Disabling logging redirects
+stdout/stderr to `/dev/null`; crash reports remain available independently.

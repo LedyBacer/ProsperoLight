@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProsperoLight - Independent graphics dependency implementations in one title.
+# ps5-native-app-boilerplate / ProsperoLight - Independent graphics dependency implementations in one title.
 # Copyright (C) 2026 BlackBearReloaded
 # SPDX-License-Identifier: GPL-3.0-or-later
 import pathlib

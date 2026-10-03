@@ -5,8 +5,9 @@ stream normally after 60–90 seconds. Compare the same codec, scene, resolution
 FPS, VSync setting and network conditions. Repeat each mode rather than using
 one run as proof of improvement.
 
-After stopping, download these files through FTP from the mounted app's
-`download0` directory:
+After stopping, download these files through FTP from
+`/data/prosperolight/logs` with filesystem elevation, or from the mounted
+app's `download0` directory in sandbox fallback mode:
 
 - H.264 / HEVC: `performance-frames-modeN.csv` and `performance-last.json`.
 - PyroWave: `pyrowave-output-modeN.csv` and `prosperolight-pyrowave.log`.
