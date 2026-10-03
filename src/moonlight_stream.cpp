@@ -812,8 +812,7 @@ static void save_frame_trace(unsigned mode)
         return;
 #if PROSPEROLIGHT_PERFORMANCE_DETAIL
     char temporary[96], destination[96];
-    snprintf(destination, sizeof(destination), "/download0/performance-frames-mode%u.csv",
-             mode);
+    snprintf(destination, sizeof(destination), "/download0/performance-frames-mode%u.csv", mode);
     snprintf(temporary, sizeof(temporary), "%s.tmp", destination);
     // Rows are batched: one write per row cost tens of thousands of system calls.
     static char batch[65536];
