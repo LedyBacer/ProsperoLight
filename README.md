@@ -4,10 +4,13 @@
 
 <h1 align="center">ProsperoLight</h1>
 
-> **Upstream beta: [01.000.080](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.080).**
-> This development branch integrates that release's GPU launcher and persistent
-> storage with PyroWave, extended DualSense support and frame pacing. It is not
-> the unchanged upstream release. Native HEVC limits remain documented below.
+> **Beta: [01.000.080](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.080).**
+> A new launcher drawn by the GPU, up to four controllers, a Sunshine port per PC, and settings
+> and pairing kept in `/data/prosperolight`. The streaming engine is the one of the 01.000.070
+> performance beta; the PS5 decoder still limits how much bitrate is usable: see
+> [Bitrate limits](#bitrate-limits).
+> The source on `main` is ahead of that release: PyroWave, more DualSense features and frame
+> pacing arrive with the next one.
 > [01.000.060 remains stable](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.060).
 > Please report results and regressions through [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues), using the checklist in the beta release notes.
 
@@ -20,7 +23,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-PlayStation%205-003791?logo=playstation&amp;logoColor=white" alt="PlayStation 5">
   <img src="https://img.shields.io/badge/video-H.264%20%7C%20HEVC%20%7C%20PyroWave-70E1DC" alt="H.264, HEVC and PyroWave">
-  <img src="https://img.shields.io/badge/frame%20rate-30%E2%80%93120%20FPS-5BBEFF" alt="30 to 120 FPS">
+  <img src="https://img.shields.io/badge/frame%20rate-60%20%7C%2090%20%7C%20120%20FPS-5BBEFF" alt="60, 90, and 120 FPS">
   <img src="https://img.shields.io/badge/audio-Stereo%20%7C%205.1%20Opus-7DD3FC" alt="Stereo and 5.1 Opus audio">
   <img src="https://img.shields.io/badge/UI-OpenGL-5DDFA4" alt="OpenGL launcher">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
@@ -33,7 +36,7 @@ The picture shows the launcher running on a PlayStation 5 with a paired Sunshine
 ## Highlights
 
 - Native PS5 hardware streaming through VideoDec2 and AGC at 1080p, 1440p,
-  and 2160p, with independently selectable integer stream targets from 30 to 120 FPS.
+  and 2160p, with independently selectable 60, 90, and 120 FPS stream targets.
 - Decoding and presentation on separate threads: a late flip never holds back
   decoding, and every display refresh shows the newest decoded frame. See the
   [measured bitrate limits](#bitrate-limits) before raising the bitrate.
@@ -44,7 +47,7 @@ The picture shows the launcher running on a PlayStation 5 with a paired Sunshine
 - Automatic Sunshine discovery, manual address and port entry, persistent
   multi-PC pairing, application artwork, and launch/resume/stop controls.
 - Persistent stream preferences, edge-to-edge or TV-safe presentation,
-  independent frame-rate selection, and numeric bitrate entry from 1 to 1000 Mbps.
+  independent frame-rate selection, and a bitrate slider (to 300 Mbps, to 1000 Mbps with PyroWave).
 - Selectable 48 kHz stereo or 5.1 surround Opus audio, a sound for every
   launcher widget, live performance metrics, and graceful connection recovery.
 
@@ -92,6 +95,9 @@ presented by AGC without copying decoded pixels through a CPU framebuffer.
   by decoder backlog" rises and "Decode (last second)" shows a load near 100%.
   "Frames dropped by your network connection" is a different problem.
 - Bitrates of 300 Mbps and above are beyond these measured native HEVC limits.
+- Other profiles: PyroWave is marked smooth to 500 Mbps, with a warning above it and a
+  stronger one from 700 Mbps. H.264 at 4K is marked smooth to 80 Mbps at 60 FPS and is
+  warned about at 90 and 120 FPS at any bitrate.
 
 Measured on a PS5 with HEVC SDR and eight slices per frame, decoding one frame
 at a time (the default). HDR, H.264 and the lower resolutions are not measured
@@ -112,7 +118,8 @@ Use wired Ethernet and a high bitrate for PyroWave. On one PS5 13.60 setup,
 These observations are not a quality or latency guarantee for other hosts.
 
 Settings offer **Unpaced**, **Paced**, and **Paced+VRR**, alongside independent
-V-Sync. Both video backends use the shared source-clock pacing policy; physical
+V-Sync. Unpaced is the default and presents frames as 01.000.080 did. With the paced
+modes both video backends use the shared source-clock pacing policy; physical
 presentation measurements depend on the backend. See
 [configuration](docs/CONFIGURATION.md#frame-pacing-and-vsync) and
 [interval traces and graphs](docs/frame-pacing-measurements.md).
@@ -123,9 +130,13 @@ Host emulation and game support determine which effects are available.
 Native high-definition waveform playback and controller speaker audio are
 not implemented; see [controller support](docs/DUALSENSE.md).
 
-Diagnostic logs can be disabled in Settings. Text logs retain bounded current
-and previous files; output traces retain the latest bounded capture per backend
-and pacing mode. Menu sounds also have a persistent toggle.
+Diagnostic logs can be turned off in Settings: the stream's reports stop at
+once, the rest of the log from the next start. Output traces keep the latest
+capture per backend and pacing mode. Menu sounds have a switch of their own.
+
+Settings, under Host session, has **Quit host app after stream**: it stops the
+game or app on the PC when leaving the stream. It is off by default, which
+keeps it running. ProsperoLight always returns to its launcher.
 
 ## Project foundation
 
@@ -187,7 +198,7 @@ tooling are maintained in this repository.
   3840x2160 target and 2160p is presented 1:1. High-refresh streams retain the
   same 4K output geometry: 1440p is GPU-scaled to 4K, while 2160p/120 is
   presented through the PS5's native 3840x2160 119.88 Hz output path.
-- Enter a bitrate from 1 to 1000 Mbps with the numeric keyboard. For native HEVC at 4K the Settings screen
+- Set the bitrate from 10 to 300 Mbps on a slider (to 1000 Mbps with PyroWave). For native HEVC at 4K the Settings screen
   shows how close the bitrate is to the decoder's measured limit and warns
   above it.
 - Choose V-Sync, the decoder pipeline (Classic, or the experimental Adaptive),
@@ -274,9 +285,14 @@ Outputs are written to:
 
 ```text
 dist/PPSA99002/           complete title folder
-dist/PPSA99002.exfat      recommended raw installation image
-dist/PPSA99002.ffpfsc     optional compressed installation image
+dist/PPSA99002.exfat      raw installation image
+dist/PPSA99002.ffpfsc     compressed installation image
 ```
+
+`PPSA99002.exfat` holds the same files as the compressed image; the build reads
+every file back and checks its hash. On firmware 13.60 the compressed image was
+seen to mount with duplicated 64 KiB blocks of the executable, while the raw
+image started correctly: prefer the raw image there.
 
 Useful development gates are:
 
@@ -414,8 +430,8 @@ PC, and the next controller to join takes its place.
 
 ## Controls
 
-The physical system/share buttons remain owned by PS5. Use the streaming
-shortcuts below for host Select/Back and PS/Guide.
+The console keeps its own Create and PS buttons. The stream shortcuts below
+send the host's Back and Guide buttons instead.
 
 The icons are the controller's buttons. ![Touchpad][touchpad] is the touchpad button: press the
 touchpad down until it clicks.
@@ -440,8 +456,8 @@ touchpad down until it clicks.
 | ![Touchpad][touchpad] + ![L1][l1] | End the stream and return to ProsperoLight |
 | ![Touchpad][touchpad] + ![Square][square] | Toggle mouse/controller mode |
 | ![Touchpad][touchpad] + ![Triangle][triangle] | Toggle ProsperoLight's stream keyboard |
-| ![Touchpad][touchpad] + ![L3][l3] | Send Select/Back to the host |
-| ![Touchpad][touchpad] + ![R3][r3] | Send PS/Guide to the host |
+| ![Touchpad][touchpad] + ![L3][l3] | Send the Back button to the host |
+| ![Touchpad][touchpad] + ![R3][r3] | Send the Guide button to the host |
 | Physical USB keyboard | Forward keys and modifiers directly to Sunshine |
 | Physical USB mouse | Move, click, and scroll directly on the Sunshine host |
 | Either ![analog stick][stick] in mouse mode | Move the pointer |
@@ -617,20 +633,3 @@ Copyright © 2026 BlackBearReloaded. Licensed under GPL-3.0-or-later; see [LICEN
 
 This project was developed with AI assistance from OpenAI and/or Anthropic tools.
 <!-- bbr-footer:end -->
-
-### Raw production image
-
-Use `PPSA99002.exfat` on PS5. It contains the same production files as the
-compressed image, and the build reads every file back to verify its hash.
-Firmware 13.60 testing exposed duplicated 64 KiB eboot blocks when mounting
-the compressed FFPFSC; the raw image matched the executable and launched
-correctly. The compressed artifact remains available for investigation.
-
-Settings → Host session → `Quit host app after stream` stops the game/app on
-the PC when leaving the stream. Default Off keeps it running. ProsperoLight
-always returns to its launcher.
-
-Decoder load recommendations: PyroWave is green through 500 Mbps, yellow above
-500 and below 700, red at 700–1000, at any resolution/FPS. H.264 4K120 is red
-at any bitrate, 4K90 is yellow, and 4K60 is green through 80 Mbps then red.
-Other H.264 profiles have no recommendation; existing HEVC recommendations remain.

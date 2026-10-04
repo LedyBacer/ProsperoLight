@@ -92,12 +92,12 @@ These checks are useful for maintainers and other console configurations:
 
 ## Logs and reproducibility
 
-`/download0/prosperolight-session.log` records stream profiles, negotiation,
-VideoDec2/AGC setup and errors. `/download0/prosperolight-pyrowave.log` records GPU
-profile, output mode, incoming/decoded/presented FPS, timings, loss and backlog.
-The installed test title uses PPSA99018; upstream's normal app identity remains
-PPSA99002. Both packages use the same signed eboot. Pairings and user configuration
-are deliberately not distributed in the archives.
+`prosperolight-launcher.log` records, on lines tagged `[session]`, stream profiles,
+negotiation, VideoDec2/AGC setup and errors, and for PyroWave the GPU profile, output
+mode, incoming/decoded/presented FPS, timings, loss and backlog.
+The checks above were made by the contributor with a test title on firmware 13.60,
+before the code was merged; the app's identity is PPSA99002. Pairings and user
+configuration are never distributed.
 
 For an issue report include the build hash, console firmware, host version,
 profile, resolution/FPS, bitrate, V-Sync, failure time, shortcuts used and logs.

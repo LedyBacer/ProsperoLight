@@ -5,6 +5,17 @@
 - Replaced the bundled sandbox elevation helper with the cooperative upstream
   PS5-Lapy-JB-Daemon owned-root flow. The app package no longer contains
   `sandbox-elevator.elf` or app-local kernel credential/file-descriptor writes.
+- PyroWave: a GPU wavelet codec decoded with Vulkan, chosen in Settings with 4:2:0 or
+  4:4:4 chroma and SDR or HDR10. It needs a Vibepollo/Vibeshine host that offers it and a
+  wired network; the bitrate slider reaches 1000 Mbps while it is selected.
+- More of the DualSense reaches the game: adaptive triggers, light bar, motion, touchpad
+  contacts, and haptics from hosts that send them.
+- Frame pacing in Settings: Unpaced (the default, as before), Paced and Paced+VRR.
+- Two more stream shortcuts: Touchpad + L3 and Touchpad + R3 send the host's Back and
+  Guide buttons.
+- New switches in Settings: menu sounds, quit the host app after a stream, diagnostic logs.
+- Box art is decoded by libpng, and a raw exFAT installation image is built beside the
+  compressed one.
 
 ## 01.000.080
 

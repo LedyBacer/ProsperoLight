@@ -297,10 +297,9 @@ The host must advertise that exact profile; enable it in Vibepollo/Vibeshine
 and disable compression. Use wired LAN and a high bitrate. Native HEVC bitrate
 limits do not describe the PyroWave GPU decoder. See [PyroWave](PYROWAVE.md).
 
-Hold the touchpad down until it clicks, then press the left stick for host
-Select/Back or the right stick for host PS/Guide. The physical PS/share buttons
-remain owned by PS5. Settings shows all six click combinations beside the
-scrolling list. See [controls](../README.md#controls) and [DualSense](DUALSENSE.md).
+Hold the Touchpad down until it clicks, then press L3 for the host's Back button
+or R3 for Guide. The console keeps its own Create and PS buttons. Settings shows
+all six shortcuts beside the list. See [controls](../README.md#controls) and [DualSense](DUALSENSE.md).
 
 For frame pacing comparison, enable diagnostic logs and collect a bounded
 capture for each mode; [the plotting tool](frame-pacing-measurements.md) shows
@@ -310,11 +309,10 @@ follow `/data/prosperolight/logs`; the fallback is `/download0`.
 ### Native setup fails before the host connection
 
 `sysmodule207=80020063` is a local module-loading failure, not a Sunshine
-encoder/bitrate failure. Filesystem elevation preserves the title root/jail and
-SCE credentials: `/data` is already mounted inside the jail. Otherwise even
-preloaded Videodec2 can fail at its first compute query (`811d0111`) while lazily
-loading VdecCore or codec libraries. Native modules are loaded once before the
-filesystem permission grant and retained across streams. Decoder resources and
-input handles still close at stream exit. Startup results are logged as
-`native modules: phase=before-storage`; keep this line and the compute-query
-result when diagnosing a failure.
+encoder/bitrate failure. The decoder, keyboard and mouse modules are loaded once at
+start, before filesystem access is requested, and kept for every stream; decoder
+resources and input handles still close when a stream ends. The start-up results are
+logged as `native modules: phase=before-storage`; keep this line and the compute-query
+result when diagnosing a failure. On firmware 13.60 Videodec2 was seen to fail at its
+first compute query (`811d0111`) once the process had left the title's sandbox: report
+it if a build with filesystem access shows that.

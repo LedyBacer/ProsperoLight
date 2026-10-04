@@ -9,9 +9,9 @@ report separates these results from untested resolution/bitrate combinations.
 
 ## Settings and profiles
 
-Video bitrate uses the existing PS5 IME. Decimal integers 1–1000 Mbps are accepted,
-invalid input leaves the previous value unchanged, and the stream receives Mbps
-multiplied by 1000. Config v7 preserves migrations from v1–v6, paired host entries,
+Video bitrate is the Settings slider; while PyroWave is selected it reaches 1000 Mbps.
+The stream receives Mbps multiplied by 1000. Configuration version 8 preserves
+migrations from the earlier versions, paired host entries,
 audio, V-Sync and decoder preferences. Default chroma is 4:2:0; the PyroWave chroma
 preference is retained while another codec is selected.
 
@@ -91,8 +91,9 @@ swapchain, device and instance are destroyed; an explicit WSI handoff then stops
 the flip thread, unregisters buffers, restores output mode, closes VideoOut and
 releases direct memory before the launcher reacquires the display.
 
-Logs: `/download0/prosperolight-session.log` contains common session/VD2/AGC
-receipts; `/download0/prosperolight-pyrowave.log` contains GPU timings. Stream-start and ANNOUNCE logs show
+Logs: `prosperolight-launcher.log` (under `/data/prosperolight/logs`, or `/download0` in
+the sandbox) carries the session, VideoDec2/AGC and PyroWave lines, tagged `[session]`.
+Stream-start and ANNOUNCE logs show
 profile, format, resolution, FPS, bitrate, chroma, depth, range, backend and
 bitstream. PyroWave GPU timing stays separate from VideoDec2 decode-load metrics.
 

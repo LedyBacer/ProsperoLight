@@ -1,8 +1,7 @@
 # Native DualSense and multiple controllers
 
-This feature branch starts from upstream `main` at `d7587ea`. It contains no
-PyroWave decoder or RADV dependency. The same controller changes can be merged
-with PyroWave PR #9; the combined test build keeps that PR's validated video paths.
+This describes the controller code in `src/ps5_dualsense.cpp`. It is independent of
+the video codec in use.
 
 ## Existing path and new ownership
 
@@ -28,8 +27,9 @@ original input path.
 ## Implemented
 
 - Four independently numbered controllers; analog sticks/triggers, D-pad,
-  face/shoulder buttons, stick clicks, Options and touchpad click. Host Select/Back
-  and PS/Guide use touchpad click + L3/R3; native Create/PS are system-owned.
+  face/shoulder buttons, stick clicks, Options and the Touchpad button. The host's Back
+  and Guide buttons are sent with Touchpad + L3 and Touchpad + R3; the console keeps
+  its own Create and PS buttons.
 - Two simultaneous touch contacts with stable IDs, normalized coordinates and
   down/move/up/cancel lifecycle. Local UI chords, mouse mode and intercepted
   system input cancel host touches and suppress feedback until focus returns.
@@ -79,8 +79,8 @@ No per-feature hardware tests were performed during implementation. Compilation
 and packaging do not establish pad API permissions or effect fidelity on PS5.
 
 1. Start a stream with one DualSense. Check every button, both sticks and analog
-   triggers; verify touchpad click + L3 sends Select/Back and touchpad click + R3
-   sends PS/Guide to the host. Native Create/PS still open PS5 system UI.
+   triggers; verify that Touchpad + L3 sends Back and Touchpad + R3 sends Guide to
+   the host. The Create and PS buttons still open the console's own menus.
 2. Enable the host's PlayStation/DualSense virtual controller support. In a game
    that outputs effects, check rumble, left/right adaptive resistance and LEDs.
    Inspect `DualSense ...` session-log rows if an effect is missing: distinguish
@@ -103,7 +103,7 @@ and packaging do not establish pad API permissions or effect fidelity on PS5.
 
 ## Review fixes
 
-Touchpad click + L3 sends Select/Back; touchpad click + R3 sends Guide. Both work for all controller slots and suppress constituent button clicks and touch contacts while held. PS/Create remain system-owned. DualSense connections explicitly select scePad rumble mode (2) for legacy vibration. Nonzero low amplitudes are preserved when converting 16-bit host motor values.
+Touchpad + L3 sends the host's Back button; Touchpad + R3 sends Guide. Both work for all controller slots and suppress constituent button clicks and touch contacts while held. PS/Create remain system-owned. DualSense connections explicitly select scePad rumble mode (2) for legacy vibration. Nonzero low amplitudes are preserved when converting 16-bit host motor values.
 
 On Windows Vibepollo can emulate DualSense with `gamepad = vhf_ds5`, provided its virtual gamepad driver is installed. `ds4` uses a PS4 device. Reference: https://github.com/Nonary/Vibepollo/blob/master/docs/configuration.md .
 
@@ -127,4 +127,4 @@ Clang 18 and Python 3.13 with its pinned Mbed TLS code-generation dependencies:
 These host checks do not prove controller output on PS5. User review separately
 confirmed two controllers, rumble, touchpad, RGB, acceleration, gyroscope and
 adaptive triggers in the combined PyroWave preview. Three/four-controller use
-and the new Select/Guide shortcuts have not yet been confirmed by user review.
+and the new Back/Guide shortcuts have not yet been confirmed by user review.

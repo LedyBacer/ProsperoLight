@@ -403,6 +403,7 @@ if [[ ${PYROWAVE:-0} == 1 ]]; then
     cp "$root/.deps/pyrowave/Granite/LICENSE" "$app/licenses/Granite-MIT.txt"
     cp "$root/.deps/pyrowave/Granite/third_party/volk/LICENSE.md" "$app/licenses/Volk-MIT.txt"
     cp "$root/.deps/pyrowave/Granite/third_party/khronos/vulkan-headers/LICENSE.md" "$app/licenses/Vulkan-Headers-LICENSE.md"
+    cp "$root/.deps/pyrowave/PS5_Mesa/docs/license.rst" "$app/licenses/Mesa-license.rst"
 fi
 "$tool" self --inspect --file "$app/eboot.bin"
 python3 "$root/tools/write-build-provenance.py" "$app/eboot.bin" "$build/build-provenance.json"

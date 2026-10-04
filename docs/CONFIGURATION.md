@@ -173,11 +173,11 @@ The launcher requests fixed 60 Hz when its own VideoOut handle opens.
 
 Menu sounds and the presentation policy are stored separately from the paired
 host configuration in `prosperolight-ui-sound.bin` and
-`prosperolight-presentation.bin` under `/download0`.
+`prosperolight-presentation.bin` beside the main configuration
+(`/data/prosperolight/config`, or `/download0` in the sandbox).
 
-The scrolling list contains settings only; two permanent lines below it show
-local touchpad-click combinations and the host Select/Back and PS/Guide
-shortcuts. These lines use the loaded 20 px bitmap font.
+The list holds settings only; the panel beside it shows the six Touchpad
+shortcuts, including the two that send the host's Back and Guide buttons.
 
 Current hardware evidence: H.264 4K60 completed Unpaced, Paced, and
 Paced + VRR selected-policy sessions with zero decoded frames discarded
@@ -187,22 +187,22 @@ pacing comparisons, and HEVC HDR regression checks are pending. H.264 4K120
 recorded decoder timing spikes and input-queue overflows even with Unpaced;
 these limits must not be represented as eliminated by pacing.
 
-### Manual frame-rate entry
+### Frame rate and bitrate
 
-Select Stream frame rate and press Cross to open the same system keyboard used
-for bitrate. Enter any integer from 30 to 120 FPS. Cancel, invalid input and a
-failed save retain the previous value. The saved target is passed unchanged to
-H.264, HEVC or PyroWave and their pacing policy. No configuration-format change
-is required. This is a stream target, not a new fixed HDMI mode: VideoOut uses
-its fixed60/120Hz path or requests VRR. Arbitrary targets such as75FPS can have
-uneven display intervals with fixed-refresh VSync; sustained decoding capacity
-and active VRR still require console verification.
+Frame rate is one of 60, 90 or 120 FPS and bitrate is a slider from 10 to 300 Mbps
+(to 1000 Mbps while PyroWave is selected), as in 01.000.080. A settings file may hold
+any target from 30 to 120 FPS; the row then shows the preset at or below it.
 
 ### Diagnostic logs
 
-`Diagnostic logs` enables or disables application diagnostic files, LAN diagnostic telemetry, and end-of-stream performance exports. It defaults to On and is stored independently beside the main config (`config/prosperolight-logging.bin` under `/data/prosperolight`, or `/download0/prosperolight-logging.bin` in the sandbox). Disabling keeps existing files for inspection; it does not erase them or disable the statistics overlay.
+`Diagnostic logs` turns the stream's diagnostic lines and the end-of-stream performance
+exports on or off. It defaults to On and is stored beside the main configuration as
+`prosperolight-logging.bin`. The stream's reports stop at once; the rest of the log
+follows the switch from the next start.
 
-Session, PyroWave and menu-output text logs rotate at 1 MiB each, retaining one `.previous` file per log (up to 6 MiB for those three logs). Rotation is size-based and can occur within a long stream; files are not reset on every connection. Legacy oversized current logs are discarded on their next write. Performance JSON/CSV files replace the previous report rather than accumulating sessions. System/etaHEN logs are outside this switch.
+Every line goes to `prosperolight-launcher.log`, tagged `[session]` or `[menu-output]`.
+The log of the previous launch is kept as `prosperolight-launcher.prev.log`, and a log
+that passes 8 MiB within one launch starts again.
 
 ### Source-clock frame pacing
 
