@@ -121,7 +121,7 @@ void kept_path(char *path, std::size_t size, const Kept &kept)
 
 int g_log_file = -1;
 char g_log_path[176];
-constexpr off_t kLogLimit = 1024 * 1024;
+constexpr off_t kLogLimit = 8 * 1024 * 1024;
 
 // Toggle/flush on this owner thread. Slow filesystem writes stay away from
 // the display thread. Every launch has one bounded current/previous log.
@@ -146,18 +146,16 @@ void bound_log(int descriptor)
         (void)ftruncate(descriptor, 0);
 }
 
+// Writes what the streams hold into the log file, a few times a second. A
+// write to a file under /data takes tens of milliseconds, so the lines wait in
+// memory and this thread pays for the writes. The Diagnostic logs switch
+// silences the stream reports at once; the streams themselves are opened once,
+// at start, and never reopened under running threads.
 void *log_flusher(void *)
 {
-    bool enabled = prosperolight_logs_enabled() != 0;
     for (;;)
     {
         usleep(200000);
-        const bool requested = prosperolight_logs_enabled() != 0;
-        if (requested != enabled)
-        {
-            redirect_log_streams(requested);
-            enabled = requested;
-        }
         std::fflush(stdout);
         std::fflush(stderr);
         bound_log(g_log_file);
@@ -192,8 +190,9 @@ void open_log(const char *folder)
         pthread_detach(flusher);
     else
     {
-        // Without a retention owner, avoid leaving an unbounded log behind.
-        redirect_log_streams(false);
+        // Without the thread every line is written at once, as before.
+        std::setvbuf(stdout, nullptr, _IONBF, 0);
+        std::setvbuf(stderr, nullptr, _IONBF, 0);
     }
 }
 

@@ -14,14 +14,12 @@
 #include <stdio.h>
 #include <mutex>
 #include <string.h>
-#include <sys/stat.h>
 
 namespace
 {
 std::mutex log_mutex;
 bool logs_loaded = false;
 bool logs_enabled = true;
-constexpr size_t log_limit = 1024 * 1024;
 std::string log_settings()
 {
     return storage::setting_file("prosperolight-logging.bin");
@@ -74,41 +72,21 @@ void prosperolight_log_append(const char *path, const char *message)
 {
     if (!path || !message)
         return;
-    const std::string resolved = std::string(storage::paths().logs) + "/" +
-                                 (strrchr(path, '/') ? strrchr(path, '/') + 1 : path);
-    path = resolved.c_str();
-    std::lock_guard<std::mutex> guard(log_mutex);
-    load_logs();
-    if (!logs_enabled)
-        return;
-    const size_t length = strnlen(message, log_limit - 1);
-    struct stat info
     {
-    };
-    if (stat(path, &info) == 0 && static_cast<uint64_t>(info.st_size) + length + 1 > log_limit)
-    {
-        char previous[256];
-        if (snprintf(previous, sizeof(previous), "%s.previous", path) >=
-            static_cast<int>(sizeof(previous)))
+        std::lock_guard<std::mutex> guard(log_mutex);
+        load_logs();
+        if (!logs_enabled)
             return;
-        // Oversized logs from earlier builds must not become an unbounded backup.
-        if (info.st_size > static_cast<off_t>(log_limit))
-        {
-            if (remove(path) != 0)
-                return;
-        }
-        else
-        {
-            if (rename(path, previous) != 0)
-                return;
-        }
     }
-    if (FILE *file = fopen(path, "a"))
-    {
-        fwrite(message, 1, length, file);
-        fputc('\n', file);
-        fclose(file);
-    }
+    // A write to a file under /data takes tens of milliseconds, and these
+    // lines come from the receive, decode and present threads. They go into
+    // the buffered launcher log, tagged with the name of the report they
+    // belong to; the storage flusher thread pays for the write.
+    const char *name = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
+    if (strncmp(name, "prosperolight-", 14) == 0)
+        name += 14;
+    printf("[%.*s] %.*s\n", static_cast<int>(strcspn(name, ".")), name,
+           static_cast<int>(strnlen(message, 4096)), message);
 }
 
 #ifndef PROSPEROLIGHT_LAN_TELEMETRY

@@ -13,7 +13,6 @@ void log_line(const char *fmt, ...)
     va_start(args, fmt);
     vsnprintf(text, sizeof(text), fmt, args);
     va_end(args);
-    prosperolight_log_append("prosperolight-pyrowave.log", text);
     (void)lan_http_report_text(text);
 }
 [[noreturn]] void fail(const char *reason)
