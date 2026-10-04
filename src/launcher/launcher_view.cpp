@@ -1897,19 +1897,19 @@ void View::draw_settings(ui::Canvas &canvas, ui::Painter &paint) const
     // What the controller does during a stream, in the buttons' own shapes.
     shortcut_panel_.draw(canvas, kShortcutPanel);
     const Rect keys = shortcut_panel_.content_rect(kShortcutPanel).inset(12.0f);
-    paint.label(ui::upper("Hold touchpad click"), keys.x, keys.y + 20.0f, 19.0f, t.text_muted);
+    paint.label(ui::upper("During a stream"), keys.x, keys.y + 20.0f, 19.0f, t.text_muted);
     struct Shortcut
     {
         ui::Button second;
         const char *what;
     };
     static constexpr Shortcut kShortcuts[] = {
-        {ui::Button::l1, "Return"},
+        {ui::Button::l1, "Leave stream"},
         {ui::Button::r1, "Statistics"},
         {ui::Button::square, "Mouse mode"},
         {ui::Button::triangle, "Keyboard"},
-        {ui::Button::left_stick, "Select/Back"},
-        {ui::Button::right_stick, "PS/Guide"},
+        {ui::Button::left_stick, "Host Back"},
+        {ui::Button::right_stick, "Host Guide"},
     };
     const ui::GlyphStyle glyph = t.dark ? ui::GlyphStyle::dark() : ui::GlyphStyle::light();
     for (int i = 0; i < 6; ++i)
