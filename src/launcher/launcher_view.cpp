@@ -465,7 +465,8 @@ void View::build()
     form_.style.header_height = 54.0f;
     form_.style.label_size = 26.0f;
     form_.style.control_width = 440.0f;
-    form_.style.number_width = 124.0f;
+    // Wide enough for "1000 Mbps", which the PyroWave range reaches.
+    form_.style.number_width = 156.0f;
     form_.style.highlight.kind = ui::HighlightKind::tint;
     form_.set_bounds({kMargin - 20.0f, kContentTop - 8.0f, 1060.0f, 720.0f});
 
