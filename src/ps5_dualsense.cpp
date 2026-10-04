@@ -173,8 +173,8 @@ int Disconnect(unsigned index)
     int result = 0;
     if (live && slot.announced)
     {
-        result = LiSendMultiControllerEvent(index, WireMask() & ~(1u << index), 0, 0, 0, 0, 0,
-                                            0, 0);
+        result =
+            LiSendMultiControllerEvent(index, WireMask() & ~(1u << index), 0, 0, 0, 0, 0, 0, 0);
         ++statistics.removals;
         if (result != 0)
             ++statistics.send_errors;
@@ -659,10 +659,9 @@ void Poll()
                         memcmp(axes, slot.sent_axes, sizeof(axes)) != 0;
                     if (changed || now - slot.last_input >= 100000)
                     {
-                        const int result =
-                            LiSendMultiControllerEvent(i, WireMask(), buttons, triggers[0],
-                                                       triggers[1], axes[0], axes[1], axes[2],
-                                                       axes[3]);
+                        const int result = LiSendMultiControllerEvent(
+                            i, WireMask(), buttons, triggers[0], triggers[1], axes[0], axes[1],
+                            axes[2], axes[3]);
                         if (result == 0)
                         {
                             ++slot.input_events;

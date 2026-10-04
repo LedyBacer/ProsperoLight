@@ -4334,8 +4334,7 @@ configure_stream:
                 snprintf(notification.message, sizeof(notification.message),
                          "ProsperoLight: Controller %u %s.", pad + 1u,
                          (pads_before & (1u << pad)) ? "disconnected" : "connected");
-                (void)sceKernelSendNotificationRequest(0, &notification, sizeof(notification),
-                                                       0);
+                (void)sceKernelSendNotificationRequest(0, &notification, sizeof(notification), 0);
                 (void)lan_http_report_text(notification.message);
             }
         const unsigned pad_actions = prosperolight::dualsense::TakeLocalActions();

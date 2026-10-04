@@ -431,8 +431,8 @@ void View::build()
     form_.add_toggle(kHdr, "HDR", false).description =
         "HDR10 through HEVC Main10 or 10-bit PyroWave, when advertised by the "
         "PC.";
-    ui::FormRow &bitrate = form_.add_slider(kBitrate, "Bitrate", 20.0f, kBitrateStep, kBitrateMax,
-                                            kBitrateStep);
+    ui::FormRow &bitrate =
+        form_.add_slider(kBitrate, "Bitrate", 20.0f, kBitrateStep, kBitrateMax, kBitrateStep);
     bitrate.unit = " Mbps";
     bitrate.description = "Higher is not always better: the decoder sets the limit.";
     form_.add_header("Sound");
@@ -1869,12 +1869,9 @@ void View::draw_settings(ui::Canvas &canvas, ui::Painter &paint) const
         const char *what;
     };
     static constexpr Shortcut kShortcuts[] = {
-        {ui::Button::l1, "Leave stream"},
-        {ui::Button::r1, "Statistics"},
-        {ui::Button::square, "Mouse mode"},
-        {ui::Button::triangle, "Keyboard"},
-        {ui::Button::left_stick, "Host Back"},
-        {ui::Button::right_stick, "Host Guide"},
+        {ui::Button::l1, "Leave stream"},      {ui::Button::r1, "Statistics"},
+        {ui::Button::square, "Mouse mode"},    {ui::Button::triangle, "Keyboard"},
+        {ui::Button::left_stick, "Host Back"}, {ui::Button::right_stick, "Host Guide"},
     };
     const ui::GlyphStyle glyph = t.dark ? ui::GlyphStyle::dark() : ui::GlyphStyle::light();
     for (int i = 0; i < 6; ++i)
