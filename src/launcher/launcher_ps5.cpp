@@ -96,6 +96,9 @@ View::Storage StorageFolders()
 }
 
 #if PROSPEROLIGHT_STREAM_SELF_TEST_FPS != 0
+#ifndef PROSPEROLIGHT_STREAM_SELF_TEST_CODEC
+#define PROSPEROLIGHT_STREAM_SELF_TEST_CODEC MOONLIGHT_VIDEO_CODEC_HEVC
+#endif
 bool high_refresh_self_test_consumed;
 #endif
 #if PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST != 0
@@ -503,7 +506,7 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                     if (FillSelection(model, selection))
                     {
                         selection->bitrate_kbps = 80000;
-                        selection->video_codec = MOONLIGHT_VIDEO_CODEC_HEVC;
+                        selection->video_codec = PROSPEROLIGHT_STREAM_SELF_TEST_CODEC;
                         selection->stream_resolution = PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION;
                         selection->stream_fps = PROSPEROLIGHT_STREAM_SELF_TEST_FPS;
                         selection->hdr_enabled = 0;
