@@ -95,6 +95,13 @@ View::Storage StorageFolders()
     return folders;
 }
 
+#if PROSPEROLIGHT_STREAM_SELF_TEST_FPS != 0
+bool high_refresh_self_test_consumed;
+#endif
+#if PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST != 0
+bool stop_active_app_self_test_consumed;
+#endif
+
 bool LoadFont(gfx::Renderer &renderer, const char *name, gfx::Font *font, ui::FontRef *ref)
 {
     std::string data;
