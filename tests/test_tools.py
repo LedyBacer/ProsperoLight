@@ -161,10 +161,11 @@ class ToolTests(unittest.TestCase):
 
         for fps in (60, 90, 120):
             self.assertIn(f"#define MOONLIGHT_STREAM_FPS_{fps} {fps}U", config)
-        self.assertIn('form_.add_action(kFrameRate, "Frame rate")', view)
-        self.assertIn('number_prompt_.keyboard.set_layouts({ui::KeyboardLayout::numeric()});', view)
-        self.assertIn('MOONLIGHT_STREAM_FPS_MIN', view)
-        self.assertIn('MOONLIGHT_STREAM_FPS_MAX', view)
+        self.assertIn('form_.add_choice(kFrameRate, "Frame rate", {"60 FPS", "90 FPS", "120 FPS"}, 0)',
+                      view)
+        # Frame rate and bitrate keep their released widgets; nothing is typed.
+        self.assertIn('form_.add_slider(kBitrate, "Bitrate", 20.0f, kBitrateStep, kBitrateMax,', view)
+        self.assertNotIn("number_prompt_", view)
         self.assertIn("selection->stream_fps = config.stream_fps;", platform)
         self.assertIn("options.stream_fps = selection.stream_fps;", launcher)
         self.assertIn("stream_config.fps = (int)stream_fps;", stream)
@@ -200,13 +201,13 @@ class ToolTests(unittest.TestCase):
     def test_frame_rate_is_independent_of_resolution_and_bitrate(self):
         source = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
         settings = source[source.index("void View::apply_setting(int id)"):]
-        resolution = settings[settings.index("case kResolution:"):settings.index("case kCodec:")]
+        resolution = settings[settings.index("case kResolution:") : settings.index("case kFrameRate:")]
+        frame_rate = settings[settings.index("case kFrameRate:") : settings.index("case kCodec:")]
+
         self.assertNotIn("stream_fps", resolution)
-        numeric = source[source.index("else if (number_prompt_.is_open())"):]
-        numeric = numeric[:numeric.index("else if (port_prompt_.is_open())")]
-        self.assertIn("config.stream_fps = value;", numeric)
-        self.assertNotIn("stream_resolution", numeric)
-        self.assertIn("config.bitrate_mbps = value;", numeric)
+        self.assertIn("config.stream_fps = kRates[", frame_rate)
+        self.assertNotIn("stream_resolution", frame_rate)
+        self.assertNotIn("bitrate", frame_rate)
 
     def test_high_refresh_self_test_is_compile_time_disabled(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")

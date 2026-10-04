@@ -180,7 +180,7 @@ tooling are maintained in this repository.
 - See every saved PC and its state in one list, and browse up to 64 advertised
   Sunshine applications as posters with launch/resume and stop controls.
 - Decode H.264 High and HEVC Main streams through VideoDec2 at 1080p, 1440p,
-  and 2160p. Enter 30-120 FPS independently of resolution and bitrate;
+  and 2160p, with independently selectable 60, 90, and 120 FPS stream targets;
   live 1440p/90 and 2160p/120 Sunshine sessions are hardware-validated.
 - Present decoded GPU surfaces directly through AGC, with edge-to-edge and
   television-safe display modes. At 60 FPS, 1440p is GPU-scaled into a

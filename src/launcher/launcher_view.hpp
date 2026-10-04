@@ -235,8 +235,6 @@ class View
     hui::ui::Countdown pair_timer_;
     bool pair_timer_started_ = false;
     hui::ui::InputPrompt port_prompt_;
-    hui::ui::InputPrompt number_prompt_;
-    int number_setting_ = 0;
     hui::ui::InputPrompt host_prompt_;
     hui::ui::Dialog unpair_dialog_;
     hui::ui::LoadingScreen loader_;

@@ -565,34 +565,30 @@ int main(int argc, char **argv)
     // ---- back from a stream that failed ----
     session("games", {{80, 0, Direction::none, "stream-error"}}, "Sunshine closed the connection");
 
-    // ---- Settings: custom FPS/bitrate use numeric prompts, not presets ----
+    // ---- Settings: the frame-rate presets and the bitrate slider, beside the new rows ----
     (void)prosperolight::host_quit_set_enabled(false);
     moonlight_config_t initial_settings{};
     (void)moonlight_config_load(&initial_settings);
     initial_settings.video_codec = MOONLIGHT_VIDEO_CODEC_PYROWAVE;
     initial_settings.hdr_enabled = 1;
     initial_settings.chroma_sampling = MOONLIGHT_CHROMA_444;
-    initial_settings.stream_fps = 117;
+    initial_settings.stream_fps = MOONLIGHT_STREAM_FPS_120;
     initial_settings.bitrate_mbps = 600;
     session("settings",
             {
                 {30, options},
                 {30, 0, Direction::none, "pyrowave-hdr"},
                 {10, 0, Direction::down},
-                {10, confirm},
-                {40, 0, Direction::none, "fps-keyboard"},
-                {10, 0, Direction::down},
-                {20, confirm}, // Done keeps the entered custom FPS.
+                {20, 0, Direction::left},
+                {40, 0, Direction::none, "fps-preset"},
                 {10, 0, Direction::down},
                 {20, 0, Direction::right},
                 {30, 0, Direction::none, "h264"},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
-                {10, confirm},
-                {40, 0, Direction::none, "bitrate-keyboard"},
-                {10, 0, Direction::down},
-                {20, confirm},
+                {20, 0, Direction::left},
+                {40, 0, Direction::none, "bitrate-slider"},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
@@ -601,6 +597,8 @@ int main(int argc, char **argv)
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
+                {10, 0, Direction::right},
+                {10, 0},
                 {10, 0, Direction::right},
                 {40, 0, Direction::none, "paced-vrr"},
                 {10, 0, Direction::down},
@@ -614,8 +612,8 @@ int main(int argc, char **argv)
     {
         moonlight_config_t saved{};
         (void)moonlight_config_load(&saved);
-        expect(saved.bitrate_mbps == 600 && saved.stream_fps == 117,
-               "numeric prompts preserve independent custom bitrate and FPS");
+        expect(saved.bitrate_mbps == 590 && saved.stream_fps == MOONLIGHT_STREAM_FPS_90,
+               "the presets and the slider save frame rate and bitrate independently");
         expect(saved.video_codec == MOONLIGHT_VIDEO_CODEC_H264 && saved.hdr_enabled == 0,
                "choosing H.264 turns HDR off");
         expect(moonlight::presentation_mode() == 2u, "the new pacing row persists Paced+VRR");

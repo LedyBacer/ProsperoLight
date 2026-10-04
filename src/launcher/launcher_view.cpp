@@ -81,6 +81,11 @@ enum FormId
     kHostQuit,
 };
 
+constexpr float kBitrateStep = 10.0f;
+constexpr float kBitrateMax = 300.0f;
+// PyroWave works in the hundreds of Mbps: the slider reaches further for it.
+constexpr float kPyroWaveBitrateMax = 1000.0f;
+
 ui::Theme theme_by_id(const char *id)
 {
     for (const ui::Theme &theme : ui::themes())
@@ -417,8 +422,8 @@ void View::build()
         .add_choice(kResolution, "Resolution",
                     {"1920 \xC3\x97 1080", "2560 \xC3\x97 1440", "3840 \xC3\x97 2160"}, 0)
         .description = "The picture Sunshine encodes. 1440p is scaled to the 4K output.";
-    form_.add_action(kFrameRate, "Frame rate").description =
-        "Open to enter 30-120 FPS. Above 60 FPS uses high-refresh output.";
+    form_.add_choice(kFrameRate, "Frame rate", {"60 FPS", "90 FPS", "120 FPS"}, 0).description =
+        "90 and 120 FPS use the 119.88 Hz output mode.";
     form_.add_choice(kCodec, "Video codec", {"H.264", "HEVC", "PyroWave"}, 0).description =
         "PyroWave needs a compatible host, high bitrate and wired LAN.";
     form_.add_choice(kChroma, "Chroma sampling", {"4:2:0", "4:4:4"}, 0).description =
@@ -426,7 +431,10 @@ void View::build()
     form_.add_toggle(kHdr, "HDR", false).description =
         "HDR10 through HEVC Main10 or 10-bit PyroWave, when advertised by the "
         "PC.";
-    form_.add_action(kBitrate, "Bitrate").description = "Open to enter 1-1000 Mbps.";
+    ui::FormRow &bitrate = form_.add_slider(kBitrate, "Bitrate", 20.0f, kBitrateStep, kBitrateMax,
+                                            kBitrateStep);
+    bitrate.unit = " Mbps";
+    bitrate.description = "Higher is not always better: the decoder sets the limit.";
     form_.add_header("Sound");
     form_.add_choice(kAudio, "Audio", {"Stereo", "5.1 surround"}, 0).description =
         "48 kHz Opus, decoded on the console.";
@@ -507,14 +515,6 @@ void View::build()
     pair_timer_.style.on_panel = true;
     pair_timer_.label = "left";
     pair_timer_.set_bounds({kPairPanel.cx() - 60.0f, kPairPanel.y + 368.0f, 120.0f, 120.0f});
-
-    number_prompt_.style.width = 560.0f;
-    number_prompt_.style.max_length = 4;
-    number_prompt_.style.auto_capital = false;
-    number_prompt_.style.allow_empty = false;
-    number_prompt_.style.key_height = 66.0f;
-    number_prompt_.style.buttons = false;
-    number_prompt_.keyboard.set_layouts({ui::KeyboardLayout::numeric()});
 
     port_prompt_.style.width = 560.0f;
     port_prompt_.style.max_length = 5;
@@ -601,7 +601,6 @@ void View::restyle()
     pin_.style.theme = t;
     pair_timer_.style.theme = t;
     port_prompt_.style.theme = t;
-    number_prompt_.style.theme = t;
     host_prompt_.style.theme = t;
     unpair_dialog_.style.theme = t;
     loader_.style.theme = t;
@@ -767,12 +766,19 @@ void View::sync_settings_from_config()
 {
     const moonlight_config_t &config = model_.config();
     form_.set_choice(kResolution, static_cast<int>(std::min(config.stream_resolution, 2u)));
-    form_.set_value_text(kFrameRate, std::to_string(config.stream_fps) + " FPS");
+    form_.set_choice(kFrameRate, config.stream_fps >= MOONLIGHT_STREAM_FPS_120  ? 2
+                                 : config.stream_fps >= MOONLIGHT_STREAM_FPS_90 ? 1
+                                                                                : 0);
     form_.set_choice(kCodec, static_cast<int>(std::min(config.video_codec, 2u)));
     form_.set_choice(kChroma, config.chroma_sampling == MOONLIGHT_CHROMA_444 ? 1 : 0);
     form_.row(kChroma)->disabled = config.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE;
     form_.set_toggle(kHdr, config.hdr_enabled != 0);
-    form_.set_value_text(kBitrate, std::to_string(config.bitrate_mbps) + " Mbps");
+    if (ui::FormRow *bitrate = form_.row(kBitrate))
+        bitrate->maximum =
+            std::max(config.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE ? kPyroWaveBitrateMax
+                                                                          : kBitrateMax,
+                     static_cast<float>(config.bitrate_mbps));
+    form_.set_slider(kBitrate, static_cast<float>(config.bitrate_mbps));
     form_.set_choice(kPacing, static_cast<int>(moonlight::presentation_mode()));
     form_.set_toggle(kLogging, prosperolight_logs_enabled() != 0);
     form_.set_toggle(kUiSound, prosperolight::ui_sound_enabled());
@@ -796,6 +802,13 @@ void View::apply_setting(int id)
     case kResolution:
         config.stream_resolution = static_cast<std::uint32_t>(form_.choice_index(kResolution));
         break;
+    case kFrameRate:
+    {
+        static constexpr unsigned kRates[] = {MOONLIGHT_STREAM_FPS_60, MOONLIGHT_STREAM_FPS_90,
+                                              MOONLIGHT_STREAM_FPS_120};
+        config.stream_fps = kRates[std::clamp(form_.choice_index(kFrameRate), 0, 2)];
+        break;
+    }
     case kCodec:
         config.video_codec = static_cast<std::uint32_t>(form_.choice_index(kCodec));
         if (config.video_codec == MOONLIGHT_VIDEO_CODEC_H264)
@@ -809,6 +822,9 @@ void View::apply_setting(int id)
         config.hdr_enabled = form_.toggle_value(kHdr) ? 1u : 0u;
         if (config.hdr_enabled && config.video_codec == MOONLIGHT_VIDEO_CODEC_H264)
             config.video_codec = MOONLIGHT_VIDEO_CODEC_HEVC;
+        break;
+    case kBitrate:
+        config.bitrate_mbps = static_cast<std::uint32_t>(std::lround(form_.slider_value(kBitrate)));
         break;
     case kPacing:
         if (!moonlight::save_presentation_mode(static_cast<unsigned>(form_.choice_index(kPacing))))
@@ -1063,43 +1079,6 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
         if (load_progress_ >= kHandoverProgress)
             start_stream_ = true;
     }
-    else if (number_prompt_.is_open())
-    {
-        if (number_prompt_.handle(input, feedback) == ui::Event::activated)
-        {
-            const auto text = number_prompt_.text();
-            unsigned value = 0;
-            bool valid = !text.empty() && text.size() <= 4;
-            for (char ch : text)
-            {
-                if (ch < '0' || ch > '9')
-                    valid = false;
-                else
-                    value = value * 10 + static_cast<unsigned>(ch - '0');
-            }
-            const unsigned minimum = number_setting_ == kFrameRate ? MOONLIGHT_STREAM_FPS_MIN : 1u;
-            const unsigned maximum =
-                number_setting_ == kFrameRate ? MOONLIGHT_STREAM_FPS_MAX : 1000u;
-            if (valid && value >= minimum && value <= maximum)
-            {
-                auto &config = model_.settings();
-                if (number_setting_ == kFrameRate)
-                    config.stream_fps = value;
-                else
-                    config.bitrate_mbps = value;
-                model_.SettingsChanged();
-                sync_settings_from_config();
-                sync_profile(false);
-                feedback.play(audio::Cue::saved);
-            }
-            else
-            {
-                number_prompt_.open(feedback, text);
-                number_prompt_.field.set_error("Enter " + std::to_string(minimum) + "-" +
-                                               std::to_string(maximum));
-            }
-        }
-    }
     else if (host_prompt_.is_open())
     {
         if (host_prompt_.handle(input, feedback) == ui::Event::activated)
@@ -1210,7 +1189,6 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     pin_.update(dt);
     pair_timer_.update(dt);
     port_prompt_.update(dt);
-    number_prompt_.update(dt);
     host_prompt_.update(dt);
     unpair_dialog_.update(dt);
     toasts_.update(dt, feedback);
@@ -1441,21 +1419,8 @@ void View::launch(ui::Feedback &feedback)
 
 void View::update_settings(const InputFrame &input, ui::Feedback &feedback)
 {
-    const auto event = form_.handle(input, feedback);
-    if (event == ui::Event::changed)
+    if (form_.handle(input, feedback) == ui::Event::changed)
         apply_setting(form_.changed_id());
-    else if (event == ui::Event::activated)
-    {
-        number_setting_ = form_.changed_id();
-        if (number_setting_ != kFrameRate && number_setting_ != kBitrate)
-            return;
-        const bool fps = number_setting_ == kFrameRate;
-        number_prompt_.style.max_length = fps ? 3 : 4;
-        number_prompt_.set_title(fps ? "Stream frame rate" : "Video bitrate");
-        number_prompt_.field.set_helper(fps ? "30-120 FPS" : "1-1000 Mbps");
-        number_prompt_.open(feedback, std::to_string(fps ? model_.config().stream_fps
-                                                         : model_.config().bitrate_mbps));
-    }
 }
 
 // ---- drawing -------------------------------------------------------------
@@ -1515,7 +1480,6 @@ void View::draw(Frame &frame) const
     toasts_.draw(above);
     draw_pairing(above);
     port_prompt_.draw(above);
-    number_prompt_.draw(above);
     host_prompt_.draw(above);
     unpair_dialog_.draw(above);
     loader_.draw(above);
