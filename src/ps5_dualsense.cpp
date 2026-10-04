@@ -68,6 +68,11 @@ struct Slot
     uint16_t motion_rate[2]{};
     uint64_t motion_next[2]{}, last_input = 0;
     uint32_t local_buttons = 0;
+    // What the host last received for this pad; unchanged input is not resent.
+    bool sent_valid = false;
+    int sent_buttons = 0;
+    uint8_t sent_triggers[2]{};
+    int16_t sent_axes[4]{};
     uint8_t rumble[2]{}, color[3]{};
     bool rumble_dirty = false, led_dirty = false, trigger_dirty = false;
     TriggerParam triggers{};
@@ -85,6 +90,16 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 bool initialized = false, live = false;
 uint64_t next_discovery = 0, next_report = 0;
 uint16_t active_mask = 0;
+// Hosts add and remove controllers from the mask alone, so a packet names
+// only the controllers whose arrival the host has already received.
+uint16_t WireMask()
+{
+    uint16_t mask = 0;
+    for (unsigned i = 0; i < MaxControllers; ++i)
+        if (slots[i].announced)
+            mask |= static_cast<uint16_t>(1u << i);
+    return mask;
+}
 Statistics statistics{};
 unsigned local_actions = 0;
 struct Lock
@@ -158,13 +173,14 @@ int Disconnect(unsigned index)
     int result = 0;
     if (live && slot.announced)
     {
-        result = LiSendMultiControllerEvent(index, active_mask, 0, 0, 0, 0, 0, 0, 0);
+        result = LiSendMultiControllerEvent(index, WireMask() & ~(1u << index), 0, 0, 0, 0, 0,
+                                            0, 0);
         ++statistics.removals;
         if (result != 0)
             ++statistics.send_errors;
     }
     ResetOutput(slot);
-    slot.connected = slot.announced = false;
+    slot.connected = slot.announced = slot.sent_valid = false;
     slot.last_input = 0;
     slot.local_buttons = 0;
     return result;
@@ -213,7 +229,7 @@ int Announce(unsigned index)
         return -1;
     if (slot.announced)
         return 0;
-    const int result = LiSendControllerArrivalEvent(index, active_mask, LI_CTYPE_PS,
+    const int result = LiSendControllerArrivalEvent(index, WireMask() | (1u << index), LI_CTYPE_PS,
                                                     SupportedButtons(), Capabilities);
     if (result == 0)
     {
@@ -557,7 +573,7 @@ int SendPrimary(int buttons, uint8_t lt, uint8_t rt, int16_t lx, int16_t ly, int
     int result = Announce(0);
     if (result != 0)
         return result;
-    result = LiSendMultiControllerEvent(0, active_mask, buttons, lt, rt, lx, ly, rx, ry);
+    result = LiSendMultiControllerEvent(0, WireMask(), buttons, lt, rt, lx, ly, rx, ry);
     if (result != 0)
         ++statistics.send_errors;
     return result;
@@ -625,28 +641,47 @@ void Poll()
                 ExtendedInput(i, *newest, suppressed);
                 if (slot.connected && Announce(i) == 0)
                 {
-                    const int result = LiSendMultiControllerEvent(
-                        i, active_mask, suppressed ? 0 : Buttons(newest->buttons),
-                        suppressed ? 0 : newest->left_trigger,
-                        suppressed ? 0 : newest->right_trigger,
-                        suppressed ? 0 : Axis(newest->left_x, false),
-                        suppressed ? 0 : Axis(newest->left_y, true),
-                        suppressed ? 0 : Axis(newest->right_x, false),
-                        suppressed ? 0 : Axis(newest->right_y, true));
-                    if (result == 0)
+                    const int buttons = suppressed ? 0 : Buttons(newest->buttons);
+                    const uint8_t triggers[2] = {
+                        static_cast<uint8_t>(suppressed ? 0 : newest->left_trigger),
+                        static_cast<uint8_t>(suppressed ? 0 : newest->right_trigger)};
+                    const int16_t axes[4] = {
+                        static_cast<int16_t>(suppressed ? 0 : Axis(newest->left_x, false)),
+                        static_cast<int16_t>(suppressed ? 0 : Axis(newest->left_y, true)),
+                        static_cast<int16_t>(suppressed ? 0 : Axis(newest->right_x, false)),
+                        static_cast<int16_t>(suppressed ? 0 : Axis(newest->right_y, true))};
+                    // A pad reports hundreds of samples a second. The host
+                    // hears of it when its state changes, and at the idle
+                    // interval otherwise.
+                    const bool changed =
+                        !slot.sent_valid || buttons != slot.sent_buttons ||
+                        memcmp(triggers, slot.sent_triggers, sizeof(triggers)) != 0 ||
+                        memcmp(axes, slot.sent_axes, sizeof(axes)) != 0;
+                    if (changed || now - slot.last_input >= 100000)
                     {
-                        ++slot.input_events;
-                        slot.last_input = now;
+                        const int result =
+                            LiSendMultiControllerEvent(i, WireMask(), buttons, triggers[0],
+                                                       triggers[1], axes[0], axes[1], axes[2],
+                                                       axes[3]);
+                        if (result == 0)
+                        {
+                            ++slot.input_events;
+                            slot.last_input = now;
+                            slot.sent_valid = true;
+                            slot.sent_buttons = buttons;
+                            memcpy(slot.sent_triggers, triggers, sizeof(triggers));
+                            memcpy(slot.sent_axes, axes, sizeof(axes));
+                        }
+                        else
+                            ++statistics.send_errors;
                     }
-                    else
-                        ++statistics.send_errors;
                 }
             }
             else if (slot.connected && now - slot.last_input >= 100000 && slot.announced)
             {
                 const PadSample &sample = slot.previous;
                 const int result = LiSendMultiControllerEvent(
-                    i, active_mask, slot.intercepted ? 0 : Buttons(sample.buttons),
+                    i, WireMask(), slot.intercepted ? 0 : Buttons(sample.buttons),
                     slot.intercepted ? 0 : sample.left_trigger,
                     slot.intercepted ? 0 : sample.right_trigger,
                     slot.intercepted ? 0 : Axis(sample.left_x, false),

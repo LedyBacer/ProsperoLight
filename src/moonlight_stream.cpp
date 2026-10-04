@@ -4323,7 +4323,21 @@ configure_stream:
         }
         if (controller_ready)
             ps5_controller_poll(&controller);
+        const uint16_t pads_before = prosperolight::dualsense::ActiveMask();
         prosperolight::dualsense::Poll();
+        // A controller that joins or leaves during the stream is announced.
+        const uint16_t pads_changed = pads_before ^ prosperolight::dualsense::ActiveMask();
+        for (unsigned pad = 1; pads_changed && pad < prosperolight::dualsense::MaxControllers;
+             ++pad)
+            if (pads_changed & (1u << pad))
+            {
+                snprintf(notification.message, sizeof(notification.message),
+                         "ProsperoLight: Controller %u %s.", pad + 1u,
+                         (pads_before & (1u << pad)) ? "disconnected" : "connected");
+                (void)sceKernelSendNotificationRequest(0, &notification, sizeof(notification),
+                                                       0);
+                (void)lan_http_report_text(notification.message);
+            }
         const unsigned pad_actions = prosperolight::dualsense::TakeLocalActions();
         if (pad_actions & prosperolight::dualsense::ToggleStatistics)
             native_agc_set_hud_enabled(!native_agc_hud_enabled());
