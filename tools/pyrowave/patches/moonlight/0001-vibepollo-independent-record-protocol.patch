@@ -288,7 +288,7 @@ index a4e022e..8172191 100644
 -        if (isReferenceFrameInvalidationEnabled() && !queue->reportedLostFrame && !queue->receivedOosData) {
 +        // PyroWave frames are delivered with holes (see completeBlockWithLostPackets()), so an
 +        // unrecoverable block is not a lost frame there.
-+        if (!queue->reportedLostFrame && !queue->receivedOosData &&
++        if (isReferenceFrameInvalidationEnabled() && !queue->reportedLostFrame && !queue->receivedOosData &&
 +                !(NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE)) {
              // NB: We use totalPackets - neededPackets instead of just bufferParityPackets here because we require
              // one extra parity shard for recovery if we're in FEC validation mode.
