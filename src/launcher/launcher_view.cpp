@@ -440,7 +440,7 @@ void View::build()
         "TV safe keeps a margin for televisions that crop the picture.";
     form_.add_toggle(kVsync, "V-Sync", true).description =
         "Off shows each frame at once: lower latency, visible tearing.";
-    form_.add_choice(kPacing, "Frame pacing", {"Unpaced", "Paced", "Paced+VRR"}, 1).description =
+    form_.add_choice(kPacing, "Frame pacing", {"Unpaced", "Paced", "Paced+VRR"}, 0).description =
         "Smooth frame timing; VRR uses fixed refresh if unavailable.";
     form_.add_header("Decoder");
     form_.add_choice(kPipeline, "Pipeline", {"Classic", "Adaptive (experimental)"}, 0).description =

@@ -14,12 +14,12 @@ inline unsigned presentation_mode()
     unsigned char bytes[5]{};
     FILE *file = std::fopen(storage::setting_file("prosperolight-presentation.bin").c_str(), "rb");
     if (!file)
-        return 1;
+        return 0;
     const bool valid = std::fread(bytes, 1, sizeof(bytes), file) == sizeof(bytes) &&
                        bytes[0] == 'P' && bytes[1] == 'L' && bytes[2] == 'V' && bytes[3] == 1 &&
                        bytes[4] <= 2;
     std::fclose(file);
-    return valid ? bytes[4] : 1;
+    return valid ? bytes[4] : 0;
 }
 inline bool save_presentation_mode(unsigned mode)
 {

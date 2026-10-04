@@ -2176,7 +2176,7 @@ static void *video_decode_thread(void *context)
 }
 
 static moonlight::FramePacing stream_pacer;
-static unsigned stream_presentation_mode = 1;
+static unsigned stream_presentation_mode = 0;
 
 static bool wait_presentation_deadline(native_renderer_state_t *state,
                                        const stream_ready_frame_t &item)
@@ -3959,6 +3959,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     // Apply this session's policy before that first open, not after negotiation.
     stream_presentation_mode = moonlight::presentation_mode();
     native_agc_set_vrr(stream_presentation_mode == 2);
+    native_agc_set_unpaced_90_fps_unpeg(stream_presentation_mode == 0);
     native_agc_set_vsync((int)vsync_enabled);
     snprintf(notification.message, sizeof(notification.message),
              "Moonlight output policy: mode=%u vrr_requested=%u vsync_requested=%u",

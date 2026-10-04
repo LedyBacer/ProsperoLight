@@ -86,6 +86,8 @@ void native_agc_set_tv_safe_area(int enabled);
 // a rejected immediate flip falls back to V-Sync for the rest of the process.
 void native_agc_set_vsync(int enabled);
 void native_agc_set_vrr(int enabled);
+// An unpaced 90 FPS stream leaves the fixed 120 Hz rate, as 01.000.080 did.
+void native_agc_set_unpaced_90_fps_unpeg(int enabled);
 int native_agc_vsync_active(void);
 int native_agc_vrr_active(void);
 int native_agc_flip_events_active(void);

@@ -987,6 +987,7 @@ static std::atomic<uint32_t> requested_flip_mode = VIDEO_OUT_FLIP_MODE_VSYNC;
 static std::atomic<int> hsync_rejected = 0;
 static std::atomic<int> vrr_requested = 0;
 static std::atomic<int> vrr_active = 0;
+static std::atomic<int> unpaced_90_fps_unpeg = 0;
 
 int native_agc_vrr_active(void)
 {
@@ -1004,6 +1005,11 @@ void native_agc_set_vrr(int enabled)
 {
     vrr_active.store(0, std::memory_order_relaxed);
     vrr_requested.store(enabled != 0, std::memory_order_relaxed);
+}
+
+void native_agc_set_unpaced_90_fps_unpeg(int enabled)
+{
+    unpaced_90_fps_unpeg.store(enabled != 0, std::memory_order_relaxed);
 }
 
 void native_agc_set_vsync(int enabled)
@@ -1213,7 +1219,8 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
     *preset_result = sceVideoOutConfigureOutput(handle, VIDEO_OUT_REQUEST_120_HZ, NULL, NULL, NULL);
     if (*preset_result != 0)
         return *preset_result;
-    if (vrr_requested.load(std::memory_order_relaxed))
+    if (vrr_requested.load(std::memory_order_relaxed) ||
+        (requested_fps == 90u && unpaced_90_fps_unpeg.load(std::memory_order_relaxed)))
     {
         *vrr_result = sceVideoOutVrrUnpegFromFixedRate(handle);
         vrr_active.store(*vrr_result == 0, std::memory_order_relaxed);
