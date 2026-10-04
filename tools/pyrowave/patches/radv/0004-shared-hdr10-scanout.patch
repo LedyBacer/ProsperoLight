@@ -1,0 +1,144 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -43,6 +43,7 @@
+ #include "vk_util.h"
+ #include "wsi_common_entrypoints.h"
+ #include "wsi_common_private.h"
++#include "ps5_videoout_formats.h"
+ 
+ #if defined(__PROSPERO__)
+ #include <immintrin.h>
+@@ -218,6 +219,9 @@
+    struct wsi_videoout_swapchain *current;
+ 
+    /* The flip thread and its queue. */
++   bool hdr;
++   bool prefer_high_refresh;
++   uint32_t flip_mode;
+    bool stopping;
+    int64_t physical;
+    bool thread_started;
+@@ -229,6 +233,8 @@
+ static struct wsi_videoout_output videoout_output = {
+    .handle = -1,
+    .physical = -1,
++   .flip_mode = 1,
++   .prefer_high_refresh = true,
+ };
+ static once_flag videoout_once = ONCE_FLAG_INIT;
+ 
+@@ -325,7 +331,7 @@
+       fprintf(stderr, "wsi/videoout: sceVideoOutOpen failed: 0x%08x\n", (unsigned)out->handle);
+       return false;
+    }
+-   if (videoout_title_declares_high_frame_rate()) {
++   if (out->prefer_high_refresh && videoout_title_declares_high_frame_rate()) {
+       const int supported =
+          sceVideoOutIsOutputSupported(out->handle, PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE, NULL, NULL, NULL);
+       const int configured =
+@@ -408,7 +414,7 @@
+    for (uint32_t i = 0; i < VIDEOOUT_BUFFERS; i++)
+       registered[i] = (struct ps5_video_out_buffer){.data = buffers + i * VIDEOOUT_BUFFER_BYTES};
+    uint8_t attribute[PS5_VIDEO_OUT_ATTRIBUTE_BYTES] = {0};
+-   sceVideoOutSetBufferAttribute2(attribute, PS5_VIDEO_OUT_PIXEL_FORMAT_B8G8R8A8_SDR,
++   sceVideoOutSetBufferAttribute2(attribute, out->hdr ? VIDEO_OUT_PIXEL_FORMAT_HDR : VIDEO_OUT_PIXEL_FORMAT_SDR,
+                                   PS5_VIDEO_OUT_TILING_64KB_R_X, VIDEOOUT_WIDTH, VIDEOOUT_HEIGHT, 0, 0, 0);
+    if (result == 0)
+       result = sceVideoOutRegisterBuffers2(out->handle, 0, 0, registered, VIDEOOUT_BUFFERS, attribute, 0, NULL);
+@@ -452,8 +458,13 @@
+ 
+       mtx_lock(&out->lock);
+       const int64_t argument = out->flip_argument + 1;
+-      const int result = sceVideoOutSubmitFlip(out->handle, (int32_t)present.buffer, PS5_VIDEO_OUT_FLIP_VSYNC,
++      int result = sceVideoOutSubmitFlip(out->handle, (int32_t)present.buffer, out->flip_mode,
+                                                argument);
++      if (result != 0 && out->flip_mode == 2u) {
++         fprintf(stderr, "wsi/videoout: HSYNC refused (%08x); falling back to VSYNC\n", (unsigned)result);
++         out->flip_mode = 1u;
++         result = sceVideoOutSubmitFlip(out->handle, (int32_t)present.buffer, out->flip_mode, argument);
++      }
+       if (result == 0) {
+          out->flip_argument = argument;
+          out->buffer[present.buffer].argument = argument;
+@@ -746,6 +757,7 @@
+ static const VkFormat videoout_formats[] = {
+    VK_FORMAT_B8G8R8A8_UNORM,
+    VK_FORMAT_B8G8R8A8_SRGB,
++   VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+ };
+ 
+ static VkResult
+@@ -757,7 +769,8 @@
+       vk_outarray_append_typed(VkSurfaceFormatKHR, &out, f)
+       {
+          f->format = videoout_formats[i];
+-         f->colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
++         f->colorSpace = videoout_formats[i] == VK_FORMAT_A2B10G10R10_UNORM_PACK32
++            ? VK_COLOR_SPACE_HDR10_ST2084_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+       }
+    }
+    return vk_outarray_status(&out);
+@@ -773,7 +786,8 @@
+       {
+          assert(f->sType == VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR);
+          f->surfaceFormat.format = videoout_formats[i];
+-         f->surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
++         f->surfaceFormat.colorSpace = videoout_formats[i] == VK_FORMAT_A2B10G10R10_UNORM_PACK32
++            ? VK_COLOR_SPACE_HDR10_ST2084_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+       }
+    }
+    return vk_outarray_status(&out);
+@@ -786,6 +800,8 @@
+    VK_OUTARRAY_MAKE_TYPED(VkPresentModeKHR, out, pPresentModes, pPresentModeCount);
+    vk_outarray_append_typed(VkPresentModeKHR, &out, mode)
+       *mode = VK_PRESENT_MODE_FIFO_KHR;
++   vk_outarray_append_typed(VkPresentModeKHR, &out, mode)
++      *mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    return vk_outarray_status(&out);
+ }
+ 
+@@ -1046,7 +1062,10 @@
+       return VK_ERROR_INITIALIZATION_FAILED;
+ 
+    mtx_lock(&out->lock);
+-   VkResult result = videoout_register_locked();
++   const bool hdr = pCreateInfo->imageColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT;
++   VkResult result = hdr != out->hdr ||
++      (hdr && pCreateInfo->imageFormat != VK_FORMAT_A2B10G10R10_UNORM_PACK32)
++      ? VK_ERROR_FORMAT_NOT_SUPPORTED : videoout_register_locked();
+    if (result == VK_SUCCESS && out->current && out->current != (struct wsi_videoout_swapchain *)
+                                                  wsi_swapchain_from_handle(pCreateInfo->oldSwapchain))
+       result = VK_ERROR_NATIVE_WINDOW_IN_USE_KHR;
+@@ -1075,7 +1094,7 @@
+    chain->base.release_images = videoout_swapchain_release_images;
+    chain->base.queue_present = videoout_swapchain_queue_present;
+    chain->base.wait_for_present = videoout_swapchain_wait_for_present;
+-   chain->base.present_mode = VK_PRESENT_MODE_FIFO_KHR;
++   chain->base.present_mode = pCreateInfo->presentMode;
+    chain->base.image_count = num_images;
+ 
+    for (uint32_t i = 0; i < num_images; i++) {
+@@ -1208,3 +1227,23 @@
+    mtx_unlock(&out->lock);
+    return result;
+ }
++
++/* Application selects scanout semantics before creating a display surface.
++ * Uses the same verified VideoOut format and HSYNC flip mode as VideoDec2.
++ */
++int wsi_ps5_configure_output(int hdr, int vsync, int high_refresh);
++int wsi_ps5_configure_output(int hdr, int vsync, int high_refresh)
++{
++   call_once(&videoout_once, videoout_output_init_once);
++   struct wsi_videoout_output *out = &videoout_output;
++   mtx_lock(&out->lock);
++   if (out->buffers || out->current || out->queue_count) {
++      mtx_unlock(&out->lock);
++      return -1;
++   }
++   out->hdr = hdr != 0;
++   out->prefer_high_refresh = high_refresh != 0;
++   out->flip_mode = vsync ? 1u : 2u;
++   mtx_unlock(&out->lock);
++   return 0;
++}

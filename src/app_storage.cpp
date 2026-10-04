@@ -5,6 +5,7 @@
  */
 
 #include "app_storage.hpp"
+#include "lan_http_report.hpp"
 
 #include "elevation/elevation.hpp"
 
@@ -51,12 +52,21 @@ struct Kept
 char g_kept_config[256 * 1024];
 char g_kept_certificate[16 * 1024];
 char g_kept_key[16 * 1024];
+char g_kept_preferences[4][16];
 Kept g_kept[] = {
     {"/download0/prosperolight-config.bin", "config", "prosperolight-config.bin", g_kept_config,
      sizeof(g_kept_config), 0},
     {"/download0/moonlight/cert.pem", "pairing", "cert.pem", g_kept_certificate,
      sizeof(g_kept_certificate), 0},
     {"/download0/moonlight/key.pem", "pairing", "key.pem", g_kept_key, sizeof(g_kept_key), 0},
+    {"/download0/prosperolight-presentation.bin", "config", "prosperolight-presentation.bin",
+     g_kept_preferences[0], sizeof(g_kept_preferences[0]), 0},
+    {"/download0/prosperolight-logging.bin", "config", "prosperolight-logging.bin",
+     g_kept_preferences[1], sizeof(g_kept_preferences[1]), 0},
+    {"/download0/prosperolight-ui-sound.bin", "config", "prosperolight-ui-sound.bin",
+     g_kept_preferences[2], sizeof(g_kept_preferences[2]), 0},
+    {"/download0/prosperolight-host-quit.bin", "config", "prosperolight-host-quit.bin",
+     g_kept_preferences[3], sizeof(g_kept_preferences[3]), 0},
 };
 
 bool is_file(const char *path)
@@ -110,41 +120,67 @@ void kept_path(char *path, std::size_t size, const Kept &kept)
 }
 
 int g_log_file = -1;
+char g_log_path[176];
+constexpr off_t kLogLimit = 1024 * 1024;
 
-// Writes what the streams hold into the log file, a few times a second. A
-// write to a file under /data takes tens of milliseconds; the OpenGL runtime
-// writes some forty lines of statistics every ten thousand draws, and with
-// unbuffered streams the screen stood still for a second each time. Now the
-// lines wait in memory and this thread pays for the writes.
+// Toggle/flush on this owner thread. Slow filesystem writes stay away from
+// the display thread. Every launch has one bounded current/previous log.
+void redirect_log_streams(bool enabled)
+{
+    const char *path = enabled ? g_log_path : "/dev/null";
+    for (FILE *file : {stdout, stderr})
+    {
+        flockfile(file);
+        if (std::freopen(path, "a", file))
+            std::setvbuf(file, nullptr, _IOFBF, 64u * 1024u);
+        funlockfile(file);
+    }
+}
+
+void bound_log(int descriptor)
+{
+    struct stat info
+    {
+    };
+    if (descriptor >= 0 && fstat(descriptor, &info) == 0 && info.st_size > kLogLimit)
+        (void)ftruncate(descriptor, 0);
+}
+
 void *log_flusher(void *)
 {
+    bool enabled = prosperolight_logs_enabled() != 0;
     for (;;)
     {
         usleep(200000);
+        const bool requested = prosperolight_logs_enabled() != 0;
+        if (requested != enabled)
+        {
+            redirect_log_streams(requested);
+            enabled = requested;
+        }
         std::fflush(stdout);
         std::fflush(stderr);
+        bound_log(g_log_file);
     }
     return nullptr;
 }
 
 void open_log(const char *folder)
 {
-    char path[176];
     char previous[176];
-    std::snprintf(path, sizeof(path), "%s/%s", folder, kLogName);
+    std::snprintf(g_log_path, sizeof(g_log_path), "%s/%s", folder, kLogName);
     std::snprintf(previous, sizeof(previous), "%s/%s", folder, kPreviousLogName);
-    // Keep the previous launch's log: it is the one that explains a crash.
-    std::rename(path, previous);
-    std::FILE *stream = std::freopen(path, "w", stdout);
-    // Start a fresh file, then make both streams append to it.
-    if (stream != nullptr)
-        stream = std::freopen(path, "a", stdout);
-    const bool out = stream != nullptr;
-    stream = std::freopen(path, "a", stderr);
-    const bool err = stream != nullptr;
-    // The crash report writes into the file itself: a fault may come before
-    // the next flush.
-    g_log_file = open(path, O_WRONLY | O_APPEND);
+    // Oversized legacy logs must not become an unbounded previous-launch copy.
+    int legacy = open(g_log_path, O_WRONLY);
+    bound_log(legacy);
+    if (legacy >= 0)
+        close(legacy);
+    std::rename(g_log_path, previous);
+    FILE *initial = std::fopen(g_log_path, "w");
+    if (initial)
+        std::fclose(initial);
+    g_log_file = open(g_log_path, O_WRONLY | O_APPEND);
+    redirect_log_streams(prosperolight_logs_enabled() != 0);
 
     pthread_attr_t attributes;
     pthread_attr_init(&attributes);
@@ -154,11 +190,11 @@ void open_log(const char *folder)
     pthread_attr_destroy(&attributes);
     if (started)
         pthread_detach(flusher);
-    // Without the thread every line is written at once, as before.
-    if (out)
-        std::setvbuf(stdout, nullptr, started ? _IOFBF : _IONBF, started ? 64u * 1024u : 0u);
-    if (err)
-        std::setvbuf(stderr, nullptr, started ? _IOFBF : _IONBF, started ? 64u * 1024u : 0u);
+    else
+    {
+        // Without a retention owner, avoid leaving an unbounded log behind.
+        redirect_log_streams(false);
+    }
 }
 
 void say(const char *line)
@@ -222,8 +258,17 @@ void storage::Initialize()
                       data_ready ? "pairing" : "moonlight");
         std::snprintf(paths.logs, sizeof(paths.logs), "%s%s", base, data_ready ? "/logs" : "");
         std::snprintf(paths.performance, sizeof(paths.performance), "%s/%s", base,
-                      data_ready ? "logs" : "moonlight");
+                      data_ready ? "logs" : "");
     }
+    // Preferences must arrive before the log switch is read for the first time.
+    if (data_ready)
+        for (std::size_t i = 3; i < sizeof(g_kept) / sizeof(g_kept[0]); ++i)
+        {
+            char destination[176];
+            kept_path(destination, sizeof(destination), g_kept[i]);
+            if (g_kept[i].size && !is_file(destination))
+                (void)write_new(destination, g_kept[i]);
+        }
     open_log(paths.logs);
 
     // The OpenGL runtime keeps the shaders it compiled, so later launches, and

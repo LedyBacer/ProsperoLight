@@ -10,7 +10,7 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 bash tools/setup-native-dependencies.sh >/dev/null
-# The launcher's sources include the OpenGL SDK's headers: clang-tidy needs them.
+# The launcher static analysis needs the verified OpenGL SDK headers.
 bash tools/prepare-opengl.sh >/dev/null
 bash tools/run_clang_format.sh --check
 bash tools/run_clang_tidy.sh
@@ -25,6 +25,14 @@ for file in "${repository_files[@]}"; do
             ;;
         *.c|*.cc|*.cpp|*.h|*.hpp|*.ld|*.py|*.ps1|*.sh|*.yml|*.yaml|Makefile|.clang-format|.clang-tidy|.env.example)
             header=$(head -n 20 "$file")
+            case "$file" in
+                src/pyrowave/*|tools/pyrowave/*|include/stream_profile.hpp|include/ps5_videoout_formats.h)
+                    # Retain the MIT license of the reused PoC and protocol parser.
+                    grep -Eq 'SPDX-License-Identifier: (MIT|GPL-3.0-or-later)' <<<"$header"
+                    ((checked += 1))
+                    continue
+                    ;;
+            esac
             grep -Fq ps5-native-app-boilerplate <<<"$header"
             grep -Fq 'Copyright (C) 2026 BlackBearReloaded' <<<"$header"
             grep -Fq 'SPDX-License-Identifier: GPL-3.0-or-later' <<<"$header"

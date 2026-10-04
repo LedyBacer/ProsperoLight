@@ -55,6 +55,33 @@ def main():
         "stream_dependencies_key": (ROOT / "build/stream-deps/options").read_text().strip(),
         "eboot_sha256": digest(executable),
     }
+    patch = ROOT / "tools/pyrowave/patches/moonlight/0001-vibepollo-independent-record-protocol.patch"
+    receipt["moonlight_protocol_patch_sha256"] = digest(patch)
+    if "PROSPEROLIGHT_PYROWAVE=1" in receipt["definitions"]:
+        pins = {}
+        for line in (ROOT / "tools/pyrowave/pins.sh").read_text().splitlines():
+            if "_REV=" in line:
+                name, revision = line.split("=", 1)
+                pins[name] = revision
+        archives = [Path(line) for line in (ROOT / "build/pyrowave/archives.txt").read_text().splitlines() if line]
+        archives.append(ROOT / ".deps/pyrowave/PS5_Vulkan/.deps/native/radv-release/lib/libvulkan_radeon.ps5.a")
+        receipt["pyrowave"] = {"pins": pins, "bitstream": "186f0393",
+            "archives": [{"name": p.name, "sha256": digest(p)} for p in archives],
+            "wsi_patches": {p.name: digest(p) for p in sorted((ROOT / "tools/pyrowave/patches/radv").glob("*.patch"))},
+            "shared_scanout_header_sha256": digest(ROOT / "include/ps5_videoout_formats.h")}
+    gl = ROOT / ".deps/ps5-opengl/current"
+    receipt["opengl"] = {"manifest_sha256": digest(gl / "manifest.sha256"),
+                         "sdk_headers_sha256": digest(gl / "include/ps5_opengl_display.h")}
+    if "PROSPEROLIGHT_PYROWAVE=1" in receipt["definitions"]:
+        derived = ROOT / "build/pyrowave/opengl-isolated"
+        receipt["graphics_isolation"] = {
+            "opengl_input_key": (derived / "input.sha256").read_text().strip(),
+            "radv_input_key": (derived / "radv-input.sha256").read_text().strip(),
+            "opengl_symbol_map_sha256": digest(derived / "mesa-symbols.txt"),
+            "radv_runtime_symbol_map_sha256": digest(derived / "radv-runtime-symbols.txt"),
+            "radv_derived_archive_sha256": digest(derived / "radv-isolated.a"),
+            "allocator": "ps5platform (shared by launcher, native and PyroWave)",
+        }
     destination.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     print(f"Build provenance: {destination}")
 

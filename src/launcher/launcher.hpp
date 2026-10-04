@@ -27,6 +27,7 @@ struct Selection
     unsigned stream_resolution = MOONLIGHT_STREAM_RESOLUTION_1080P;
     unsigned stream_fps = MOONLIGHT_STREAM_FPS_60;
     unsigned hdr_enabled = 0;
+    unsigned chroma_sampling = MOONLIGHT_CHROMA_420;
     unsigned audio_configuration = MOONLIGHT_AUDIO_STEREO;
     unsigned vsync_enabled = 1;
     unsigned decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_CLASSIC;

@@ -5,6 +5,7 @@
  */
 
 #include "moonlight_backend.hpp"
+#include "server_endpoint.h"
 
 #include "app_storage.hpp"
 
@@ -83,6 +84,9 @@ int moonlight_backend_refresh(const char *host, uint16_t http_port,
     snapshot->https_port = server.https_port;
     snapshot->current_app_id = server.current_game;
     snapshot->hevc_supported = (server.server_codec_mode_support & SCM_MASK_HEVC) != 0;
+    snapshot->pyrowave_profiles =
+        server.server_codec_mode_support &
+        (SCM_PYROWAVE | SCM_PYROWAVE_444 | SCM_PYROWAVE_HDR10 | SCM_PYROWAVE_HDR10_444);
     snapshot->main10_supported = (server.server_codec_mode_support & SCM_HEVC_MAIN10) != 0;
     snprintf(snapshot->server_version, sizeof(snapshot->server_version), "%s", server.app_version);
     snprintf(snapshot->name, sizeof(snapshot->name), "%s",
@@ -339,7 +343,14 @@ int moonlight_backend_fetch_app_artwork(const char *host, uint16_t https_port, i
     http_init(&identity, 0);
     http_set_timeout_ms(1500);
     snprintf(path, sizeof(path), "/appasset?appid=%d&AssetType=2&AssetIdx=0", app_id);
-    result = http_get(host, https_port, 1, path, &response);
+    char hostname[128];
+    uint16_t ignored_port;
+    if (!server_endpoint_parse(host, hostname, sizeof(hostname), 47989, &ignored_port))
+    {
+        identity_free(&identity);
+        return GS_INVALID;
+    }
+    result = http_get(hostname, https_port, 1, path, &response);
     http_set_timeout_ms(0);
     identity_free(&identity);
     if (result != GS_OK)

@@ -530,3 +530,21 @@ had already exited cleanly and production files had already been restored. The
 wrapper now waits for the title-specific `runtime layers released` marker
 before restoring or relaunching, and production deployment remains a separate
 bounded cycle.
+
+## Combined branch after upstream 01.000.080
+
+The combined development branch preserves the earlier hardware-reviewed
+PyroWave and DualSense implementations while adopting upstream's OpenGL
+launcher, storage migration, connecting plate, crash reports and update check.
+Earlier hardware results are documented in [PyroWave regression](PYROWAVE-REGRESSION.md)
+and [DualSense](DUALSENSE.md). Those results do not validate this new launcher
+and graphics-library combination on console hardware.
+
+After installing the combined build, review saved PC/pairing migration, custom
+port display/editing, numeric FPS/bitrate, all seven video profiles, codec
+changes without restarting, pacing/V-Sync, stream exit and relaunch, and two
+controllers with rumble/LED/adaptive triggers. Confirm the six touchpad-click
+shortcut hints remain visible at both ends of the settings scroll. Verify
+logging and menu-sound toggles survive restart. Output interval traces measure
+software presentation events; use physical display measurements when judging
+actual scanout smoothness.

@@ -96,6 +96,8 @@ def svg_icons():
             "Analog stick"),
         "l1": shoulder("L1"),
         "r1": shoulder("R1"),
+        "l3": shoulder("L3"),
+        "r3": shoulder("R3"),
         "touchpad": svg(
             56,
             cap(56)

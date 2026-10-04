@@ -61,6 +61,7 @@ int describe(const char *host, std::uint16_t port, moonlight_backend_snapshot_t 
     snapshot->current_app_id = pc->current_app;
     snapshot->hevc_supported = pc->hevc ? 1u : 0u;
     snapshot->main10_supported = pc->main10 ? 1u : 0u;
+    snapshot->pyrowave_profiles = pc->pyrowave_profiles;
     std::snprintf(snapshot->name, sizeof(snapshot->name), "%s", pc->name.c_str());
     std::snprintf(snapshot->unique_id, sizeof(snapshot->unique_id), "id-%s", pc->name.c_str());
     std::snprintf(snapshot->server_version, sizeof(snapshot->server_version), "7.1.431.-1");

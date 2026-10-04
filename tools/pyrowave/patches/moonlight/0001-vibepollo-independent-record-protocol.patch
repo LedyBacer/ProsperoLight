@@ -1,0 +1,1038 @@
+diff --git a/src/Limelight.h b/src/Limelight.h
+index 22bee46..2f2c1c7 100644
+--- a/src/Limelight.h
++++ b/src/Limelight.h
+@@ -100,6 +100,10 @@ typedef struct _STREAM_CONFIGURATION {
+     // in /launch and /resume requests.
+     char remoteInputAesKey[16];
+     char remoteInputAesIv[16];
++
++    // Request independent PyroWave compression only after checking host support.
++    // Zero preserves the normal intra-only PyroWave stream.
++    int pyrowaveCompression;
+ } STREAM_CONFIGURATION, *PSTREAM_CONFIGURATION;
+ 
+ // Use this function to zero the stream configuration when allocated on the stack or heap
+@@ -113,6 +117,17 @@ void LiInitializeStreamConfiguration(PSTREAM_CONFIGURATION streamConfig);
+ #define BUFFER_TYPE_PPS      0x02
+ #define BUFFER_TYPE_VPS      0x03
+ 
++// A zero-filled buffer standing in for a packet that never arrived. Only
++// PyroWave frames carry these: every PyroWave frame is independent, so a frame
++// with missing packets is still delivered and the decoder salvages the rest.
++// The buffer has the length the lost packet's payload would have had.
++#define BUFFER_TYPE_LOST     0x04
++
++// PyroWave picture data whose first byte starts a record, as flagged by the
++// host (vibeshine). After a lost record header, parsing resumes at the next
++// such buffer. Other PyroWave picture data is BUFFER_TYPE_PICDATA.
++#define BUFFER_TYPE_RECORD_START 0x05
++
+ typedef struct _LENTRY {
+     // Pointer to the next entry or NULL if this is the last entry
+     struct _LENTRY* next;
+@@ -123,7 +138,8 @@ typedef struct _LENTRY {
+     // Size of data in bytes (never <= 0)
+     int length;
+ 
+-    // Buffer type (listed above, only set for H.264 and HEVC formats)
++    // Buffer type (listed above, only set for H.264 and HEVC formats, except
++    // BUFFER_TYPE_LOST and BUFFER_TYPE_RECORD_START which PyroWave frames carry)
+     int bufferType;
+ } LENTRY, *PLENTRY;
+ 
+@@ -191,6 +207,12 @@ typedef struct _DECODE_UNIT {
+     // Note: This is not currently parsed from the actual bitstream, so if your
+     // client has access to a bitstream parser, prefer that over this field.
+     uint8_t colorspace;
++
++    // PyroWave only: the number of leading buffers (RTP packets) that hold the
++    // sequence header and the coarsest wavelet level, as the host announced it
++    // in the frame header, or 0 if it did not. A frame that lost any of them
++    // cannot be decoded; a loss after them only blurs part of the picture.
++    uint16_t pyrowaveCriticalPackets;
+ } DECODE_UNIT, *PDECODE_UNIT;
+ 
+ // Specifies that the audio stream should be encoded in stereo (default)
+@@ -233,12 +255,33 @@ typedef struct _DECODE_UNIT {
+ #define VIDEO_FORMAT_AV1_HIGH8_444   0x4000 // AV1 High 4:4:4 8-bit profile
+ #define VIDEO_FORMAT_AV1_HIGH10_444  0x8000 // AV1 High 4:4:4 10-bit profile
+ 
++// PyroWave intra-only GPU wavelet codec (Sunshine extension). The values match
++// the Aurora/Solarflare implementation. Every frame is independently decodable;
++// see moonlight-qt docs/pyrowave-protocol.md for the wire format.
++#define VIDEO_FORMAT_PYROWAVE           0x010000 // PyroWave 8-bit 4:2:0
++#define VIDEO_FORMAT_PYROWAVE_444       0x020000 // PyroWave 8-bit 4:4:4
++#define VIDEO_FORMAT_PYROWAVE_HDR10     0x040000 // PyroWave 10-bit 4:2:0 (HDR10 on HDR displays)
++#define VIDEO_FORMAT_PYROWAVE_HDR10_444 0x080000 // PyroWave 10-bit 4:4:4
++
+ // Masks for clients to use to match video codecs without profile-specific details.
+-#define VIDEO_FORMAT_MASK_H264   0x000F
+-#define VIDEO_FORMAT_MASK_H265   0x0F00
+-#define VIDEO_FORMAT_MASK_AV1    0xF000
+-#define VIDEO_FORMAT_MASK_10BIT  0xAA00
+-#define VIDEO_FORMAT_MASK_YUV444 0xCC04
++#define VIDEO_FORMAT_MASK_H264     0x000F
++#define VIDEO_FORMAT_MASK_H265     0x0F00
++#define VIDEO_FORMAT_MASK_AV1      0xF000
++#define VIDEO_FORMAT_MASK_PYROWAVE 0x0F0000
++#define VIDEO_FORMAT_MASK_10BIT    0xCAA00
++#define VIDEO_FORMAT_MASK_YUV444   0xACC04
++
++// PyroWave bitstream identity (first 8 hex digits of the pyrowave commit the
++// codec was vendored from). The bitstream has no version field of its own, so
++// Sunshine hosts advertise theirs in the RTSP DESCRIBE response.
++#define PYROWAVE_BITSTREAM_ID "186f0393"
++
++// x-ss-video[0].pyrowaveFeatures bits sent in the RTSP ANNOUNCE.
++// Partial-frame decoding needs no bit: a record-framed client always decodes
++// what arrives, and 0x2 (once reserved for it) is ignored by hosts.
++#define PYROWAVE_FEATURE_RECORD_FRAMING 0x1 // Parses record framing with padding records
++#define PYROWAVE_FEATURE_COMPRESSION         0x8 // Independent LZ4 detail groups; no frame references
++#define PYROWAVE_COMPRESSION_VERSION         1
+ 
+ // If set in the renderer capabilities field, this flag will cause audio/video data to
+ // be submitted directly from the receive thread. This should only be specified if the
+@@ -513,13 +556,18 @@ void LiInitializeConnectionCallbacks(PCONNECTION_LISTENER_CALLBACKS clCallbacks)
+ #define SCM_HEVC_REXT10_444 0x00100000 // Sunshine extension
+ #define SCM_AV1_HIGH8_444   0x00200000 // Sunshine extension
+ #define SCM_AV1_HIGH10_444  0x00400000 // Sunshine extension
++#define SCM_PYROWAVE           0x00800000 // Sunshine extension
++#define SCM_PYROWAVE_444       0x01000000 // Sunshine extension
++#define SCM_PYROWAVE_HDR10     0x02000000 // Sunshine extension
++#define SCM_PYROWAVE_HDR10_444 0x04000000 // Sunshine extension
+ 
+ // SCM masks to identify various codec capabilities
+-#define SCM_MASK_H264   (SCM_H264 | SCM_H264_HIGH8_444)
+-#define SCM_MASK_HEVC   (SCM_HEVC | SCM_HEVC_MAIN10 | SCM_HEVC_REXT8_444 | SCM_HEVC_REXT10_444)
+-#define SCM_MASK_AV1    (SCM_AV1_MAIN8 | SCM_AV1_MAIN10 | SCM_AV1_HIGH8_444 | SCM_AV1_HIGH10_444)
+-#define SCM_MASK_10BIT  (SCM_HEVC_MAIN10 | SCM_HEVC_REXT10_444 | SCM_AV1_MAIN10 | SCM_AV1_HIGH10_444)
+-#define SCM_MASK_YUV444 (SCM_H264_HIGH8_444 | SCM_HEVC_REXT8_444 | SCM_HEVC_REXT10_444 | SCM_AV1_HIGH8_444 | SCM_AV1_HIGH10_444)
++#define SCM_MASK_H264     (SCM_H264 | SCM_H264_HIGH8_444)
++#define SCM_MASK_HEVC     (SCM_HEVC | SCM_HEVC_MAIN10 | SCM_HEVC_REXT8_444 | SCM_HEVC_REXT10_444)
++#define SCM_MASK_AV1      (SCM_AV1_MAIN8 | SCM_AV1_MAIN10 | SCM_AV1_HIGH8_444 | SCM_AV1_HIGH10_444)
++#define SCM_MASK_PYROWAVE (SCM_PYROWAVE | SCM_PYROWAVE_444 | SCM_PYROWAVE_HDR10 | SCM_PYROWAVE_HDR10_444)
++#define SCM_MASK_10BIT    (SCM_HEVC_MAIN10 | SCM_HEVC_REXT10_444 | SCM_AV1_MAIN10 | SCM_AV1_HIGH10_444 | SCM_PYROWAVE_HDR10 | SCM_PYROWAVE_HDR10_444)
++#define SCM_MASK_YUV444   (SCM_H264_HIGH8_444 | SCM_HEVC_REXT8_444 | SCM_HEVC_REXT10_444 | SCM_AV1_HIGH8_444 | SCM_AV1_HIGH10_444 | SCM_PYROWAVE_444 | SCM_PYROWAVE_HDR10_444)
+ 
+ typedef struct _SERVER_INFORMATION {
+     // Server host name or IP address in text form
+@@ -859,6 +907,15 @@ uint64_t LiGetMicroseconds(void);
+ // It should only ever be compared with the return value from a previous call to itself.
+ uint64_t LiGetMillis(void);
+ 
++// PyroWave only. Called on the video receive thread with the RTP timestamp of a
++// frame whose final FEC block is still incomplete. Return the latest
++// LiGetMicroseconds() time at which that frame can finish reassembly and still
++// reach its presentation slot, or 0 when unknown. Past that time, a frame with
++// its critical packets is delivered after a much shorter packet silence than
++// usual. Set it before LiStartConnection(); NULL disables it.
++typedef uint64_t (*LiVideoReassemblyDeadlineCallback)(uint32_t rtpTimestamp);
++void LiSetVideoReassemblyDeadlineCallback(LiVideoReassemblyDeadlineCallback callback);
++
+ // This is a simplistic STUN function that can assist clients in getting the WAN address
+ // for machines they find using mDNS over IPv4. This can be used to pre-populate the external
+ // address for streaming after GFE stopped sending it a while back. wanAddr is returned in
+@@ -1006,6 +1063,14 @@ typedef struct _SS_HDR_METADATA {
+ // function when HDR mode is active on the host. This is a Sunshine protocol extension.
+ bool LiGetHdrMetadata(PSS_HDR_METADATA metadata);
+ 
++// Returns the PyroWave bitstream identity the host advertised in its RTSP DESCRIBE
++// response (see PYROWAVE_BITSTREAM_ID), or an empty string if it sent none. Hosts
++// that encode PyroWave without advertising it use an unknown bitstream revision.
++// Valid after the RTSP handshake. This is a Sunshine protocol extension.
++const char* LiGetHostPyroWaveBitstreamId(void);
++
++
++
+ // This function requests an IDR frame from the host. Typically this is done using DR_NEED_IDR, but clients
+ // processing frames asynchronously may need to reset their decoder state even after returning DR_OK for
+ // the prior frame. Rather than wait for a new frame and return DR_NEED_IDR for that one, they can just
+diff --git a/src/PlatformSockets.c b/src/PlatformSockets.c
+index cec96f3..6a5e3ee 100644
+--- a/src/PlatformSockets.c
++++ b/src/PlatformSockets.c
+@@ -231,6 +231,68 @@ int recvUdpSocket(SOCKET s, char* buffer, int size, bool useSelect) {
+     return err;
+ }
+ 
++int recvUdpSocketWithTimeout(SOCKET s, char* buffer, int size, int timeoutMs) {
++    uint64_t waitStartedUs = 0;
++    bool waiting = false;
++    bool timedOut = false;
++
++    LC_ASSERT(timeoutMs >= 0);
++    for (;;) {
++        // Avoid a poll syscall for every packet in a high-bitrate burst. More
++        // importantly, drain packets queued during a receiver scheduling pause
++        // before reporting silence to the partial-frame completion policy.
++        int err = (int)recvfrom(s, buffer, size, 0, NULL, NULL);
++        if (err > 0) {
++            return err;
++        }
++        if (err == 0) {
++            // An empty UDP datagram is not proof that the socket is drained.
++            continue;
++        }
++
++        int socketError = LastSocketError();
++        if (socketError == EINTR ||
++#if defined(LC_WINDOWS) && !defined(NXDK)
++                socketError == WSAECONNRESET) {
++#else
++                socketError == ECONNREFUSED) {
++#endif
++            continue;
++        }
++        if (socketError != EWOULDBLOCK && socketError != EAGAIN) {
++            return err;
++        }
++        if (timedOut) {
++            return 0;
++        }
++
++        uint64_t nowUs = PltGetMicroseconds();
++        if (!waiting) {
++            waitStartedUs = nowUs;
++            waiting = true;
++        }
++        uint64_t elapsedUs = nowUs >= waitStartedUs ? nowUs - waitStartedUs : 0;
++        uint64_t timeoutUs = (uint64_t)timeoutMs * 1000;
++        int remainingMs = elapsedUs >= timeoutUs ? 0 : (int)((timeoutUs - elapsedUs + 999) / 1000);
++        struct pollfd pfd;
++        pfd.fd = s;
++        pfd.events = POLLIN;
++        err = pollSockets(&pfd, 1, remainingMs);
++        if (err == 0) {
++            // A packet can arrive as the poll timeout resolves or while this
++            // thread is descheduled afterward. Check the socket once more
++            // before allowing the caller to synthesize missing packets.
++            timedOut = true;
++            continue;
++        }
++        if (err < 0 && LastSocketError() != EINTR) {
++            return err;
++        }
++        // Retry recv even after an interrupted wait. Only an empty socket and
++        // an expired poll may authorize partial-frame completion.
++    }
++}
++
+ void closeSocket(SOCKET s) {
+ #if defined(LC_WINDOWS) && !defined(NXDK)
+     closesocket(s);
+diff --git a/src/PlatformSockets.h b/src/PlatformSockets.h
+index 4bac8bd..892e431 100644
+--- a/src/PlatformSockets.h
++++ b/src/PlatformSockets.h
+@@ -129,6 +129,9 @@ SOCKET bindUdpSocket(int addressFamily, struct sockaddr_storage* localAddr, SOCK
+ int enableNoDelay(SOCKET s);
+ int setSocketNonBlocking(SOCKET s, bool enabled);
+ int recvUdpSocket(SOCKET s, char* buffer, int size, bool useSelect);
++// Requires a nonblocking socket. Read queued data before waiting; zero means
++// the socket stayed empty through the requested wait, not a zero-byte packet.
++int recvUdpSocketWithTimeout(SOCKET s, char* buffer, int size, int timeoutMs);
+ void shutdownTcpSocket(SOCKET s);
+ int setNonFatalRecvTimeoutMs(SOCKET s, int timeoutMs);
+ void closeSocket(SOCKET s);
+diff --git a/src/RtpVideoQueue.c b/src/RtpVideoQueue.c
+index a4e022e..8172191 100644
+--- a/src/RtpVideoQueue.c
++++ b/src/RtpVideoQueue.c
+@@ -17,6 +17,23 @@
+ // RTP packets use a 90 KHz presentation timestamp clock
+ #define PTS_DIVISOR 90
+ 
++// After the final data packet of an unprotected PyroWave block arrives, give
++// interior holes a short reorder interval before delivering the usable frame.
++// An absent tail must wait for completion or a successor boundary: a gap
++// between host send batches is not evidence that the remaining packets are lost.
++#define PYROWAVE_PACKET_SILENCE_US 1000
++
++// Once the block's final data packet has arrived and the client's on-time
++// deadline has passed, shorten the reorder allowance for interior holes.
++// This must never authorize completion while the final data packet is absent.
++#define PYROWAVE_LATE_PACKET_SILENCE_US 250
++
++static LiVideoReassemblyDeadlineCallback reassemblyDeadlineCallback;
++
++void LiSetVideoReassemblyDeadlineCallback(LiVideoReassemblyDeadlineCallback callback) {
++    reassemblyDeadlineCallback = callback;
++}
++
+ void RtpvInitializeQueue(PRTP_VIDEO_QUEUE queue) {
+     reed_solomon_init();
+     memset(queue, 0, sizeof(*queue));
+@@ -39,6 +56,9 @@ static void purgeListEntries(PRTPV_QUEUE_LIST list) {
+ void RtpvCleanupQueue(PRTP_VIDEO_QUEUE queue) {
+     purgeListEntries(&queue->pendingFecBlockList);
+     purgeListEntries(&queue->completedFecBlockList);
++    queue->pendingFrameDeadlineUs = 0;
++    queue->pendingFrameDeadlinePrecise = false;
++    queue->onTimeDeadlineQueried = false;
+ }
+ 
+ static void insertEntryIntoList(PRTPV_QUEUE_LIST list, PRTPV_QUEUE_ENTRY entry) {
+@@ -153,6 +173,7 @@ static bool queuePacket(PRTP_VIDEO_QUEUE queue, PRTPV_QUEUE_ENTRY newEntry, PRTP
+     newEntry->packet = packet;
+     newEntry->length = length;
+     newEntry->isParity = isParity;
++    newEntry->isLost = false;
+     newEntry->prev = NULL;
+     newEntry->next = NULL;
+     newEntry->presentationTimeUs = ((uint64_t)packet->timestamp * 1000) / PTS_DIVISOR;
+@@ -212,7 +233,10 @@ static int reconstructFrame(PRTP_VIDEO_QUEUE queue) {
+         // based on the packets we've received (or not) so far. If the number of missing shards exceeds the total
+         // needed shards, there is no hope of recovering the data. The only way we could recover this frame is by
+         // receiving OOS data, which is unlikely because we've not seen any recently from this host.
+-        if (isReferenceFrameInvalidationEnabled() && !queue->reportedLostFrame && !queue->receivedOosData) {
++        // PyroWave frames are delivered with holes (see completeBlockWithLostPackets()), so an
++        // unrecoverable block is not a lost frame there.
++        if (!queue->reportedLostFrame && !queue->receivedOosData &&
++                !(NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE)) {
+             // NB: We use totalPackets - neededPackets instead of just bufferParityPackets here because we require
+             // one extra parity shard for recovery if we're in FEC validation mode.
+             if (queue->missingPackets > totalPackets - neededPackets) {
+@@ -537,6 +561,211 @@ static void submitCompletedFrame(PRTP_VIDEO_QUEUE queue) {
+     }
+ }
+ 
++// PyroWave frames are intra-only and the decoder can reconstruct a frame from the
++// records that arrived, so an FEC block that can no longer complete is delivered
++// anyway: every missing data packet is replaced by a zero-filled packet that the
++// depacketizer passes on as BUFFER_TYPE_LOST. Returns false when that isn't
++// possible (other codecs, the frame's first packet with the frame header and
++// PyroWave sequence header is missing, or out of memory); the caller then drops
++// the block as before.
++static bool completeBlockWithLostPackets(PRTP_VIDEO_QUEUE queue, const char* reason) {
++    PRTPV_QUEUE_ENTRY reference = NULL;
++    PRTPV_QUEUE_ENTRY entry;
++    bool* present;
++    unsigned int i;
++
++    if (!(NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE)) {
++        return false;
++    }
++
++    present = calloc(queue->bufferDataPackets, sizeof(bool));
++    if (present == NULL) {
++        return false;
++    }
++
++    for (entry = queue->pendingFecBlockList.head; entry != NULL; entry = entry->next) {
++        if (!entry->isParity) {
++            present[U16(entry->packet->sequenceNumber - queue->bufferLowestSequenceNumber)] = true;
++            reference = entry;
++        }
++    }
++
++    if (reference == NULL || (queue->multiFecCurrentBlockNumber == 0 && !present[0])) {
++        free(present);
++        return false;
++    }
++
++    int dataOffset = sizeof(*reference->packet);
++    if (reference->packet->header & FLAG_EXTENSION) {
++        dataOffset += 4; // 2 additional fields
++    }
++
++    // Stream packet indices count up with the sequence numbers within a block
++    PNV_VIDEO_PACKET referenceNvPacket = (PNV_VIDEO_PACKET)(((char*)reference->packet) + dataOffset);
++    unsigned int referenceIndex = U16(reference->packet->sequenceNumber - queue->bufferLowestSequenceNumber);
++    uint32_t firstStreamPacketIndex = (referenceNvPacket->streamPacketIndex >> 8) - referenceIndex;
++
++    int receiveSize = StreamConfig.packetSize + MAX_RTP_HEADER_SIZE;
++    int packetBufferSize = receiveSize + sizeof(RTPV_QUEUE_ENTRY);
++    unsigned int lostPackets = 0;
++
++    for (i = 0; i < queue->bufferDataPackets; i++) {
++        if (present[i]) {
++            continue;
++        }
++
++        char* buffer = calloc(1, packetBufferSize);
++        if (buffer == NULL) {
++            // The zero-filled packets already queued stay with the block and are
++            // purged with it.
++            free(present);
++            return false;
++        }
++
++        PRTP_PACKET rtpPacket = (PRTP_PACKET)buffer;
++        rtpPacket->header = reference->packet->header;
++        rtpPacket->packetType = reference->packet->packetType;
++        rtpPacket->sequenceNumber = U16(queue->bufferLowestSequenceNumber + i);
++        rtpPacket->timestamp = reference->packet->timestamp;
++        rtpPacket->ssrc = reference->packet->ssrc;
++
++        PNV_VIDEO_PACKET nvPacket = (PNV_VIDEO_PACKET)(buffer + dataOffset);
++        nvPacket->streamPacketIndex = U24(firstStreamPacketIndex + i) << 8;
++        nvPacket->frameIndex = queue->currentFrameNumber;
++        // Sunshine marks the first and last packet of every FEC block
++        nvPacket->flags = FLAG_CONTAINS_PIC_DATA;
++        if (i == 0) {
++            nvPacket->flags |= FLAG_SOF;
++        }
++        if (i == queue->bufferDataPackets - 1) {
++            nvPacket->flags |= FLAG_EOF;
++        }
++        nvPacket->multiFecFlags = referenceNvPacket->multiFecFlags;
++        nvPacket->multiFecBlocks = referenceNvPacket->multiFecBlocks;
++        nvPacket->fecInfo = referenceNvPacket->fecInfo;
++
++        PRTPV_QUEUE_ENTRY lostEntry = (PRTPV_QUEUE_ENTRY)&buffer[receiveSize];
++        lostEntry->packet = rtpPacket;
++        lostEntry->length = StreamConfig.packetSize + dataOffset;
++        lostEntry->isParity = false;
++        lostEntry->isLost = true;
++        lostEntry->prev = NULL;
++        lostEntry->next = NULL;
++        lostEntry->presentationTimeUs = reference->presentationTimeUs;
++        lostEntry->rtpTimestamp = reference->rtpTimestamp;
++        insertEntryIntoList(&queue->pendingFecBlockList, lostEntry);
++        lostPackets++;
++    }
++
++    free(present);
++
++    Limelog("Delivering frame %u (block %d of %d) without %u of %u data packets (%s)\n",
++            queue->currentFrameNumber, queue->multiFecCurrentBlockNumber + 1,
++            queue->multiFecLastBlockNumber + 1, lostPackets, queue->bufferDataPackets, reason);
++
++    stageCompleteFecBlock(queue);
++    LC_ASSERT(queue->pendingFecBlockList.count == 0);
++    return true;
++}
++
++// Never shorten critical-data recovery. The record-framing header announces
++// the exact leading packet count required by the decoder. Earlier blocks are
++// staged in order; the pending final block can still contain reordered packets.
++static bool hasCompletePyroWaveCriticalData(PRTP_VIDEO_QUEUE queue) {
++    PRTPV_QUEUE_ENTRY first = queue->completedFecBlockList.head;
++    PRTPV_QUEUE_ENTRY entry;
++    unsigned int criticalPackets, remaining, received;
++    int dataOffset;
++    PNV_VIDEO_PACKET videoPacket;
++    const unsigned char* header;
++
++    if (first == NULL) {
++        if (queue->multiFecCurrentBlockNumber != 0) {
++            return false;
++        }
++        for (entry = queue->pendingFecBlockList.head; entry != NULL; entry = entry->next) {
++            if (!entry->isParity && entry->packet->sequenceNumber == queue->bufferLowestSequenceNumber) {
++                first = entry;
++                break;
++            }
++        }
++    }
++    if (first == NULL || first->isLost) {
++        return false;
++    }
++
++    dataOffset = sizeof(RTP_PACKET) + ((first->packet->header & FLAG_EXTENSION) ? 4 : 0);
++    if (first->length < dataOffset + (int)sizeof(NV_VIDEO_PACKET) + 8) {
++        return false;
++    }
++    videoPacket = (PNV_VIDEO_PACKET)(((char*)first->packet) + dataOffset);
++    header = (const unsigned char*)(videoPacket + 1);
++    if (!(videoPacket->extraFlags & NV_VIDEO_PACKET_EXTRA_FLAG_PYROWAVE_RECORD_START) || header[0] != 0x01) {
++        return false;
++    }
++    criticalPackets = header[6] | ((unsigned int)header[7] << 8);
++    if (criticalPackets == 0) {
++        return false;
++    }
++
++    remaining = criticalPackets;
++    for (entry = queue->completedFecBlockList.head; entry != NULL; entry = entry->next) {
++        if (entry->isLost) {
++            return false;
++        }
++        if (--remaining == 0) {
++            return true;
++        }
++    }
++    if (remaining > queue->bufferDataPackets) {
++        return false;
++    }
++    received = 0;
++    for (entry = queue->pendingFecBlockList.head; entry != NULL; entry = entry->next) {
++        if (!entry->isParity && !entry->isLost &&
++                U16(entry->packet->sequenceNumber - queue->bufferLowestSequenceNumber) < remaining) {
++            received++;
++        }
++    }
++    // queuePacket() rejects duplicates, so every required prefix index is
++    // present when the count matches, regardless of arrival order.
++    return received == remaining;
++}
++
++uint64_t RtpvGetPendingFrameDeadlineUs(PRTP_VIDEO_QUEUE queue) {
++    return queue->pendingFrameDeadlineUs;
++}
++
++bool RtpvPendingFrameDeadlineIsPrecise(PRTP_VIDEO_QUEUE queue) {
++    return queue->pendingFrameDeadlineUs != 0 && queue->pendingFrameDeadlinePrecise;
++}
++
++bool RtpvExpirePendingFrame(PRTP_VIDEO_QUEUE queue, uint64_t nowUs) {
++    if (queue->pendingFrameDeadlineUs == 0 || nowUs < queue->pendingFrameDeadlineUs) {
++        return false;
++    }
++    // An unsafe/unknown critical prefix falls back to boundary-based delivery.
++    // A subsequently received unique packet will arm another silence interval.
++    queue->pendingFrameDeadlineUs = 0;
++    if (!(NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) ||
++            queue->pendingFecBlockList.count == 0 || queue->bufferParityPackets != 0 ||
++            queue->receivedHighestSequenceNumber != queue->bufferHighestSequenceNumber ||
++            queue->multiFecCurrentBlockNumber != queue->multiFecLastBlockNumber ||
++            !hasCompletePyroWaveCriticalData(queue)) {
++        return false;
++    }
++
++    reportFinalFrameFecStatus(queue);
++    if (!completeBlockWithLostPackets(queue, queue->pendingFrameDeadlinePrecise ?
++                                      "on-time deadline" : "packet silence")) {
++        return false;
++    }
++    submitCompletedFrame(queue);
++    queue->currentFrameNumber++;
++    queue->multiFecCurrentBlockNumber = 0;
++    return true;
++}
++
+ uint32_t RtpvGetCurrentFrameNumber(PRTP_VIDEO_QUEUE queue) {
+     return queue->currentFrameNumber;
+ }
+@@ -593,11 +822,32 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
+     // if we can't finish a frame before receiving the next one.
+     if (queue->pendingFecBlockList.count == 0 || queue->currentFrameNumber != nvPacket->frameIndex ||
+             queue->multiFecCurrentBlockNumber != fecCurrentBlockNumber) {
++        queue->pendingFrameDeadlineUs = 0;
++        queue->onTimeDeadlineQueried = false;
+         if (queue->pendingFecBlockList.count != 0) {
+             // Report the final status of the FEC queue before dropping this frame
+             reportFinalFrameFecStatus(queue);
+ 
+-            if (queue->multiFecLastBlockNumber != 0) {
++            // PyroWave: once the next block of this frame or the next frame starts, the
++            // incomplete block is delivered with its missing packets zero-filled. That
++            // only works for the frame's last block when the next frame starts, since a
++            // block that never arrived at all has no packet count to fill.
++            bool nextBlockOfFrame = queue->currentFrameNumber == nvPacket->frameIndex &&
++                                    fecCurrentBlockNumber == queue->multiFecCurrentBlockNumber + 1;
++            bool lastBlockOfFrame = queue->currentFrameNumber != nvPacket->frameIndex &&
++                                    queue->multiFecCurrentBlockNumber == queue->multiFecLastBlockNumber;
++            if ((nextBlockOfFrame || lastBlockOfFrame) && completeBlockWithLostPackets(queue, "next boundary")) {
++                if (nextBlockOfFrame) {
++                    queue->multiFecCurrentBlockNumber++;
++                }
++                else {
++                    submitCompletedFrame(queue);
++                    LC_ASSERT(queue->completedFecBlockList.count == 0);
++                    queue->currentFrameNumber++;
++                    queue->multiFecCurrentBlockNumber = 0;
++                }
++            }
++            else if (queue->multiFecLastBlockNumber != 0) {
+                 Limelog("Unrecoverable frame %d (block %d of %d): %d+%d=%d received < %d needed\n",
+                         queue->currentFrameNumber, queue->multiFecCurrentBlockNumber+1,
+                         queue->multiFecLastBlockNumber+1,
+@@ -617,13 +867,11 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
+                     // Notify the host of the loss of this frame
+                     if (!queue->reportedLostFrame) {
+                         notifyFrameLost(queue->currentFrameNumber, false);
++                        queue->reportedLostFrame = true;
+                     }
+ 
+-                    // NB: We reset reportedLostFrame here because we don't want to suppress
+-                    // the reporting of the _next_ frame if it's lost.
+                     queue->currentFrameNumber++;
+                     queue->multiFecCurrentBlockNumber = 0;
+-                    queue->reportedLostFrame = false;
+                     return RTPF_RET_REJECTED;
+                 }
+             }
+@@ -654,16 +902,13 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
+ 
+             // Notify the host of the loss of this frame
+             if (!queue->reportedLostFrame) {
+-                notifyFrameLost(nvPacket->frameIndex, false);
++                notifyFrameLost(queue->currentFrameNumber, false);
++                queue->reportedLostFrame = true;
+             }
+ 
+             // We dropped a block of this frame, so we must skip to the next one.
+-            //
+-            // NB: We reset reportedLostFrame here because we don't want to suppress
+-            // the reporting of the _next_ frame if it's lost.
+             queue->currentFrameNumber = nvPacket->frameIndex + 1;
+             queue->multiFecCurrentBlockNumber = 0;
+-            queue->reportedLostFrame = false;
+             return RTPF_RET_REJECTED;
+         }
+ 
+@@ -773,9 +1018,40 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
+             LC_ASSERT(queue->receivedParityPackets <= queue->bufferParityPackets);
+         }
+ 
++        if ((NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) && queue->bufferParityPackets == 0 &&
++                queue->multiFecCurrentBlockNumber == queue->multiFecLastBlockNumber &&
++                queue->receivedHighestSequenceNumber == queue->bufferHighestSequenceNumber) {
++            // With no parity, the highest valid sequence is the last data packet.
++            // Require that actual packet, not just an EOF flag or a quiet socket,
++            // before deciding that interior detail was lost. This also handles
++            // reordering and 16-bit sequence wrap without another state flag.
++            // Only accepted unique packets extend the grace. Do not expire it
++            // here: a paused receive thread may still have reordered data in
++            // the kernel socket queue, which must be drained first.
++            uint64_t nowUs = PltGetMicroseconds();
++            if (!queue->onTimeDeadlineQueried) {
++                queue->onTimeDeadlineQueried = true;
++                queue->onTimeDeadlineUs = reassemblyDeadlineCallback != NULL ?
++                    reassemblyDeadlineCallback(packet->timestamp) : 0;
++            }
++            queue->pendingFrameDeadlineUs = nowUs + PYROWAVE_PACKET_SILENCE_US;
++            queue->pendingFrameDeadlinePrecise = false;
++            if (queue->onTimeDeadlineUs != 0) {
++                uint64_t lateDeadlineUs = nowUs + PYROWAVE_LATE_PACKET_SILENCE_US;
++                if (lateDeadlineUs < queue->onTimeDeadlineUs) {
++                    lateDeadlineUs = queue->onTimeDeadlineUs;
++                }
++                if (lateDeadlineUs < queue->pendingFrameDeadlineUs) {
++                    queue->pendingFrameDeadlineUs = lateDeadlineUs;
++                    queue->pendingFrameDeadlinePrecise = true;
++                }
++            }
++        }
++
+         // Try to submit this frame. If we haven't received enough packets,
+         // this will fail and we'll keep waiting.
+         if (reconstructFrame(queue) == 0) {
++            queue->pendingFrameDeadlineUs = 0;
+             // Stage the complete FEC block for use once reassembly is complete
+             stageCompleteFecBlock(queue);
+ 
+diff --git a/src/RtpVideoQueue.h b/src/RtpVideoQueue.h
+index c9bce6f..0d0b106 100644
+--- a/src/RtpVideoQueue.h
++++ b/src/RtpVideoQueue.h
+@@ -11,6 +11,8 @@ typedef struct _RTPV_QUEUE_ENTRY {
+     uint32_t rtpTimestamp;
+     int length;
+     bool isParity;
++    // Zero-filled stand-in for a data packet that never arrived (PyroWave only)
++    bool isLost;
+ } RTPV_QUEUE_ENTRY, *PRTPV_QUEUE_ENTRY;
+ 
+ typedef struct _RTPV_QUEUE_LIST {
+@@ -24,6 +26,14 @@ typedef struct _RTP_VIDEO_QUEUE {
+     RTPV_QUEUE_LIST completedFecBlockList;
+ 
+     uint64_t bufferFirstRecvTimeUs;
++    // Only a PyroWave final block without parity whose final data packet has
++    // arrived may have a silence deadline; an absent tail waits for a boundary.
++    uint64_t pendingFrameDeadlineUs;
++    // The client's on-time reassembly bound for the current frame (0 = none),
++    // queried once per final block. A precise deadline is governed by it.
++    uint64_t onTimeDeadlineUs;
++    bool onTimeDeadlineQueried;
++    bool pendingFrameDeadlinePrecise;
+     uint32_t bufferLowestSequenceNumber;
+     uint32_t bufferHighestSequenceNumber;
+     uint32_t bufferFirstParitySequenceNumber;
+@@ -57,4 +67,10 @@ void RtpvInitializeQueue(PRTP_VIDEO_QUEUE queue);
+ void RtpvCleanupQueue(PRTP_VIDEO_QUEUE queue);
+ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_QUEUE_ENTRY packetEntry);
+ uint32_t RtpvGetCurrentFrameNumber(PRTP_VIDEO_QUEUE queue);
++uint64_t RtpvGetPendingFrameDeadlineUs(PRTP_VIDEO_QUEUE queue);
++// True when the pending deadline comes from the client's on-time bound and so
++// needs sub-millisecond wake-up accuracy.
++bool RtpvPendingFrameDeadlineIsPrecise(PRTP_VIDEO_QUEUE queue);
++// Call only after draining the receive socket, on the receive thread.
++bool RtpvExpirePendingFrame(PRTP_VIDEO_QUEUE queue, uint64_t nowUs);
+ void RtpvSubmitQueuedPackets(PRTP_VIDEO_QUEUE queue);
+diff --git a/src/RtspConnection.c b/src/RtspConnection.c
+index e958101..af28252 100644
+--- a/src/RtspConnection.c
++++ b/src/RtspConnection.c
+@@ -20,6 +20,9 @@ static PPLT_CRYPTO_CONTEXT encryptionCtx;
+ static PPLT_CRYPTO_CONTEXT decryptionCtx;
+ static uint32_t encryptionSequenceNumber;
+ 
++// PyroWave bitstream identity from the DESCRIBE response ("" when absent)
++static char hostPyroWaveBitstreamId[32];
++
+ static SOCKET sock = INVALID_SOCKET;
+ static ENetHost* client;
+ static ENetPeer* peer;
+@@ -902,6 +905,33 @@ static bool parseUrlAddrFromRtspUrlString(const char* rtspUrlString, char* desti
+ 
+ // SDP attributes are in the form:
+ // a=x-nv-bwe.bwuSafeZoneLowLimit:70\r\n
++// Copies a token-valued SDP attribute (up to whitespace) into val
++static bool parseSdpAttributeToToken(const char* payload, const char* name, char* val, size_t valSize) {
++    const char* attribute = strstr(payload, name);
++    if (!attribute || valSize == 0) {
++        return false;
++    }
++
++    const char* valst = strstr(attribute, ":");
++    if (!valst) {
++        return false;
++    }
++    valst++;
++
++    size_t len = 0;
++    while (valst[len] != '\0' && valst[len] != '\r' && valst[len] != '\n' &&
++           valst[len] != ' ' && len + 1 < valSize) {
++        val[len] = valst[len];
++        len++;
++    }
++    val[len] = '\0';
++    return len != 0;
++}
++
++const char* LiGetHostPyroWaveBitstreamId(void) {
++    return hostPyroWaveBitstreamId;
++}
++
+ bool parseSdpAttributeToUInt(const char* payload, const char* name, uint32_t* val) {
+     // Find the entry for the specified attribute name
+     char* attribute = strstr(payload, name);
+@@ -1087,7 +1117,38 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
+             goto Exit;
+         }
+ 
+-        if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_AV1) && strstr(response.payload, "AV1/90000")) {
++        hostPyroWaveBitstreamId[0] = '\0';
++        parseSdpAttributeToToken(response.payload, "x-ss-pyrowave.bitstream",
++                                 hostPyroWaveBitstreamId, sizeof(hostPyroWaveBitstreamId));
++
++        // PyroWave is only ever requested explicitly by the client, so it takes
++        // precedence whenever the host advertises it. Some PyroWave hosts omit the
++        // "PYROWAVE/90000" DESCRIBE marker, so the capability bits decide.
++        if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) &&
++                (serverInfo->serverCodecModeSupport & SCM_MASK_PYROWAVE)) {
++            if ((serverInfo->serverCodecModeSupport & SCM_PYROWAVE_HDR10_444) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE_HDR10_444)) {
++                NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE_HDR10_444;
++            }
++            else if ((serverInfo->serverCodecModeSupport & SCM_PYROWAVE_HDR10) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE_HDR10)) {
++                NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE_HDR10;
++            }
++            else if ((serverInfo->serverCodecModeSupport & SCM_PYROWAVE_444) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE_444)) {
++                NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE_444;
++            }
++            else {
++                NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE;
++            }
++
++            if (!(NegotiatedVideoFormat & StreamConfig.supportedVideoFormats)) {
++                Limelog("Selected PyroWave profile is unsupported by host\n");
++                ret = -1; goto Exit;
++            }
++            if (strcmp(hostPyroWaveBitstreamId, PYROWAVE_BITSTREAM_ID) != 0) {
++                Limelog("Incompatible PyroWave bitstream: host '%s', expected '%s'\n", hostPyroWaveBitstreamId, PYROWAVE_BITSTREAM_ID);
++                ret = -1; goto Exit;
++            }
++        }
++        else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_AV1) && strstr(response.payload, "AV1/90000")) {
+             if ((serverInfo->serverCodecModeSupport & SCM_AV1_HIGH10_444) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_AV1_HIGH10_444)) {
+                 NegotiatedVideoFormat = VIDEO_FORMAT_AV1_HIGH10_444;
+             }
+diff --git a/src/SdpGenerator.c b/src/SdpGenerator.c
+index 22467c0..f9ec002 100644
+--- a/src/SdpGenerator.c
++++ b/src/SdpGenerator.c
+@@ -431,7 +431,26 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
+         snprintf(payloadStr, sizeof(payloadStr), "%d", slicesPerFrame);
+         err |= addAttributeString(&optionHead, "x-nv-video[0].videoEncoderSlicesPerFrame", payloadStr);
+ 
+-        if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_AV1) {
++        if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
++            Limelog("PyroWave ANNOUNCE: bitStreamFormat=3 chromaSamplingType=%d dynamicRangeMode=%d adaptiveFec=0 adaptiveBitrate=0 features=1 bitrate=%d kbps\n",
++                (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_YUV444) ? 1 : 0,
++                (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_10BIT) ? 1 : 0, StreamConfig.bitrate);
++            err |= addAttributeString(&optionHead, "x-nv-vqos[0].bitStreamFormat", "3");
++
++            // Aurora-compatible attributes: their presence tells PyroWave hosts that
++            // we parse record framing. We never ask for their adaptive modes.
++            err |= addAttributeString(&optionHead, "x-ss-video[0].pyrowaveAdaptiveFec", "0");
++            err |= addAttributeString(&optionHead, "x-ss-video[0].pyrowaveAdaptiveBitrate", "0");
++
++            const unsigned int pyrowaveFeatures = PYROWAVE_FEATURE_RECORD_FRAMING |
++                (StreamConfig.pyrowaveCompression ? PYROWAVE_FEATURE_COMPRESSION : 0);
++            snprintf(payloadStr, sizeof(payloadStr), "%u", pyrowaveFeatures);
++            err |= addAttributeString(&optionHead, "x-ss-video[0].pyrowaveFeatures", payloadStr);
++            if (StreamConfig.pyrowaveCompression) {
++                err |= addAttributeString(&optionHead, "x-ss-video[0].pyrowaveCompression", "1");
++            }
++        }
++        else if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_AV1) {
+             err |= addAttributeString(&optionHead, "x-nv-vqos[0].bitStreamFormat", "2");
+         }
+         else if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_H265) {
+diff --git a/src/Video.h b/src/Video.h
+index 737d23c..71175e7 100644
+--- a/src/Video.h
++++ b/src/Video.h
+@@ -23,6 +23,8 @@ typedef struct _ENC_VIDEO_HEADER {
+ #define FLAG_SOF 0x4
+ 
+ #define NV_VIDEO_PACKET_EXTRA_FLAG_LTR_FRAME 0x1
++// PyroWave record framing (vibeshine): this packet's frame data starts with a record
++#define NV_VIDEO_PACKET_EXTRA_FLAG_PYROWAVE_RECORD_START 0x80
+ 
+ typedef struct _NV_VIDEO_PACKET {
+     uint32_t streamPacketIndex;
+diff --git a/src/VideoDepacketizer.c b/src/VideoDepacketizer.c
+index 5baa1d5..d36539b 100644
+--- a/src/VideoDepacketizer.c
++++ b/src/VideoDepacketizer.c
+@@ -24,6 +24,7 @@ static uint64_t firstPacketPresentationTime;
+ static uint32_t firstPacketRtpTimestamp;
+ static bool dropStatePending;
+ static bool idrFrameProcessed;
++static uint16_t pyrowaveCriticalPackets;
+ 
+ #define DR_CLEANUP -1000
+ 
+@@ -77,6 +78,7 @@ void initializeVideoDepacketizer(int pktSize) {
+     lastPacketPayloadLength = 0;
+     dropStatePending = false;
+     idrFrameProcessed = false;
++    pyrowaveCriticalPackets = 0;
+     strictIdrFrameWait = !isReferenceFrameInvalidationEnabled();
+ }
+ 
+@@ -219,6 +221,11 @@ void validateDecodeUnitForPlayback(PDECODE_UNIT decodeUnit) {
+             // We don't parse the AV1 bitstream
+             LC_ASSERT_VT(decodeUnit->bufferList->bufferType == BUFFER_TYPE_PICDATA);
+         }
++        else if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
++            // The first packet is never a lost one; hosts may flag it as a record start
++            LC_ASSERT_VT(decodeUnit->bufferList->bufferType == BUFFER_TYPE_PICDATA ||
++                         decodeUnit->bufferList->bufferType == BUFFER_TYPE_RECORD_START);
++        }
+         else {
+             LC_ASSERT(false);
+         }
+@@ -490,6 +497,7 @@ static void reassembleFrame(int frameNumber, bool frameIsLTR) {
+             qdu->decodeUnit.presentationTimeUs = firstPacketPresentationTime;
+             qdu->decodeUnit.rtpTimestamp = firstPacketRtpTimestamp;
+             qdu->decodeUnit.enqueueTimeUs = PltGetMicroseconds();
++            qdu->decodeUnit.pyrowaveCriticalPackets = pyrowaveCriticalPackets;
+ 
+             // These might be wrong for a few frames during a transition between SDR and HDR,
+             // but the effects shouldn't very noticable since that's an infrequent operation.
+@@ -603,7 +611,7 @@ static int getBufferFlags(char* data, int length) {
+ 
+ // As an optimization, we can cast the existing packet buffer to a PLENTRY and avoid
+ // a malloc() and a memcpy() of the packet data.
+-static void queueFragment(PLENTRY_INTERNAL* existingEntry, char* data, int offset, int length) {
++static void queueFragment(PLENTRY_INTERNAL* existingEntry, char* data, int offset, int length, bool lost, bool recordStart) {
+     PLENTRY_INTERNAL entry;
+ 
+     if (existingEntry == NULL || *existingEntry == NULL) {
+@@ -635,7 +643,9 @@ static void queueFragment(PLENTRY_INTERNAL* existingEntry, char* data, int offse
+             *existingEntry = NULL;
+         }
+ 
+-        entry->entry.bufferType = getBufferFlags(entry->entry.data, entry->entry.length);
++        entry->entry.bufferType = lost ? BUFFER_TYPE_LOST :
++                                  recordStart ? BUFFER_TYPE_RECORD_START :
++                                  getBufferFlags(entry->entry.data, entry->entry.length);
+ 
+         nalChainDataLength += entry->entry.length;
+ 
+@@ -709,7 +719,7 @@ static void processAvcHevcRtpPayloadSlow(PBUFFER_DESC currentPos, PLENTRY_INTERN
+         // To minimize copies, we'll allocate for SPS, PPS, and VPS to allow
+         // us to reuse the packet buffer for the picture data in the I-frame.
+         queueFragment(containsPicData ? existingEntry : NULL,
+-                      currentPos->data, start, currentPos->offset - start);
++                      currentPos->data, start, currentPos->offset - start, false, false);
+     }
+ }
+ 
+@@ -743,9 +753,10 @@ static bool isFirstPacket(uint8_t flags, uint8_t fecBlockNumber) {
+ 
+ // Process an RTP Payload
+ // The caller will free *existingEntry unless we NULL it
++// A lost payload is a zero-filled stand-in from the RtpVideoQueue (PyroWave only)
+ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
+                        uint64_t receiveTimeUs, uint64_t presentationTimeUs, uint32_t rtpTimestamp,
+-                       PLENTRY_INTERNAL* existingEntry) {
++                       bool lost, PLENTRY_INTERNAL* existingEntry) {
+     BUFFER_DESC currentPos;
+     uint32_t frameIndex;
+     uint8_t flags;
+@@ -912,6 +923,16 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
+             BbGet16(&bb, &lastPacketPayloadLength);
+         }
+ 
++        // Vibeshine announces how many leading packets of a PyroWave frame hold its
++        // coarsest wavelet level in the last two bytes of the short frame header
++        pyrowaveCriticalPackets = 0;
++        if ((NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) && currentPos.data[currentPos.offset] == 0x01 &&
++                currentPos.length >= 8) {
++            BYTE_BUFFER bb;
++            BbInitializeWrappedBuffer(&bb, currentPos.data, currentPos.offset + 6, 2, BYTE_ORDER_LITTLE);
++            BbGet16(&bb, &pyrowaveCriticalPackets);
++        }
++
+         if (APP_VERSION_AT_LEAST(7, 1, 450)) {
+             // >= 7.1.450 uses 2 different header lengths based on the first byte:
+             // 0x01 indicates an 8 byte header
+@@ -1022,7 +1043,7 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
+             }
+ #endif
+ 
+-            queueFragment(existingEntry, currentPos.data, currentPos.offset, currentPos.length);
++            queueFragment(existingEntry, currentPos.data, currentPos.offset, currentPos.length, false, false);
+         }
+     }
+     else {
+@@ -1066,7 +1087,9 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
+         }
+ 
+         // Other codecs are just passed through as is.
+-        queueFragment(existingEntry, currentPos.data, currentPos.offset, currentPos.length);
++        queueFragment(existingEntry, currentPos.data, currentPos.offset, currentPos.length, lost,
++                      (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) &&
++                          (extraFlags & NV_VIDEO_PACKET_EXTRA_FLAG_PYROWAVE_RECORD_START));
+     }
+ 
+     if (lastPacket) {
+@@ -1184,6 +1207,7 @@ void queueRtpPacket(PRTPV_QUEUE_ENTRY queueEntryPtr) {
+                       queueEntry.receiveTimeUs,
+                       queueEntry.presentationTimeUs,
+                       queueEntry.rtpTimestamp,
++                      queueEntry.isLost,
+                       &existingEntry);
+ 
+     if (existingEntry != NULL) {
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+index 402b056..1a8268f 100644
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -34,6 +34,10 @@ static bool receivedFullFrame;
+ // and subsequent packet/frame bursts that follow.
+ #define RTP_RECV_PACKETS_BUFFERED 2048
+ 
++// PyroWave frames are intra-coded at hundreds of Mbps; a 1080p120 or 4K60 frame
++// alone can approach 2048 packets. Keep several frames of headroom.
++#define RTP_RECV_PACKETS_BUFFERED_PYROWAVE 8192
++
+ // Initialize the video stream
+ void initializeVideoStream(void) {
+     initializeVideoDepacketizer(StreamConfig.packetSize);
+@@ -91,6 +95,7 @@ static void VideoReceiveThreadProc(void* context) {
+     bool useSelect;
+     int waitingForVideoMs;
+     bool encrypted;
++    bool usePartialFrameTimeout;
+ 
+     encrypted = !!(EncryptionFeaturesEnabled & SS_ENC_VIDEO);
+     decryptedSize = StreamConfig.packetSize + MAX_RTP_HEADER_SIZE;
+@@ -99,7 +104,12 @@ static void VideoReceiveThreadProc(void* context) {
+     bufferSize = decryptedSize + sizeof(RTPV_QUEUE_ENTRY);
+     buffer = NULL;
+ 
+-    if (setNonFatalRecvTimeoutMs(rtpSocket, UDP_RECV_POLL_TIMEOUT_MS) < 0) {
++    usePartialFrameTimeout = (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) != 0 &&
++                            setSocketNonBlocking(rtpSocket, true) == 0;
++    if (usePartialFrameTimeout) {
++        useSelect = false; // The nonblocking helper polls only after draining a burst.
++    }
++    else if (setNonFatalRecvTimeoutMs(rtpSocket, UDP_RECV_POLL_TIMEOUT_MS) < 0) {
+         // SO_RCVTIMEO failed, so use select() to wait
+         useSelect = true;
+     }
+@@ -134,16 +144,44 @@ static void VideoReceiveThreadProc(void* context) {
+             }
+         }
+ 
+-        err = recvUdpSocket(rtpSocket,
+-                            encrypted ? encryptedBuffer : buffer,
+-                            receiveSize,
+-                            useSelect);
++        if (usePartialFrameTimeout) {
++            int timeoutMs = UDP_RECV_POLL_TIMEOUT_MS;
++            uint64_t deadlineUs = RtpvGetPendingFrameDeadlineUs(&rtpQueue);
++            if (deadlineUs != 0) {
++                uint64_t nowUs = PltGetMicroseconds();
++                uint64_t remainingUs = nowUs >= deadlineUs ? 0 : deadlineUs - nowUs;
++                if (RtpvPendingFrameDeadlineIsPrecise(&rtpQueue)) {
++                    // A poll can overshoot its millisecond timeout. Wake at
++                    // least a millisecond early and poll without blocking for
++                    // the remainder, so the frame still makes its slot.
++                    timeoutMs = remainingUs >= 2000 ? (int)((remainingUs - 1000) / 1000) : 0;
++                }
++                else {
++                    timeoutMs = (int)((remainingUs + 999) / 1000);
++                }
++                if (timeoutMs > UDP_RECV_POLL_TIMEOUT_MS) {
++                    timeoutMs = UDP_RECV_POLL_TIMEOUT_MS;
++                }
++            }
++            err = recvUdpSocketWithTimeout(rtpSocket,
++                                          encrypted ? encryptedBuffer : buffer,
++                                          receiveSize, timeoutMs);
++        }
++        else {
++            err = recvUdpSocket(rtpSocket,
++                                encrypted ? encryptedBuffer : buffer,
++                                receiveSize,
++                                useSelect);
++        }
+         if (err < 0) {
+             Limelog("Video Receive: recvUdpSocket() failed: %d\n", (int)LastSocketError());
+             ListenerCallbacks.connectionTerminated(LastSocketFail());
+             break;
+         }
+         else if  (err == 0) {
++            if (usePartialFrameTimeout) {
++                RtpvExpirePendingFrame(&rtpQueue, PltGetMicroseconds());
++            }
+             if (!receivedDataFromPeer) {
+                 // If we wait many seconds without ever receiving a video packet,
+                 // assume something is broken and terminate the connection.
+@@ -328,14 +366,35 @@ int startVideoStream(void* rendererContext, int drFlags) {
+         return err;
+     }
+ 
++    int requestedBufferSize = ((NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) ?
++                                   RTP_RECV_PACKETS_BUFFERED_PYROWAVE : RTP_RECV_PACKETS_BUFFERED) *
++                              (StreamConfig.packetSize + MAX_RTP_HEADER_SIZE);
+     rtpSocket = bindUdpSocket(RemoteAddr.ss_family, &LocalAddr, AddrLen,
+-                              RTP_RECV_PACKETS_BUFFERED * (StreamConfig.packetSize + MAX_RTP_HEADER_SIZE),
+-                              SOCK_QOS_TYPE_VIDEO);
++                              requestedBufferSize, SOCK_QOS_TYPE_VIDEO);
+     if (rtpSocket == INVALID_SOCKET) {
+         VideoCallbacks.cleanup();
+         return LastSocketError();
+     }
+ 
++    if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
++        // A PyroWave frame can be hundreds of packets arriving at line rate.
++        // Linux silently clamps SO_RCVBUF to net.core.rmem_max, and packets
++        // beyond the clamped buffer are dropped by the kernel.
++        int actualBufferSize = 0;
++        SOCKADDR_LEN len = sizeof(actualBufferSize);
++        if (getsockopt(rtpSocket, SOL_SOCKET, SO_RCVBUF, (char*)&actualBufferSize, &len) == 0) {
++#ifdef __linux__
++            // Linux reports double the usable size to account for its overhead
++            actualBufferSize /= 2;
++#endif
++            if (actualBufferSize < requestedBufferSize) {
++                Limelog("WARNING: video receive buffer is %d KB of %d KB requested; "
++                        "PyroWave frames may lose packets (on Linux, raise net.core.rmem_max)\n",
++                        actualBufferSize / 1024, requestedBufferSize / 1024);
++            }
++        }
++    }
++
+     VideoCallbacks.start();
+ 
+     err = PltCreateThread("VideoRecv", VideoReceiveThreadProc, NULL, &receiveThread);

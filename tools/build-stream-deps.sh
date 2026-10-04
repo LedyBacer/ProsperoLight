@@ -8,6 +8,7 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/tools/native-toolchain.sh"
+bash "$root/tools/pyrowave/apply-transport.sh"
 fec_simd=${FEC_SIMD:-0}
 opus_simd=${OPUS_SIMD:-0}
 [[ "$fec_simd" =~ ^[01]$ && "$opus_simd" =~ ^[01]$ ]] || {
@@ -18,6 +19,7 @@ if [[ $# -gt 1 || ( $# -eq 1 && $1 != --ensure ) ]]; then
     echo 'usage: tools/build-stream-deps.sh [--ensure]' >&2
     exit 2
 fi
+bash "$root/tools/controllers/apply-haptics.sh"
 bash "$root/tools/setup-native-dependencies.sh" >/dev/null
 sdk=${PS5_PAYLOAD_SDK:-$root/.deps/native/ps5-payload-sdk}
 cc="$sdk/bin/prospero-clang"
@@ -42,6 +44,7 @@ options=$( {
     sha256sum "$root/tools/native-toolchain.sh" "$root/tools/build-stream-deps.sh" \
         "$root/tools/setup-native-dependencies.sh" "$cc" \
         "$("$LLVM_CONFIG" --bindir)/clang" "$("$LLVM_CONFIG" --bindir)/llvm-ar"
+    sha256sum "$root/include/server_endpoint.h"
     find "$common/src" "$common/enet" "$common/nanors" \
         "$mbedtls/include" "$mbedtls/library" "$opus" \
         "$root/platform/ps5" "$root/src/gamestream" \

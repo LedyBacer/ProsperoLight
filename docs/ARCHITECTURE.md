@@ -10,6 +10,7 @@ configuration, discovery, pairing, application control
 Moonlight stream coordinator (moonlight_stream.cpp)
    |                 |                 |
 VideoDec2 -> AGC     Opus -> AudioOut   DualSense + USB HID -> Moonlight input
+PyroWave -> RADV
 ```
 
 `moonlight_stream.cpp` owns the live session and its cleanup. Video access
@@ -51,7 +52,9 @@ draws nothing. `launcher_view.cpp` draws the four screens and their dialogs
 with the widgets of the UI kit in `third_party/ps5-homebrew-ui`, reads the
 model and asks it for things. `launcher_ps5.cpp` owns the console: the EGL
 display of the ps5-opengl SDK, the controller, the audio port, the sounds and
-the PNG decoder for box art. The model and the view have no console call in
+registers the portable `launcher_artwork.cpp` decoder for box art. It uses static
+libpng with bounded allocations on the model worker, without system PNG imports.
+The model and the view have no console call in
 them, so `tools/render-launcher.sh` runs both on a PC against a pretend
 Sunshine network, checks their behaviour and writes a picture of every state.
 
@@ -111,3 +114,13 @@ settles every path in `storage::paths()`: the install folder for the app's own
 files and `/data/prosperolight` for what it writes. It then opens the log. No
 other source names a sandbox path; without access the same structure holds
 `/app0` and `/download0`.
+
+## Integrated video and input extensions
+
+Explicit profile resolution in `stream_profile.hpp` selects native or PyroWave
+callbacks. PyroWave owns Vulkan/RADV presentation after the connecting plate
+releases AGC VideoOut; native video keeps the plate until the first picture.
+Both backends use `frame_pacing.hpp`; decoder ownership and teardown remain
+backend-specific. `ps5_dualsense.cpp` is the sole owner of additional pad handles
+and extended controller feedback. See [PyroWave](PYROWAVE.md),
+[DualSense](DUALSENSE.md) and [frame pacing](CONFIGURATION.md#source-clock-frame-pacing).

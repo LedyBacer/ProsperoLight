@@ -106,8 +106,14 @@ mapfile -d '' -t source_paths < <(
         ! -path "$root/src/gamestream/*" \
         -print0 | sort -z
 )
+bash "$root/tools/pyrowave/apply-transport.sh"
+
 sources=()
 for source in "${source_paths[@]}"; do
+    [[ ${PYROWAVE:-0} == 1 || $source != "$root/src/pyrowave/"* ]] || continue
+    # RADV's platform supplies the complete wrapped allocation family. Mixing
+    # it with the upstream OpenGL-only mspace would cross-free heap pointers.
+    [[ ${PYROWAVE:-0} != 1 || $source != "$root/src/runtime/app_heap.c" ]] || continue
     sources+=("${source#"$root/"}")
 done
 (( ${#sources[@]} > 0 )) || { echo "src/ has no C or C++ sources" >&2; exit 2; }
@@ -157,6 +163,49 @@ if (( ${#pacbrew_packages[@]} > 0 || ${#pacbrew_includes[@]} > 0 || ${#pacbrew_a
     printf 'PacBrew dependencies: %s\n' "${pacbrew_packages[*]:-(manual archives)}"
 fi
 
+pyrowave_cflags=()
+pyrowave_archives=()
+radv_link_flags=()
+radv_link_inputs=()
+link_script=(-T "$native/ps5-pie.ld")
+if [[ ${PYROWAVE:-0} == 1 ]]; then
+    source "$root/tools/pyrowave/build-deps.sh"
+    prepare_pyrowave_build
+    # The app layout includes both libunwind bounds and crash-report text bounds.
+    link_script=(-T "$native/ps5-pie.ld")
+    # The OpenGL launcher and RADV ship different Mesa versions. Namespace the
+    # launcher's private symbols in derived archives before either is linked.
+    isolated_graphics=$(python3 "$root/tools/pyrowave/isolate-opengl.py" \
+        "$root/.deps/ps5-opengl/current" \
+        "$PS5_VULKAN_ROOT/.deps/native/radv-release/lib/libvulkan_radeon.ps5.a" \
+        "$root/build/pyrowave/opengl-isolated" "${pacbrew_libs[@]}")
+    mapfile -t isolated_paths <<< "$isolated_graphics"
+    isolated_gl=${isolated_paths[0]}
+    radv_archive="$PS5_VULKAN_ROOT/.deps/native/radv-release/lib/libvulkan_radeon.ps5.a"
+    for index in "${!radv_link_inputs[@]}"; do
+        if [[ ${radv_link_inputs[index]} == "$radv_archive" ]]; then
+            radv_link_inputs[index]=${isolated_paths[1]}
+        fi
+    done
+    gl_group="$root/build/pyrowave/libps5opengl-isolated-group.a"
+    printf 'SEARCH_DIR("%s")\nEXTERN(ps5_agc_gate2_run)\nGROUP ("%s/libPS5OpenGL.a")\n' \
+        "$isolated_gl" "$isolated_gl" > "$gl_group"
+    rewritten_archives=()
+    for archive in "${archives[@]}"; do
+        if [[ $archive == .deps/ps5-opengl/libps5opengl-group.a ]]; then
+            rewritten_archives+=("build/pyrowave/libps5opengl-isolated-group.a")
+        else
+            rewritten_archives+=("$archive")
+        fi
+    done
+    archives=("${rewritten_archives[@]}")
+    # Use one C++ ABI, matching the platform library required by RADV.
+    filtered_archives=()
+    for archive in "${archives[@]}"; do
+        [[ $archive != vendor/ps5/sdk/lib/libcxx.a && $archive != vendor/ps5/sdk/lib/libcxxabi.a && $archive != vendor/ps5/sdk/lib/libunwind.a ]] && filtered_archives+=("$archive")
+    done
+    archives=("${filtered_archives[@]}")
+fi
 # Sources are compiled side by side, as many at once as BUILD_JOBS allows.
 max_jobs=${BUILD_JOBS:-$(nproc 2>/dev/null || printf '2')}
 [[ $max_jobs =~ ^[1-9][0-9]*$ ]] || { echo "BUILD_JOBS must be positive" >&2; exit 2; }
@@ -170,7 +219,11 @@ for source in "${sources[@]}"; do
     if [[ $source == *.c ]]; then standard=-std=c11; else standard=-std=c++20; fi
     args=("$standard" -O2 -Wall -Wextra -ffunction-sections -fdata-sections)
     # Neither the app nor the UI kit throws or asks for a type at run time.
-    [[ $source == *.c ]] || args+=(-fno-exceptions -fno-rtti)
+    if [[ $source == src/pyrowave/* ]]; then
+        args+=(-fexceptions -frtti)
+    elif [[ $source != *.c ]]; then
+        args+=(-fno-exceptions -fno-rtti)
+    fi
     for definition in "${definitions[@]}"; do
         [[ $definition =~ ^[A-Za-z_][A-Za-z0-9_]*(=[A-Za-z0-9_]+)?$ ]] || {
             echo "invalid compile definition: $definition" >&2; exit 2;
@@ -183,7 +236,7 @@ for source in "${sources[@]}"; do
         }
         args+=("-I$root/$include")
     done
-    args+=("${pacbrew_cflags[@]}")
+    args+=("${pacbrew_cflags[@]}" "${pyrowave_cflags[@]}")
     while (( $(jobs -rp | wc -l) >= max_jobs )); do
         wait -n || compile_failed=1
     done
@@ -234,6 +287,8 @@ pngdec_stub=$(build_system_link_stub libScePngDec vendor/ps5/sdk/stubs/pngdec_li
 videodec2_stub=$(build_system_link_stub libSceVideodec2 vendor/ps5/sdk/stubs/videodec2_link_stub.c)
 mouse_stub=$(build_system_link_stub libSceMouse vendor/ps5/sdk/stubs/mouse_link_stub.c)
 videoout_stub=$(build_system_link_stub libSceVideoOut vendor/ps5/sdk/stubs/videoout_link_stub.c)
+# Superset of the five SDK driver declarations plus RADV's tessellation setters.
+agc_driver_stub=$(build_system_link_stub libSceAgcDriver vendor/ps5/sdk/stubs/agc_driver_link_stub.c)
 
 link_inputs=("$build/obj/app_crt.o" "$build/obj/app_cpp_runtime.o" "${objects[@]}" \
     "$pngdec_stub" "$videodec2_stub" "$mouse_stub" "$videoout_stub")
@@ -267,11 +322,12 @@ done
 wrap_options+=("--wrap=sceSystemServiceHideSplashScreen")
 # libcurl's socket calls go through third_party/update-check/console_curl.c.
 wrap_options+=("--wrap=fcntl")
-"$sdk_root/bin/prospero-lld" -T "$native/ps5-pie.ld" --eh-frame-hdr "${wrap_options[@]}" \
+"$sdk_root/bin/prospero-lld" "${link_script[@]}" --eh-frame-hdr "${wrap_options[@]}" "${radv_link_flags[@]}" \
     --version-script "$native/app-symbols.map" \
     --exclude-libs=ALL \
     -L "$build/obj" \
     -e _start -o "$build/llvm-pie.elf" "${link_inputs[@]}" \
+    --start-group "${pyrowave_archives[@]}" --end-group "${radv_link_inputs[@]}" \
     --as-needed "${stub_paths[@]}" "$sdk_root"/target/lib/*.so
 "$tool" link --in "$build/llvm-pie.elf" --out "$build/eboot.elf" \
     --stub-dir "$sdk_root/target/lib" \
@@ -336,6 +392,18 @@ PY
     fi
     "$tool" self --inspect --file "$app/sce_module/$name"
 done
+mkdir -p "$app/licenses"
+cp "$root/LICENSE" "$app/licenses/ProsperoLight-GPL.txt"
+cp "$root/THIRD_PARTY_NOTICES.md" "$app/licenses/THIRD_PARTY_NOTICES.md"
+cp "$root/third_party/licenses/libpng.txt" "$app/licenses/libpng.txt"
+cp "$root/third_party/moonlight-common-c/LICENSE.txt" "$app/licenses/moonlight-common-c-LICENSE.txt"
+if [[ ${PYROWAVE:-0} == 1 ]]; then
+    cp "$root/src/pyrowave/LICENSE-MIT.txt" "$app/licenses/PS5-PyroWave-PoC-MIT.txt"
+    cp "$root/.deps/pyrowave/pyrowave/LICENSE" "$app/licenses/PyroWave-MIT.txt"
+    cp "$root/.deps/pyrowave/Granite/LICENSE" "$app/licenses/Granite-MIT.txt"
+    cp "$root/.deps/pyrowave/Granite/third_party/volk/LICENSE.md" "$app/licenses/Volk-MIT.txt"
+    cp "$root/.deps/pyrowave/Granite/third_party/khronos/vulkan-headers/LICENSE.md" "$app/licenses/Vulkan-Headers-LICENSE.md"
+fi
 "$tool" self --inspect --file "$app/eboot.bin"
 python3 "$root/tools/write-build-provenance.py" "$app/eboot.bin" "$build/build-provenance.json"
 
@@ -358,6 +426,9 @@ if [[ $format == ffpfsc || $format == all ]]; then
     rm -f -- "$dist/$title_id.ffpfsc"
     "$mkpfs" pack folder --no-adjust-output-file-extension \
         --version PS5 --verify "$app" "$dist/$title_id.ffpfsc"
+    # Raw exFAT avoids the PFSC mounting corruption observed on firmware 13.60.
+    "$root/.deps/MkPFS/.venv-linux/bin/python" "$root/tools/pack-exfat.py" \
+        "$app" "$dist/$title_id.exfat"
 fi
 
 printf 'Build complete.\nApp folder: %s\n' "$app"

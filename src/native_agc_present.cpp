@@ -73,8 +73,8 @@ static_assert(PROSPEROLIGHT_FLIP_POLL_US >= 100 && PROSPEROLIGHT_FLIP_POLL_US <=
 #define HUD_REFRESH_FRAMES 60u
 #define DIRECT_MEMORY_TYPE 12
 #define MAP_PROTECTION 0x33
-#define VIDEO_OUT_PIXEL_FORMAT_SDR UINT64_C(0x8000000000000000)
-#define VIDEO_OUT_PIXEL_FORMAT_HDR UINT64_C(0x8100070422000000)
+
+#include "ps5_videoout_formats.h"
 #define VIDEO_OUT_REFRESH_RATE_59_94 UINT64_C(3)
 #define VIDEO_OUT_REFRESH_RATE_119_88 UINT64_C(13)
 #define VIDEO_OUT_REFRESH_RATE_89_91 UINT64_C(35)
@@ -225,7 +225,7 @@ extern "C"
     int sceKernelWaitEqueue(void *queue, void *event, int count, int *out,
                             unsigned int *timeout_us);
 
-    int32_t sceAgcInit(void *state, uint32_t size);
+    int32_t sceAgcInit(uint32_t version);
     int32_t sceAgcCreateShader(void **shader, void *header, void *code);
     int32_t sceAgcLinkShaders(void *cx, void *uc, void *reserved, void *vertex_shader,
                               void *pixel_shader, uint32_t primitive_type);
@@ -395,9 +395,15 @@ static void refresh_hud_surface(uint8_t *surface, const native_agc_metrics_t *me
              metrics->incoming_fps_x100 % 100u, metrics->video_codec ? "HEVC" : "H.264",
              hdr ? " / HDR" : "", metrics->slices_observed, metrics->slices_requested);
     hud_line(luma, 0, text_luma, line);
-    snprintf(line, sizeof(line), "Output: %ux%u @ %u.%02u Hz / V-Sync %s", output_width,
-             output_height, output_refresh_x100 / 100u, output_refresh_x100 % 100u,
-             metrics->vsync_enabled ? "on" : "off (tearing)");
+    snprintf(line, sizeof(line), "Output %ux%u %u.%02u Hz / %s / VSync %s / reserve %llu us%s",
+             output_width, output_height, output_refresh_x100 / 100u, output_refresh_x100 % 100u,
+             metrics->pacing_mode == 2 ? "Paced+VRR"
+             : metrics->pacing_mode    ? "Paced"
+                                       : "Unpaced",
+             metrics->vsync_enabled ? "on" : "off", (unsigned long long)metrics->pacing_reserve_us,
+             metrics->pacing_mode == 2
+                 ? (metrics->vrr_api_active ? " / VRR API ok" : " / fixed fallback")
+                 : "");
     hud_line(luma, 1, text_luma, line);
     if (metrics->pipeline_depth > 1u)
         snprintf(line, sizeof(line), "Decoder: Videodec2 adaptive x%u / %u cores (mask 0x%llx)",
@@ -971,7 +977,6 @@ static native_agc_presenter_t presenter = {
     .hdr = 0,
     .ready = 0,
 };
-static uint64_t agc_state;
 static uint8_t agc_initialized;
 static std::atomic<int> hud_enabled = 1;
 static std::atomic<int> keyboard_enabled = 0;
@@ -980,6 +985,13 @@ static std::atomic<int> keyboard_shifted = 0;
 static std::atomic<uint32_t> keyboard_generation = 0;
 static std::atomic<uint32_t> requested_flip_mode = VIDEO_OUT_FLIP_MODE_VSYNC;
 static std::atomic<int> hsync_rejected = 0;
+static std::atomic<int> vrr_requested = 0;
+static std::atomic<int> vrr_active = 0;
+
+int native_agc_vrr_active(void)
+{
+    return vrr_active.load(std::memory_order_relaxed);
+}
 
 static uint32_t effective_flip_mode(void)
 {
@@ -988,10 +1000,18 @@ static uint32_t effective_flip_mode(void)
                : std::atomic_load_explicit(&requested_flip_mode, std::memory_order_relaxed);
 }
 
+void native_agc_set_vrr(int enabled)
+{
+    vrr_active.store(0, std::memory_order_relaxed);
+    vrr_requested.store(enabled != 0, std::memory_order_relaxed);
+}
+
 void native_agc_set_vsync(int enabled)
 {
     std::atomic_store_explicit(&requested_flip_mode,
-                               enabled ? VIDEO_OUT_FLIP_MODE_VSYNC : VIDEO_OUT_FLIP_MODE_HSYNC,
+                               (enabled || vrr_requested.load(std::memory_order_relaxed))
+                                   ? VIDEO_OUT_FLIP_MODE_VSYNC
+                                   : VIDEO_OUT_FLIP_MODE_HSYNC,
                                std::memory_order_relaxed);
 }
 
@@ -1090,6 +1110,17 @@ static int wait_for_marker(int64_t marker, unsigned *waits_out)
             }
         }
     }
+    if (timed_out)
+    {
+        char receipt[240];
+        snprintf(receipt, sizeof(receipt),
+                 "Native flip timeout: handle=%08x expected=%lld shown=%lld count=%llu fps=%u "
+                 "budget_us=%llu queue=%u",
+                 (unsigned)presenter.video, (long long)marker, (long long)status[3],
+                 (unsigned long long)status[0], presenter.requested_fps,
+                 (unsigned long long)budget_us, presenter.flip_queue ? 1u : 0u);
+        report_agc_receipt(receipt);
+    }
     if (waits_out)
         *waits_out = waits;
     if (timed_out)
@@ -1171,6 +1202,7 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
                                          int32_t *support_result, int32_t *preset_result,
                                          int32_t *vrr_result)
 {
+    vrr_active.store(0, std::memory_order_relaxed);
     *support_result = 0;
     *preset_result = 0;
     *vrr_result = 0;
@@ -1181,14 +1213,39 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
     *preset_result = sceVideoOutConfigureOutput(handle, VIDEO_OUT_REQUEST_120_HZ, NULL, NULL, NULL);
     if (*preset_result != 0)
         return *preset_result;
-    if (requested_fps == 90u)
+    if (vrr_requested.load(std::memory_order_relaxed))
+    {
         *vrr_result = sceVideoOutVrrUnpegFromFixedRate(handle);
-    return *vrr_result;
+        vrr_active.store(*vrr_result == 0, std::memory_order_relaxed);
+        if (*vrr_result != 0)
+        {
+            const uint32_t fixed_mode =
+                requested_fps > 60u ? VIDEO_OUT_REQUEST_120_HZ : VIDEO_OUT_REQUEST_DEFAULT;
+            const int fallback = sceVideoOutConfigureOutput(handle, fixed_mode, NULL, NULL, NULL);
+            char line[160];
+            snprintf(line, sizeof(line), "VRR unavailable: rc=%08x fixed_fallback=%08x",
+                     (uint32_t)*vrr_result, (uint32_t)fallback);
+            report_agc_receipt(line);
+            return fallback;
+        }
+    }
+    return 0;
 }
 
 static int configure_launcher_output(int32_t handle)
 {
     return sceVideoOutConfigureOutput(handle, VIDEO_OUT_REQUEST_DEFAULT, NULL, NULL, NULL);
+}
+
+// Same 48-byte output status already used by the native presenter. The
+// dynamic-range/flags interpretation is documented by Kodi's public PS5 port:
+// https://github.com/VivaLaVent/kodi-ps5/blob/main/overlay/xbmc/platform/ps5/VideoOutInfo.cpp
+int native_videoout_hdr_active(int32_t handle)
+{
+    video_output_status_t status = {};
+    if (handle < 0 || sceVideoOutGetOutputStatus(handle, &status) != 0)
+        return -1;
+    return status.output_class == 2u || (status.flags & 1u) ? 1 : 0;
 }
 
 static void update_presenter_output_status(const char *stage)
@@ -1244,6 +1301,13 @@ int native_agc_hud_enabled(void)
     return std::atomic_load_explicit(&hud_enabled, std::memory_order_relaxed);
 }
 
+void native_agc_keyboard_snapshot(int *enabled, uint32_t *selected, int *shifted)
+{
+    *enabled = keyboard_enabled.load(std::memory_order_acquire);
+    *selected = keyboard_selected.load(std::memory_order_relaxed);
+    *shifted = keyboard_shifted.load(std::memory_order_relaxed);
+}
+
 void native_agc_set_keyboard_state(int enabled, uint32_t selected, int shifted)
 {
     std::atomic_store_explicit(&keyboard_selected, selected, std::memory_order_relaxed);
@@ -1290,7 +1354,7 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
     result = 0;
     if (!agc_initialized)
     {
-        result = sceAgcInit(&agc_state, 8);
+        result = sceAgcInit(8);
         if (result == 0)
             agc_initialized = 1;
     }
@@ -1361,7 +1425,8 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
     presenter.video = sceVideoOutOpen(0xff, 0, 0, NULL);
     if (presenter.video >= 0)
         open_flip_events();
-    if (presenter.video >= 0 && requested_fps > 60u)
+    if (presenter.video >= 0 &&
+        (requested_fps > 60u || vrr_requested.load(std::memory_order_relaxed)))
         mode_result =
             configure_high_refresh_output(presenter.video, requested_fps, &mode_support_result,
                                           &mode_preset_result, &mode_vrr_result);
@@ -1715,7 +1780,7 @@ int native_agc_present_shutdown(void)
     }
     if (presenter.video >= 0 && presenter.ready)
         unregister_result = sceVideoOutUnregisterBuffers(presenter.video, 0);
-    if (presenter.video >= 0 && presenter.requested_fps > 60u)
+    if (presenter.video >= 0)
     {
         restore_result = configure_launcher_output(presenter.video);
         if (restore_result == 0)

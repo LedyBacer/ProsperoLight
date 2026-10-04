@@ -142,7 +142,7 @@ class ToolTests(unittest.TestCase):
 
         view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
         settings = view[view.index("void View::apply_setting(int id)") :]
-        resolution = settings[settings.index("case kResolution:") : settings.index("case kFrameRate:")]
+        resolution = settings[settings.index("case kResolution:") : settings.index("case kCodec:")]
         self.assertNotIn("hdr_enabled", resolution)
 
     def test_hdr_overlay_identifies_hdr_on_the_first_line(self):
@@ -161,8 +161,10 @@ class ToolTests(unittest.TestCase):
 
         for fps in (60, 90, 120):
             self.assertIn(f"#define MOONLIGHT_STREAM_FPS_{fps} {fps}U", config)
-        self.assertIn('form_.add_choice(kFrameRate, "Frame rate", {"60 FPS", "90 FPS", "120 FPS"}, 0)',
-                      view)
+        self.assertIn('form_.add_action(kFrameRate, "Frame rate")', view)
+        self.assertIn('number_prompt_.keyboard.set_layouts({ui::KeyboardLayout::numeric()});', view)
+        self.assertIn('MOONLIGHT_STREAM_FPS_MIN', view)
+        self.assertIn('MOONLIGHT_STREAM_FPS_MAX', view)
         self.assertIn("selection->stream_fps = config.stream_fps;", platform)
         self.assertIn("options.stream_fps = selection.stream_fps;", launcher)
         self.assertIn("stream_config.fps = (int)stream_fps;", stream)
@@ -197,14 +199,14 @@ class ToolTests(unittest.TestCase):
 
     def test_frame_rate_is_independent_of_resolution_and_bitrate(self):
         source = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
-        settings = source[source.index("void View::apply_setting(int id)") :]
-        resolution = settings[settings.index("case kResolution:") : settings.index("case kFrameRate:")]
-        frame_rate = settings[settings.index("case kFrameRate:") : settings.index("case kCodec:")]
-
+        settings = source[source.index("void View::apply_setting(int id)"):]
+        resolution = settings[settings.index("case kResolution:"):settings.index("case kCodec:")]
         self.assertNotIn("stream_fps", resolution)
-        self.assertIn("config.stream_fps = kRates[", frame_rate)
-        self.assertNotIn("stream_resolution", frame_rate)
-        self.assertNotIn("bitrate", frame_rate)
+        numeric = source[source.index("else if (number_prompt_.is_open())"):]
+        numeric = numeric[:numeric.index("else if (port_prompt_.is_open())")]
+        self.assertIn("config.stream_fps = value;", numeric)
+        self.assertNotIn("stream_resolution", numeric)
+        self.assertIn("config.bitrate_mbps = value;", numeric)
 
     def test_high_refresh_self_test_is_compile_time_disabled(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
@@ -263,7 +265,7 @@ class ToolTests(unittest.TestCase):
         # Filesystem access is asked for before anything else runs.
         body = main[main.index("int main()") :]
         self.assertLess(body.index("storage::Initialize();"), body.index("RunVideoOutputSelfTest();"))
-        self.assertLess(body.index("storage::Initialize();"), body.index("sceSysmoduleLoadModule("))
+        self.assertLess(body.index("storage::Initialize();"), body.index("launcher::Run("))
         # The paths name this title; privileged work stays in upstream Lapy.
         self.assertIn(f'kTitleId[] = "{title}"', storage)
         self.assertIn(f'kInstallDir[] = "/data/homebrew/{title}"', storage)
@@ -323,7 +325,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("mode_changed ? PROSPEROLIGHT_HFR_SETTLE_MS : 100;", main)
         # AGC is initialised once per process, by whichever renderer drew first.
         self.assertIn("native_agc_note_initialized();", platform)
-        self.assertEqual(presenter.count("sceAgcInit(&agc_state, 8)"), 1)
+        self.assertEqual(presenter.count("sceAgcInit(8)"), 1)
         self.assertIn("if (!agc_initialized)", presenter)
 
     def test_main10_descriptors_follow_the_visible_resolution(self):
@@ -374,6 +376,23 @@ class ToolTests(unittest.TestCase):
         )
         self.assertLess(failure, stream.index("prepare_native_session("))
 
+    def test_native_modules_keep_process_references_across_storage_and_reconnect(self):
+        main = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        self.assertLess(main.index("native_modules::PrepareBeforeStorage();"),
+                        main.index("storage::Initialize();"))
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+        self.assertNotIn("sceSysmoduleLoadModule(", stream)
+        self.assertNotIn("sceSysmoduleUnloadModule(", stream)
+        compiler = shutil.which("clang++") or shutil.which("c++")
+        self.assertIsNotNone(compiler)
+        with tempfile.TemporaryDirectory() as folder:
+            executable = str(Path(folder) / "native-modules")
+            subprocess.run([compiler, "-std=c++20", "-Wall", "-Wextra", "-Werror",
+                            "-I", str(ROOT / "include"), str(ROOT / "src/native_modules.cpp"),
+                            str(ROOT / "tests/test_native_modules.cpp"), "-o", executable],
+                           check=True)
+            subprocess.run([executable], check=True)
+
     def test_physical_input_loads_modules_and_batch_drains_all_handles(self):
         source = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
         start = source.index("static int ps5_physical_input_init(")
@@ -381,11 +400,11 @@ class ToolTests(unittest.TestCase):
         physical_input = source[start:end]
 
         self.assertLess(
-            physical_input.index("sceSysmoduleLoadModule(UINT32_C(0x0106))"),
+            physical_input.index("native_modules::Result(prosperolight::native_modules::keyboard)"),
             physical_input.index("sceKeyboardInit()"),
         )
         self.assertLess(
-            physical_input.index("sceSysmoduleLoadModule(UINT32_C(0x00a9))"),
+            physical_input.index("native_modules::Result(prosperolight::native_modules::mouse)"),
             physical_input.index("sceMouseInit()"),
         )
         self.assertIn("sceKeyboardRead(", physical_input)
@@ -488,7 +507,7 @@ class ToolTests(unittest.TestCase):
         self.assertNotIn("sceVideoOutWaitVblank", wait)
         self.assertIn("#define PROSPEROLIGHT_FLIP_POLL_US 500", presenter)
         self.assertIn("sceKernelUsleep(PROSPEROLIGHT_FLIP_POLL_US);", presenter)
-        self.assertIn("if (requested_fps == 90u)", presenter)
+        self.assertIn("requested_fps > 60u ? VIDEO_OUT_REQUEST_120_HZ : VIDEO_OUT_REQUEST_DEFAULT", presenter)
         self.assertIn("sceVideoOutIsOutputSupported", presenter)
         self.assertIn("sceVideoOutConfigureOutput", presenter)
         self.assertNotIn("sceVideoOutSysConfigureOutput", presenter)
@@ -615,7 +634,7 @@ class ToolTests(unittest.TestCase):
         # The stream shows it before anything slow, and moves the bar on at
         # each step of the connection.
         begin = run.index("result = connecting_screen_begin(")
-        self.assertLess(begin, run.index("sceSysmoduleLoadModule(207)"))
+        self.assertLess(begin, run.index("native_modules::Result(prosperolight::native_modules::video_decoder)"))
         steps = [run.index(f"connecting_screen_stage({step}") for step in
                  ("connecting_screen.progress, 0.45f", "0.45f, 0.70f", "0.70f, 0.88f", "0.88f, 0.97f")]
         self.assertEqual(steps, sorted(steps))
@@ -703,7 +722,9 @@ class ToolTests(unittest.TestCase):
         # the console's C library lays its FILE out differently.
         opened = storage[storage.index("void open_log(") :]
         self.assertIn("pthread_create(&flusher", opened)
-        self.assertIn("std::setvbuf(stdout, nullptr, started ? _IOFBF : _IONBF", opened)
+        self.assertIn("std::setvbuf(file, nullptr, _IOFBF", storage)
+        self.assertIn("bound_log(g_log_file);", storage)
+        self.assertIn("prosperolight_logs_enabled()", storage)
         self.assertNotIn("fileno(", storage)
         self.assertNotIn("dup2(", storage)
         # The crash report goes to the file itself.
@@ -780,13 +801,13 @@ class ToolTests(unittest.TestCase):
         self.assertIn('"Jinja2==3.1.6" "jsonschema==4.25.1"', workflow)
         self.assertIn('python3 -m zipfile -c "$TITLE_ID.zip" "$TITLE_ID"', workflow)
         self.assertIn(
-            'sha256sum "$TITLE_ID.ffpfsc" "$TITLE_ID.zip" > SHA256SUMS',
+            'sha256sum "$TITLE_ID.exfat" "$TITLE_ID.ffpfsc" "$TITLE_ID.zip" > SHA256SUMS',
             workflow,
         )
         self.assertIn("dist/${{ env.TITLE_ID }}.zip", workflow)
         self.assertIn("dist/SHA256SUMS", workflow)
         self.assertIn(
-            "Expected one FFPFSC image, one app-folder ZIP, and SHA256SUMS.",
+            "Expected one raw exFAT image, one FFPFSC image, one app-folder ZIP, and SHA256SUMS.",
             workflow,
         )
         self.assertIn("find . -type f -name 'PPSA*.ffpfsc' -print0", workflow)
@@ -794,7 +815,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("find . -type f -name 'SHA256SUMS' -print0", workflow)
         self.assertIn('sha256sum -c "$(basename "${checksums[0]}")"', workflow)
         self.assertIn(
-            'assets=("release/$IMAGE" "release/$ARCHIVE" "release/$CHECKSUM")',
+            'assets=("release/$RAW_IMAGE" "release/$IMAGE" "release/$ARCHIVE" "release/$CHECKSUM")',
             workflow,
         )
         self.assertIn("gh release delete-asset", workflow)
@@ -850,7 +871,7 @@ class ToolTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         references = dict(re.findall(r"^\[(\w+)\]: (docs/images/buttons/\w+\.svg) ", readme, re.M))
-        self.assertEqual(len(references), 10)
+        self.assertEqual(len(references), 12)
         for label, path in references.items():
             self.assertTrue((ROOT / path).is_file(), path)
             self.assertIn(f"][{label}]", readme)
@@ -875,12 +896,14 @@ class ToolTests(unittest.TestCase):
         self.assertIn("constexpr int kScreens = 4;", view)
         # About gives credit, as ProsperoEden's page does, and names the folders.
         about = view[view.index("void View::draw_about(") : view.index("void View::draw_pairing(")]
+        # C++ concatenates adjacent literals, including across formatted lines.
+        about = re.sub(r'"\s*"', "", about)
         for text in ("Powered by Moonlight", "moonlight-stream.org", "Sunshine developers",
                      "brought to you by BlackBearReloaded", "made with ElevenLabs",
                      '"Version " + version_', "files_.draw(canvas);"):
             self.assertIn(text, about)
         self.assertIn("view.set_storage(StorageFolders());", platform)
-        self.assertNotIn("Diagnostics", view)
+        self.assertIn('form_.add_header("Diagnostics");', view)
 
     def test_every_sunshine_request_uses_the_port_saved_for_that_pc(self):
         config = (ROOT / "include/moonlight_config.hpp").read_text(encoding="utf-8")
@@ -893,7 +916,8 @@ class ToolTests(unittest.TestCase):
 
         # One default, in the configuration and in the protocol client.
         self.assertIn("#define MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT 47989U", config)
-        self.assertIn("server->http_port = http_port ? http_port : 47989;", client)
+        self.assertIn("server_endpoint_parse(address, server->address, sizeof(server->address), http_port,", client)
+        self.assertIn("uint16_t value = fallback_port ? fallback_port : 47989;", (ROOT / "include/server_endpoint.h").read_text())
         for source in (backend, app, launcher, stream):
             self.assertNotIn("47989)", source)
         calls = [line for line in backend.splitlines() if "gs_init(" in line]
@@ -927,22 +951,15 @@ class ToolTests(unittest.TestCase):
         self.assertIn("QueueSelectedRefresh();", set_port)
 
     def test_stream_forwards_a_pad_for_every_signed_in_user(self):
-        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
-        run = stream[stream.index("int moonlight_stream_run(") :]
-
-        self.assertIn("#define PS5_EXTRA_PAD_COUNT 3u", stream)
-        self.assertIn("ps5_controllers_poll(&controller);", run)
-        self.assertNotIn("ps5_controller_poll(&controller);", run)
-        # The launch request names the controllers present, and the user list
-        # is read before the loading worker starts polling the first pad.
-        self.assertLess(run.index("launch_mask = ps5_controller_launch_mask(&controller);"),
-                        run.index("start_connection_loading(&loading, controller_ready ? &controller"))
-        session = " ".join(run[run.index("result = prepare_native_session(") :][:240].split())
-        self.assertIn("mode, launch_mask, host, host_port, app_name, app_id);", session)
-        # No packet may claim a fixed set of controllers.
-        self.assertNotIn("LiSendMultiControllerEvent(0, 1,", stream)
-        self.assertNotIn("LiSendControllerArrivalEvent(0, 1,", stream)
-        self.assertEqual(stream.count("LiSendControllerArrivalEvent("), 1)
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text()
+        controller = (ROOT / "src/ps5_dualsense.cpp").read_text()
+        self.assertIn("prosperolight::dualsense::Poll();", stream)
+        self.assertIn("controller_ready ? prosperolight::dualsense::ActiveMask() : 0", stream)
+        self.assertIn("sceUserServiceGetLoginUserIdList(users)", controller)
+        self.assertIn("LiSendControllerArrivalEvent(index, active_mask", controller)
+        self.assertNotIn("LiSendMultiControllerEvent(0, 1,", stream + controller)
+        self.assertNotIn("ps5_controller_launch_mask", stream)
+        self.assertIn("controller_summary = prosperolight::dualsense::GetStatistics();", stream)
 
     def test_games_show_no_apps_while_the_first_answer_is_pending(self):
         view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")

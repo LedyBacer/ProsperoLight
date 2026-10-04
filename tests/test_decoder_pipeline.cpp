@@ -59,6 +59,13 @@ static DECODE_UNIT queued_unit;
 
 extern "C"
 {
+    void gs_logf(const char *, const char *, ...)
+    {
+    }
+    int prosperolight_logs_enabled(void)
+    {
+        return 1;
+    }
     int lan_http_report_text(const char *)
     {
         return 0;
@@ -212,6 +219,16 @@ void native_agc_reset_performance()
 {
 }
 int native_agc_finish_frame(void)
+{
+    return 0;
+}
+void native_agc_output_status(uint32_t *width, uint32_t *height, uint32_t *refresh_x100)
+{
+    *width = 3840;
+    *height = 2160;
+    *refresh_x100 = 11988;
+}
+int native_agc_vrr_active(void)
 {
     return 0;
 }
@@ -565,6 +582,26 @@ static void every_connection_of_a_process_is_accepted()
     assert(moonlight_video_callbacks.setup == moonlight_renderer_setup);
 }
 
+static void paced_ready_queue_retains_surface_ownership()
+{
+    DECODE_UNIT unit{};
+    unit.fullLength = sizeof(access_unit);
+    unit.bufferList = &fragment;
+    auto *state = make_state(1, Model::SameCall, 1);
+    state->mailbox.capacity = 2;
+    for (int frame = 1; frame <= 3; ++frame)
+        assert(decode(state, &unit, frame, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(state->not_displayed == 1 && state->frames.count(Pool::Ready) == 2);
+    stream_ready_frame_t ready{};
+    assert(state->mailbox.take(&ready) && ready.frame == 2);
+    state->frames.release(ready.slot);
+    assert(state->mailbox.take(&ready) && ready.frame == 3);
+    state->frames.release(ready.slot);
+    assert(!state->mailbox.full && state->frames.count(Pool::Free) == FRAME_SLOT_COUNT);
+    renderer_sync_destroy(state);
+    delete state;
+}
+
 int main()
 {
     fragment.data = reinterpret_cast<char *>(access_unit);
@@ -574,6 +611,7 @@ int main()
     a_started_drain_runs_to_completion(Model::Queued);
     a_started_drain_runs_to_completion(Model::SameCall);
     classic_depth_one();
+    paced_ready_queue_retains_surface_ownership();
     errors_reset_and_bounded_backlog();
     fallback_to_depth_one();
     presentation_hands_slots_back();

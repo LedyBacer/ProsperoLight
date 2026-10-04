@@ -1,0 +1,34 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -273,9 +273,19 @@
+ videoout_vblank_period_ns(int handle)
+ {
+    uint64_t intervals[VIDEOOUT_PERIOD_INTERVALS];
++#if defined(__PROSPERO__)
++   /* WaitVblank wakeups may skip physical vblanks under scheduler pressure.
++    * Measure elapsed time over the hardware counter advance, not one wakeup. */
++   extern int sceVideoOutGetVblankStatus(int32_t, void *);
++   uint64_t initial_status[16] = {0}, final_status[16] = {0};
++#endif
+    if (sceVideoOutWaitVblank(handle) != 0)
+       return 0;
+    uint64_t previous = os_time_get_nano();
++#if defined(__PROSPERO__)
++   const bool counter_available = sceVideoOutGetVblankStatus(handle, initial_status) == 0;
++   const uint64_t start = previous;
++#endif
+    for (unsigned at = 0; at < VIDEOOUT_PERIOD_INTERVALS; at++) {
+       if (sceVideoOutWaitVblank(handle) != 0)
+          return 0;
+@@ -283,6 +293,11 @@
+       intervals[at] = now - previous;
+       previous = now;
+    }
++#if defined(__PROSPERO__)
++   if (counter_available && sceVideoOutGetVblankStatus(handle, final_status) == 0 &&
++       final_status[0] > initial_status[0])
++      return (previous - start) / (final_status[0] - initial_status[0]);
++#endif
+    for (unsigned i = 1; i < VIDEOOUT_PERIOD_INTERVALS; i++)
+       for (unsigned j = i; j > 0 && intervals[j - 1] > intervals[j]; j--) {
+          const uint64_t swap = intervals[j];

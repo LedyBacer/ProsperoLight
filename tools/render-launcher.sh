@@ -15,15 +15,16 @@ cxx=$(command -v "${HOST_CXX:-clang++}")
 build="$root/build/launcher-host"
 kit="$root/third_party/ps5-homebrew-ui"
 mkdir -p "$build/obj"
+bash "$root/tools/pyrowave/apply-transport.sh"
 
 sources=("$root"/tools/launcher-host/*.cpp "$root/src/launcher/launcher_model.cpp"
     "$root/src/launcher/launcher_view.cpp" "$root/src/moonlight_config.cpp"
-    "$root/src/connecting_plate.cpp")
+    "$root/src/connecting_plate.cpp" "$root/src/lan_http_report.cpp")
 while IFS= read -r -d '' source; do
     sources+=("$source")
 done < <(find "$kit/gfx" "$kit/ui" "$kit/core" "$kit/audio" -type f -name '*.cpp' -print0 | sort -z)
 
-flags="-std=c++20 -O2 -Wall -Wextra -DGL_GLEXT_PROTOTYPES=1 -I$root/src -I$root/include -I$kit -I$root/tools/launcher-host -I$root/third_party/stb"
+flags="-std=c++20 -O2 -Wall -Wextra -DGL_GLEXT_PROTOTYPES=1 -I$root/src -I$root/include -I$kit -I$root/tools/launcher-host -I$root/third_party/stb -I$root/third_party/moonlight-common-c/src"
 {
     printf 'all: %s\n' "$build/launcher_host"
     objects=()

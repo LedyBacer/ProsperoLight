@@ -5,6 +5,7 @@
  */
 
 #include "launcher/launcher_model.hpp"
+#include "stream_profile.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -417,7 +418,19 @@ bool Model::RequestStream()
                "Choose H.264 in Settings, or change the encoder on the PC.");
         return false;
     }
-    if (config_.hdr_enabled && !backend_.main10_supported)
+    if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
+    {
+        const auto profile = moonlight::resolve_stream_profile(
+            config_.video_codec, config_.chroma_sampling, config_.hdr_enabled != 0);
+        if (!(backend_.pyrowave_profiles & profile.capability))
+        {
+            Notify(NoticeKind::error, "This PyroWave profile is unavailable",
+                   "Choose a supported chroma/HDR profile or configure Vibepollo on the PC.");
+            return false;
+        }
+    }
+    if (config_.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE && config_.hdr_enabled &&
+        !backend_.main10_supported)
     {
         Notify(NoticeKind::error, "This PC cannot encode HDR",
                "Turn HDR off in Settings, or enable HEVC Main10 on the PC.");

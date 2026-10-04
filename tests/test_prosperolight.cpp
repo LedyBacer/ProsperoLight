@@ -84,7 +84,10 @@ TEST(Pipeline, ThreadLayoutKeepsStreamThreadsOffDecoderCpus)
     EXPECT_EQ(five.other, 0x1800u);
     const ThreadLayout three = plan_thread_layout(kTitleCpuMask, kClassicDecoderCpuMask);
     EXPECT_EQ(three.receive, 0x40u);
-    EXPECT_EQ(three.other, 0x1f80u);
+    EXPECT_EQ(three.other, 0x300u);
+    EXPECT_EQ(three.other & (three.receive | three.decode | three.present), 0u);
+    const ThreadLayout four = plan_thread_layout(kTitleCpuMask, 0xffu);
+    EXPECT_EQ(four.other & (four.receive | four.decode | four.present), 0u);
     // One CPU left is shared; none left means "leave the inherited masks".
     const ThreadLayout single = plan_thread_layout(0x7u, 0x3u);
     EXPECT_EQ(single.receive, 0x4u);
@@ -148,7 +151,7 @@ TEST(Pipeline, SlotsAreOnlyReusedAfterReleaseAndNeverTheLatestOutput)
 
 TEST(Pipeline, MailboxKeepsOnlyTheNewestPicture)
 {
-    moonlight::LatestMailbox<int> mailbox;
+    moonlight::ReadyMailbox<int> mailbox;
     int out = 0, displaced = 0;
     EXPECT_FALSE(mailbox.take(&out));
     EXPECT_FALSE(mailbox.publish(1, &displaced));
@@ -671,7 +674,96 @@ TEST(Configuration, MigratesVersionFiveAndDefaultsTheNewStreamSettings)
     EXPECT_EQ(config.vsync_enabled, 1U);
     EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_CLASSIC);
     EXPECT_EQ(config.decoder_cores, MOONLIGHT_DECODER_CORES_DEFAULT);
+    // The persisted reader must retain every entered target, not just presets.
+    kernel_read_data = reinterpret_cast<const std::uint8_t *>(&file);
+    kernel_read_size = sizeof(file);
+    for (uint32_t fps = 30; fps <= 120; ++fps)
+    {
+        file.config.stream_fps = fps;
+        file.checksum = checksum(&file.config, sizeof(file.config));
+        ASSERT_TRUE(moonlight_config_load(&config));
+        EXPECT_EQ(config.stream_fps, fps);
+    }
+    for (uint32_t fps : {0u, 29u, 121u, UINT32_MAX})
+    {
+        file.config.stream_fps = fps;
+        file.checksum = checksum(&file.config, sizeof(file.config));
+        ASSERT_TRUE(moonlight_config_load(&config));
+        EXPECT_EQ(config.stream_fps, MOONLIGHT_STREAM_FPS_60);
+    }
+    kernel_read_data = nullptr;
+    kernel_read_size = 0;
     EXPECT_EQ(config.hosts[0].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+}
+
+TEST(Configuration, MigratesBothVersionSevenLayoutsWithoutLosingPyroWaveOrPorts)
+{
+    struct UpstreamConfig
+    {
+        std::uint32_t fields[12];
+        moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    };
+    struct PyroWaveConfig
+    {
+        std::uint32_t fields[13];
+        LegacyHost hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    };
+    struct UpstreamFile
+    {
+        std::uint32_t magic, version, checksum, reserved;
+        UpstreamConfig config;
+    } upstream{};
+    struct PyroWaveFile
+    {
+        std::uint32_t magic, version, checksum, reserved;
+        PyroWaveConfig config;
+    } pyrowave{};
+    moonlight_config_t defaults{};
+    moonlight_config_defaults(&defaults);
+    defaults.host_count = 1;
+    defaults.bitrate_mbps = 600;
+    defaults.stream_fps = 117;
+    defaults.video_codec = MOONLIGHT_VIDEO_CODEC_PYROWAVE;
+    defaults.hdr_enabled = 1;
+    defaults.chroma_sampling = MOONLIGHT_CHROMA_444;
+    upstream.magic = pyrowave.magic = UINT32_C(0x504c4346);
+    upstream.version = pyrowave.version = 7;
+    memcpy(upstream.config.fields, &defaults, sizeof(upstream.config.fields));
+    memcpy(pyrowave.config.fields, &defaults, sizeof(pyrowave.config.fields));
+    // Upstream's layout has a separate port and no chroma field.
+    upstream.config.fields[4] = MOONLIGHT_VIDEO_CODEC_HEVC;
+    snprintf(upstream.config.hosts[0].address, sizeof(upstream.config.hosts[0].address),
+             "192.168.1.5");
+    upstream.config.hosts[0].http_port = 48000;
+    // Our previous layout puts the custom port inside the address.
+    snprintf(pyrowave.config.hosts[0].address, sizeof(pyrowave.config.hosts[0].address),
+             "192.168.1.5:49000");
+    pyrowave.config.hosts[0].manual = 1;
+    upstream.checksum = ConfigChecksum(&upstream.config, sizeof(upstream.config));
+    pyrowave.checksum = ConfigChecksum(&pyrowave.config, sizeof(pyrowave.config));
+    for (int variant = 0; variant < 2; ++variant)
+    {
+        kernel_read_data = variant ? reinterpret_cast<const std::uint8_t *>(&pyrowave)
+                                   : reinterpret_cast<const std::uint8_t *>(&upstream);
+        kernel_read_size = variant ? sizeof(pyrowave) : sizeof(upstream);
+        moonlight_config_t loaded{};
+        ASSERT_TRUE(moonlight_config_load(&loaded));
+        EXPECT_EQ(loaded.host_count, 1u);
+        EXPECT_STREQ(loaded.hosts[0].address, "192.168.1.5");
+        EXPECT_EQ(loaded.hosts[0].http_port, variant ? 49000u : 48000u);
+        EXPECT_EQ(loaded.stream_fps, 117u);
+        EXPECT_EQ(loaded.video_codec,
+                  variant ? MOONLIGHT_VIDEO_CODEC_PYROWAVE : MOONLIGHT_VIDEO_CODEC_HEVC);
+        EXPECT_EQ(loaded.chroma_sampling, variant ? MOONLIGHT_CHROMA_444 : MOONLIGHT_CHROMA_420);
+        EXPECT_EQ(loaded.hdr_enabled, 1u);
+    }
+    ++pyrowave.checksum;
+    kernel_read_data = reinterpret_cast<const std::uint8_t *>(&pyrowave);
+    kernel_read_size = sizeof(pyrowave);
+    moonlight_config_t loaded{};
+    EXPECT_FALSE(moonlight_config_load(&loaded));
+    kernel_read_data = nullptr;
+    kernel_read_size = 0;
 }
 
 TEST(Configuration, MigratesVersionSixAndGivesSavedPcsTheDefaultPort)
@@ -1065,6 +1157,22 @@ TEST(Configuration, ParsesAPortNumber)
     for (const char *text : {"", " ", "0", "65536", "-1", "+80", "80a", "4 7", "0x50", "1e3"})
         EXPECT_FALSE(moonlight_config_parse_port(text, &port)) << text;
     EXPECT_FALSE(moonlight_config_parse_port(nullptr, &port));
+}
+
+TEST(Configuration, DiscoveryPreservesAnExplicitCustomPort)
+{
+    moonlight_config_t config{};
+    moonlight_config_defaults(&config);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48000, "PC", "host-1", true),
+              0);
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 0, "PC discovered", "host-1", false),
+        0);
+    EXPECT_EQ(config.host_count, 1u);
+    EXPECT_STREQ(config.hosts[0].address, "192.168.1.10");
+    EXPECT_EQ(config.hosts[0].http_port, 48000u);
+    ASSERT_EQ(moonlight_config_set_host_port(&config, 0, 49000), 0);
+    EXPECT_EQ(config.hosts[0].http_port, 49000u);
 }
 
 TEST(Configuration, UpsertRejectsAHostBeyondCapacity)

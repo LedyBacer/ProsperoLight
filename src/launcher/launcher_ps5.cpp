@@ -5,6 +5,10 @@
  */
 
 #include "launcher/launcher.hpp"
+#include "ui_sound_preferences.hpp"
+#if PROSPEROLIGHT_PYROWAVE
+#include "pyrowave/video/ps5_presentation_stats.hpp"
+#endif
 
 #include "app_storage.hpp"
 #include "../../platform/ps5/ps5_thread_placement.h"
@@ -13,7 +17,7 @@
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
 #include "native_agc_present.hpp"
-#include "ps5_pngdec.hpp"
+#include "launcher/launcher_artwork.hpp"
 
 #include "audio/cues.hpp"
 #include "audio/mixer.hpp"
@@ -76,108 +80,6 @@ std::string Assets()
     return std::string(storage::paths().app) + "/assets";
 }
 
-// Posters are kept at most this tall: twice what a card shows at 4K needs
-// nothing more, and 64 of them must fit comfortably in graphics memory.
-constexpr int kPosterHeight = 672;
-constexpr std::uint64_t kLargestPicture = 64u * 1024u * 1024u;
-
-#if PROSPEROLIGHT_STREAM_SELF_TEST_FPS != 0
-bool high_refresh_self_test_consumed;
-#endif
-#if PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST != 0
-bool stop_active_app_self_test_consumed;
-#endif
-
-// Sunshine's box art, decoded by the console's PNG decoder and scaled down.
-// Runs on the model's worker thread.
-bool DecodePoster(const unsigned char *png, std::size_t size, ArtworkImage *image)
-{
-    if (!png || size == 0 || size > UINT32_MAX)
-        return false;
-    ScePngDecParseParam parse{png, static_cast<std::uint32_t>(size), 0};
-    ScePngDecImageInfo info{};
-    if (scePngDecParseHeader(&parse, &info) < 0 || info.image_width == 0 || info.image_height == 0)
-        return false;
-    const std::uint64_t bytes =
-        static_cast<std::uint64_t>(info.image_width) * info.image_height * 4;
-    if (bytes > kLargestPicture)
-        return false;
-
-    ScePngDecCreateParam create{sizeof(ScePngDecCreateParam), info.bit_depth > 8 ? 1u : 0u,
-                                info.image_width};
-    const int work_size = scePngDecQueryMemorySize(&create);
-    if (work_size <= 0)
-        return false;
-    void *work = std::malloc(static_cast<std::size_t>(work_size));
-    void *handle = nullptr;
-    if (!work || scePngDecCreate(&create, work, static_cast<std::uint32_t>(work_size), &handle) < 0)
-    {
-        std::free(work);
-        return false;
-    }
-    // Pixel format 1 is blue, green, red, alpha: the order the launcher has
-    // always asked this decoder for.
-    std::vector<unsigned char> decoded(static_cast<std::size_t>(bytes));
-    ScePngDecDecodeParam decode{png,
-                                decoded.data(),
-                                static_cast<std::uint32_t>(size),
-                                static_cast<std::uint32_t>(bytes),
-                                1,
-                                255,
-                                info.image_width * 4};
-    ScePngDecImageInfo output{};
-    const int result = scePngDecDecode(handle, &decode, &output);
-    (void)scePngDecDelete(handle);
-    std::free(work);
-    if (result < 0)
-        return false;
-
-    // Each output pixel is the average of the block of source pixels it covers.
-    const int source_width = static_cast<int>(info.image_width);
-    const int source_height = static_cast<int>(info.image_height);
-    int height = source_height > kPosterHeight ? kPosterHeight : source_height;
-    int width = static_cast<int>(static_cast<std::int64_t>(source_width) * height / source_height);
-    if (width < 1)
-        width = 1;
-    image->width = width;
-    image->height = height;
-    image->rgba.resize(static_cast<std::size_t>(width) * height * 4);
-    for (int y = 0; y < height; ++y)
-    {
-        const int y0 = static_cast<int>(static_cast<std::int64_t>(y) * source_height / height);
-        int y1 = static_cast<int>(static_cast<std::int64_t>(y + 1) * source_height / height);
-        if (y1 <= y0)
-            y1 = y0 + 1;
-        for (int x = 0; x < width; ++x)
-        {
-            const int x0 = static_cast<int>(static_cast<std::int64_t>(x) * source_width / width);
-            int x1 = static_cast<int>(static_cast<std::int64_t>(x + 1) * source_width / width);
-            if (x1 <= x0)
-                x1 = x0 + 1;
-            unsigned sum[4] = {0, 0, 0, 0};
-            for (int sy = y0; sy < y1; ++sy)
-            {
-                const unsigned char *row =
-                    decoded.data() + (static_cast<std::size_t>(sy) * source_width + x0) * 4;
-                for (int sx = x0; sx < x1; ++sx, row += 4)
-                {
-                    sum[0] += row[0];
-                    sum[1] += row[1];
-                    sum[2] += row[2];
-                    sum[3] += row[3];
-                }
-            }
-            const unsigned count = static_cast<unsigned>((y1 - y0) * (x1 - x0));
-            unsigned char *out = image->rgba.data() + (static_cast<std::size_t>(y) * width + x) * 4;
-            out[0] = static_cast<unsigned char>(sum[2] / count);
-            out[1] = static_cast<unsigned char>(sum[1] / count);
-            out[2] = static_cast<unsigned char>(sum[0] / count);
-            out[3] = static_cast<unsigned char>(sum[3] / count);
-        }
-    }
-    return true;
-}
-
 // The folders the About screen names.
 View::Storage StorageFolders()
 {
@@ -226,6 +128,7 @@ bool FillSelection(const Model &model, Selection *selection)
     selection->stream_resolution = config.stream_resolution;
     selection->stream_fps = config.stream_fps;
     selection->hdr_enabled = config.hdr_enabled;
+    selection->chroma_sampling = config.chroma_sampling;
     selection->audio_configuration = config.audio_configuration;
     selection->vsync_enabled = config.vsync_enabled;
     selection->decoder_pipeline = config.decoder_pipeline;
@@ -388,6 +291,19 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
     { return static_cast<long long>((sys::monotonic_us() - opened_at) / 1000); };
     sys::log("[PL] launcher: opening (first=%d)", first_start ? 1 : 0);
 
+#if PROSPEROLIGHT_PYROWAVE
+    struct LauncherOutputPolicy
+    {
+        LauncherOutputPolicy()
+        {
+            ps5_launcher_output_policy(true);
+        }
+        ~LauncherOutputPolicy()
+        {
+            ps5_launcher_output_policy(false);
+        }
+    } launcher_output_policy;
+#endif
     // 4K when the television takes it, else 1080p.
     ps5::Display display;
     if (!(ps5::Display::supports_display_modes() && display.open(3840, 2160)) &&
@@ -512,11 +428,12 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
 
                 feedback.clear();
                 view.update(input, dt, feedback);
-                for (const audio::CueEvent &event : feedback.cues)
-                    sounds.play(mixer,
-                                event.set == audio::SoundSet::count ? audio::SoundSet::glass
-                                                                    : event.set,
-                                event);
+                if (prosperolight::ui_sound_enabled())
+                    for (const audio::CueEvent &event : feedback.cues)
+                        sounds.play(mixer,
+                                    event.set == audio::SoundSet::count ? audio::SoundSet::glass
+                                                                        : event.set,
+                                    event);
 
                 lap(parts[2]);
                 frame.reset();

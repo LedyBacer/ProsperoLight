@@ -1,0 +1,15 @@
+Keep Granite errors visible in the client's shipping C API build.
+No bitstream, shader or decoder algorithm changes.
+
+diff --git a/pyrowave_c.cpp b/pyrowave_c.cpp
+--- a/pyrowave_c.cpp
++++ b/pyrowave_c.cpp
+@@ -21,7 +21,7 @@ struct NullLogger : Util::LoggingInterface
+ {
+ 	bool log(const char *, const char *, va_list) override
+ 	{
+-#ifdef VULKAN_DEBUG
++#if defined(VULKAN_DEBUG) || defined(PROSPEROLIGHT_PYROWAVE_DIAGNOSTICS)
+ 		return false;
+ #else
+ 		return true;

@@ -32,6 +32,7 @@ struct Pc
     bool discoverable = true;
     bool hevc = true;
     bool main10 = true;
+    std::uint32_t pyrowave_profiles = 0;
     int current_app = 0;
     std::vector<App> apps;
 };

@@ -5,6 +5,7 @@
  */
 
 #pragma once
+#include <string>
 
 // Where ProsperoLight keeps its files.
 //
@@ -35,7 +36,7 @@ struct Paths
     char pairing[128] = "/download0/moonlight";
     char logs[128] = "/download0";
     // The folder a stream leaves its performance report in.
-    char performance[128] = "/download0/moonlight";
+    char performance[128] = "/download0";
 };
 
 inline Paths g_paths;
@@ -43,6 +44,13 @@ inline Paths g_paths;
 inline const Paths &paths()
 {
     return g_paths;
+}
+
+// Sidecar preferences follow the main configuration across elevation/migration.
+inline std::string setting_file(const char *name)
+{
+    const std::string config = paths().config;
+    return config.substr(0, config.find_last_of('/') + 1) + name;
 }
 
 // Asks for filesystem access, settles every path, creates the folders, brings

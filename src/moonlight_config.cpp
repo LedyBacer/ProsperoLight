@@ -14,7 +14,7 @@
 #include <string.h>
 
 #define CONFIG_MAGIC UINT32_C(0x504c4346)
-#define CONFIG_VERSION 7U
+#define CONFIG_VERSION 8U
 #define CONFIG_PATH (storage::paths().config)
 #define CONFIG_TEMP_PATH (storage::paths().config_temporary)
 #define OPEN_READ_ONLY 0x0000
@@ -162,12 +162,32 @@ typedef struct legacy_config_v6
 
 typedef struct legacy_config_file_v6
 {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t checksum;
-    uint32_t reserved;
+    uint32_t magic, version, checksum, reserved;
     legacy_config_v6_t config;
 } legacy_config_file_v6_t;
+
+// The two version-7 branches had different layouts. Checksummed payload
+// sizes identify them; version 8 stores both chroma and the per-PC port.
+typedef struct legacy_config_v7_upstream
+{
+    uint32_t fields[12];
+    moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+} legacy_config_v7_upstream_t;
+typedef struct legacy_config_v7_pyrowave
+{
+    uint32_t fields[13];
+    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+} legacy_config_v7_pyrowave_t;
+typedef struct legacy_file_v7_upstream
+{
+    uint32_t magic, version, checksum, reserved;
+    legacy_config_v7_upstream_t config;
+} legacy_file_v7_upstream_t;
+typedef struct legacy_file_v7_pyrowave
+{
+    uint32_t magic, version, checksum, reserved;
+    legacy_config_v7_pyrowave_t config;
+} legacy_file_v7_pyrowave_t;
 
 extern "C"
 {
@@ -260,6 +280,15 @@ static void copy_legacy_hosts(moonlight_config_t *config, const legacy_config_ho
         memcpy(host->unique_id, hosts[index].unique_id, sizeof(host->unique_id));
         host->manual = hosts[index].manual;
         host->http_port = 0;
+        // Our previous UI kept a custom port in the address string.
+        char address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
+        uint16_t port = 0;
+        host->address[sizeof(host->address) - 1] = 0;
+        if (moonlight_config_parse_endpoint(host->address, address, &port))
+        {
+            copy_text(host->address, sizeof(host->address), address);
+            host->http_port = port;
+        }
     }
 }
 
@@ -283,6 +312,8 @@ void moonlight_config_defaults(moonlight_config_t *config)
 bool moonlight_config_load(moonlight_config_t *config)
 {
     config_file_t file;
+    legacy_file_v7_upstream_t upstream_v7;
+    legacy_file_v7_pyrowave_t pyrowave_v7;
     legacy_config_file_v6_t legacy_v6;
     legacy_config_file_v5_t legacy_v5;
     legacy_config_file_v4_t legacy_v4;
@@ -300,6 +331,25 @@ bool moonlight_config_load(moonlight_config_t *config)
         file.config.host_count <= MOONLIGHT_CONFIG_MAX_HOSTS)
     {
         *config = file.config;
+    }
+    else if (read_exact(CONFIG_PATH, &upstream_v7, sizeof(upstream_v7)) &&
+             upstream_v7.magic == CONFIG_MAGIC && upstream_v7.version == 7U &&
+             upstream_v7.checksum == checksum(&upstream_v7.config, sizeof(upstream_v7.config)) &&
+             upstream_v7.config.fields[0] <= MOONLIGHT_CONFIG_MAX_HOSTS)
+    {
+        static_assert(sizeof(upstream_v7.config.fields) ==
+                      offsetof(moonlight_config_t, chroma_sampling));
+        memcpy(config, upstream_v7.config.fields, sizeof(upstream_v7.config.fields));
+        memcpy(config->hosts, upstream_v7.config.hosts, sizeof(config->hosts));
+    }
+    else if (read_exact(CONFIG_PATH, &pyrowave_v7, sizeof(pyrowave_v7)) &&
+             pyrowave_v7.magic == CONFIG_MAGIC && pyrowave_v7.version == 7U &&
+             pyrowave_v7.checksum == checksum(&pyrowave_v7.config, sizeof(pyrowave_v7.config)) &&
+             pyrowave_v7.config.fields[0] <= MOONLIGHT_CONFIG_MAX_HOSTS)
+    {
+        static_assert(sizeof(pyrowave_v7.config.fields) == offsetof(moonlight_config_t, hosts));
+        memcpy(config, pyrowave_v7.config.fields, sizeof(pyrowave_v7.config.fields));
+        copy_legacy_hosts(config, pyrowave_v7.config.hosts);
     }
     else if (read_exact(CONFIG_PATH, &legacy_v6, sizeof(legacy_v6)) &&
              legacy_v6.magic == CONFIG_MAGIC && legacy_v6.version == 6U &&
@@ -402,17 +452,16 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->selected_host = 0;
     else if (config->selected_host >= config->host_count)
         config->selected_host = config->host_count - 1;
-    if (config->bitrate_mbps < 1 || config->bitrate_mbps > 500)
+    if (config->bitrate_mbps < 1 || config->bitrate_mbps > 1000)
         config->bitrate_mbps = 20;
     if (config->display_area > MOONLIGHT_DISPLAY_AREA_FULL)
         config->display_area = MOONLIGHT_DISPLAY_AREA_FULL;
-    if (config->video_codec > MOONLIGHT_VIDEO_CODEC_HEVC)
+    if (config->video_codec > MOONLIGHT_VIDEO_CODEC_PYROWAVE)
         config->video_codec = MOONLIGHT_VIDEO_CODEC_H264;
     if (config->stream_resolution > MOONLIGHT_STREAM_RESOLUTION_2160P)
         config->stream_resolution = MOONLIGHT_STREAM_RESOLUTION_1080P;
-    if (config->stream_fps != MOONLIGHT_STREAM_FPS_60 &&
-        config->stream_fps != MOONLIGHT_STREAM_FPS_90 &&
-        config->stream_fps != MOONLIGHT_STREAM_FPS_120)
+    if (config->stream_fps < MOONLIGHT_STREAM_FPS_MIN ||
+        config->stream_fps > MOONLIGHT_STREAM_FPS_MAX)
         config->stream_fps = MOONLIGHT_STREAM_FPS_60;
     if (config->hdr_enabled > 1U)
         config->hdr_enabled = 0;
@@ -425,7 +474,9 @@ bool moonlight_config_load(moonlight_config_t *config)
     if (config->decoder_cores < MOONLIGHT_DECODER_CORES_MIN ||
         config->decoder_cores > MOONLIGHT_DECODER_CORES_MAX)
         config->decoder_cores = MOONLIGHT_DECODER_CORES_DEFAULT;
-    if (config->hdr_enabled)
+    if (config->chroma_sampling > MOONLIGHT_CHROMA_444)
+        config->chroma_sampling = MOONLIGHT_CHROMA_420;
+    if (config->hdr_enabled && config->video_codec == MOONLIGHT_VIDEO_CODEC_H264)
         config->video_codec = MOONLIGHT_VIDEO_CODEC_HEVC;
     return true;
 }

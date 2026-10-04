@@ -7,6 +7,7 @@ SHELL := /bin/bash
 
 -include .env
 
+PYROWAVE ?= 1
 LAN_TELEMETRY ?= 0
 STREAM_SELF_TEST_FPS ?= 0
 STREAM_SELF_TEST_RESOLUTION ?= 0
@@ -33,6 +34,7 @@ REFERENCE_FRAME_INVALIDATION ?= 0
 HFR_SETTLE_MS ?= 5000
 APP_DEFINITIONS ?= GL_GLEXT_PROTOTYPES=1
 APP_DEFINITIONS += PROSPEROLIGHT_HFR_SETTLE_MS=$(HFR_SETTLE_MS)
+APP_DEFINITIONS += PROSPEROLIGHT_PYROWAVE=$(PYROWAVE)
 APP_DEFINITIONS += PROSPEROLIGHT_LAN_TELEMETRY=$(LAN_TELEMETRY)
 APP_DEFINITIONS += PROSPEROLIGHT_STREAM_SELF_TEST_FPS=$(STREAM_SELF_TEST_FPS)
 APP_DEFINITIONS += PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION=$(STREAM_SELF_TEST_RESOLUTION)
@@ -54,12 +56,12 @@ APP_DEFINITIONS += PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION=$(REFERENCE_FRAME_
 APP_INCLUDE_PATHS ?= third_party/ps5-homebrew-ui third_party/update-check .deps/ps5-opengl/current/include include src src/gamestream platform/ps5 third_party/moonlight-common-c/src third_party/moonlight-common-c/enet/include third_party/moonlight-common-c/nanors third_party/moonlight-common-c/nanors/deps third_party/moonlight-common-c/nanors/deps/obl third_party/mbedtls/include third_party/opus/include
 APP_STATIC_ARCHIVES ?= .deps/ps5-opengl/libps5opengl-group.a build/stream-deps/libmoonlight-common-c.a build/stream-deps/libopus.a build/stream-deps/libmbedtls.a build/stream-deps/libmbedx509.a build/stream-deps/libmbedcrypto.a
 # The launcher draws with ps5-opengl: its AGC import libraries replace the app's own.
-APP_IMPORT_STUBS ?= .deps/ps5-opengl/current/lib/libSceAgc.so .deps/ps5-opengl/current/lib/libSceAgcDriver.so
+APP_IMPORT_STUBS ?= .deps/ps5-opengl/current/lib/libSceAgc.so build/stubs/libSceAgcDriver.so
 # Empty selects the pinned ps5-opengl release (tools/fetch-opengl-sdk.sh).
 PS5_OPENGL_PREFIX ?=
 APP_RUNTIME_MODULES ?=
 # The update check asks homebrew.page through libcurl (third_party/update-check).
-PACBREW_PACKAGES ?= libcurl
+PACBREW_PACKAGES ?= libcurl libpng
 PACBREW_INCLUDE_PATHS ?=
 PACBREW_STATIC_ARCHIVES ?=
 PS5_HOST ?=
@@ -77,12 +79,12 @@ HOST_TEST_CXXFLAGS ?= -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror \
 	-ffunction-sections -fdata-sections
 HOST_TEST_LDFLAGS ?= -Wl,--gc-sections
 GTEST_ARGS ?=
+export FEC_SIMD OPUS_SIMD PYROWAVE
 export APP_DEFINITIONS APP_INCLUDE_PATHS APP_STATIC_ARCHIVES APP_IMPORT_STUBS APP_RUNTIME_MODULES
 export PS5_OPENGL_PREFIX
 export PACBREW_PACKAGES PACBREW_INCLUDE_PATHS PACBREW_STATIC_ARCHIVES
 export PS5_HOST FTP_PORT DEPLOY_FORMAT PS5_FTP_USER PS5_FTP_PASSWORD DEPLOY_DRY_RUN
 export TITLE_ID APP_NAME APP_CATEGORY CONTENT_SUFFIX
-export FEC_SIMD OPUS_SIMD
 
 RUNTIME := runtime/libc.prx
 RUNTIME_INPUTS := tools/rebuild-libc.sh \
@@ -94,13 +96,13 @@ HOST_ELEVATION_TEST := build/tests/elevation_client
 STREAM_ARCHIVES := build/stream-deps/libmoonlight-common-c.a \
 	build/stream-deps/libopus.a build/stream-deps/libmbedtls.a \
 	build/stream-deps/libmbedx509.a build/stream-deps/libmbedcrypto.a
-STREAM_INPUTS := tools/build-stream-deps.sh tools/native-toolchain.sh \
+STREAM_INPUTS := tools/pyrowave/apply-transport.sh tools/pyrowave/patches/moonlight/0001-vibepollo-independent-record-protocol.patch tools/build-stream-deps.sh tools/native-toolchain.sh \
 	$(wildcard src/gamestream/* platform/ps5/*) \
 	$(wildcard third_party/moonlight-common-c/src/* third_party/moonlight-common-c/enet/*) \
 	$(wildcard third_party/mbedtls/library/* third_party/mbedtls/include/mbedtls/*) \
 	$(wildcard third_party/opus/src/* third_party/opus/include/*)
 
-.PHONY: all app build init doctor test test-deps test-unit test-integration libc deps pacbrew pacbrew-list stream-deps assets-check format format-check tidy lint check ffpkg ffpfsc packages deploy undeploy clean distclean help
+.PHONY: transport-deps all app build init doctor test test-deps test-unit test-integration libc deps pacbrew pacbrew-list stream-deps assets-check format format-check tidy lint check ffpkg ffpfsc packages deploy undeploy clean distclean help
 
 all: app
 build: app
@@ -114,6 +116,9 @@ doctor:
 	@bash tools/doctor.sh
 
 test: test-unit test-integration test-performance-guards
+
+transport-deps:
+	@bash tools/pyrowave/apply-transport.sh
 
 test-deps:
 	@printf '%s\n' '==> [test-deps] Fetching the pinned host-only GoogleTest source'
@@ -137,7 +142,7 @@ $(HOST_UNIT_TEST): tests/test_prosperolight.cpp include/moonlight_config.hpp \
 		include/moonlight_discovery.hpp src/moonlight_discovery.cpp \
 		include/lan_http_report.hpp src/lan_http_report.cpp \
 		include/connecting_plate.hpp src/connecting_plate.cpp \
-		tools/setup-test-dependencies.sh | test-deps
+		tools/setup-test-dependencies.sh | test-deps transport-deps
 	@printf '%s\n' '==> [test-unit] Compiling the host-native GoogleTest binary'
 	@mkdir -p -- $(@D)
 	@gtest=$$(bash tools/setup-test-dependencies.sh); \
@@ -195,7 +200,7 @@ performance-round3-candidates:
 	@bash tools/build-performance-candidates.sh --round3
 
 .PHONY: test-performance-guards
-test-performance-guards:
+test-performance-guards: | transport-deps
 	@mkdir -p build/tests
 	@clang -std=c11 -D_DEFAULT_SOURCE -DUSE_MBEDTLS -O2 -c third_party/moonlight-common-c/src/FakeCallbacks.c \
 		-Ithird_party/moonlight-common-c/src -Ithird_party/moonlight-common-c/enet/include \
@@ -349,3 +354,9 @@ help:
 	  'Local defaults:      Copy .env.example to the ignored .env file' \
 	  'make clean           Remove build/, dist/, and generated libc.prx' \
 	  'make distclean       Also remove the ignored .deps/ cache'
+
+.PHONY: controller-deps
+controller-deps: $(if $(wildcard tools/pyrowave/apply-transport.sh),transport-deps)
+	@bash tools/controllers/apply-haptics.sh
+
+$(HOST_UNIT_TEST) test-integration test-stream-performance test-performance-guards: | controller-deps

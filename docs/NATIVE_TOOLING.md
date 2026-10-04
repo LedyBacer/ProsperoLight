@@ -121,3 +121,17 @@ The loader-visible comment record and the unmapped trailing note intentionally
 have zero memory size. Firmware 6.02 rejects those records before entry when
 their file size is incorrectly copied into `p_memsz`; the static validator
 enforces the tested convention.
+
+## Linking OpenGL and RADV together
+
+The launcher SDK and RADV contain independent Mesa versions. PyroWave builds
+run `tools/pyrowave/isolate-opengl.py` to rename colliding private OpenGL symbols
+in build-local archive copies, including Mesa template/type metadata. RADV's
+embedded compression functions are separately isolated from libcurl's zlib
+and zstd dependencies. Public EGL/OpenGL/Vulkan entry points stay unchanged;
+verified SDK/dependency archives are never edited. The generated caches are
+keyed by the tool and all input archive contents. All paths share the RADV
+platform's C++ runtime ABI and complete wrapped allocator family. The
+OpenGL-only mspace allocator is excluded in PyroWave builds, so aligned
+allocations and free/realloc always agree on pointer ownership. The host integration test links distinct synthetic
+implementations and verifies that each backend still calls its own dependency.

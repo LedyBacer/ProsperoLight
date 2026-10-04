@@ -10,6 +10,7 @@
 #include "launcher/launcher.hpp"
 #include "moonlight_stream.hpp"
 #include "native_agc_present.hpp"
+#include "native_modules.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -29,7 +30,6 @@ extern "C" int sceKernelMapDirectMemory(void **address, std::size_t length, int 
                                         int flags, std::int64_t direct_memory_start,
                                         std::size_t alignment);
 extern "C" int sceKernelReleaseDirectMemory(std::int64_t direct_memory_start, std::size_t length);
-extern "C" int sceSysmoduleLoadModule(std::uint16_t module_id);
 extern "C" int munmap(void *address, std::size_t length);
 extern "C" void prosperolight_release_splash(void);
 extern "C" int sceSystemServiceHideSplashScreen(void);
@@ -112,8 +112,6 @@ extern "C" char *strcasestr(const char *haystack, const char *needle)
 
 namespace
 {
-
-constexpr std::uint16_t kPngDecModule = 0x008c;
 
 [[noreturn]] void KeepProcessAlive()
 {
@@ -249,17 +247,16 @@ void RunVideoOutputSelfTest()
 
 int main()
 {
-    // Filesystem access first, while the process has one thread: every path
-    // the app reads or writes is settled here (app_storage.hpp).
+    // Resolve process-owned system modules before storage grants filesystem access.
+    prosperolight::native_modules::PrepareBeforeStorage();
     storage::Initialize();
+    prosperolight::native_modules::LogResults();
     // From here a fault leaves a report beside the log.
     crash::Install(storage::paths().logs, storage::log_descriptor());
 #if PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS != 0
     RunVideoOutputSelfTest();
 #endif
 
-    // Box art is decoded with the console's PNG decoder.
-    (void)sceSysmoduleLoadModule(kPngDecModule);
     char stream_error[192]{};
     bool first_start = true;
     unsigned streams = 0;
@@ -302,6 +299,7 @@ int main()
         options.stream_resolution = selection.stream_resolution;
         options.stream_fps = selection.stream_fps;
         options.hdr_enabled = selection.hdr_enabled;
+        options.chroma_sampling = selection.chroma_sampling;
         options.audio_configuration = selection.audio_configuration;
         options.vsync_enabled = selection.vsync_enabled;
         options.decoder_pipeline = selection.decoder_pipeline;

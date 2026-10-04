@@ -50,6 +50,8 @@ typedef struct native_agc_metrics
     uint32_t pipeline_depth;
     uint32_t decoder_cores;
     uint32_t vsync_enabled;
+    uint32_t pacing_mode, vrr_api_active;
+    uint64_t pacing_reserve_us;
     uint64_t decoder_cpu_mask;
 } native_agc_metrics_t;
 
@@ -83,12 +85,18 @@ void native_agc_set_tv_safe_area(int enabled);
 // V-Sync off flips at the next hsync (tearing). Applies to the next submission;
 // a rejected immediate flip falls back to V-Sync for the rest of the process.
 void native_agc_set_vsync(int enabled);
+void native_agc_set_vrr(int enabled);
 int native_agc_vsync_active(void);
+int native_agc_vrr_active(void);
 int native_agc_flip_events_active(void);
 int native_agc_present_shutdown(void);
 /* The launcher's OpenGL runtime initialises AGC for the process when it draws
    its first frame. Call this once it has: the stream's presenter then uses
    that initialisation and does not ask for a second one. */
 void native_agc_note_initialized(void);
+
+// Codec-independent physical output status: -1 unknown, 0 SDR, 1 HDR.
+int native_videoout_hdr_active(int32_t handle);
+void native_agc_keyboard_snapshot(int *enabled, uint32_t *selected, int *shifted);
 
 #endif

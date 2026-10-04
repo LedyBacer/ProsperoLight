@@ -6,6 +6,8 @@
 
 /* Native game Moonlight/Sunshine Videodec2 zero-copy stream. */
 
+#include "ps5_dualsense.hpp"
+
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
@@ -21,7 +23,13 @@
 #include <opus_multistream.h>
 
 #include "moonlight_stream.hpp"
+#include "stream_profile.hpp"
+#include "frame_cadence.hpp"
+#include "frame_pacing.hpp"
+#include "presentation_preferences.hpp"
 #include "app_storage.hpp"
+#include "host_quit_preferences.hpp"
+#include "native_modules.hpp"
 #include "connecting_plate.hpp"
 #include "moonlight_config.hpp"
 #include "moonlight_physical_input.hpp"
@@ -41,6 +49,9 @@
 #include "gamestream/gs_http.h"
 #include "gamestream/gs_log.h"
 #include "../../third_party/moonlight-common-c/src/Limelight.h"
+#if PROSPEROLIGHT_PYROWAVE
+#include "pyrowave/stream_backend.hpp"
+#endif
 
 // Frame slots cover every picture the deepest pipeline can hold, one waiting
 // for presentation, one on screen, the protected latest output and one spare.
@@ -131,10 +142,6 @@ static_assert(FRAME_SLOT_COUNT >= moonlight::kMaxDecoderDepth + 4u &&
 #define PS5_PAD_SAMPLE_CAPACITY 64
 #define PS5_PAD_OPEN_ATTEMPTS 20u
 #define PS5_PAD_OPEN_RETRY_US 50000u
-// The console signs in up to four users and each owns one controller. The user
-// who started the app is host controller 0; the others take numbers 1-3.
-#define PS5_EXTRA_PAD_COUNT 3u
-#define PS5_USER_SCAN_US UINT64_C(1000000)
 
 extern "C"
 {
@@ -155,11 +162,8 @@ extern "C"
     int32_t sceKernelSendNotificationRequest(uint32_t device, void *request, size_t size,
                                              int32_t blocking);
     int sceSystemServiceHideSplashScreen(void);
-    int32_t sceSysmoduleLoadModule(uint32_t id);
-    int32_t sceSysmoduleUnloadModule(uint32_t id);
     int32_t sceUserServiceInitialize(void *params);
     int32_t sceUserServiceGetInitialUser(int32_t *user_id);
-    int32_t sceUserServiceGetLoginUserIdList(int32_t user_ids[4]);
     int32_t sceUserServiceTerminate(void);
     int32_t scePadInit(void);
     int32_t scePadOpen(int32_t user_id, int32_t port_type, int32_t index, const void *params);
@@ -339,18 +343,7 @@ static uint32_t decoder_max_level(const native_video_mode_t *mode, uint32_t stre
     return 150u;
 }
 
-typedef struct ps5_pad_sample
-{
-    uint32_t buttons;
-    uint8_t left_x, left_y, right_x, right_y;
-    uint8_t left_trigger, right_trigger;
-    uint8_t reserved_to_connected[66];
-    int32_t connected;
-    uint64_t timestamp_us;
-    uint8_t extension[16];
-    uint8_t connected_count;
-    uint8_t remaining[15];
-} ps5_pad_sample_t;
+using ps5_pad_sample_t = prosperolight::dualsense::PadSample;
 
 static_assert(sizeof(ps5_pad_sample_t) == 120,
               "normal Pad samples must use the verified 120-byte ABI");
@@ -367,16 +360,6 @@ typedef struct controller_event
     uint8_t left_trigger, right_trigger;
     int16_t left_x, left_y, right_x, right_y;
 } controller_event_t;
-
-typedef struct ps5_extra_pad
-{
-    int32_t user_id, handle;
-    int open;      // the slot holds a signed-in user's pad
-    int announced; // the host holds a virtual controller for this pad
-    uint32_t last_raw_buttons;
-    controller_event_t last_event;
-    uint64_t last_event_us;
-} ps5_extra_pad_t;
 
 typedef struct ps5_controller_state
 {
@@ -402,22 +385,8 @@ typedef struct ps5_controller_state
     uint32_t keyboard_selected;
     int keyboard_shifted;
     std::atomic<int> requested_stop;
-    // Pads of the other signed-in users and the controllers the host holds.
-    ps5_extra_pad_t extra[PS5_EXTRA_PAD_COUNT];
-    uint16_t active_mask;
-    uint64_t next_user_scan_us;
-    int32_t user_scan_result, extra_open_result;
-    uint32_t user_scans, user_scan_errors, extra_open_errors;
-    uint32_t extra_arrivals, extra_removals, extra_events;
-    uint32_t extra_read_errors, extra_send_errors, peak_controllers;
     ps5_pad_sample_t sample_batch[PS5_PAD_SAMPLE_CAPACITY];
 } ps5_controller_state_t;
-
-// Controller activity of the last stream, for the performance summary.
-typedef struct controller_summary
-{
-    uint32_t peak, arrivals, removals, open_errors, send_errors, scan_errors;
-} controller_summary_t;
 
 typedef struct ps5_keyboard_state
 {
@@ -542,7 +511,6 @@ extern "C"
 }
 
 static notification_request_t notification;
-static controller_summary_t controller_summary;
 static std::atomic<int> connection_terminated;
 static std::atomic<int> connection_error;
 static std::atomic<int> connection_failed_stage;
@@ -579,7 +547,7 @@ typedef struct stream_ready_frame
     size_t buffer_size;
     uint32_t pitch, height;
     int32_t frame;
-    uint64_t arrival_us, enqueue_us, ready_us;
+    uint64_t arrival_us, enqueue_us, ready_us, pts_us;
     moonlight::FrameTrace::Sample *trace;
     native_agc_metrics_t hud;
 } stream_ready_frame_t;
@@ -633,7 +601,7 @@ typedef struct native_renderer_state
     int32_t last_decode_error;
     uint32_t catchup_refreshes;
     uint32_t decoded;
-    uint32_t not_displayed;
+    std::atomic<uint32_t> not_displayed;
     uint32_t decoder_delayed;
     uint32_t input_sequence;
     uint64_t copy_total_us;
@@ -658,6 +626,8 @@ typedef struct native_renderer_state
     uint32_t pending_video_high_water;
     uint32_t reassembly_invalid_samples;
     uint32_t observed_slices_min, observed_slices_max, observed_slices_last, layout_samples;
+    moonlight::TimingHistogram idr_decode_timing, inter_decode_timing;
+    uint64_t decode_over_budget, decode_first_us;
     uint32_t hdr_mismatch_reported;
     int32_t last_result;
     stream_submission_t submissions[SUBMISSION_QUEUE_CAPACITY];
@@ -675,7 +645,8 @@ typedef struct native_renderer_state
     pthread_mutex_t lock;
     pthread_cond_t wake;
     moonlight::SlotPool<FRAME_SLOT_COUNT> frames;
-    moonlight::LatestMailbox<stream_ready_frame_t> mailbox;
+    moonlight::ReadyMailbox<stream_ready_frame_t> mailbox;
+    moonlight::SourceTimestamp source_clock;
     bool stop_presenting;
 
     // Presentation worker.
@@ -712,6 +683,8 @@ static bool presentation_faulted;
 // key events or payloads; no per-frame file/network I/O. Failure is nonfatal.
 static void log_performance_summary(const char *report, size_t length, bool new_session = true)
 {
+    if (!prosperolight_logs_enabled())
+        return;
     // Bound each kernel record; never dump the per-frame trace into klog.
     constexpr size_t chunk_bytes = 384;
     static unsigned session = 0;
@@ -836,18 +809,18 @@ static bool write_performance_bytes(int descriptor, const char *data, size_t len
     return true;
 }
 
-static void save_frame_trace()
+static void save_frame_trace(unsigned mode)
 {
+    if (!prosperolight_logs_enabled())
+        return;
 #if PROSPEROLIGHT_PERFORMANCE_DETAIL
-    char temporary[176];
-    char destination[176];
-    snprintf(temporary, sizeof(temporary), "%s/performance-frames.csv.tmp",
-             storage::paths().performance);
-    snprintf(destination, sizeof(destination), "%s/performance-frames.csv",
-             storage::paths().performance);
+    char temporary[176], destination[176];
+    snprintf(destination, sizeof(destination), "%s/performance-frames-mode%u.csv",
+             storage::paths().performance, mode);
+    snprintf(temporary, sizeof(temporary), "%s.tmp", destination);
     // Rows are batched: one write per row cost tens of thousands of system calls.
     static char batch[65536];
-    const int descriptor = sceKernelOpen(temporary, 0x601, 0600);
+    const int descriptor = sceKernelOpen(temporary, 0x601, 0644);
     if (descriptor < 0)
         return;
     size_t used = 0;
@@ -903,11 +876,13 @@ report_append(char *report, size_t capacity, size_t *length, const char *format,
     return true;
 }
 
+static prosperolight::dualsense::Statistics controller_summary{};
+
 static void save_performance_summary(const native_renderer_state_t &state,
                                      const moonlight::TimingHistogram &input_intervals,
                                      const moonlight_stream_options_t *options, int result)
 {
-    if (!state.mode || !options || !state.access_units)
+    if (!prosperolight_logs_enabled() || !state.mode || !options || !state.access_units)
         return;
     static char report[12288];
     const auto &agc = native_agc_performance();
@@ -935,21 +910,21 @@ static void save_performance_summary(const native_renderer_state_t &state,
         PROSPEROLIGHT_OPUS_SIMD, PROSPEROLIGHT_AUDIO_MAX_BACKLOG_MS, state.slices_requested,
         PROSPEROLIGHT_PRESENT_OVERLAP, PROSPEROLIGHT_FLIP_POLL_US, PROSPEROLIGHT_PERFORMANCE_DETAIL,
         (unsigned long long)state.stream_bytes);
-    ok =
-        ok && report_append(
-                  report, sizeof(report), &length,
-                  "\"access_units\":%u,\"decoded\":%u,\"presented\":%u,\"not_displayed\":%u,"
-                  "\"network_frame_gaps\":%llu,\"decoder_frame_gaps\":%llu,\"queue_overflows\":%u,"
-                  "\"decoder_refreshes\":%u,\"decode_errors\":%u,\"last_decode_error\":%d,"
-                  "\"catchup_refreshes\":%u,\"unrecoverable_frames\":%u,"
-                  "\"pending_video_high_water\":%u,\n",
-                  state.access_units, state.decoded, state.presented.load(), state.not_displayed,
-                  (unsigned long long)state.drops.network, (unsigned long long)state.drops.decoder,
-                  std::atomic_load_explicit(&video_queue_overflows, std::memory_order_relaxed),
-                  state.decoder_refreshes, state.decode_errors, (int)state.last_decode_error,
-                  state.catchup_refreshes,
-                  std::atomic_load_explicit(&video_unrecoverable_frames, std::memory_order_relaxed),
-                  state.pending_video_high_water);
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"access_units\":%u,\"decoded\":%u,\"presented\":%u,\"not_displayed\":%u,"
+             "\"network_frame_gaps\":%llu,\"decoder_frame_gaps\":%llu,\"queue_overflows\":%u,"
+             "\"decoder_refreshes\":%u,\"decode_errors\":%u,\"last_decode_error\":%d,"
+             "\"catchup_refreshes\":%u,\"unrecoverable_frames\":%u,"
+             "\"pending_video_high_water\":%u,\n",
+             state.access_units, state.decoded, state.presented.load(), state.not_displayed.load(),
+             (unsigned long long)state.drops.network, (unsigned long long)state.drops.decoder,
+             std::atomic_load_explicit(&video_queue_overflows, std::memory_order_relaxed),
+             state.decoder_refreshes, state.decode_errors, (int)state.last_decode_error,
+             state.catchup_refreshes,
+             std::atomic_load_explicit(&video_unrecoverable_frames, std::memory_order_relaxed),
+             state.pending_video_high_water);
     ok = ok &&
          report_append(
              report, sizeof(report), &length,
@@ -1065,13 +1040,15 @@ static void save_performance_summary(const native_renderer_state_t &state,
     memcpy(report + length, "}}\n", 3);
     length += 3;
     log_performance_summary(report, length);
+    if (!prosperolight_logs_enabled())
+        return;
     char temporary[176];
     char destination[176];
     snprintf(temporary, sizeof(temporary), "%s/performance-last.json.tmp",
              storage::paths().performance);
     snprintf(destination, sizeof(destination), "%s/performance-last.json",
              storage::paths().performance);
-    const int descriptor = sceKernelOpen(temporary, 0x601, 0600);
+    const int descriptor = sceKernelOpen(temporary, 0x601, 0644);
     if (descriptor < 0)
         return;
     const bool written = write_performance_bytes(descriptor, report, length);
@@ -1100,7 +1077,6 @@ static int ps5_controller_disconnect_only(ps5_controller_state_t *state)
     return 0;
 }
 
-// Watches the controller and the clock while the connection is set up.
 typedef struct connection_loading_state
 {
     ps5_controller_state_t *controller;
@@ -1632,8 +1608,8 @@ static void snapshot_hud_metrics(const native_renderer_state_t *state, int pendi
     hud->decoder_cpu_mask = state->decoder_cpu_mask;
 }
 
-// Newest wins: a picture the presenter has not taken yet is replaced, and its
-// slot returns to the decoder.
+// Unpaced replaces the pending picture; paced modes retain two ready
+// pictures. Capacity overflow retires the oldest surface without blocking decode.
 static void publish_ready_frame(native_renderer_state_t *state, const stream_ready_frame_t &ready)
 {
     stream_ready_frame_t displaced{};
@@ -1739,6 +1715,7 @@ static int32_t settle_decoder_call(native_renderer_state_t *state, int offered,
         ready.arrival_us = submission.arrival_us;
         ready.enqueue_us = submission.enqueue_us;
         ready.ready_us = completed_us;
+        ready.pts_us = submission.pts_us;
         ready.trace = submission.trace;
         snapshot_hud_metrics(state, pending, &ready.hud);
         publish_ready_frame(state, ready);
@@ -1966,6 +1943,14 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     busy = elapsed;
     state->decode_total_us += elapsed;
     state->decode_timing.add(elapsed);
+    if (!state->decode_calls)
+        state->decode_first_us = elapsed;
+    else
+        (decode_unit->frameType == FRAME_TYPE_IDR ? state->idr_decode_timing
+                                                  : state->inter_decode_timing)
+            .add(elapsed);
+    if (state->stream_fps && elapsed * state->stream_fps > 1000000u)
+        ++state->decode_over_budget;
     if (trace)
         trace->decode_us = elapsed;
     if (elapsed > state->decode_max_us)
@@ -1990,7 +1975,8 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
                                SUBMISSION_QUEUE_CAPACITY];
         submission.arrival_us = arrival_us;
         submission.enqueue_us = network_enqueue_us;
-        submission.pts_us = decode_unit->presentationTimeUs;
+        submission.pts_us =
+            state->source_clock.update(decode_unit->rtpTimestamp, decode_unit->presentationTimeUs);
         submission.frame = decode_unit->frameNumber;
         submission.trace = trace;
         ++state->submission_count;
@@ -2189,6 +2175,46 @@ static void *video_decode_thread(void *context)
     return nullptr;
 }
 
+static moonlight::FramePacing stream_pacer;
+static unsigned stream_presentation_mode = 1;
+
+static bool wait_presentation_deadline(native_renderer_state_t *state,
+                                       const stream_ready_frame_t &item)
+{
+    if (!stream_presentation_mode)
+        return true;
+    uint32_t width = 0, height = 0, refresh = 0;
+    native_agc_output_status(&width, &height, &refresh);
+    // VRR uses source cadence, not the changing observed display rate. Fixed
+    // VSync uses completed-flip observations as a best-effort phase anchor.
+    const bool fixed =
+        native_agc_vsync_active() && (stream_presentation_mode == 1 || !native_agc_vrr_active());
+    const uint64_t started = monotonic_us();
+    const uint64_t deadline =
+        stream_pacer.target(item.frame, item.pts_us, started, fixed ? refresh : 0,
+                            fixed ? state->last_present_us : 0, fixed ? 0 : refresh,
+                            std::max<uint64_t>(250, state->present_call_timing.percentile(99) +
+                                                        stream_pacer.wake_lead_us()));
+    uint64_t now = started;
+    while (now < deadline)
+    {
+        pthread_mutex_lock(&state->lock);
+        const bool stopping = state->stop_presenting;
+        pthread_mutex_unlock(&state->lock);
+        if (stopping)
+            return false;
+        const uint64_t remaining = deadline - now;
+        const uint64_t lead = stream_pacer.wake_lead_us();
+        if (remaining > lead)
+            sceKernelUsleep(static_cast<uint32_t>(std::min<uint64_t>(1000, remaining - lead)));
+        else
+            __builtin_ia32_pause(); // Active tail is bounded to at most 250 us.
+        now = monotonic_us();
+    }
+    stream_pacer.submitted(deadline, now, now - started);
+    return true;
+}
+
 static int submit_presentation(native_renderer_state_t *state, const stream_ready_frame_t &item)
 {
     native_agc_metrics_t hud = item.hud;
@@ -2198,6 +2224,9 @@ static int submit_presentation(native_renderer_state_t *state, const stream_read
 
     hud.rendering_fps_x100 = state->rendering_rate.fps_x100;
     hud.vsync_enabled = native_agc_vsync_active() ? 1u : 0u;
+    hud.pacing_mode = stream_presentation_mode;
+    hud.vrr_api_active = native_agc_vrr_active();
+    hud.pacing_reserve_us = stream_pacer.stats.reserve_us;
     if (PROSPEROLIGHT_PERFORMANCE_DETAIL)
         state->present_wait_timing.add(waited);
     if (item.trace)
@@ -2318,6 +2347,17 @@ static void *video_present_thread(void *context)
             pthread_mutex_unlock(&state->lock);
             return nullptr;
         }
+        // Only discard an old ready image if a decoded replacement exists.
+        // GPU/decoder service is not counted as replaceable queue residence.
+        while (stream_presentation_mode && state->mailbox.full &&
+               monotonic_us() > current.ready_us + stream_pacer.stale_limit_us())
+        {
+            state->frames.release(current.slot);
+            if (current.trace)
+                current.trace->outcome = 2;
+            ++state->not_displayed;
+            state->mailbox.take(&current);
+        }
         state->frames.state[static_cast<size_t>(current.slot)] = Pool::Presenting;
         pthread_mutex_unlock(&state->lock);
         if (first_picture)
@@ -2327,6 +2367,13 @@ static void *video_present_thread(void *context)
             connecting_screen_finish();
             native_agc_reset_performance();
             first_picture = false;
+        }
+        if (!wait_presentation_deadline(state, current))
+        {
+            pthread_mutex_lock(&state->lock);
+            state->frames.release(current.slot);
+            pthread_mutex_unlock(&state->lock);
+            return nullptr;
         }
         if (submit_presentation(state, current) == 0)
         {
@@ -2942,7 +2989,8 @@ static int ps5_physical_input_init(ps5_physical_input_state_t *state, int32_t us
          ++index)
         state->mouse_handles[index] = -1;
 
-    state->keyboard_module_result = sceSysmoduleLoadModule(UINT32_C(0x0106));
+    state->keyboard_module_result =
+        prosperolight::native_modules::Result(prosperolight::native_modules::keyboard);
     if (state->keyboard_module_result >= 0)
         state->keyboard_init_result = sceKeyboardInit();
     if (state->keyboard_init_result >= 0)
@@ -2960,7 +3008,8 @@ static int ps5_physical_input_init(ps5_physical_input_state_t *state, int32_t us
         }
     }
 
-    state->mouse_module_result = sceSysmoduleLoadModule(UINT32_C(0x00a9));
+    state->mouse_module_result =
+        prosperolight::native_modules::Result(prosperolight::native_modules::mouse);
     if (state->mouse_module_result >= 0)
         state->mouse_init_result = sceMouseInit();
     if (state->mouse_init_result >= 0)
@@ -3062,9 +3111,9 @@ static void ps5_physical_input_shutdown(ps5_physical_input_state_t *state)
         state->mouse_handles[index] = -1;
     }
     if (state->mouse_module_result == 0)
-        state->mouse_unload_result = sceSysmoduleUnloadModule(UINT32_C(0x00a9));
+        state->mouse_unload_result = 0; // Process-owned module remains loaded.
     if (state->keyboard_module_result == 0)
-        state->keyboard_unload_result = sceSysmoduleUnloadModule(UINT32_C(0x0106));
+        state->keyboard_unload_result = 0; // Process-owned module remains loaded.
     state->initialization_attempted = 0;
 }
 
@@ -3110,6 +3159,8 @@ static controller_event_t ps5_controller_map_sample(const ps5_pad_sample_t *samp
         event.buttons |= LS_CLK_FLAG;
     if (sample->buttons & PS5_PAD_BUTTON_R3)
         event.buttons |= RS_CLK_FLAG;
+    if (sample->buttons & 0x1u)
+        event.buttons |= BACK_FLAG;
     if (sample->buttons & PS5_PAD_BUTTON_OPTIONS)
         event.buttons |= PLAY_FLAG;
     if (sample->buttons & PS5_PAD_BUTTON_TOUCH_PAD)
@@ -3123,62 +3174,26 @@ static controller_event_t ps5_controller_map_sample(const ps5_pad_sample_t *samp
     return event;
 }
 
-// Every controller packet names all controllers the host should hold: older
-// hosts add and remove their virtual pads from that mask alone.
-static int ps5_controller_announce(ps5_controller_state_t *state, unsigned number)
-{
-    static const uint32_t supported_buttons =
-        UP_FLAG | DOWN_FLAG | LEFT_FLAG | RIGHT_FLAG | A_FLAG | B_FLAG | X_FLAG | Y_FLAG | LB_FLAG |
-        RB_FLAG | PLAY_FLAG | LS_CLK_FLAG | RS_CLK_FLAG | TOUCHPAD_FLAG;
-    const uint16_t mask = (uint16_t)(state->active_mask | (1u << number));
-    const int result = LiSendControllerArrivalEvent((uint8_t)number, mask, LI_CTYPE_PS,
-                                                    supported_buttons, LI_CCAP_ANALOG_TRIGGERS);
-
-    if (result == 0)
-    {
-        state->active_mask = mask;
-        if ((uint32_t)__builtin_popcount(mask) > state->peak_controllers)
-            state->peak_controllers = (uint32_t)__builtin_popcount(mask);
-    }
-    return result;
-}
-
-static int ps5_controller_withdraw(ps5_controller_state_t *state, unsigned number)
-{
-    state->active_mask = (uint16_t)(state->active_mask & ~(1u << number));
-    return LiSendMultiControllerEvent((short)number, (short)state->active_mask, 0, 0, 0, 0, 0, 0,
-                                      0);
-}
-
 static void ps5_controller_send(ps5_controller_state_t *state, const controller_event_t *event)
 {
     uint64_t now;
     int result;
 
-    if (!state->announced)
-    {
-        result = ps5_controller_announce(state, 0);
-        state->arrival_result = result;
-        if (result != 0)
-        {
-            ++state->send_errors;
-            return;
-        }
-        state->announced = 1;
-    }
-
     now = monotonic_us();
     if (state->last_event_us != 0 && !memcmp(event, &state->last_event, sizeof(*event)) &&
         now - state->last_event_us < CONTROLLER_KEEPALIVE_US)
         return;
-    result = LiSendMultiControllerEvent(0, (short)state->active_mask, event->buttons,
-                                        event->left_trigger, event->right_trigger, event->left_x,
-                                        event->left_y, event->right_x, event->right_y);
+    result = prosperolight::dualsense::SendPrimary(event->buttons, event->left_trigger,
+                                                   event->right_trigger, event->left_x,
+                                                   event->left_y, event->right_x, event->right_y);
     if (result != 0)
     {
         ++state->send_errors;
         return;
     }
+    state->announced = (prosperolight::dualsense::ActiveMask() & 1) != 0;
+    if (state->announced)
+        state->arrival_result = 0;
     state->last_event = *event;
     state->last_event_us = now;
     ++state->events;
@@ -3467,8 +3482,14 @@ static void ps5_controller_poll(ps5_controller_state_t *state)
             state->connected_count = sample->connected_count;
             state->connected_count_valid = 1;
             state->last_raw_buttons = 0;
+            state->last_event_us = 0;
             ps5_controller_release_mouse_buttons(state);
         }
+        prosperolight::dualsense::PrimarySample(
+            *sample, neutral || state->mouse_mode || state->keyboard_mode ||
+                         moonlight_stream_mouse_toggle_requested(raw_buttons) ||
+                         moonlight_stream_keyboard_requested(raw_buttons) ||
+                         moonlight_stream_hud_toggle_requested(raw_buttons));
         if (neutral)
             raw_buttons = 0;
         mouse_toggle = moonlight_stream_mouse_toggle_requested(raw_buttons) &&
@@ -3503,6 +3524,9 @@ static void ps5_controller_poll(ps5_controller_state_t *state)
         }
 
         event = ps5_controller_map_sample(sample, neutral);
+        if (!neutral)
+            event.buttons =
+                prosperolight::dualsense::RemoteShortcuts(sample->buttons, event.buttons);
         mouse_buttons = neutral ? 0 : sample->buttons;
         state->last_raw_buttons = raw_buttons;
         state->observed_raw_buttons |= raw_buttons;
@@ -3540,223 +3564,10 @@ static void ps5_controller_poll(ps5_controller_state_t *state)
     }
 }
 
-static void ps5_extra_pad_notify(unsigned index, int connected)
-{
-    snprintf(notification.message, sizeof(notification.message), "ProsperoLight: Controller %u %s.",
-             index + 2u, connected ? "connected" : "disconnected");
-    (void)sceKernelSendNotificationRequest(0, &notification, sizeof(notification), 0);
-    (void)lan_http_report_text(notification.message);
-}
-
-static void ps5_extra_pad_send(ps5_controller_state_t *state, unsigned index,
-                               const controller_event_t *event)
-{
-    ps5_extra_pad_t *pad = &state->extra[index];
-    const unsigned number = index + 1u;
-    uint64_t now;
-
-    if (!pad->announced)
-    {
-        if (ps5_controller_announce(state, number) != 0)
-        {
-            ++state->extra_send_errors;
-            return;
-        }
-        pad->announced = 1;
-        pad->last_event_us = 0;
-        ++state->extra_arrivals;
-        ps5_extra_pad_notify(index, 1);
-    }
-    now = monotonic_us();
-    if (pad->last_event_us != 0 && !memcmp(event, &pad->last_event, sizeof(*event)) &&
-        now - pad->last_event_us < CONTROLLER_KEEPALIVE_US)
-        return;
-    if (LiSendMultiControllerEvent((short)number, (short)state->active_mask, event->buttons,
-                                   event->left_trigger, event->right_trigger, event->left_x,
-                                   event->left_y, event->right_x, event->right_y) != 0)
-    {
-        ++state->extra_send_errors;
-        return;
-    }
-    pad->last_event = *event;
-    pad->last_event_us = now;
-    ++state->extra_events;
-}
-
-// Takes the host's virtual controller away; the pad itself stays open.
-static void ps5_extra_pad_withdraw(ps5_controller_state_t *state, unsigned index, int notify)
-{
-    ps5_extra_pad_t *pad = &state->extra[index];
-
-    if (!pad->announced)
-        return;
-    pad->announced = 0;
-    memset(&pad->last_event, 0, sizeof(pad->last_event));
-    if (ps5_controller_withdraw(state, index + 1u) != 0)
-        ++state->extra_send_errors;
-    ++state->extra_removals;
-    if (notify)
-        ps5_extra_pad_notify(index, 0);
-}
-
-static void ps5_extra_pad_close(ps5_controller_state_t *state, unsigned index)
-{
-    ps5_extra_pad_t *pad = &state->extra[index];
-
-    ps5_extra_pad_withdraw(state, index, 1);
-    if (pad->open)
-        (void)scePadClose(pad->handle);
-    memset(pad, 0, sizeof(*pad));
-}
-
-// A user who signs in gets the lowest free controller number and gives it
-// back when signing out. A pad that cannot be opened is retried at the next scan.
-static void ps5_controller_scan_users(ps5_controller_state_t *state)
-{
-    int32_t users[4] = {-1, -1, -1, -1};
-
-    ++state->user_scans;
-    state->user_scan_result = sceUserServiceGetLoginUserIdList(users);
-    if (state->user_scan_result < 0)
-    {
-        ++state->user_scan_errors;
-        return;
-    }
-    for (unsigned index = 0; index < PS5_EXTRA_PAD_COUNT; ++index)
-    {
-        const ps5_extra_pad_t *pad = &state->extra[index];
-        bool signed_in = false;
-
-        if (!pad->open)
-            continue;
-        for (const int32_t user : users)
-            signed_in = signed_in || user == pad->user_id;
-        if (!signed_in)
-            ps5_extra_pad_close(state, index);
-    }
-    for (const int32_t user : users)
-    {
-        ps5_extra_pad_t *free_pad = NULL;
-        bool known = user <= 0 || user == state->user_id;
-
-        for (unsigned index = 0; index < PS5_EXTRA_PAD_COUNT && !known; ++index)
-        {
-            ps5_extra_pad_t *pad = &state->extra[index];
-
-            if (pad->open)
-                known = pad->user_id == user;
-            else if (!free_pad)
-                free_pad = pad;
-        }
-        if (known || !free_pad)
-            continue;
-        const int32_t handle = scePadOpen(user, 0, 0, NULL);
-        if (handle < 0)
-        {
-            state->extra_open_result = handle;
-            ++state->extra_open_errors;
-            continue;
-        }
-        free_pad->user_id = user;
-        free_pad->handle = handle;
-        free_pad->open = 1;
-    }
-}
-
-static void ps5_extra_pad_poll(ps5_controller_state_t *state, unsigned index)
-{
-    static const uint32_t hud_chord = PS5_PAD_BUTTON_TOUCH_PAD | PS5_PAD_BUTTON_R1;
-    ps5_extra_pad_t *pad = &state->extra[index];
-    ps5_pad_sample_t *sample;
-    controller_event_t event;
-    uint32_t raw_buttons;
-    int intercepted;
-    int count;
-
-    if (!pad->open)
-        return;
-    count = scePadRead(pad->handle, state->sample_batch, PS5_PAD_SAMPLE_CAPACITY);
-    if (count < 0)
-    {
-        ++state->extra_read_errors;
-        return;
-    }
-    if (count == 0)
-    {
-        if (pad->announced)
-            ps5_extra_pad_send(state, index, &pad->last_event);
-        return;
-    }
-    sample = ps5_controller_newest_sample(state, count);
-    if (!sample->connected)
-    {
-        // The controller is off: the host must not keep an idle player.
-        pad->last_raw_buttons = 0;
-        ps5_extra_pad_withdraw(state, index, 1);
-        return;
-    }
-    intercepted = (sample->buttons & PS5_PAD_BUTTON_INTERCEPTED) != 0;
-    raw_buttons = intercepted ? 0 : sample->buttons;
-    // Leaving the stream and the statistics overlay work from every controller;
-    // the mouse and the on-screen keyboard stay with the first one.
-    if (moonlight_stream_disconnect_requested(raw_buttons))
-    {
-        state->requested_stop = 1;
-        return;
-    }
-    if (moonlight_stream_hud_toggle_requested(raw_buttons) &&
-        !moonlight_stream_hud_toggle_requested(pad->last_raw_buttons))
-        native_agc_set_hud_enabled(!native_agc_hud_enabled());
-    if (moonlight_stream_hud_toggle_requested(raw_buttons))
-        sample->buttons &= ~hud_chord;
-    pad->last_raw_buttons = raw_buttons;
-    event = ps5_controller_map_sample(sample, intercepted);
-    ps5_extra_pad_send(state, index, &event);
-}
-
-static void ps5_controllers_poll(ps5_controller_state_t *state)
-{
-    const uint64_t now = monotonic_us();
-
-    ps5_controller_poll(state);
-    if (now >= state->next_user_scan_us)
-    {
-        state->next_user_scan_us = now + PS5_USER_SCAN_US;
-        ps5_controller_scan_users(state);
-    }
-    for (unsigned index = 0; index < PS5_EXTRA_PAD_COUNT; ++index)
-        ps5_extra_pad_poll(state, index);
-}
-
-// The controllers present when the session starts: the launch request names them.
-static int ps5_controller_launch_mask(ps5_controller_state_t *state)
-{
-    int mask = 1;
-
-    ps5_controller_scan_users(state);
-    state->next_user_scan_us = monotonic_us() + PS5_USER_SCAN_US;
-    for (unsigned index = 0; index < PS5_EXTRA_PAD_COUNT; ++index)
-    {
-        const ps5_extra_pad_t *pad = &state->extra[index];
-        int count;
-
-        if (!pad->open)
-            continue;
-        count = scePadRead(pad->handle, state->sample_batch, PS5_PAD_SAMPLE_CAPACITY);
-        if (count > 0 && ps5_controller_newest_sample(state, count)->connected)
-            mask |= 1 << (index + 1u);
-    }
-    return mask;
-}
-
 static void ps5_controller_stop(ps5_controller_state_t *state)
 {
     ps5_controller_release_mouse_buttons(state);
-    for (unsigned index = PS5_EXTRA_PAD_COUNT; index-- > 0;)
-        ps5_extra_pad_withdraw(state, index, 0);
-    if (!state->announced)
-        return;
-    state->removal_result = ps5_controller_withdraw(state, 0);
+    state->removal_result = prosperolight::dualsense::Stop();
     if (state->removal_result != 0)
         ++state->send_errors;
     state->announced = 0;
@@ -3764,13 +3575,8 @@ static void ps5_controller_stop(ps5_controller_state_t *state)
 
 static void ps5_controller_shutdown(ps5_controller_state_t *state)
 {
+    prosperolight::dualsense::Shutdown();
     native_agc_set_keyboard_state(0, 0, 0);
-    for (unsigned index = 0; index < PS5_EXTRA_PAD_COUNT; ++index)
-    {
-        if (state->extra[index].open)
-            (void)scePadClose(state->extra[index].handle);
-        state->extra[index].open = 0;
-    }
     if (state->handle >= 0)
     {
         (void)scePadClose(state->handle);
@@ -3802,6 +3608,8 @@ static void connection_stage_complete(int stage)
     (void)lan_http_report_text(receipt);
 }
 
+static char protocol_error[192]{};
+
 static void connection_log(const char *format, ...)
 {
     char message[320];
@@ -3815,6 +3623,9 @@ static void connection_log(const char *format, ...)
     length = strlen(message);
     while (length && (message[length - 1] == '\n' || message[length - 1] == '\r'))
         message[--length] = '\0';
+    if (strstr(message, "Incompatible PyroWave bitstream") ||
+        strstr(message, "Selected PyroWave profile is unsupported"))
+        snprintf(protocol_error, sizeof(protocol_error), "%s", message);
     // The only signal moonlight-common-c gives when it discards its frame queue
     // because decoding fell behind. Rare lines; never per packet.
     if (strstr(message, "Video decode unit queue overflow"))
@@ -3864,6 +3675,9 @@ static void connection_set_hdr_mode(bool enabled)
     std::atomic_fetch_add_explicit(&host_hdr_transitions, 1u, std::memory_order_relaxed);
     if (enabled)
         metadata_valid = LiGetHdrMetadata(&metadata) ? 1 : 0;
+#if PROSPEROLIGHT_PYROWAVE
+    prosperolight::pyrowave::set_hdr_mode(enabled, metadata_valid ? &metadata : nullptr);
+#endif
     snprintf(receipt, sizeof(receipt),
              "Moonlight HDR mode: active=%u transitions=%u metadata=%u max_nits=%u min_1e4_nits=%u "
              "max_cll=%u max_fall=%u",
@@ -3881,13 +3695,14 @@ static CONNECTION_LISTENER_CALLBACKS moonlight_connection_callbacks = {
     .connectionStarted = connection_started,
     .connectionTerminated = connection_ended,
     .logMessage = connection_log,
-    .rumble = nullptr,
+    .rumble = prosperolight::dualsense::Rumble,
     .connectionStatusUpdate = nullptr,
     .setHdrMode = connection_set_hdr_mode,
-    .rumbleTriggers = nullptr,
-    .setMotionEventState = nullptr,
-    .setControllerLED = nullptr,
-    .setAdaptiveTriggers = nullptr,
+    .rumbleTriggers = prosperolight::dualsense::RumbleTriggers,
+    .setMotionEventState = prosperolight::dualsense::MotionState,
+    .setControllerLED = prosperolight::dualsense::Led,
+    .setAdaptiveTriggers = prosperolight::dualsense::AdaptiveTriggers,
+    .controllerHaptics = prosperolight::dualsense::Haptics,
 };
 
 static void nvhttp_log_sink(const char *message)
@@ -3897,7 +3712,7 @@ static void nvhttp_log_sink(const char *message)
 
 static int prepare_native_session(client_identity_t *identity, gs_server_t *server,
                                   STREAM_CONFIGURATION *configuration,
-                                  const native_video_mode_t *mode, int gamepad_mask,
+                                  const moonlight::ResolvedStreamProfile &profile, int gamepad_mask,
                                   const char *host, uint16_t host_port, const char *app_name,
                                   int requested_app_id)
 {
@@ -3928,15 +3743,12 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
         gs_error = "Pair this client from the launcher";
         return GS_WRONG_STATE;
     }
-    if (!mode ||
-        (mode->video_format == VIDEO_FORMAT_H265_MAIN10 &&
-         !(server->server_codec_mode_support & SCM_HEVC_MAIN10)) ||
-        (mode->video_format == VIDEO_FORMAT_H265 &&
-         !(server->server_codec_mode_support & SCM_HEVC)) ||
-        (mode->video_format == VIDEO_FORMAT_H264 &&
-         !(server->server_codec_mode_support & SCM_MASK_H264)))
+    if (!(server->server_codec_mode_support & profile.capability))
     {
-        gs_error = "Selected video codec is not supported by this Sunshine PC";
+        static char unsupported[192];
+        snprintf(unsupported, sizeof(unsupported), "Selected PC does not advertise %s",
+                 profile.name);
+        gs_error = unsupported;
         return GS_NOT_SUPPORTED_MODE;
     }
 
@@ -3970,6 +3782,7 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
             return result;
     }
     resume_requested = server->current_game == target_id;
+    gamepad_mask = prosperolight::dualsense::ActiveMask();
     result = gs_start_app(server, configuration, target_id, true, false, gamepad_mask);
     snprintf(notification.message, sizeof(notification.message),
              "Native NVHTTP launch: rc=%08x action=%s target=%s id=%d gamepads=%x rtsp=%s error=%s",
@@ -4032,7 +3845,6 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     int32_t delete_result = -1;
     int32_t release_compute_result = -1;
     int32_t unload_result = -1;
-    int sysmodule_loaded = 0;
     uint64_t live_elapsed_us = 0;
     uint64_t first_frame_wait_start_us = 0;
     uint64_t last_input_poll_us = 0;
@@ -4044,7 +3856,6 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     int session_started = 0;
     int controller_result = -1;
     int controller_ready = 0;
-    int launch_mask = 0;
     int physical_input_ready = 0;
     int first_frame_timed_out = 0;
     int terminated = 0;
@@ -4066,16 +3877,26 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     const uint32_t bitrate_kbps = options && options->bitrate_kbps ? options->bitrate_kbps : 20000u;
     const uint32_t requested_fps = options ? options->stream_fps : MOONLIGHT_STREAM_FPS_60;
     const uint32_t stream_fps =
-        requested_fps == MOONLIGHT_STREAM_FPS_90 || requested_fps == MOONLIGHT_STREAM_FPS_120
+        requested_fps >= MOONLIGHT_STREAM_FPS_MIN && requested_fps <= MOONLIGHT_STREAM_FPS_MAX
             ? requested_fps
             : MOONLIGHT_STREAM_FPS_60;
     const uint32_t requested_audio =
         options ? options->audio_configuration : MOONLIGHT_AUDIO_STEREO;
     int audio_configuration = AUDIO_CONFIGURATION_STEREO;
+    const auto profile = moonlight::resolve_stream_profile(
+        options ? options->video_codec : MOONLIGHT_VIDEO_CODEC_H264,
+        options ? options->chroma_sampling : MOONLIGHT_CHROMA_420, options && options->hdr_enabled);
+    const bool use_pyrowave = profile.decoder_backend == moonlight::DecoderBackend::PyroWaveRadv;
+    const uint32_t resolution =
+        options ? options->stream_resolution : MOONLIGHT_STREAM_RESOLUTION_1080P;
+    const unsigned stream_width = resolution == MOONLIGHT_STREAM_RESOLUTION_2160P   ? 3840
+                                  : resolution == MOONLIGHT_STREAM_RESOLUTION_1440P ? 2560
+                                                                                    : 1920;
+    const unsigned stream_height = resolution == MOONLIGHT_STREAM_RESOLUTION_2160P   ? 2160
+                                   : resolution == MOONLIGHT_STREAM_RESOLUTION_1440P ? 1440
+                                                                                     : 1080;
     const native_video_mode_t *mode =
-        find_video_mode(options ? options->video_codec : MOONLIGHT_VIDEO_CODEC_H264,
-                        options ? options->stream_resolution : MOONLIGHT_STREAM_RESOLUTION_1080P,
-                        options ? options->hdr_enabled : 0u);
+        use_pyrowave ? nullptr : find_video_mode(profile.codec, resolution, profile.hdr);
     const bool classic_pipeline =
         !options || options->decoder_pipeline != MOONLIGHT_DECODER_PIPELINE_ADAPTIVE;
     const uint32_t requested_depth = classic_pipeline ? 1u : (uint32_t)DECODER_PIPELINE_DEPTH;
@@ -4083,7 +3904,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
                                          ? options->decoder_cores
                                          : MOONLIGHT_DECODER_CORES_DEFAULT;
     const uint32_t vsync_enabled = !options || options->vsync_enabled ? 1u : 0u;
-    // More slices lower the per-kilobyte decode cost at every resolution.
+    // Request slice parallelism; the best count depends on codec and workload.
     const uint32_t stream_slices = VIDEO_SLICES_PER_FRAME;
 
     controller.user_service_result = -1;
@@ -4109,46 +3930,79 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     if (metrics)
         memset(metrics, 0, sizeof(*metrics));
 
-    if (!host[0] || !mode)
+    if (!host[0] || (!use_pyrowave && !mode))
         return -1;
+#if !PROSPEROLIGHT_PYROWAVE
+    if (use_pyrowave)
+    {
+        if (metrics)
+            snprintf(metrics->error, sizeof(metrics->error),
+                     "PyroWave backend is not included in this build");
+        return -1;
+    }
+#endif
+    snprintf(notification.message, sizeof(notification.message),
+             "Stream profile: codec=%u format=%s resolution=%ux%u fps=%u bitrate=%u kbps chroma=%s "
+             "depth=%u range=%s decoder=%s bitstream=%s",
+             profile.codec, profile.format_name, stream_width, stream_height, stream_fps,
+             bitrate_kbps, profile.chroma == MOONLIGHT_CHROMA_444 ? "444" : "420",
+             profile.bit_depth, profile.hdr ? "HDR10" : "SDR", use_pyrowave ? "RADV" : "VideoDec2",
+             use_pyrowave ? PYROWAVE_BITSTREAM_ID : "n/a");
+    (void)lan_http_report_text(notification.message);
+    protocol_error[0] = 0;
+#if PROSPEROLIGHT_PYROWAVE
+    if (use_pyrowave)
+        prosperolight::pyrowave::clear_error();
+#endif
     lan_http_report_set_host(host);
+    // The loading renderer opens VideoOut before decoder/connection setup.
+    // Apply this session's policy before that first open, not after negotiation.
+    stream_presentation_mode = moonlight::presentation_mode();
+    native_agc_set_vrr(stream_presentation_mode == 2);
+    native_agc_set_vsync((int)vsync_enabled);
+    snprintf(notification.message, sizeof(notification.message),
+             "Moonlight output policy: mode=%u vrr_requested=%u vsync_requested=%u",
+             stream_presentation_mode, stream_presentation_mode == 2 ? 1u : 0u, vsync_enabled);
+    (void)lan_http_report_text(notification.message);
     if (requested_audio == MOONLIGHT_AUDIO_51_SURROUND && ps5_audio_surround_available())
         audio_configuration = AUDIO_CONFIGURATION_51_SURROUND;
     else if (requested_audio == MOONLIGHT_AUDIO_51_SURROUND)
         (void)lan_http_report_text("Moonlight 5.1 unavailable; falling back to stereo");
 
     direct_memory_limit = sceKernelGetDirectMemorySize();
-    // The launcher's connecting screen goes back on the television before
-    // anything slow starts, and stays until the first picture of the stream.
-    result = connecting_screen_begin(options ? options->connecting : NULL, mode->hdr,
-                                     mode->visible_width, mode->visible_height, stream_fps,
-                                     direct_memory_limit);
-    snprintf(notification.message, sizeof(notification.message),
-             "Connecting screen: present=%08x picture=%u hdr=%u refresh=%u", (uint32_t)result,
-             connecting_screen.plate.has_bar() ? 1u : 0u, mode->hdr ? 1u : 0u,
-             connecting_screen.output_refresh_x100);
-    (void)lan_http_report_text(notification.message);
-    printf("[PL] stream: %s\n", notification.message);
+    result = connecting_screen_begin(options ? options->connecting : NULL, profile.hdr,
+                                     stream_width, stream_height, stream_fps, direct_memory_limit);
     if (result != 0)
         goto done;
     connecting_screen_stage(connecting_screen.progress, 0.45f);
-
     result = start_connection_loading(&loading, NULL);
     if (result != 0)
         goto done;
 
     snprintf(notification.message, sizeof(notification.message),
-             "Native zero-copy stage 1: mode=%s fps=%u bitrate=%u kbps input_slot=%x", mode->name,
+             "Native zero-copy stage 1: mode=%s fps=%u bitrate=%u kbps input_slot=%x", profile.name,
              stream_fps, bitrate_kbps, INPUT_SLOT_BYTES);
     (void)lan_http_report_text(notification.message);
     sceSystemServiceHideSplashScreen();
-    result = sceSysmoduleLoadModule(207);
+    if (use_pyrowave)
+    {
+        renderer.stream_fps = stream_fps;
+        renderer.process_cpu_mask = moonlight::kTitleCpuMask;
+        renderer.layout = moonlight::plan_thread_layout(renderer.process_cpu_mask, 0);
+        stop_connection_loading();
+        goto configure_stream;
+    }
+    result = prosperolight::native_modules::Result(prosperolight::native_modules::video_decoder);
     snprintf(notification.message, sizeof(notification.message),
              "Native zero-copy stage 2: sysmodule207=%08x", (uint32_t)result);
     (void)lan_http_report_text(notification.message);
     if (result != 0)
+    {
+        snprintf(stream_error, sizeof(stream_error),
+                 "Local video decoder module failed to load (0x%08x). Restart ProsperoLight.",
+                 (uint32_t)result);
         goto done;
-    sysmodule_loaded = 1;
+    }
 
     compute_memory.size = sizeof(compute_memory);
     result = sceVideodec2QueryComputeMemoryInfo(&compute_memory);
@@ -4289,32 +4143,32 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     }
     stop_connection_loading();
 
+configure_stream:
     LiInitializeStreamConfiguration(&stream_config);
-    stream_config.width = (int)mode->visible_width;
-    stream_config.height = (int)mode->visible_height;
+    stream_config.width = (int)stream_width;
+    stream_config.height = (int)stream_height;
     stream_config.fps = (int)stream_fps;
     stream_config.bitrate = (int)bitrate_kbps;
     stream_config.packetSize = 1392;
     stream_config.streamingRemotely = STREAM_CFG_LOCAL;
     stream_config.audioConfiguration = audio_configuration;
-    stream_config.supportedVideoFormats = mode->video_format;
-    stream_config.colorSpace = mode->hdr ? COLORSPACE_REC_2020 : COLORSPACE_REC_709;
+    stream_config.supportedVideoFormats = profile.video_format;
+    stream_config.colorSpace = profile.hdr ? COLORSPACE_REC_2020 : COLORSPACE_REC_709;
     stream_config.colorRange = COLOR_RANGE_LIMITED;
+    stream_config.pyrowaveCompression = 0;
     stream_config.encryptionFlags = ENCFLG_NONE;
     controller_result = ps5_controller_init(&controller);
     controller_ready = controller_result == 0;
+    prosperolight::dualsense::Init(controller.user_id, controller.handle);
     if (controller_ready && controller.user_id >= 0)
         physical_input_ready = ps5_physical_input_init(&physical_input, controller.user_id) == 0;
-    // Before the loading worker starts reading the first pad on its own thread.
-    if (controller_ready)
-        launch_mask = ps5_controller_launch_mask(&controller);
+    // Discovery in Init() has already populated the connected controller mask.
     snprintf(notification.message, sizeof(notification.message),
              "Moonlight controller init: ready=%d user_service=%08x user=%08x pad_init=%08x "
-             "handle=%08x launch_mask=%x user_scan=%08x pad_open=%08x",
+             "handle=%08x launch_mask=%x",
              controller_ready, (uint32_t)controller.user_service_result,
              (uint32_t)controller.user_result, (uint32_t)controller.pad_init_result,
-             (uint32_t)controller.handle, launch_mask, (uint32_t)controller.user_scan_result,
-             (uint32_t)controller.extra_open_result);
+             (uint32_t)controller.handle, prosperolight::dualsense::ActiveMask());
     (void)lan_http_report_text(notification.message);
     if (!controller_ready)
     {
@@ -4342,7 +4196,8 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         moonlight::client_refresh_x100(stream_fps, connecting_screen.output_refresh_x100);
     stream_config.clientRefreshRateX100 = (int)renderer.client_refresh_x100;
     identity_initialized = 1;
-    result = prepare_native_session(&client_identity, &gs_server, &stream_config, mode, launch_mask,
+    result = prepare_native_session(&client_identity, &gs_server, &stream_config, profile,
+                                    controller_ready ? prosperolight::dualsense::ActiveMask() : 0,
                                     host, host_port, app_name, app_id);
     if (result != GS_OK)
         goto done;
@@ -4360,6 +4215,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         goto done;
     }
 
+    protocol_error[0] = 0;
     connection_terminated = 0;
     connection_error = 0;
     std::atomic_store_explicit(&host_hdr_active, 0u, std::memory_order_relaxed);
@@ -4370,8 +4226,28 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     std::atomic_store_explicit(&video_queue_overflows, 0u, std::memory_order_relaxed);
     std::atomic_store_explicit(&video_unrecoverable_frames, 0u, std::memory_order_relaxed);
     std::atomic_store_explicit(&connection_failed_stage, 0, std::memory_order_relaxed);
-    prepare_video_callbacks(stream_slices, mode->codec_type == 1u);
-    native_agc_set_vsync((int)vsync_enabled);
+    if (!use_pyrowave)
+        prepare_video_callbacks(stream_slices, mode->codec_type == 1u);
+#if PROSPEROLIGHT_PYROWAVE
+    if (use_pyrowave)
+    {
+        // RADV must take sole ownership before its swapchain opens VideoOut.
+        connecting_screen_stop();
+        if (native_agc_present_shutdown() != 0)
+        {
+            result = -1;
+            goto done;
+        }
+        connecting_screen_release();
+        prosperolight::pyrowave::prepare_callbacks(fail_stream, vsync_enabled != 0,
+                                                   !options || options->display_area ==
+                                                                   MOONLIGHT_DISPLAY_AREA_TV_SAFE);
+    }
+#endif
+    stream_pacer.reset(renderer.stream_fps);
+    renderer.mailbox.capacity = stream_presentation_mode ? 2u : 1u;
+    LOGI("Moonlight pacing: mode=%u requested_fps=%u ready_capacity=%u source_clock=1",
+         stream_presentation_mode, renderer.stream_fps, renderer.mailbox.capacity);
     // Keep every stream thread off the decoder's CPUs. New threads inherit the
     // creator's mask, so narrow this thread first; moonlight-common-c's thread
     // hook then gives the video receive thread a CPU of its own.
@@ -4388,7 +4264,12 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     }
     connection_result = LiStartConnection(
         &gs_server.server_info, &stream_config, &moonlight_connection_callbacks,
-        &moonlight_video_callbacks, &moonlight_audio_callbacks, &renderer, 0, NULL, 0);
+#if PROSPEROLIGHT_PYROWAVE
+        use_pyrowave ? prosperolight::pyrowave::callbacks() : &moonlight_video_callbacks,
+#else
+        &moonlight_video_callbacks,
+#endif
+        &moonlight_audio_callbacks, &renderer, 0, NULL, 0);
     std::atomic_store_explicit(&loading.connection_pending, 0, std::memory_order_release);
     stop_connection_loading();
     if (connection_result != 0)
@@ -4429,10 +4310,9 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
             const uint64_t now = monotonic_us();
             if (now >= synthetic_motion_next_us)
             {
-                const short x = (short)((synthetic_motion_events * 32u) % mode->visible_width);
-                const short y = (short)(mode->visible_height / 2u);
-                if (LiSendMousePositionEvent(x, y, (short)mode->visible_width,
-                                             (short)mode->visible_height) != 0)
+                const short x = (short)((synthetic_motion_events * 32u) % stream_width);
+                const short y = (short)(stream_height / 2u);
+                if (LiSendMousePositionEvent(x, y, (short)stream_width, (short)stream_height) != 0)
                     ++synthetic_motion_errors;
                 ++synthetic_motion_events;
                 synthetic_motion_next_us += UINT64_C(16667);
@@ -4441,9 +4321,19 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
             }
         }
         if (controller_ready)
-            ps5_controllers_poll(&controller);
+            ps5_controller_poll(&controller);
+        prosperolight::dualsense::Poll();
+        const unsigned pad_actions = prosperolight::dualsense::TakeLocalActions();
+        if (pad_actions & prosperolight::dualsense::ToggleStatistics)
+            native_agc_set_hud_enabled(!native_agc_hud_enabled());
+        if (pad_actions & prosperolight::dualsense::StopStream)
+            controller.requested_stop = 1;
         if (physical_input_ready)
             ps5_physical_input_poll(&physical_input);
+#if PROSPEROLIGHT_PYROWAVE
+        if (use_pyrowave)
+            renderer.presented = (uint32_t)prosperolight::pyrowave::presented();
+#endif
         if (std::atomic_load_explicit(&renderer.presented, std::memory_order_relaxed) == 0 &&
             monotonic_us() - first_frame_wait_start_us >= FIRST_VIDEO_FRAME_TIMEOUT_US)
         {
@@ -4479,80 +4369,101 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     live_elapsed_us = renderer.last_present_us > renderer.first_present_us
                           ? renderer.last_present_us - renderer.first_present_us
                           : 0;
-    snprintf(
-        notification.message, sizeof(notification.message),
-        "Moonlight live result: rc=%08x connection=%08x terminated=%d user_stop=%d error=%08x "
-        "access_units=%u presented=%u fragments=%u bytes=%zx frame_span_us=%llu fps_x100=%llu "
-        "source=%p",
-        (uint32_t)result, (uint32_t)connection_result, terminated, user_stop,
-        (uint32_t)reported_error, renderer.access_units, presented, renderer.fragments,
-        renderer.stream_bytes, (unsigned long long)live_elapsed_us,
-        (unsigned long long)(live_elapsed_us && presented > 1
-                                 ? (uint64_t)(presented - 1) * UINT64_C(100000000) / live_elapsed_us
-                                 : 0),
-        frame_memory);
-    (void)lan_http_report_text(notification.message);
-    snprintf(notification.message, sizeof(notification.message),
-             "Moonlight synthetic motion: enabled=%u events=%u errors=%u",
-             options && options->synthetic_motion ? 1u : 0u, synthetic_motion_events,
-             synthetic_motion_errors);
-    (void)lan_http_report_text(notification.message);
-    snprintf(
-        notification.message, sizeof(notification.message),
-        "Moonlight live timing: copy_calls=%u copy_avg_us=%llu copy_max_us=%llu decode_calls=%u "
-        "decode_avg_us=%llu decode_max_us=%llu flush_calls=%u flush_avg_us=%llu flush_max_us=%llu "
-        "present_calls=%u present_avg_us=%llu present_max_us=%llu",
-        renderer.access_units,
-        (unsigned long long)(renderer.access_units ? renderer.copy_total_us / renderer.access_units
-                                                   : 0),
-        (unsigned long long)renderer.copy_max_us, renderer.decode_calls,
-        (unsigned long long)(renderer.decode_calls
-                                 ? renderer.decode_total_us / renderer.decode_calls
-                                 : 0),
-        (unsigned long long)renderer.decode_max_us, renderer.flush_calls,
-        (unsigned long long)(renderer.flush_calls ? renderer.flush_total_us / renderer.flush_calls
-                                                  : 0),
-        (unsigned long long)renderer.flush_max_us, presented,
-        (unsigned long long)(presented ? renderer.present_total_us / presented : 0),
-        (unsigned long long)renderer.present_max_us);
-    (void)lan_http_report_text(notification.message);
-    snprintf(notification.message, sizeof(notification.message),
-             "Moonlight live latency: calls=%u callback_to_decode_avg_us=%llu min_us=%llu "
-             "max_us=%llu callback_to_flip_avg_us=%llu min_us=%llu max_us=%llu pending=%u",
-             renderer.latency_calls,
-             (unsigned long long)(renderer.ready_calls
-                                      ? renderer.callback_to_decode_total_us / renderer.ready_calls
-                                      : 0),
-             (unsigned long long)renderer.callback_to_decode_min_us,
-             (unsigned long long)renderer.callback_to_decode_max_us,
-             (unsigned long long)(renderer.latency_calls
-                                      ? renderer.callback_to_flip_total_us / renderer.latency_calls
-                                      : 0),
-             (unsigned long long)renderer.callback_to_flip_min_us,
-             (unsigned long long)renderer.callback_to_flip_max_us, renderer.submission_count);
-    (void)lan_http_report_text(notification.message);
+    if (!use_pyrowave)
     {
-        const ps5_thread_placement_stats_t placed = ps5_thread_placement_stats();
-
-        snprintf(notification.message, sizeof(notification.message),
-                 "Moonlight live pipeline: depth=%u drain=%u drains=%u drain_faults=%u "
-                 "recreations=%u refreshes=%u overflows=%u decoded=%u not_displayed=%u "
-                 "network_gaps=%llu decoder_gaps=%llu present_errors=%u placed=%u/%u "
-                 "receive=%llx decode=%d present=%d main=%d vsync=%d flip_events=%d",
-                 renderer.pipeline_depth, renderer.drain_enabled ? 1u : 0u, renderer.drain_calls,
-                 renderer.drain_faults, renderer.decoder_recreations, renderer.decoder_refreshes,
-                 std::atomic_load_explicit(&video_queue_overflows, std::memory_order_relaxed),
-                 renderer.decoded, renderer.not_displayed,
-                 (unsigned long long)renderer.drops.network,
-                 (unsigned long long)renderer.drops.decoder, renderer.present_errors,
-                 placed.applied, placed.applied + placed.failed,
-                 (unsigned long long)placed.receive_verified, renderer.decode_placement_result,
-                 renderer.present_placement_result, renderer.main_placement_result,
-                 native_agc_vsync_active(), native_agc_flip_events_active());
+        snprintf(
+            notification.message, sizeof(notification.message),
+            "Moonlight live result: rc=%08x connection=%08x terminated=%d user_stop=%d error=%08x "
+            "access_units=%u presented=%u fragments=%u bytes=%zx frame_span_us=%llu fps_x100=%llu "
+            "source=%p",
+            (uint32_t)result, (uint32_t)connection_result, terminated, user_stop,
+            (uint32_t)reported_error, renderer.access_units, presented, renderer.fragments,
+            renderer.stream_bytes, (unsigned long long)live_elapsed_us,
+            (unsigned long long)(live_elapsed_us && presented > 1
+                                     ? (uint64_t)(presented - 1) * UINT64_C(100000000) /
+                                           live_elapsed_us
+                                     : 0),
+            frame_memory);
         (void)lan_http_report_text(notification.message);
+        snprintf(notification.message, sizeof(notification.message),
+                 "Moonlight synthetic motion: enabled=%u events=%u errors=%u",
+                 options && options->synthetic_motion ? 1u : 0u, synthetic_motion_events,
+                 synthetic_motion_errors);
+        (void)lan_http_report_text(notification.message);
+        snprintf(notification.message, sizeof(notification.message),
+                 "Moonlight live timing: copy_calls=%u copy_avg_us=%llu copy_max_us=%llu "
+                 "decode_calls=%u "
+                 "decode_avg_us=%llu decode_max_us=%llu flush_calls=%u flush_avg_us=%llu "
+                 "flush_max_us=%llu "
+                 "present_calls=%u present_avg_us=%llu present_max_us=%llu",
+                 renderer.access_units,
+                 (unsigned long long)(renderer.access_units
+                                          ? renderer.copy_total_us / renderer.access_units
+                                          : 0),
+                 (unsigned long long)renderer.copy_max_us, renderer.decode_calls,
+                 (unsigned long long)(renderer.decode_calls
+                                          ? renderer.decode_total_us / renderer.decode_calls
+                                          : 0),
+                 (unsigned long long)renderer.decode_max_us, renderer.flush_calls,
+                 (unsigned long long)(renderer.flush_calls
+                                          ? renderer.flush_total_us / renderer.flush_calls
+                                          : 0),
+                 (unsigned long long)renderer.flush_max_us, presented,
+                 (unsigned long long)(presented ? renderer.present_total_us / presented : 0),
+                 (unsigned long long)renderer.present_max_us);
+        (void)lan_http_report_text(notification.message);
+        snprintf(notification.message, sizeof(notification.message),
+                 "Moonlight live latency: calls=%u callback_to_decode_avg_us=%llu min_us=%llu "
+                 "max_us=%llu callback_to_flip_avg_us=%llu min_us=%llu max_us=%llu pending=%u",
+                 renderer.latency_calls,
+                 (unsigned long long)(renderer.ready_calls ? renderer.callback_to_decode_total_us /
+                                                                 renderer.ready_calls
+                                                           : 0),
+                 (unsigned long long)renderer.callback_to_decode_min_us,
+                 (unsigned long long)renderer.callback_to_decode_max_us,
+                 (unsigned long long)(renderer.latency_calls ? renderer.callback_to_flip_total_us /
+                                                                   renderer.latency_calls
+                                                             : 0),
+                 (unsigned long long)renderer.callback_to_flip_min_us,
+                 (unsigned long long)renderer.callback_to_flip_max_us, renderer.submission_count);
+        (void)lan_http_report_text(notification.message);
+        {
+            const ps5_thread_placement_stats_t placed = ps5_thread_placement_stats();
+
+            snprintf(notification.message, sizeof(notification.message),
+                     "Moonlight live pipeline: depth=%u drain=%u drains=%u drain_faults=%u "
+                     "recreations=%u refreshes=%u overflows=%u decoded=%u not_displayed=%u "
+                     "network_gaps=%llu decoder_gaps=%llu present_errors=%u placed=%u/%u "
+                     "receive=%llx decode=%d present=%d main=%d vsync=%d flip_events=%d",
+                     renderer.pipeline_depth, renderer.drain_enabled ? 1u : 0u,
+                     renderer.drain_calls, renderer.drain_faults, renderer.decoder_recreations,
+                     renderer.decoder_refreshes,
+                     std::atomic_load_explicit(&video_queue_overflows, std::memory_order_relaxed),
+                     renderer.decoded, renderer.not_displayed.load(),
+                     (unsigned long long)renderer.drops.network,
+                     (unsigned long long)renderer.drops.decoder, renderer.present_errors,
+                     placed.applied, placed.applied + placed.failed,
+                     (unsigned long long)placed.receive_verified, renderer.decode_placement_result,
+                     renderer.present_placement_result, renderer.main_placement_result,
+                     native_agc_vsync_active(), native_agc_flip_events_active());
+            (void)lan_http_report_text(notification.message);
+        }
     }
 
 done:
+#if PROSPEROLIGHT_PYROWAVE
+    if (result != 0 && use_pyrowave)
+    {
+        prosperolight::pyrowave::copy_error(stream_error, sizeof(stream_error));
+        if (stream_error[0])
+        {
+            snprintf(protocol_error, sizeof(protocol_error), "%s", stream_error);
+            gs_error = protocol_error;
+        }
+        else if (protocol_error[0])
+            gs_error = protocol_error;
+    }
+#endif
     if (result != 0 && !controller.requested_stop)
     {
         if (std::atomic_load_explicit(&loading.timed_out, std::memory_order_relaxed))
@@ -4672,21 +4583,26 @@ done:
         controller.mouse_button_events, controller.mouse_scroll_events, controller.mouse_errors);
     (void)lan_http_report_text(notification.message);
     snprintf(notification.message, sizeof(notification.message),
-             "Moonlight extra controllers: launch_mask=%x peak=%u arrivals=%u removals=%u "
-             "events=%u read_errors=%u send_errors=%u scans=%u scan_errors=%u scan=%08x "
-             "open_errors=%u open=%08x",
-             launch_mask, controller.peak_controllers, controller.extra_arrivals,
-             controller.extra_removals, controller.extra_events, controller.extra_read_errors,
-             controller.extra_send_errors, controller.user_scans, controller.user_scan_errors,
-             (uint32_t)controller.user_scan_result, controller.extra_open_errors,
-             (uint32_t)controller.extra_open_result);
+             "Moonlight decode profile: first_us=%llu over_budget=%llu slices=%u-%u "
+             "slice_samples=%u IDR_calls=%llu IDR_avg_us=%llu IDR_p99_upper_us=%llu "
+             "P_calls=%llu P_avg_us=%llu P_p99_upper_us=%llu other_mask=%llx",
+             (unsigned long long)renderer.decode_first_us,
+             (unsigned long long)renderer.decode_over_budget, renderer.observed_slices_min,
+             renderer.observed_slices_max, renderer.layout_samples,
+             (unsigned long long)renderer.idr_decode_timing.count,
+             (unsigned long long)(renderer.idr_decode_timing.count
+                                      ? renderer.idr_decode_timing.total_us /
+                                            renderer.idr_decode_timing.count
+                                      : 0),
+             (unsigned long long)renderer.idr_decode_timing.percentile(99),
+             (unsigned long long)renderer.inter_decode_timing.count,
+             (unsigned long long)(renderer.inter_decode_timing.count
+                                      ? renderer.inter_decode_timing.total_us /
+                                            renderer.inter_decode_timing.count
+                                      : 0),
+             (unsigned long long)renderer.inter_decode_timing.percentile(99),
+             (unsigned long long)renderer.layout.other);
     (void)lan_http_report_text(notification.message);
-    controller_summary = {controller.peak_controllers,
-                          controller.extra_arrivals,
-                          controller.extra_removals,
-                          controller.extra_open_errors,
-                          controller.send_errors + controller.extra_send_errors,
-                          controller.user_scan_errors};
     ps5_physical_input_shutdown(&physical_input);
     snprintf(notification.message, sizeof(notification.message),
              "Moonlight physical input result: ready=%d keyboard_module=%08x open=%08x handles=%u "
@@ -4709,7 +4625,7 @@ done:
              (uint32_t)physical_input.mouse_unload_result);
     (void)lan_http_report_text(notification.message);
     ps5_controller_shutdown(&controller);
-    if (session_started && !controller.requested_stop)
+    if (session_started && (!controller.requested_stop || prosperolight::host_quit_enabled()))
     {
         http_set_timeout_ms(2000);
         int quit_result = gs_quit_app(&gs_server);
@@ -4728,11 +4644,26 @@ done:
         moonlight_video_callbacks.stop();
         moonlight_video_callbacks.cleanup();
     }
+#if PROSPEROLIGHT_PYROWAVE
+    if (use_pyrowave)
+        prosperolight::pyrowave::cleanup();
+#endif
+    LOGI("Moonlight pacing result: mode=%u period_us=%llu reserve_us=%llu submissions=%llu "
+         "misses=%llu resets=%llu wait_total_us=%llu late_max_us=%llu spacing_error_max_us=%llu",
+         stream_presentation_mode, (unsigned long long)stream_pacer.stats.period_us,
+         (unsigned long long)stream_pacer.stats.reserve_us,
+         (unsigned long long)stream_pacer.stats.submissions,
+         (unsigned long long)stream_pacer.stats.misses,
+         (unsigned long long)stream_pacer.stats.resets,
+         (unsigned long long)stream_pacer.stats.wait_total_us,
+         (unsigned long long)stream_pacer.stats.late_max_us,
+         (unsigned long long)stream_pacer.stats.spacing_error_max_us);
+    controller_summary = prosperolight::dualsense::GetStatistics();
     save_performance_summary(renderer, input_intervals, options, result);
     if (renderer.access_units)
     {
         log_performance_windows(renderer.stream_fps);
-        save_frame_trace();
+        save_frame_trace(stream_presentation_mode);
     }
     ps5_thread_placement_clear();
     if (main_mask_changed)
@@ -4754,8 +4685,7 @@ done:
         if (compute_queue)
             release_compute_result = sceVideodec2ReleaseComputeQueue(compute_queue);
         release_direct(compute_memory.cpu_gpu, compute_start, compute_size);
-        if (sysmodule_loaded)
-            unload_result = sceSysmoduleUnloadModule(207);
+        unload_result = 0; // Native modules are retained across streams.
     }
     else
     {

@@ -8,11 +8,16 @@
 #define LAN_HTTP_REPORT_HPP
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-int lan_http_report_text(const char *message);
-void lan_http_report_set_host(const char *host);
+    int prosperolight_logs_enabled(void);
+    int prosperolight_logs_set_enabled(int enabled);
+    void prosperolight_log_append(const char *path, const char *message);
+
+    int lan_http_report_text(const char *message);
+    void lan_http_report_set_host(const char *host);
 
 #ifdef __cplusplus
 }

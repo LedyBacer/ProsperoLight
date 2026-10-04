@@ -12,6 +12,11 @@
 // usage: launcher_host <assets dir> <output dir> [width height]
 
 #include "fake_world.hpp"
+#include "app_storage.hpp"
+#include "presentation_preferences.hpp"
+#include "host_quit_preferences.hpp"
+#include "stream_profile.hpp"
+#include "lan_http_report.hpp"
 #include "connecting_plate.hpp"
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
@@ -96,8 +101,9 @@ bool make_poster(const unsigned char *png, std::size_t size, launcher::ArtworkIm
     launcher::Palette tones;
     launcher::Palette *palette = &tones;
     static const std::uint32_t kTones[][3] = {
-        {0x2a0f4f, 0x8a2f8f, 0xff5fa2}, {0x0f3d3a, 0x2fa59a, 0x86f0dc}, {0x1d2e12, 0x4f7a28, 0xcfe07a},
-        {0x08142e, 0x1f5fb0, 0x35e0ff}, {0x3a1c10, 0xb0683a, 0xffd9a0}, {0x101820, 0x3a4a52, 0xf2b84b},
+        {0x2a0f4f, 0x8a2f8f, 0xff5fa2}, {0x0f3d3a, 0x2fa59a, 0x86f0dc},
+        {0x1d2e12, 0x4f7a28, 0xcfe07a}, {0x08142e, 0x1f5fb0, 0x35e0ff},
+        {0x3a1c10, 0xb0683a, 0xffd9a0}, {0x101820, 0x3a4a52, 0xf2b84b},
         {0x2e0d12, 0xa02a3a, 0xff8a7a}, {0x14103a, 0x4a3fb0, 0xb9a8ff},
     };
     const std::uint32_t *tone = kTones[static_cast<unsigned>(app_id) % 8u];
@@ -207,12 +213,19 @@ int main(int argc, char **argv)
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         return 1;
     hui::save::ensure_directory(output);
+    const auto preferences = output + "/preferences";
+    hui::save::ensure_directory(preferences);
+    std::snprintf(storage::g_paths.config, sizeof(storage::g_paths.config), "%s/config.bin",
+                  preferences.c_str());
+    std::snprintf(storage::g_paths.logs, sizeof(storage::g_paths.logs), "%s", preferences.c_str());
 
     // ---- the pretend network ----
     fake::Pc gaming;
     gaming.address = "192.168.4.20";
     gaming.name = "Gaming-PC";
     gaming.current_app = 1;
+    gaming.pyrowave_profiles =
+        SCM_PYROWAVE | SCM_PYROWAVE_444 | SCM_PYROWAVE_HDR10 | SCM_PYROWAVE_HDR10_444;
     static const char *const kNames[] = {"Desktop",       "Lumen Drift",  "Tidewater",
                                          "Glass Orchard", "Neon Harbor",  "Paper Kites",
                                          "Hollow Signal", "Copper Vale",  "Night Ferry",
@@ -257,18 +270,25 @@ int main(int argc, char **argv)
     // Runs one launcher from start-up until its script ends; returns whether
     // it asked for a stream.
     const auto session = [&](const char *prefix, const std::vector<Step> &script,
-                             const char *stream_error) -> bool
+                             const char *stream_error,
+                             const moonlight_config_t *initial = nullptr) -> bool
     {
         launcher::Model model;
         model.set_artwork_decoder(make_poster);
         if (offer_update)
-            model.set_update_check([](char *version, std::size_t size)
-                                   {
-                                       ++update_checks;
-                                       std::snprintf(version, size, "01.000.090");
-                                       return true;
-                                   });
+            model.set_update_check(
+                [](char *version, std::size_t size)
+                {
+                    ++update_checks;
+                    std::snprintf(version, size, "01.000.090");
+                    return true;
+                });
         model.Initialize(now_ms);
+        if (initial)
+        {
+            model.settings() = *initial;
+            model.SettingsChanged();
+        }
         launcher::View view(model, fonts);
         view.set_version("01.000.080");
         view.set_players(2);
@@ -452,22 +472,21 @@ int main(int argc, char **argv)
         saved.selected_host = 0;
         (void)moonlight_config_save(&saved);
     }
-    const bool started = session(
-        "games",
-        {
-            {30, next},
-            {90, 0, Direction::right, "running"},
-            {15, 0, Direction::right},
-            {15, 0, Direction::right},
-            {70, 0, Direction::down, "focus"},
-            {60, 0, Direction::up, "second-row"},
-            {20, square},
-            {60, 0, Direction::none, "stopped"},
-            {10, confirm},
-            {30, 0, Direction::none, "connecting"},
-            {120, 0},
-        },
-        "");
+    const bool started = session("games",
+                                 {
+                                     {30, next},
+                                     {90, 0, Direction::right, "running"},
+                                     {15, 0, Direction::right},
+                                     {15, 0, Direction::right},
+                                     {70, 0, Direction::down, "focus"},
+                                     {60, 0, Direction::up, "second-row"},
+                                     {20, square},
+                                     {60, 0, Direction::none, "stopped"},
+                                     {10, confirm},
+                                     {30, 0, Direction::none, "connecting"},
+                                     {120, 0},
+                                 },
+                                 "");
     expect(started, "Cross on an app starts the stream");
 
     // ---- the stream's side of the connecting screen ----
@@ -490,7 +509,8 @@ int main(int argc, char **argv)
         connecting::Plate video;
         video.build(plate.data(), bar, false);
         std::vector<unsigned char> surface(connecting::surface_bytes(false));
-        const std::size_t luma = static_cast<std::size_t>(connecting::kWidth) * connecting::kSurfaceHeight;
+        const std::size_t luma =
+            static_cast<std::size_t>(connecting::kWidth) * connecting::kSurfaceHeight;
         // The frame as the television shows it: BT.709 video back to pixels.
         const auto save = [&](const char *name, float progress, float brightness)
         {
@@ -500,7 +520,8 @@ int main(int argc, char **argv)
                 for (int x = 0; x < width; ++x)
                 {
                     const std::size_t at = static_cast<std::size_t>(y) * width + x;
-                    const std::size_t pair = luma + static_cast<std::size_t>(y / 2) * width + (x & ~1);
+                    const std::size_t pair =
+                        luma + static_cast<std::size_t>(y / 2) * width + (x & ~1);
                     const float l = (surface[at] - 16.0f) / 219.0f;
                     const float cb = (surface[pair] - 128.0f) / 224.0f;
                     const float cr = (surface[pair + 1] - 128.0f) / 224.0f;
@@ -522,7 +543,10 @@ int main(int argc, char **argv)
         };
         const int middle = static_cast<int>(bar.y + bar.height * 0.5f);
         const auto bar_luma = [&](float share)
-        { return surface[static_cast<std::size_t>(middle) * width + static_cast<int>(bar.x + bar.width * share)]; };
+        {
+            return surface[static_cast<std::size_t>(middle) * width +
+                           static_cast<int>(bar.x + bar.width * share)];
+        };
         save("connecting", 0.65f, 1.0f);
         const int filled = bar_luma(0.3f);
         const int empty = bar_luma(0.9f);
@@ -541,31 +565,62 @@ int main(int argc, char **argv)
     // ---- back from a stream that failed ----
     session("games", {{80, 0, Direction::none, "stream-error"}}, "Sunshine closed the connection");
 
-    // ---- Settings ----
+    // ---- Settings: custom FPS/bitrate use numeric prompts, not presets ----
+    (void)prosperolight::host_quit_set_enabled(false);
+    moonlight_config_t initial_settings{};
+    (void)moonlight_config_load(&initial_settings);
+    initial_settings.video_codec = MOONLIGHT_VIDEO_CODEC_PYROWAVE;
+    initial_settings.hdr_enabled = 1;
+    initial_settings.chroma_sampling = MOONLIGHT_CHROMA_444;
+    initial_settings.stream_fps = 117;
+    initial_settings.bitrate_mbps = 600;
     session("settings",
             {
                 {30, options},
-                {60, 0, Direction::down, "video"},
+                {30, 0, Direction::none, "pyrowave-hdr"},
+                {10, 0, Direction::down},
+                {10, confirm},
+                {40, 0, Direction::none, "fps-keyboard"},
+                {10, 0, Direction::down},
+                {20, confirm}, // Done keeps the entered custom FPS.
+                {10, 0, Direction::down},
+                {20, 0, Direction::right},
+                {30, 0, Direction::none, "h264"},
+                {10, 0, Direction::down},
+                {10, 0, Direction::down},
+                {10, 0, Direction::down},
+                {10, confirm},
+                {40, 0, Direction::none, "bitrate-keyboard"},
+                {10, 0, Direction::down},
+                {20, confirm},
+                {10, 0, Direction::down},
+                {10, 0, Direction::down},
+                {10, 0, Direction::down},
+                {10, confirm},
+                {40, 0, Direction::none, "host-quit-on"},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
                 {10, 0, Direction::right},
-                {10, 0, Direction::right},
-                {10, 0, Direction::right},
-                {10, 0, Direction::right},
-                {60, 0, Direction::up, "above-limit"},
-                {10, 0, Direction::up},
-                {10, 0, Direction::left},
-                {60, 0, Direction::none, "h264"},
+                {40, 0, Direction::none, "paced-vrr"},
+                {10, 0, Direction::down},
+                {10, 0, Direction::down},
+                {10, 0, Direction::down},
+                {10, confirm},
+                {40, 0, Direction::none, "logs-off"},
                 {120, 0},
             },
-            "");
+            "", &initial_settings);
     {
-        moonlight_config_t saved;
+        moonlight_config_t saved{};
         (void)moonlight_config_load(&saved);
-        expect(saved.bitrate_mbps == 120, "four steps of the slider save 120 Mbps");
+        expect(saved.bitrate_mbps == 600 && saved.stream_fps == 117,
+               "numeric prompts preserve independent custom bitrate and FPS");
         expect(saved.video_codec == MOONLIGHT_VIDEO_CODEC_H264 && saved.hdr_enabled == 0,
                "choosing H.264 turns HDR off");
+        expect(moonlight::presentation_mode() == 2u, "the new pacing row persists Paced+VRR");
+        expect(prosperolight::host_quit_enabled(), "host app quit toggle persists");
+        expect(!prosperolight_logs_enabled(), "the new diagnostics row persists logs off");
     }
 
     // ---- a newer version in the catalog: one notice, for ten seconds ----

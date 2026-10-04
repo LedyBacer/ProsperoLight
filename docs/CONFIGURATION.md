@@ -135,10 +135,94 @@ the application. Do not commit credentials; `.env` is ignored by Git.
 
 ## Persistent configuration
 
-Use `/download0` for configuration, pairing state, caches, and logs. Write a
+Files live under `/data/prosperolight` after filesystem elevation, with
+`/download0` as the sandbox fallback. Configuration version 8 migrates both
+the upstream and PyroWave version 7 layouts, preserving saved hosts and ports. Write a
 temporary file and rename it into place to avoid partial writes. Provide an
 application-level export/import mechanism for important data because retention
 after title deletion or cache-management actions is not guaranteed.
 
 Native SaveData initialization is not part of this baseline; see
 [Platform findings](PLATFORM_NOTES.md).
+
+### Settings list navigation
+
+The settings page scrolls vertically as the selected row moves out of view. Use
+Up / Down to select a setting and Cross to change it. The scrollbar shows your
+position; stream shortcuts and the footer stay visible outside the list.
+
+### Custom server port
+
+Use **Add PC** and enter `IPv4:HTTP-port`, for example `192.168.1.5:48000`.
+This is the HTTP port (47989 by default), not the browser administration port.
+The selected PC's address always shows its port. Automatic discovery retains
+explicitly saved endpoints; the port is not a global streaming setting.
+
+### Frame pacing and VSync
+
+| Policy | Scheduling | VSync preference |
+| --- | --- | --- |
+| Unpaced | Submit the newest ready frame without a cadence timer. | On synchronizes flips; Off requests immediate output. |
+| Paced | Learn source cadence, retain a bounded readiness reserve, and align fixed-VSync submissions using observed flip timing. | On/Off is retained independently. |
+| Paced + VRR | Use source-clock pacing and request variable-rate VideoOut; API failure uses fixed-output pacing. | Synchronized flips are required; the saved preference is restored when another policy is selected. |
+
+VRR is a request, not proof that the display accepted it. A rejected request
+falls back to fixed output and is recorded in the session log. Native
+immediate flips can also fall back to VSync if the system rejects them.
+The launcher requests fixed 60 Hz when its own VideoOut handle opens.
+
+Menu sounds and the presentation policy are stored separately from the paired
+host configuration in `prosperolight-ui-sound.bin` and
+`prosperolight-presentation.bin` under `/download0`.
+
+The scrolling list contains settings only; two permanent lines below it show
+local touchpad-click combinations and the host Select/Back and PS/Guide
+shortcuts. These lines use the loaded 20 px bitmap font.
+
+Current hardware evidence: H.264 4K60 completed Unpaced, Paced, and
+Paced + VRR selected-policy sessions with zero decoded frames discarded
+before presentation. Those measurements preceded the VRR initialization-order
+fix and do not establish active VRR. Confirmation after that fix, PyroWave
+pacing comparisons, and HEVC HDR regression checks are pending. H.264 4K120
+recorded decoder timing spikes and input-queue overflows even with Unpaced;
+these limits must not be represented as eliminated by pacing.
+
+### Manual frame-rate entry
+
+Select Stream frame rate and press Cross to open the same system keyboard used
+for bitrate. Enter any integer from 30 to 120 FPS. Cancel, invalid input and a
+failed save retain the previous value. The saved target is passed unchanged to
+H.264, HEVC or PyroWave and their pacing policy. No configuration-format change
+is required. This is a stream target, not a new fixed HDMI mode: VideoOut uses
+its fixed60/120Hz path or requests VRR. Arbitrary targets such as75FPS can have
+uneven display intervals with fixed-refresh VSync; sustained decoding capacity
+and active VRR still require console verification.
+
+### Diagnostic logs
+
+`Diagnostic logs` enables or disables application diagnostic files, LAN diagnostic telemetry, and end-of-stream performance exports. It defaults to On and is stored independently beside the main config (`config/prosperolight-logging.bin` under `/data/prosperolight`, or `/download0/prosperolight-logging.bin` in the sandbox). Disabling keeps existing files for inspection; it does not erase them or disable the statistics overlay.
+
+Session, PyroWave and menu-output text logs rotate at 1 MiB each, retaining one `.previous` file per log (up to 6 MiB for those three logs). Rotation is size-based and can occur within a long stream; files are not reset on every connection. Legacy oversized current logs are discarded on their next write. Performance JSON/CSV files replace the previous report rather than accumulating sessions. System/etaHEN logs are outside this switch.
+
+### Source-clock frame pacing
+
+Unpaced keeps the latest-frame policy without an extra software wait. Paced and Paced+VRR share a source-clock controller, learn the source interval from validated RTP timestamps (presentation timestamps are the fallback), and carry a small bounded readiness reserve (up to the smaller of 10 ms or one source interval). The ready queue holds at most two decoded native images. Old decoded images are discarded only when a decoded successor exists; compressed H.264/HEVC references are preserved.
+
+Native fixed-VSync pacing uses completed-flip observations as a best-effort phase estimate and submits with a preparation margin. These observations are not a precise scanout clock. VRR API failure uses the fixed-output timing policy. The HUD distinguishes successful VRR API activation from fixed fallback; API success does not prove physical panel VRR.
+
+PyroWave submits GPU decode/render immediately, waits for preparation completion, then paces presentation. Its two-entry compressed queue preserves brief arrival bursts; it does not claim two prepared GPU surfaces or asynchronous decode/present overlap. GPU fences measure work completion, not physical display completion. Independent stale compressed PyroWave frames may be skipped, while the sole remaining frame is retained.
+
+Per-stream pacing summaries report learned period, reserve, missed readiness targets, re-anchors, wake lateness and submission-spacing error. These counters remain controlled by Diagnostic logs. Compare completed-flip intervals and end-to-end latency, not only submission spacing, during console validation.
+
+The upstream OpenGL launcher log additionally retains the current and previous
+launch, bounded by a periodic flush/size check. Disabling logging redirects
+stdout/stderr to `/dev/null`; crash reports remain available independently.
+
+### Quit host app after stream
+
+`Quit host app after stream` is off by default. On sends the authenticated
+Sunshine cancel request when leaving the stream, stopping the host game/app.
+Off keeps the host app running for resume. ProsperoLight stays open in both
+cases. Initial setup failures do not trigger this optional cancel request.
+The setting persists in `config/prosperolight-host-quit.bin` (PLQ1 + boolean).
+The removed local app close setting is not reused.

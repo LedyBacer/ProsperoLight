@@ -52,8 +52,9 @@ struct ThreadLayout
 
 // Keep every stream thread off the decoder's CPUs. The receive thread gets the
 // lowest remaining CPU to itself; the decode thread, which mostly blocks in
-// Videodec2, takes the highest; the presenter and all other stream threads
-// share the rest. A single remaining CPU is shared by everything.
+// Videodec2, takes the highest. Keep background workers off the decode caller
+// and presenter when capacity permits, including their SMT siblings if a whole
+// spare core remains. Scarce layouts still share to keep audio/input running.
 inline ThreadLayout plan_thread_layout(uint64_t process_mask, uint64_t decoder_mask)
 {
     ThreadLayout layout{};
@@ -71,8 +72,16 @@ inline ThreadLayout plan_thread_layout(uint64_t process_mask, uint64_t decoder_m
     layout.decode = highest;
     layout.other = rest & ~lowest;
     const uint64_t below_highest = layout.other & ~highest;
-    layout.present =
-        below_highest ? UINT64_C(1) << (63 - __builtin_clzll(below_highest)) : highest;
+    layout.present = below_highest ? UINT64_C(1) << (63 - __builtin_clzll(below_highest)) : highest;
+    const uint64_t critical = layout.receive | layout.decode | layout.present;
+    const uint64_t spare = rest & ~critical;
+    if (spare)
+    {
+        const uint64_t siblings = ((critical & UINT64_C(0x5555555555555555)) << 1u) |
+                                  ((critical & UINT64_C(0xaaaaaaaaaaaaaaaa)) >> 1u);
+        const uint64_t isolated = spare & ~siblings;
+        layout.other = isolated ? isolated : spare;
+    }
     return layout;
 }
 
@@ -165,19 +174,37 @@ template <size_t N> struct SlotPool
 };
 
 // One-slot "newest wins" handoff from decoding to presentation.
-template <typename T> struct LatestMailbox
+template <typename T> struct ReadyMailbox
 {
     bool full{};
-    T item{};
+    T item{}, following{};
+    unsigned capacity = 1;
+    bool second{};
 
     bool publish(const T &next, T *displaced)
     {
-        const bool replaced = full;
-        if (replaced && displaced)
+        if (!full)
+        {
+            item = next;
+            full = true;
+            return false;
+        }
+        if (capacity > 1 && !second)
+        {
+            following = next;
+            second = true;
+            return false;
+        }
+        if (displaced)
             *displaced = item;
-        item = next;
-        full = true;
-        return replaced;
+        if (second)
+        {
+            item = following;
+            following = next;
+        }
+        else
+            item = next;
+        return true;
     }
 
     bool take(T *out)
@@ -186,7 +213,13 @@ template <typename T> struct LatestMailbox
             return false;
         if (out)
             *out = item;
-        full = false;
+        if (second)
+        {
+            item = following;
+            second = false;
+        }
+        else
+            full = false;
         return true;
     }
 };

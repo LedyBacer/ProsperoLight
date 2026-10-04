@@ -6,7 +6,12 @@
 
 #include "launcher/launcher_view.hpp"
 
+#include "host_quit_preferences.hpp"
+#include "lan_http_report.hpp"
+#include "presentation_preferences.hpp"
+#include "stream_profile.hpp"
 #include "ui/widgets.hpp"
+#include "ui_sound_preferences.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -69,10 +74,12 @@ enum FormId
     kVsync,
     kPipeline,
     kCores,
+    kChroma,
+    kPacing,
+    kLogging,
+    kUiSound,
+    kHostQuit,
 };
-
-constexpr float kBitrateStep = 10.0f;
-constexpr float kBitrateMax = 300.0f;
 
 ui::Theme theme_by_id(const char *id)
 {
@@ -86,11 +93,7 @@ ui::Theme theme_by_id(const char *id)
 
 void format_endpoint(char *output, std::size_t capacity, const moonlight_config_host_t &host)
 {
-    const unsigned port = moonlight_config_host_port(&host);
-    if (port != MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT)
-        std::snprintf(output, capacity, "%s:%u", host.address, port);
-    else
-        std::snprintf(output, capacity, "%s", host.address);
+    std::snprintf(output, capacity, "%s:%u", host.address, moonlight_config_host_port(&host));
 }
 
 const char *resolution_name(unsigned resolution)
@@ -102,6 +105,8 @@ const char *resolution_name(unsigned resolution)
 
 const char *codec_name(const moonlight_config_t &config)
 {
+    if (config.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
+        return config.hdr_enabled ? "PyroWave HDR" : "PyroWave SDR";
     return config.hdr_enabled                                 ? "HEVC Main10 HDR"
            : config.video_codec == MOONLIGHT_VIDEO_CODEC_HEVC ? "HEVC"
                                                               : "H.264";
@@ -353,7 +358,8 @@ void View::build()
     remove_.style.size = ui::ButtonSize::medium;
 
     empty_.title = "No PCs yet";
-    empty_.body = "Start Sunshine on a PC on this network and it appears here, or add it by its "
+    empty_.body = "Start Sunshine on a PC on this network and it appears here, "
+                  "or add it by its "
                   "address.";
     empty_.action = "Add a PC";
     empty_.style.max_text_width = 620.0f;
@@ -406,38 +412,47 @@ void View::build()
     loading_apps_.set_bounds({930.0f, 500.0f, 60.0f, 60.0f});
 
     // ---- Settings ----
-    const float bitrate_max =
-        std::max(kBitrateMax, static_cast<float>(model_.config().bitrate_mbps));
     form_.add_header("Video");
     form_
         .add_choice(kResolution, "Resolution",
                     {"1920 \xC3\x97 1080", "2560 \xC3\x97 1440", "3840 \xC3\x97 2160"}, 0)
         .description = "The picture Sunshine encodes. 1440p is scaled to the 4K output.";
-    form_.add_choice(kFrameRate, "Frame rate", {"60 FPS", "90 FPS", "120 FPS"}, 0).description =
-        "90 and 120 FPS use the 119.88 Hz output mode.";
-    form_.add_choice(kCodec, "Video codec", {"H.264", "HEVC"}, 0).description =
-        "HEVC needs less bitrate for the same picture.";
+    form_.add_action(kFrameRate, "Frame rate").description =
+        "Open to enter 30-120 FPS. Above 60 FPS uses high-refresh output.";
+    form_.add_choice(kCodec, "Video codec", {"H.264", "HEVC", "PyroWave"}, 0).description =
+        "PyroWave needs a compatible host, high bitrate and wired LAN.";
+    form_.add_choice(kChroma, "Chroma sampling", {"4:2:0", "4:4:4"}, 0).description =
+        "4:4:4 is available with PyroWave; native codecs use 4:2:0.";
     form_.add_toggle(kHdr, "HDR", false).description =
-        "HEVC Main10 with HDR10 output, when the PC advertises it.";
-    ui::FormRow &bitrate =
-        form_.add_slider(kBitrate, "Bitrate", 20.0f, kBitrateStep, bitrate_max, kBitrateStep);
-    bitrate.unit = " Mbps";
-    bitrate.description = "Higher is not always better: the decoder sets the limit.";
+        "HDR10 through HEVC Main10 or 10-bit PyroWave, when advertised by the "
+        "PC.";
+    form_.add_action(kBitrate, "Bitrate").description = "Open to enter 1-1000 Mbps.";
     form_.add_header("Sound");
     form_.add_choice(kAudio, "Audio", {"Stereo", "5.1 surround"}, 0).description =
         "48 kHz Opus, decoded on the console.";
+    form_.add_toggle(kUiSound, "Menu sounds", true).description =
+        "Menu navigation and confirmation sounds.";
+    form_.add_header("Host session");
+    form_.add_toggle(kHostQuit, "Quit host app after stream", false).description =
+        "Stop the game or app on the PC when leaving the stream.";
     form_.add_header("Display");
     form_.add_choice(kArea, "Picture size", {"TV safe", "Edge to edge"}, 0).description =
         "TV safe keeps a margin for televisions that crop the picture.";
     form_.add_toggle(kVsync, "V-Sync", true).description =
         "Off shows each frame at once: lower latency, visible tearing.";
+    form_.add_choice(kPacing, "Frame pacing", {"Unpaced", "Paced", "Paced+VRR"}, 1).description =
+        "Smooth frame timing; VRR uses fixed refresh if unavailable.";
     form_.add_header("Decoder");
     form_.add_choice(kPipeline, "Pipeline", {"Classic", "Adaptive (experimental)"}, 0).description =
-        "Classic decodes one frame at a time. Adaptive overlaps frames when decoding falls behind.";
+        "Classic decodes one frame at a time. Adaptive overlaps "
+        "frames when decoding falls behind.";
     form_
         .add_stepper(kCores, "CPU cores", MOONLIGHT_DECODER_CORES_DEFAULT,
                      MOONLIGHT_DECODER_CORES_MIN, MOONLIGHT_DECODER_CORES_MAX)
         .description = "Cores reserved for decoding; the stream uses the rest.";
+    form_.add_header("Diagnostics");
+    form_.add_toggle(kLogging, "Diagnostic logs", true).description =
+        "Bounded logs and output interval traces saved after the stream.";
     form_.style.row_height = 66.0f;
     form_.style.header_height = 54.0f;
     form_.style.label_size = 26.0f;
@@ -492,6 +507,14 @@ void View::build()
     pair_timer_.style.on_panel = true;
     pair_timer_.label = "left";
     pair_timer_.set_bounds({kPairPanel.cx() - 60.0f, kPairPanel.y + 368.0f, 120.0f, 120.0f});
+
+    number_prompt_.style.width = 560.0f;
+    number_prompt_.style.max_length = 4;
+    number_prompt_.style.auto_capital = false;
+    number_prompt_.style.allow_empty = false;
+    number_prompt_.style.key_height = 66.0f;
+    number_prompt_.style.buttons = false;
+    number_prompt_.keyboard.set_layouts({ui::KeyboardLayout::numeric()});
 
     port_prompt_.style.width = 560.0f;
     port_prompt_.style.max_length = 5;
@@ -578,6 +601,7 @@ void View::restyle()
     pin_.style.theme = t;
     pair_timer_.style.theme = t;
     port_prompt_.style.theme = t;
+    number_prompt_.style.theme = t;
     host_prompt_.style.theme = t;
     unpair_dialog_.style.theme = t;
     loader_.style.theme = t;
@@ -743,12 +767,19 @@ void View::sync_settings_from_config()
 {
     const moonlight_config_t &config = model_.config();
     form_.set_choice(kResolution, static_cast<int>(std::min(config.stream_resolution, 2u)));
-    form_.set_choice(kFrameRate, config.stream_fps >= MOONLIGHT_STREAM_FPS_120  ? 2
-                                 : config.stream_fps >= MOONLIGHT_STREAM_FPS_90 ? 1
-                                                                                : 0);
-    form_.set_choice(kCodec, config.video_codec == MOONLIGHT_VIDEO_CODEC_HEVC ? 1 : 0);
+    form_.set_value_text(kFrameRate, std::to_string(config.stream_fps) + " FPS");
+    form_.set_choice(kCodec, static_cast<int>(std::min(config.video_codec, 2u)));
+    form_.set_choice(kChroma, config.chroma_sampling == MOONLIGHT_CHROMA_444 ? 1 : 0);
+    form_.row(kChroma)->disabled = config.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE;
     form_.set_toggle(kHdr, config.hdr_enabled != 0);
-    form_.set_slider(kBitrate, static_cast<float>(config.bitrate_mbps));
+    form_.set_value_text(kBitrate, std::to_string(config.bitrate_mbps) + " Mbps");
+    form_.set_choice(kPacing, static_cast<int>(moonlight::presentation_mode()));
+    form_.set_toggle(kLogging, prosperolight_logs_enabled() != 0);
+    form_.set_toggle(kUiSound, prosperolight::ui_sound_enabled());
+    form_.set_toggle(kHostQuit, prosperolight::host_quit_enabled());
+    const bool native = config.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE;
+    form_.row(kPipeline)->disabled = !native;
+    form_.row(kCores)->disabled = !native;
     form_.set_choice(kAudio, config.audio_configuration == MOONLIGHT_AUDIO_51_SURROUND ? 1 : 0);
     form_.set_choice(kArea, config.display_area == MOONLIGHT_DISPLAY_AREA_FULL ? 1 : 0);
     form_.set_toggle(kVsync, config.vsync_enabled != 0);
@@ -765,34 +796,40 @@ void View::apply_setting(int id)
     case kResolution:
         config.stream_resolution = static_cast<std::uint32_t>(form_.choice_index(kResolution));
         break;
-    case kFrameRate:
-    {
-        static constexpr unsigned kRates[] = {MOONLIGHT_STREAM_FPS_60, MOONLIGHT_STREAM_FPS_90,
-                                              MOONLIGHT_STREAM_FPS_120};
-        config.stream_fps = kRates[std::clamp(form_.choice_index(kFrameRate), 0, 2)];
-        break;
-    }
     case kCodec:
-        config.video_codec = form_.choice_index(kCodec) == 1 ? MOONLIGHT_VIDEO_CODEC_HEVC
-                                                             : MOONLIGHT_VIDEO_CODEC_H264;
-        // HDR is HEVC Main10: H.264 cannot carry it.
-        if (config.video_codec == MOONLIGHT_VIDEO_CODEC_H264 && config.hdr_enabled)
-        {
+        config.video_codec = static_cast<std::uint32_t>(form_.choice_index(kCodec));
+        if (config.video_codec == MOONLIGHT_VIDEO_CODEC_H264)
             config.hdr_enabled = 0;
-            form_.set_toggle(kHdr, false);
-        }
+        break;
+    case kChroma:
+        config.chroma_sampling =
+            form_.choice_index(kChroma) == 1 ? MOONLIGHT_CHROMA_444 : MOONLIGHT_CHROMA_420;
         break;
     case kHdr:
         config.hdr_enabled = form_.toggle_value(kHdr) ? 1u : 0u;
-        if (config.hdr_enabled && config.video_codec != MOONLIGHT_VIDEO_CODEC_HEVC)
-        {
+        if (config.hdr_enabled && config.video_codec == MOONLIGHT_VIDEO_CODEC_H264)
             config.video_codec = MOONLIGHT_VIDEO_CODEC_HEVC;
-            form_.set_choice(kCodec, 1);
-        }
         break;
-    case kBitrate:
-        config.bitrate_mbps = static_cast<std::uint32_t>(std::lround(form_.slider_value(kBitrate)));
-        break;
+    case kPacing:
+        if (!moonlight::save_presentation_mode(static_cast<unsigned>(form_.choice_index(kPacing))))
+            toasts_.push(ui::StatusKind::danger, "Could not save frame pacing", "Try again.");
+        sync_settings_from_config();
+        return;
+    case kLogging:
+        if (!prosperolight_logs_set_enabled(form_.toggle_value(kLogging)))
+            toasts_.push(ui::StatusKind::danger, "Could not save logging", "Try again.");
+        sync_settings_from_config();
+        return;
+    case kHostQuit:
+        if (!prosperolight::host_quit_set_enabled(form_.toggle_value(kHostQuit)))
+            toasts_.push(ui::StatusKind::danger, "Could not save host app quit", "Try again.");
+        sync_settings_from_config();
+        return;
+    case kUiSound:
+        if (!prosperolight::ui_sound_set_enabled(form_.toggle_value(kUiSound)))
+            toasts_.push(ui::StatusKind::danger, "Could not save menu sounds", "Try again.");
+        sync_settings_from_config();
+        return;
     case kAudio:
         config.audio_configuration =
             form_.choice_index(kAudio) == 1 ? MOONLIGHT_AUDIO_51_SURROUND : MOONLIGHT_AUDIO_STEREO;
@@ -816,6 +853,7 @@ void View::apply_setting(int id)
         return;
     }
     model_.SettingsChanged();
+    sync_settings_from_config();
     sync_profile(false);
 }
 
@@ -825,47 +863,87 @@ void View::sync_profile(bool snap)
     const moonlight_backend_snapshot_t &backend = model_.backend();
     const BitrateLimit limit = limit_for(config.stream_fps);
     const float bitrate = static_cast<float>(config.bitrate_mbps);
-    const bool hevc = config.video_codec == MOONLIGHT_VIDEO_CODEC_HEVC || config.hdr_enabled;
-    // The limits were measured for 4K HEVC; nothing is claimed for the rest.
-    limits_apply_ = config.stream_resolution == MOONLIGHT_STREAM_RESOLUTION_2160P && hevc;
-    const float scale = limit.freezes * 1.3f;
+    const bool pyro = config.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE;
+    const bool hevc =
+        !pyro && (config.video_codec == MOONLIGHT_VIDEO_CODEC_HEVC || config.hdr_enabled);
+    const bool h264 = !pyro && !hevc;
+    const bool h264_4k = h264 && config.stream_resolution == MOONLIGHT_STREAM_RESOLUTION_2160P;
+    const bool h264_red = h264_4k && config.stream_fps == 120;
+    const bool h264_yellow = h264_4k && config.stream_fps == 90;
+    const bool h264_60 = h264_4k && config.stream_fps == 60;
+    const bool hevc_limits = config.stream_resolution == MOONLIGHT_STREAM_RESOLUTION_2160P && hevc;
+    limits_apply_ = pyro || hevc_limits || h264_red || h264_yellow || h264_60;
+    const float scale = hevc_limits ? limit.freezes * 1.3f : 1000.0f;
+    headroom_.label = limits_apply_ ? "Decoder load" : "Requested bitrate";
     headroom_.style.value_scale = scale;
-    headroom_.style.warning_at = limits_apply_ ? (limit.smooth + 2.0f) / scale : 2.0f;
-    headroom_.style.danger_at = limits_apply_ ? limit.freezes / scale : 2.0f;
+    headroom_.style.warning_at = pyro                      ? 0.500001f
+                                 : h264_red || h264_yellow ? 0.0f
+                                 : h264_60                 ? 0.080001f
+                                 : hevc_limits             ? (limit.smooth + 2.0f) / scale
+                                                           : 2.0f;
+    headroom_.style.danger_at = pyro          ? 0.7f
+                                : h264_red    ? 0.0f
+                                : h264_60     ? 0.080001f
+                                : hevc_limits ? limit.freezes / scale
+                                              : 2.0f;
     headroom_.style.zone_strip = limits_apply_;
     headroom_.set_value(std::min(bitrate / scale, 1.0f), snap);
 
     const bool fast = config.stream_fps > MOONLIGHT_STREAM_FPS_60;
     std::vector<ui::DetailItem> items;
     items.push_back({"TV output", fast ? "119.88 Hz" : "59.94 Hz"});
-    items.push_back({"Codec", config.hdr_enabled ? "HEVC Main10, HDR10"
-                              : hevc             ? "HEVC Main"
-                                                 : "H.264 High"});
+    items.push_back({"Codec", pyro                 ? codec_name(config)
+                              : config.hdr_enabled ? "HEVC Main10, HDR10"
+                              : hevc               ? "HEVC Main"
+                                                   : "H.264 High"});
     items.push_back({"Sound", config.audio_configuration == MOONLIGHT_AUDIO_51_SURROUND
                                   ? "5.1 surround, 48 kHz"
                                   : "Stereo, 48 kHz"});
     profile_details_.set_items(std::move(items));
 
     const bool online = model_.backend_valid() && backend.online;
-    const bool no_hdr = online && config.hdr_enabled && !backend.main10_supported;
+    const bool no_hdr = online && !pyro && config.hdr_enabled && !backend.main10_supported;
     const bool no_hevc = online && hevc && !backend.hevc_supported;
+    const auto selected_profile = moonlight::resolve_stream_profile(
+        config.video_codec, config.chroma_sampling, config.hdr_enabled != 0);
+    const bool no_pyro =
+        online && pyro && !(backend.pyrowave_profiles & selected_profile.capability);
     char text[200];
-    if (no_hdr || no_hevc)
+    if (no_hdr || no_hevc || no_pyro)
     {
-        warning_.title = no_hdr ? "This PC cannot encode HDR" : "This PC cannot encode HEVC";
+        warning_.title = no_pyro  ? "PyroWave profile unavailable"
+                         : no_hdr ? "This PC cannot encode HDR"
+                                  : "This PC cannot encode HEVC";
         std::snprintf(text, sizeof(text), "%s does not advertise it. The stream will not start.",
                       backend.name[0] ? backend.name : "The PC");
     }
     else
     {
-        warning_.title = "Above the decoder's limit";
-        std::snprintf(text, sizeof(text),
-                      "Smooth up to %.0f Mbps. Above %.0f Mbps the picture freezes about once a "
-                      "second.",
-                      static_cast<double>(limit.smooth), static_cast<double>(limit.freezes));
+        warning_.title = "Decoder load recommendation";
+        if (pyro)
+            std::snprintf(text, sizeof(text),
+                          "Smooth up to 500 Mbps. Above 500 Mbps stability may decrease; above "
+                          "700 Mbps packet loss is more likely. Use wired LAN.");
+        else if (h264_red)
+            std::snprintf(text, sizeof(text),
+                          "H.264 4K120 can drop frames at any bitrate. Lower the frame rate or "
+                          "use HEVC/PyroWave.");
+        else if (h264_yellow)
+            std::snprintf(text, sizeof(text), "H.264 4K90 may drop frames at any bitrate.");
+        else if (h264_60)
+            std::snprintf(text, sizeof(text),
+                          "Smooth up to 80 Mbps at 4K60. Above 80 Mbps the picture "
+                          "may stutter.");
+        else
+            std::snprintf(text, sizeof(text),
+                          "Smooth up to %.0f Mbps. Above %.0f Mbps the picture "
+                          "freezes about once a second.",
+                          static_cast<double>(limit.smooth), static_cast<double>(limit.freezes));
     }
     warning_.body = text;
-    const bool warn = no_hdr || no_hevc || (limits_apply_ && bitrate > limit.smooth);
+    const bool warn = no_pyro || no_hdr || no_hevc || (pyro && bitrate > 500.0f) || h264_red ||
+                      h264_yellow || (h264_60 && bitrate > 80.0f) ||
+                      (hevc_limits && bitrate > limit.smooth);
     warning_.set_shown(warn, snap);
 
     static const char *const kShort[] = {"1080p", "1440p", "4K"};
@@ -985,6 +1063,43 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
         if (load_progress_ >= kHandoverProgress)
             start_stream_ = true;
     }
+    else if (number_prompt_.is_open())
+    {
+        if (number_prompt_.handle(input, feedback) == ui::Event::activated)
+        {
+            const auto text = number_prompt_.text();
+            unsigned value = 0;
+            bool valid = !text.empty() && text.size() <= 4;
+            for (char ch : text)
+            {
+                if (ch < '0' || ch > '9')
+                    valid = false;
+                else
+                    value = value * 10 + static_cast<unsigned>(ch - '0');
+            }
+            const unsigned minimum = number_setting_ == kFrameRate ? MOONLIGHT_STREAM_FPS_MIN : 1u;
+            const unsigned maximum =
+                number_setting_ == kFrameRate ? MOONLIGHT_STREAM_FPS_MAX : 1000u;
+            if (valid && value >= minimum && value <= maximum)
+            {
+                auto &config = model_.settings();
+                if (number_setting_ == kFrameRate)
+                    config.stream_fps = value;
+                else
+                    config.bitrate_mbps = value;
+                model_.SettingsChanged();
+                sync_settings_from_config();
+                sync_profile(false);
+                feedback.play(audio::Cue::saved);
+            }
+            else
+            {
+                number_prompt_.open(feedback, text);
+                number_prompt_.field.set_error("Enter " + std::to_string(minimum) + "-" +
+                                               std::to_string(maximum));
+            }
+        }
+    }
     else if (host_prompt_.is_open())
     {
         if (host_prompt_.handle(input, feedback) == ui::Event::activated)
@@ -1095,6 +1210,7 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     pin_.update(dt);
     pair_timer_.update(dt);
     port_prompt_.update(dt);
+    number_prompt_.update(dt);
     host_prompt_.update(dt);
     unpair_dialog_.update(dt);
     toasts_.update(dt, feedback);
@@ -1325,8 +1441,21 @@ void View::launch(ui::Feedback &feedback)
 
 void View::update_settings(const InputFrame &input, ui::Feedback &feedback)
 {
-    if (form_.handle(input, feedback) == ui::Event::changed)
+    const auto event = form_.handle(input, feedback);
+    if (event == ui::Event::changed)
         apply_setting(form_.changed_id());
+    else if (event == ui::Event::activated)
+    {
+        number_setting_ = form_.changed_id();
+        if (number_setting_ != kFrameRate && number_setting_ != kBitrate)
+            return;
+        const bool fps = number_setting_ == kFrameRate;
+        number_prompt_.style.max_length = fps ? 3 : 4;
+        number_prompt_.set_title(fps ? "Stream frame rate" : "Video bitrate");
+        number_prompt_.field.set_helper(fps ? "30-120 FPS" : "1-1000 Mbps");
+        number_prompt_.open(feedback, std::to_string(fps ? model_.config().stream_fps
+                                                         : model_.config().bitrate_mbps));
+    }
 }
 
 // ---- drawing -------------------------------------------------------------
@@ -1386,6 +1515,7 @@ void View::draw(Frame &frame) const
     toasts_.draw(above);
     draw_pairing(above);
     port_prompt_.draw(above);
+    number_prompt_.draw(above);
     host_prompt_.draw(above);
     unpair_dialog_.draw(above);
     loader_.draw(above);
@@ -1574,11 +1704,13 @@ void View::draw_hosts(ui::Canvas &canvas, ui::Painter &paint) const
     {
         paint.heading("Add a PC", inside.x, inside.y + 44.0f, 40.0f);
         ui::paragraph(canvas.list, canvas.fonts.regular,
-                      "PCs running Sunshine on this network appear by themselves. Add one by hand "
+                      "PCs running Sunshine on this network appear by themselves. Add one by "
+                      "hand "
                       "when it is on another network, or when discovery is blocked.",
                       inside.x, inside.y + 100.0f, 25.0f, inside.w, 38.0f, t.text_muted);
         ui::paragraph(canvas.list, canvas.fonts.regular,
-                      "Type its address, for example 192.168.1.50. Add a port after a colon if "
+                      "Type its address, for example 192.168.1.50. Add a port "
+                      "after a colon if "
                       "Sunshine does not use 47989: 192.168.1.50:48989.",
                       inside.x, inside.y + 250.0f, 25.0f, inside.w, 38.0f, t.text_muted);
         return;
@@ -1677,7 +1809,8 @@ void View::draw_games(ui::Canvas &canvas, ui::Painter &paint) const
         else if (!backend.online)
         {
             state.title = model_.reconnecting() ? "Reconnecting" : "The PC is not answering";
-            state.body = "ProsperoLight keeps trying. Check that Sunshine is running on the PC.";
+            state.body = "ProsperoLight keeps trying. Check that Sunshine is running "
+                         "on the PC.";
             state.action = "Try again";
         }
         else if (!backend.paired)
@@ -1689,7 +1822,8 @@ void View::draw_games(ui::Canvas &canvas, ui::Painter &paint) const
         else
         {
             state.title = "No apps on this PC";
-            state.body = "Sunshine returned an empty list. Add apps in Sunshine, then try again.";
+            state.body = "Sunshine returned an empty list. Add apps in Sunshine, "
+                         "then try again.";
             state.action = "Try again";
         }
         state.draw(canvas);
@@ -1747,11 +1881,15 @@ void View::draw_settings(ui::Canvas &canvas, ui::Painter &paint) const
     else
     {
         char text[120];
-        if (limits_apply_)
+        if (model_.config().video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
+            std::snprintf(text, sizeof(text), "Smooth up to 500 Mbps. Wired LAN recommended.");
+        else if (model_.config().video_codec == MOONLIGHT_VIDEO_CODEC_H264 && limits_apply_)
+            std::snprintf(text, sizeof(text), "Smooth up to 80 Mbps at this frame rate.");
+        else if (limits_apply_)
             std::snprintf(text, sizeof(text), "Smooth up to %.0f Mbps at this frame rate.",
                           static_cast<double>(limit_for(model_.config().stream_fps).smooth));
         else
-            std::snprintf(text, sizeof(text), "The limits are measured for 4K HEVC.");
+            std::snprintf(text, sizeof(text), "No measured decoder limit for this profile.");
         paint.body(text, inside.x, inside.y + 214.0f, 22.0f, t.text_muted);
         profile_details_.draw(canvas);
     }
@@ -1759,28 +1897,31 @@ void View::draw_settings(ui::Canvas &canvas, ui::Painter &paint) const
     // What the controller does during a stream, in the buttons' own shapes.
     shortcut_panel_.draw(canvas, kShortcutPanel);
     const Rect keys = shortcut_panel_.content_rect(kShortcutPanel).inset(12.0f);
-    paint.label(ui::upper("During a stream"), keys.x, keys.y + 20.0f, 19.0f, t.text_muted);
+    paint.label(ui::upper("Hold touchpad click"), keys.x, keys.y + 20.0f, 19.0f, t.text_muted);
     struct Shortcut
     {
         ui::Button second;
         const char *what;
     };
     static constexpr Shortcut kShortcuts[] = {
-        {ui::Button::l1, "Back to ProsperoLight"},
+        {ui::Button::l1, "Return"},
         {ui::Button::r1, "Statistics"},
         {ui::Button::square, "Mouse mode"},
         {ui::Button::triangle, "Keyboard"},
+        {ui::Button::left_stick, "Select/Back"},
+        {ui::Button::right_stick, "PS/Guide"},
     };
     const ui::GlyphStyle glyph = t.dark ? ui::GlyphStyle::dark() : ui::GlyphStyle::light();
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 6; ++i)
     {
-        const float cy = keys.y + 60.0f + static_cast<float>(i) * 40.0f;
-        float x = keys.x;
+        const float cy = keys.y + 60.0f + static_cast<float>(i % 3) * 44.0f;
+        const float column = keys.x + static_cast<float>(i / 3) * keys.w * 0.5f;
+        float x = column;
         ui::draw_button(list, canvas.fonts, glyph, ui::Button::touchpad, x, cy, 32.0f);
         x += ui::button_width(ui::Button::touchpad, 32.0f) + 10.0f;
         x += paint.body("+", x, cy + 8.0f, 24.0f, t.text_muted) + 10.0f;
         ui::draw_button(list, canvas.fonts, glyph, kShortcuts[i].second, x, cy, 32.0f);
-        paint.body(kShortcuts[i].what, keys.x + 176.0f, cy + 8.0f, 24.0f, t.text);
+        paint.body(kShortcuts[i].what, column + 138.0f, cy + 8.0f, 21.0f, t.text);
     }
 }
 
@@ -1802,21 +1943,25 @@ void View::draw_about(ui::Canvas &canvas, ui::Painter &paint) const
     paint.label(ui::upper("Project credits"), left.x, left.y + 20.0f, 19.0f, t.text_muted);
     paint.heading("Powered by Moonlight", left.x, left.y + 72.0f, 38.0f);
     ui::paragraph(list, regular,
-                  "ProsperoLight speaks the Moonlight protocol through moonlight-common-c. All "
+                  "ProsperoLight speaks the Moonlight protocol through moonlight-common-c. "
+                  "All "
                   "credit for it goes to the Moonlight developers and contributors.",
                   left.x, left.y + 118.0f, 24.0f, left.w, 34.0f, t.text, 3);
     paint.label("moonlight-stream.org", left.x, left.y + 226.0f, 24.0f, t.primary);
     list.rounded_rect({left.x, left.y + 252.0f, left.w, 1.0f}, 0.0f, rule);
     paint.label(ui::upper("Thanks"), left.x, left.y + 288.0f, 19.0f, t.text_muted);
     ui::paragraph(list, regular,
-                  "Thanks to the Sunshine developers for the host on the PC, to the whole PS5 "
-                  "homebrew community, and to every developer whose tools and libraries make "
+                  "Thanks to the Sunshine developers for the host on the PC, to "
+                  "the whole PS5 "
+                  "homebrew community, and to every developer whose tools and "
+                  "libraries make "
                   "ProsperoLight possible.",
                   left.x, left.y + 326.0f, 24.0f, left.w, 34.0f, t.text, 3);
     list.rounded_rect({left.x, left.y + 426.0f, left.w, 1.0f}, 0.0f, rule);
     paint.label(ui::upper("PS5 edition"), left.x, left.y + 462.0f, 19.0f, t.text_muted);
     ui::paragraph(list, regular,
-                  "ProsperoLight is an unofficial PS5 client brought to you by BlackBearReloaded.",
+                  "ProsperoLight is an unofficial PS5 client brought to you by "
+                  "BlackBearReloaded.",
                   left.x, left.y + 500.0f, 24.0f, left.w, 34.0f, t.text, 2);
     paint.body("Menu sound effects made with ElevenLabs.", left.x, bottom, 20.0f, t.text_muted);
     if (!version_.empty())
@@ -1911,7 +2056,8 @@ void View::draw_connect_bar(ui::Canvas &canvas) const
     list.pop_opacity();
 }
 
-// The connecting screen's tip, with the buttons drawn as the controller shows them.
+// The connecting screen's tip, with the buttons drawn as the controller shows
+// them.
 void View::draw_loader_tip(ui::Canvas &canvas) const
 {
     const float shown = loader_.opacity();
