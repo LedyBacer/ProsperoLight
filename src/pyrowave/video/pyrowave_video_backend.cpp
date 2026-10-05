@@ -145,6 +145,7 @@ VideoFrameTiming PyroWaveVideoBackend::present(void (*before_present)(void *), v
     unsigned index = 0;
     VK_OK(vkAcquireNextImageKHR(c_.device, swapchain_, UINT64_MAX, acquired_, VK_NULL_HANDLE,
                                 &index));
+    const double acquired_at = clock_ms();
     c_.begin();
     output_->prepare();
     vkCmdResetQueryPool(c_.cmd, c_.queries, 0, 4);
@@ -166,7 +167,9 @@ VideoFrameTiming PyroWaveVideoBackend::present(void (*before_present)(void *), v
     submit.pCommandBuffers = &c_.cmd;
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &rendered_[index];
+    const double recorded_at = clock_ms();
     VK_OK(vkQueueSubmit(c_.queue, 1, &submit, c_.fence));
+    const double submitted_at = clock_ms();
     VkPresentInfoKHR pi = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     pi.waitSemaphoreCount = 1;
     pi.pWaitSemaphores = &rendered_[index];
@@ -175,13 +178,17 @@ VideoFrameTiming PyroWaveVideoBackend::present(void (*before_present)(void *), v
     pi.pImageIndices = &index;
     // Decode/render are submitted immediately. Pace only the prepared image;
     // this fence is GPU completion, not physical display completion.
+    double prepared_at = submitted_at, paced_at = submitted_at;
     if (before_present)
     {
         if (wait_for_prepared)
             VK_OK(vkWaitForFences(c_.device, 1, &c_.fence, VK_TRUE, 30000000000ull));
+        prepared_at = clock_ms();
         before_present(context);
+        paced_at = clock_ms();
     }
     VK_OK(vkQueuePresentKHR(c_.queue, &pi));
+    const double presented_at = clock_ms();
     ++requested_;
     VK_OK(vkWaitForFences(c_.device, 1, &c_.fence, VK_TRUE, 30000000000ull));
     uint64_t t[4] = {};
@@ -189,8 +196,17 @@ VideoFrameTiming PyroWaveVideoBackend::present(void (*before_present)(void *), v
                                 VK_QUERY_RESULT_64_BIT));
     uint64_t mask = c_.timestamp_bits == 64 ? ~uint64_t(0) : (uint64_t(1) << c_.timestamp_bits) - 1;
     double scale = c_.props.limits.timestampPeriod / 1e6;
-    return {double((t[1] - t[0]) & mask) * scale, double((t[3] - t[2]) & mask) * scale,
-            double((t[3] - t[0]) & mask) * scale, clock_ms() - start};
+    return {double((t[1] - t[0]) & mask) * scale,
+            double((t[3] - t[2]) & mask) * scale,
+            double((t[3] - t[0]) & mask) * scale,
+            clock_ms() - start,
+            acquired_at - start,
+            recorded_at - acquired_at,
+            submitted_at - recorded_at,
+            prepared_at - submitted_at,
+            paced_at - prepared_at,
+            presented_at - paced_at,
+            clock_ms() - presented_at};
 }
 void PyroWaveVideoBackend::shutdown()
 {
