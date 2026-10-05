@@ -266,6 +266,7 @@ int main(int argc, char **argv)
     struct PretendUpdate
     {
         bool installable = false;
+        bool notes = false;
         bool fails = false;
         bool begun = false;
         bool cancelled = false;
@@ -296,6 +297,17 @@ int main(int argc, char **argv)
                     std::snprintf(offer->version, sizeof(offer->version), "01.000.090");
                     offer->installable = pretend.installable;
                     offer->size = 84000000;
+                    if (pretend.notes)
+                        offer->notes = "Streaming\n- PyroWave, a GPU codec for hosts that offer it.\n"
+                                       "- Frame pacing: Unpaced, Paced and Paced+VRR.\n"
+                                       "- More of the DualSense reaches the game: adaptive triggers, "
+                                       "light bar, motion and touchpad contacts.\nUpdates\n"
+                                       "- ProsperoLight installs new releases by itself.\n"
+                                       "Note: this release must be installed by hand; later ones "
+                                       "arrive through this dialog.\n"
+                                       "The decoder still limits the usable bitrate at 4K, as the "
+                                       "Settings screen shows.";
+                    offer->notes_truncated = pretend.notes;
                     return true;
                 });
         model.Initialize(now_ms);
@@ -741,6 +753,24 @@ int main(int argc, char **argv)
             "");
     expect(pretend.begins == 1 && !pretend.applied && update_exits == 1,
            "a failed update changes nothing and closes on request");
+    // A release with notes: What's new shows them, Back returns to the question, Cross updates.
+    pretend = PretendUpdate{};
+    pretend.installable = pretend.notes = true;
+    session("self-update",
+            {{150, 0, Direction::none, "offer-with-notes"},
+             {10, 0, Direction::left},
+             {10, confirm},
+             {60, 0, Direction::none, "notes"},
+             {10, 0, Direction::down},
+             {40, 0, Direction::none, "notes-scrolled"},
+             {10, back},
+             {50, 0, Direction::none, "offer-after-notes"},
+             {10, confirm},
+             {60, 0, Direction::none, "notes-again"},
+             {10, confirm},
+             {40, 0}},
+            "");
+    expect(pretend.begins == 1, "What's new can be read, left and come back to, and Cross updates from it");
     pretend = PretendUpdate{};
     offer_update = false;
 

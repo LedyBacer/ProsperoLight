@@ -83,6 +83,11 @@ struct UpdateOffer
     bool installable = false; // the app can download and install it by itself
     char version[40] = {};    // the release's name, for display
     std::uint64_t size = 0;   // the ZIP's size in bytes; 0 when the catalog doesn't say
+    // What the developer wrote on the release, as the catalog gives it: plain
+    // text, lines split by '\n', list items starting "- ". Empty when there is
+    // none; truncated when the catalog cut it (the rest is on the app's page).
+    std::string notes;
+    bool notes_truncated = false;
 };
 
 enum class UpdatePhase : std::uint8_t

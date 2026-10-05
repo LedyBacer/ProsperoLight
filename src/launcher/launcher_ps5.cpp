@@ -268,7 +268,7 @@ bool g_update_begun = false;
 // Development only: update-offer.txt in the app's folder replaces the
 // catalog's answer, and with it the catalog's signature. Five lines: the new
 // content version, the release's name, its ZIP on GitHub, its SHA-256, its
-// size in bytes.
+// size in bytes; any further lines are the release notes.
 bool DevelopmentOffer(self_update_offer *out)
 {
     const std::string path = std::string(storage::paths().app) + "/update-offer.txt";
@@ -286,8 +286,16 @@ bool DevelopmentOffer(self_update_offer *out)
         }
         line[std::strcspn(line, "\r\n")] = '\0';
     }
+    std::string notes;
+    char more[600];
+    while (complete && std::fgets(more, sizeof(more), file))
+    {
+        more[std::strcspn(more, "\r\n")] = '\0';
+        notes += (notes.empty() ? "" : "\n") + std::string(more);
+    }
     std::fclose(file);
     self_update_offer filled{};
+    std::snprintf(filled.notes, sizeof(filled.notes), "%s", notes.c_str());
     const std::string param = std::string(storage::paths().app) + "/sce_sys/param.json";
     if (!complete || !update_check_read_param(param.c_str(), filled.title, filled.installed))
         return false;
@@ -337,6 +345,8 @@ bool CheckForUpdate(UpdateOffer *offer)
     std::snprintf(offer->version, sizeof(offer->version), "%s",
                   found.version[0] ? found.version : found.available);
     offer->size = found.size;
+    offer->notes = found.notes;
+    offer->notes_truncated = found.notes_truncated != 0;
     return true;
 }
 

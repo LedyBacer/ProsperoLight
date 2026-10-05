@@ -40,6 +40,7 @@ constexpr Rect kStartPanel{kMargin + 876.0f, kContentTop, 852.0f, 708.0f};
 constexpr int kScreens = 4;
 constexpr Rect kPairPanel{960.0f - 440.0f, 250.0f, 880.0f, 560.0f};
 constexpr Rect kUpdatePanel{960.0f - 440.0f, 230.0f, 880.0f, 600.0f};
+constexpr Rect kNotesPanel{960.0f - 560.0f, 120.0f, 1120.0f, 840.0f};
 constexpr int kColumns = 7;
 // How long the connecting screen stays before the stream takes the display,
 // and how far its bar gets meanwhile. The stream carries the bar on from there.
@@ -542,6 +543,14 @@ void View::build()
     unpair_dialog_.style.width = 720.0f;
     update_dialog_.style.width = 800.0f;
     update_ring_.style.thickness = 14.0f;
+    update_notes_.style.panel = false;
+    update_notes_.style.focus_ring = false;
+    update_notes_.style.footer = false;
+    update_notes_.style.padding = 8.0f;
+    update_notes_.style.subheading_size = 27.0f;
+    update_notes_.set_bounds({kNotesPanel.x + 56.0f, kNotesPanel.y + 150.0f, kNotesPanel.w - 112.0f,
+                              kNotesPanel.h - 270.0f});
+    update_notes_.set_active(true);
     update_ring_.set_bounds({kUpdatePanel.cx() - 95.0f, kUpdatePanel.y + 196.0f, 190.0f, 190.0f});
 
     loader_.style.layout = ui::LoadingLayout::corner;
@@ -610,6 +619,7 @@ void View::restyle()
     unpair_dialog_.style.theme = t;
     update_dialog_.style.theme = t;
     update_ring_.style.theme = t;
+    update_notes_.style.theme = t;
     loader_.style.theme = t;
     toasts_.style.theme = t;
     apply_ambient(true);
@@ -1086,20 +1096,37 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
         model_.TakeUpdateOffer(&offered))
     {
         update_offer_ = offered;
-        ui::DialogContent content;
-        content.icon = ui::StatusKind::info;
-        content.title = "Update available";
-        char size[48] = "";
-        if (offered.size != 0)
-            std::snprintf(size, sizeof(size), " (%.0f MB)",
-                          static_cast<double>(offered.size) / 1e6);
-        content.body = std::string("ProsperoLight ") + offered.version + " is out" + size +
-                       ".\nUpdate now downloads and checks it. ProsperoLight then closes "
-                       "while the new version is put in place.";
-        content.buttons = {{"Skip"}, {"Update now", ui::ButtonKind::primary}};
-        content.default_button = 1;
-        update_dialog_.open(std::move(content), feedback);
-        update_ui_ = UpdateUi::offer;
+        // The notes as an article: list items, callouts, headings and text.
+        std::vector<ui::TextBlock> blocks;
+        std::size_t at = 0;
+        const std::string &notes = update_offer_.notes;
+        while (at < notes.size())
+        {
+            std::size_t end = notes.find('\n', at);
+            if (end == std::string::npos)
+                end = notes.size();
+            const std::string line = notes.substr(at, end - at);
+            at = end + 1;
+            if (line.find_first_not_of(" \t\r") == std::string::npos)
+                continue;
+            const auto starts = [&line](const char *prefix) { return line.rfind(prefix, 0) == 0; };
+            const char last = line.back();
+            if (starts("- "))
+                blocks.push_back(ui::TextBlock::bullet(line.substr(2)));
+            else if (starts("Warning:") || starts("Caution:") || starts("Important:") ||
+                     starts("Note:") || starts("Tip:"))
+                blocks.push_back(ui::TextBlock::quote(line));
+            else if (line.size() <= 60 && last != '.' && last != ':' && last != '!' &&
+                     last != '?' && last != ',' && last != ';')
+                blocks.push_back(ui::TextBlock::heading(line, 2));
+            else
+                blocks.push_back(ui::TextBlock::paragraph(line));
+        }
+        if (!blocks.empty() && update_offer_.notes_truncated)
+            blocks.push_back(
+                ui::TextBlock::paragraph("The rest is on the app's page on homebrew.page."));
+        update_notes_.set_content(std::move(blocks));
+        open_update_offer(feedback, false);
     }
 
     if (update_ui_ != UpdateUi::hidden)
@@ -1230,6 +1257,9 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     update_fade_.target =
         update_ui_ == UpdateUi::working || update_ui_ == UpdateUi::closing ? 1.0f : 0.0f;
     update_fade_.update(dt, 14.0f);
+    update_notes_.update(dt);
+    update_notes_fade_.target = update_ui_ == UpdateUi::notes ? 1.0f : 0.0f;
+    update_notes_fade_.update(dt, 14.0f);
     toasts_.update(dt, feedback);
     pair_fade_.target = pairing ? 1.0f : 0.0f;
     pair_fade_.update(dt, 14.0f);
@@ -1522,6 +1552,7 @@ void View::draw(Frame &frame) const
     host_prompt_.draw(above);
     unpair_dialog_.draw(above);
     draw_update(above);
+    draw_update_notes(above);
     update_dialog_.draw(above);
     loader_.draw(above);
     draw_loader_tip(above);
@@ -2039,6 +2070,78 @@ bool View::take_update_exit()
     return exit;
 }
 
+// The question. With release notes it has a third answer, What's new.
+void View::open_update_offer(ui::Feedback &feedback, bool on_notes)
+{
+    const bool with_notes = !update_notes_.content().empty();
+    ui::DialogContent content;
+    content.icon = ui::StatusKind::info;
+    content.title = "Update available";
+    char size[48] = "";
+    if (update_offer_.size != 0)
+        std::snprintf(size, sizeof(size), " (%.0f MB)",
+                      static_cast<double>(update_offer_.size) / 1e6);
+    content.body = std::string("ProsperoLight ") + update_offer_.version + " is out" + size +
+                   ".\nUpdate now downloads and checks it. ProsperoLight then closes "
+                   "while the new version is put in place.";
+    content.buttons.push_back({"Skip"});
+    if (with_notes)
+        content.buttons.push_back({"What's new"});
+    content.buttons.push_back({"Update now", ui::ButtonKind::primary});
+    content.default_button =
+        with_notes && on_notes ? 1 : static_cast<int>(content.buttons.size()) - 1;
+    update_dialog_.open(std::move(content), feedback);
+    update_ui_ = UpdateUi::offer;
+}
+
+void View::begin_update(ui::Feedback &feedback)
+{
+    update_progress_ = UpdateProgress{};
+    update_ring_.set_value(0.0f, true);
+    if (update_actions_.begin && update_actions_.begin())
+        update_ui_ = UpdateUi::working;
+    else
+        open_update_failure("The update could not start.", feedback);
+}
+
+// What's new: the release notes, to read before deciding.
+void View::draw_update_notes(ui::Canvas &canvas) const
+{
+    const float shown = update_notes_fade_.value;
+    if (shown <= 0.01f)
+        return;
+    const ui::Theme &t = theme_;
+    gfx::DrawList &list = canvas.list;
+    list.rounded_rect({0, 0, gfx::kVirtualWidth, gfx::kVirtualHeight}, 0,
+                      Color::rgb(0x000000, 0.55f * shown));
+    list.push_opacity(shown);
+    const Rect panel = kNotesPanel;
+    ui::draw_overlay_panel(canvas, t, panel, false, 0.6f);
+    ui::Painter paint(list, canvas.fonts, t, canvas.glass);
+    paint.label(ui::upper(std::string("ProsperoLight ") + update_offer_.version), panel.x + 64.0f,
+                panel.y + 62.0f, 20.0f, t.text_muted);
+    paint.heading("What's new", panel.x + 64.0f, panel.y + 116.0f, 40.0f);
+    update_notes_.draw(canvas);
+    // What the buttons do here, as the buttons themselves.
+    const ui::GlyphStyle glyph = t.dark ? ui::GlyphStyle::dark() : ui::GlyphStyle::light();
+    struct Hint
+    {
+        ui::Button button;
+        const char *what;
+    };
+    static constexpr Hint kHints[] = {{ui::Button::cross, "Update now"},
+                                      {ui::Button::circle, "Back"}};
+    float x = panel.x + 64.0f;
+    const float cy = panel.y + panel.h - 74.0f;
+    for (const Hint &hint : kHints)
+    {
+        ui::draw_button(list, canvas.fonts, glyph, hint.button, x, cy, 32.0f);
+        x += ui::button_width(hint.button, 32.0f) + 12.0f;
+        x += paint.body(hint.what, x, cy + 8.0f, 24.0f, t.text) + 44.0f;
+    }
+    list.pop_opacity();
+}
+
 void View::open_update_failure(const char *reason, ui::Feedback &feedback)
 {
     ui::DialogContent content;
@@ -2060,22 +2163,27 @@ void View::update_modal(const InputFrame &input, float dt, ui::Feedback &feedbac
     case UpdateUi::offer:
     case UpdateUi::failed:
     {
+        // Skip, [What's new,] Update now; or Close, Try again.
+        const bool offer = update_ui_ == UpdateUi::offer;
+        const bool with_notes = offer && !update_notes_.content().empty();
         const ui::Event event = update_dialog_.handle(input, feedback);
-        if (event == ui::Event::activated && update_dialog_.choice() == 1)
-        {
-            update_progress_ = UpdateProgress{};
-            update_ring_.set_value(0.0f, true);
-            if (update_actions_.begin && update_actions_.begin())
-                update_ui_ = UpdateUi::working;
-            else
-                open_update_failure("The update could not start.", feedback);
-        }
+        const int choice = update_dialog_.choice();
+        if (event == ui::Event::activated && choice == (with_notes ? 2 : 1))
+            begin_update(feedback);
+        else if (event == ui::Event::activated && with_notes && choice == 1)
+            update_ui_ = UpdateUi::notes;
         else if (!update_dialog_.is_open())
-        {
             update_ui_ = UpdateUi::hidden;
-        }
         break;
     }
+    case UpdateUi::notes:
+        if ((input.pressed & hui::action_bit(hui::Action::confirm)) != 0)
+            begin_update(feedback);
+        else if ((input.pressed & hui::action_bit(hui::Action::back)) != 0)
+            open_update_offer(feedback, true);
+        else
+            (void)update_notes_.handle(input, feedback);
+        break;
     case UpdateUi::working:
     {
         if (update_actions_.poll)

@@ -5,7 +5,11 @@ at f98de73 (GPL-3.0-or-later): `examples/update-check` (`update_check.*`, `conso
 `examples/self-update` (`self_update*.{h,c}`). The guides are the boilerplate's
 `docs/UPDATE_CHECK.md` and `docs/SELF_UPDATE.md`.
 
-Two files differ from the boilerplate's:
+`self_update.c` and `self_update.h` are ProsperoEden's copies: `self_update_check` also puts the
+catalog entry's `release_notes` and `release_notes_truncated` into the offer (`notes`,
+`notes_truncated`), for the update dialog's What's new view.
+
+Two more files differ from the boilerplate's:
 
 - `console_curl.c` leaves out the functions ProsperoLight already defines (listed at the top
   of the file).
@@ -26,5 +30,5 @@ and `main` closes the app once the update is staged.
 
 For trying it before a release is listed: a build made with `UPDATE_DEV_OFFER=1` takes the
 offer from `update-offer.txt` in the app's folder (five lines: new content version, release
-name, ZIP on GitHub, SHA-256, size) instead of the catalog. It skips the catalog's signature:
+name, ZIP on GitHub, SHA-256, size; further lines are the release notes) instead of the catalog. It skips the catalog's signature:
 never ship such a build. `UPDATE_AUTO_ACCEPT=<seconds>` makes it accept the offer by itself.

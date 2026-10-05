@@ -188,6 +188,9 @@ class View
     void draw_update(hui::ui::Canvas &canvas) const;
     void update_modal(const hui::InputFrame &input, float dt, hui::ui::Feedback &feedback);
     void open_update_failure(const char *reason, hui::ui::Feedback &feedback);
+    void open_update_offer(hui::ui::Feedback &feedback, bool on_notes);
+    void begin_update(hui::ui::Feedback &feedback);
+    void draw_update_notes(hui::ui::Canvas &canvas) const;
     void draw_loader_tip(hui::ui::Canvas &canvas) const;
     void draw_connect_bar(hui::ui::Canvas &canvas) const;
     hui::ui::GlyphStyle glyphs(const hui::ui::Painter &paint) const;
@@ -257,6 +260,7 @@ class View
     {
         hidden,
         offer,
+        notes, // What's new: the release notes
         working,
         closing,
         failed,
@@ -267,6 +271,8 @@ class View
     UpdateProgress update_progress_;
     hui::ui::Dialog update_dialog_;
     hui::ui::ProgressRing update_ring_;
+    hui::ui::TextView update_notes_;
+    hui::tween::Spring update_notes_fade_;
     hui::tween::Spring update_fade_;
     float update_closing_age_ = 0.0f;
     bool update_exit_ = false;

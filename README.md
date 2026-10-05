@@ -343,6 +343,9 @@ version and download size:
   Then ProsperoLight closes, the update helper (`self-updater.elf`, sent to the console's
   payload loader on port 9021) replaces the app's files, and the console shows a
   notification. Open ProsperoLight again to use the new version.
+- **What's new** (when the release has notes) shows what changes in it before you decide:
+  the release notes as homebrew.page lists them. Up and down scroll, ![Cross][cross]
+  updates and ![Circle][circle] goes back to the offer.
 - **Skip** keeps the version you have. The dialog shows again the next time ProsperoLight
   opens, not when you come back from a stream.
 
