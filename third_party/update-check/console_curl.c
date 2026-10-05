@@ -96,8 +96,26 @@ static int console_curl_on_socket(void *user, curl_socket_t socket, curlsocktype
     return CURL_SOCKOPT_OK;
 }
 
+#if defined(PROSPEROLIGHT_UPDATE_DEV_OFFER) && PROSPEROLIGHT_UPDATE_DEV_OFFER
+/* ProsperoLight, development builds only: libcurl's own account of a transfer
+ * (names resolved, connections tried, why one failed) goes to the log. */
+static int console_curl_trace(CURL *easy, curl_infotype type, char *data, size_t size, void *user)
+{
+    (void)easy;
+    (void)user;
+    if (type == CURLINFO_TEXT && size != 0)
+        printf("[curl] %.*s%s", (int)(size > 300 ? 300 : size), data,
+               data[size - 1] == '\n' ? "" : "\n");
+    return 0;
+}
+#endif
+
 void console_curl_setup(CURL *easy)
 {
+#if defined(PROSPEROLIGHT_UPDATE_DEV_OFFER) && PROSPEROLIGHT_UPDATE_DEV_OFFER
+    (void)curl_easy_setopt(easy, CURLOPT_DEBUGFUNCTION, console_curl_trace);
+    (void)curl_easy_setopt(easy, CURLOPT_VERBOSE, 1L);
+#endif
     (void)curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
     (void)curl_easy_setopt(easy, CURLOPT_CAINFO, console_curl_ca_file());
     (void)curl_easy_setopt(easy, CURLOPT_SOCKOPTFUNCTION, console_curl_on_socket);
