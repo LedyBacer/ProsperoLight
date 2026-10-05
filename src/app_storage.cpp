@@ -281,14 +281,14 @@ void storage::Initialize()
     const bool cache_ready =
         is_directory(shaders) && setenv("PS5_SHADER_CACHE_DIR", shaders, 1) == 0;
     char line[400];
-    std::snprintf(line, sizeof(line),
-                  "[PL] storage: title=%s status=%d app=%s data=%s uid=%d/%d gid=%d/%d "
-                  "group_matched=%d shader_cache=%d\n",
-                  kTitleId, paths.status, paths.app,
-                  granted ? (data_ready ? kDataDir : kSandboxData) : "/download0",
-                  static_cast<int>(getuid()), static_cast<int>(geteuid()),
-                  static_cast<int>(getgid()), static_cast<int>(getegid()), group_matched ? 1 : 0,
-                  cache_ready ? 1 : 0);
+    std::snprintf(
+        line, sizeof(line),
+        "[PL] storage: title=%s status=%d elevation=%s app=%s data=%s uid=%d/%d gid=%d/%d "
+        "group_matched=%d shader_cache=%d\n",
+        kTitleId, paths.status, elevation::path(), paths.app,
+        granted ? (data_ready ? kDataDir : kSandboxData) : "/download0", static_cast<int>(getuid()),
+        static_cast<int>(geteuid()), static_cast<int>(getgid()), static_cast<int>(getegid()),
+        group_matched ? 1 : 0, cache_ready ? 1 : 0);
     say(line);
     if (!data_ready)
         return;

@@ -1,25 +1,16 @@
-# Filesystem access with upstream Lapy
+# Filesystem elevation with upstream Lapy
 
-ProsperoLight uses the cooperative owned-root protocol from
-[ArkSama's PS5-Lapy-JB-Daemon](https://github.com/ArkSama/PS5-Lapy-JB-Daemon) and
+ProsperoLight packages an exact-title one-shot helper built from pinned revision
+`54a095c0f19161825e845daa760a03b446e654fa` of
 [mpereiraesaa's PS5-Lapy-JB-Daemon](https://github.com/mpereiraesaa/PS5-Lapy-JB-Daemon).
-Lapy is loaded separately on the console and performs the privileged operation. ProsperoLight
-only publishes the requesting process ID through `/download0/elevate_proc`, waits for the
-result, and proves that `/data` is readable and writable before using it.
 
-The application-side request follows Lapy's upstream
-[`cooperative_elevation.c`](https://github.com/mpereiraesaa/PS5-Lapy-JB-Daemon/blob/main/examples/cooperative_elevation.c)
-example. The result handshake and `/data` proof follow its upstream cooperative test app. The
-request file is written to a temporary file and atomically renamed so Lapy cannot observe a
-partial JSON document.
+At single-threaded startup the client first proves whether `/data` access is
+already present. It then gives a resident Lapy service a bounded opportunity
+through `/download0/elevate_proc`. If no service claims that request, the client
+cancels it and streams packaged `/app0/lapy.elf` to the loopback ELF loader on
+port 9021. A versioned handshake binds the helper to the current PID and title;
+the app uses `/data` only after a read/write proof succeeds.
 
-ProsperoLight does not bundle, fork, or reimplement the Lapy daemon. In particular, the package
-contains no `sandbox-elevator.elf`, kernel offsets, credential mutation, file-descriptor-table
-mutation, or elfldr connection. Use an official upstream Lapy owned-root build in one-shot or
-resident-service mode. If no compatible Lapy service is waiting, the request times out and the
-app stays on `/app0` and `/download0` paths.
-
-Credits for Lapy and the cooperative elevation design go to
-[ArkSama and the PS5-Lapy-JB-Daemon contributors](https://github.com/ArkSama/PS5-Lapy-JB-Daemon/graphs/contributors)
-and
-[mpereiraesaa and the PS5-Lapy-JB-Daemon contributors](https://github.com/mpereiraesaa/PS5-Lapy-JB-Daemon/graphs/contributors).
+The build verifies Lapy's source revision, target-title manifest, protocol hash,
+ELF hash, and loader framing. The upstream MIT license ships as `Lapy-MIT.txt`.
+No kernel offsets or elevation implementation are maintained in this repository.

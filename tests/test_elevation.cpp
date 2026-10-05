@@ -1,5 +1,5 @@
 /*
- * ps5-native-app-boilerplate - ProsperoLight Lapy client regression.
+ * ps5-native-app-boilerplate - ProsperoLight Lapy one-host elevation regression.
  * Copyright (C) 2026 BlackBearReloaded
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -10,7 +10,6 @@
 #include <cstring>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include "../src/elevation/elevation.cpp"
 
@@ -18,33 +17,22 @@ namespace test
 {
 struct State
 {
-    bool result_open_fails{};
-    bool prepare_fails{};
-    bool request_open_fails{};
-    bool corrupt_read{};
-    unsigned data_open_failures{};
-    unsigned data_open_calls{};
+    unsigned data_failures{};
+    unsigned data_opens{};
     unsigned sleeps{};
-    unsigned prepare_calls{};
-    unsigned closes{};
-    std::string request;
-    std::string result;
+    unsigned sockets{};
+    unsigned receives{};
+    std::size_t helper_offset{};
     std::string data;
-    std::vector<std::string> unlinked;
-    std::string renamed_from;
-    std::string renamed_to;
+    std::string sent;
 };
 
 State state;
 
-void reset()
+void reset(unsigned failures = 0)
 {
     state = {};
-}
-
-bool starts_with(const char *value, std::string_view prefix)
-{
-    return std::string_view{value}.starts_with(prefix);
+    state.data_failures = failures;
 }
 } // namespace test
 
@@ -54,122 +42,119 @@ extern "C"
     {
         return 4242;
     }
-
     uid_t geteuid() noexcept
     {
         return 1000;
     }
-
     int seteuid(uid_t) noexcept
     {
-        ++test::state.prepare_calls;
-        if (test::state.prepare_fails)
-        {
-            errno = EPERM;
-            return -1;
-        }
         return 0;
     }
 
-    int open(const char *path, int flags, ...)
+    int open(const char *path, int, ...)
     {
-        (void)flags;
-        if (std::strcmp(path, "/download0/lapy_owned_result") == 0)
-        {
-            if (test::state.result_open_fails)
-            {
-                errno = ENOENT;
-                return -1;
-            }
+        const std::string_view name{path};
+        if (name == "/download0/lapy_owned_result")
             return 10;
-        }
-        if (test::starts_with(path, "/download0/.elevate_proc."))
-        {
-            if (test::state.request_open_fails)
-            {
-                errno = EIO;
-                return -1;
-            }
+        if (name.starts_with("/download0/.elevate_proc."))
             return 11;
-        }
-        if (test::starts_with(path, "/data/.lapy_probe_"))
+        if (name.starts_with("/data/.lapy_probe_"))
         {
-            ++test::state.data_open_calls;
-            if (test::state.data_open_calls <= test::state.data_open_failures)
+            if (++test::state.data_opens <= test::state.data_failures)
             {
                 errno = EACCES;
                 return -1;
             }
             return 12;
         }
+        if (name == "/app0/lapy.elf")
+            return 13;
         errno = ENOENT;
         return -1;
     }
 
     ssize_t write(int descriptor, const void *buffer, size_t size)
     {
-        const auto count = std::min(size, std::size_t{3});
-        const auto bytes = std::string_view{static_cast<const char *>(buffer), count};
-        if (descriptor == 10)
-            test::state.result.append(bytes);
-        else if (descriptor == 11)
-            test::state.request.append(bytes);
-        else if (descriptor == 12)
-            test::state.data.append(bytes);
-        else
-        {
-            errno = EBADF;
-            return -1;
-        }
-        return static_cast<ssize_t>(count);
+        if (descriptor == 12)
+            test::state.data.append(static_cast<const char *>(buffer), size);
+        return static_cast<ssize_t>(size);
     }
 
     ssize_t read(int descriptor, void *buffer, size_t size)
     {
-        if (descriptor != 12)
+        if (descriptor == 12)
         {
-            errno = EBADF;
-            return -1;
+            const auto count = std::min(size, test::state.data.size());
+            std::memcpy(buffer, test::state.data.data(), count);
+            return static_cast<ssize_t>(count);
         }
-        const auto count = std::min(size, test::state.data.size());
-        std::memcpy(buffer, test::state.data.data(), count);
-        if (test::state.corrupt_read && count != 0)
-            static_cast<char *>(buffer)[0] = 'X';
-        return static_cast<ssize_t>(count);
+        if (descriptor == 13)
+        {
+            constexpr std::string_view helper{"ELF!"};
+            const auto count = std::min(size, helper.size() - test::state.helper_offset);
+            std::memcpy(buffer, helper.data() + test::state.helper_offset, count);
+            test::state.helper_offset += count;
+            return static_cast<ssize_t>(count);
+        }
+        errno = EBADF;
+        return -1;
     }
 
     off_t lseek(int descriptor, off_t offset, int whence) noexcept
     {
         return descriptor == 12 && offset == 0 && whence == SEEK_SET ? 0 : -1;
     }
-
     int close(int)
     {
-        ++test::state.closes;
         return 0;
     }
-
-    int fchmod(int descriptor, mode_t mode) noexcept
+    int fchmod(int, mode_t) noexcept
     {
-        return descriptor == 10 && mode == 0644 ? 0 : -1;
-    }
-
-    int rename(const char *old_path, const char *new_path) noexcept
-    {
-        test::state.renamed_from = old_path;
-        test::state.renamed_to = new_path;
         return 0;
     }
-
-    int unlink(const char *path) noexcept
+    int rename(const char *, const char *) noexcept
     {
-        test::state.unlinked.emplace_back(path);
         return 0;
     }
-
+    int unlink(const char *) noexcept
+    {
+        return 0;
+    }
     int usleep(useconds_t)
     {
         ++test::state.sleeps;
+        return 0;
+    }
+    int sceNetSocket(const char *, int, int, int)
+    {
+        ++test::state.sockets;
+        return 20;
+    }
+    int sceNetSetsockopt(int, int, int, const void *, std::uint32_t)
+    {
+        return 0;
+    }
+    int sceNetConnect(int, const void *, std::uint32_t)
+    {
+        return 0;
+    }
+    int sceNetSend(int, const void *data, std::size_t size, int)
+    {
+        test::state.sent.append(static_cast<const char *>(data), size);
+        return static_cast<int>(size);
+    }
+    int sceNetRecv(int, void *data, std::size_t size, int)
+    {
+        elevation::wire::Message reply{};
+        reply.pid = 4242;
+        reply.kind = test::state.receives++ == 0 ? elevation::wire::Kind::prepare
+                                                 : elevation::wire::Kind::response;
+        const auto count = std::min(size, sizeof(reply));
+        std::memcpy(data, &reply, count);
+        return static_cast<int>(count);
+    }
+    int sceNetSocketClose(int)
+    {
         return 0;
     }
 }
@@ -178,43 +163,19 @@ int main()
 {
     using elevation::Capability;
     using elevation::Status;
-
     test::reset();
-    test::state.data_open_failures = 1;
     assert(elevation::request(Capability::filesystem) == Status::ok);
-    assert(test::state.prepare_calls == 1);
-    assert(test::state.request == "{\"PID\":4242}\n");
-    assert(test::state.renamed_from == "/download0/.elevate_proc.4242");
-    assert(test::state.renamed_to == "/download0/elevate_proc");
-    assert(test::state.data == "LAPYOWN\n");
-    assert(test::state.result == "DATA_OK=1 OPEN_ERRNO=0\n");
-    assert(test::state.data_open_calls == 2 && test::state.sleeps == 1);
-
+    assert(std::string_view{elevation::path()} == "existing");
+    assert(test::state.sockets == 0);
+    test::reset(1);
+    assert(elevation::request(Capability::filesystem) == Status::ok);
+    assert(std::string_view{elevation::path()} == "resident");
+    assert(test::state.sockets == 0);
+    test::reset(51);
+    assert(elevation::request(Capability::filesystem) == Status::ok);
+    assert(std::string_view{elevation::path()} == "helper");
+    assert(test::state.sockets == 1 && test::state.receives == 2);
+    assert(test::state.sent.starts_with("ELF!"));
     test::reset();
     assert(elevation::request(static_cast<Capability>(2)) == Status::unsupported_capability);
-    assert(test::state.prepare_calls == 0 && test::state.closes == 0);
-
-    test::reset();
-    test::state.result_open_fails = true;
-    assert(elevation::request(Capability::filesystem) == Status::unavailable);
-
-    test::reset();
-    test::state.prepare_fails = true;
-    assert(elevation::request(Capability::filesystem) == Status::prepare_failed);
-    assert(test::state.closes == 1);
-
-    test::reset();
-    test::state.request_open_fails = true;
-    assert(elevation::request(Capability::filesystem) == Status::transport_error);
-
-    test::reset();
-    test::state.data_open_failures = 1000;
-    assert(elevation::request(Capability::filesystem) == Status::timeout);
-    assert(test::state.data_open_calls == 200 && test::state.sleeps == 200);
-    assert(test::state.result == "DATA_OK=0 OPEN_ERRNO=" + std::to_string(EACCES) + "\n");
-
-    test::reset();
-    test::state.corrupt_read = true;
-    assert(elevation::request(Capability::filesystem) == Status::apply_failed);
-    assert(test::state.result == "DATA_OK=0 OPEN_ERRNO=0\n");
 }

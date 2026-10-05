@@ -277,8 +277,10 @@ class ToolTests(unittest.TestCase):
         self.assertLess(initialize.index("remember(kept);"), initialize.index("elevation::request("))
         self.assertLess(initialize.index("elevation::request("), initialize.index("open_log("))
         self.assertIn("setegid(getgid())", initialize)
-        # The package never carries the deprecated kernel-writing helper.
-        self.assertIn('rm -f "$app/sandbox-elevator.elf"', build)
+        # The package carries only the pinned, exact-title upstream Lapy helper.
+        self.assertIn('python3 -B "$root/tools/build-lapy-helper.py"', build)
+        self.assertIn('cp "$root/build/lapy-owned-helper/lapy.elf" "$app/lapy.elf"', build)
+        self.assertNotIn("sandbox-elevator.elf", build)
         self.assertNotIn("validate-helper.py", build)
         self.assertFalse((ROOT / "tooling/elevation/helper/main.cpp").exists())
         # No other source names a sandbox path.

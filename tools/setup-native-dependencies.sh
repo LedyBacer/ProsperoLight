@@ -20,6 +20,15 @@ sdk_url="https://github.com/ps5-payload-dev/sdk/releases/download/v0.42/ps5-payl
 sdk_hash="8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da"
 zlib_url="https://zlib.net/fossils/zlib-$zlib_version.tar.gz"
 zlib_hash="bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
+lapy_commit="54a095c0f19161825e845daa760a03b446e654fa"
+lapy_source="$root/.deps/PS5-Lapy-JB-Daemon-54a095c"
+lapy_sdk="$root/.deps/lapy-ps5-payload-sdk-v0.40"
+lapy_sdk_archive="$root/.deps/lapy-ps5-payload-sdk-v0.40.zip"
+lapy_sdk_url="https://github.com/ps5-payload-dev/sdk/releases/download/v0.40/ps5-payload-sdk.zip"
+lapy_sdk_hash="617fb702df3551f709b2db0a014e618cf39334c9348395a9b005e6504d076a42"
+lapy_log="$root/.deps/lapy-ps5log-1ae1f918/ps5log.h"
+lapy_log_url="https://raw.githubusercontent.com/mpereiraesaa/ps5-agc-gears/1ae1f9182abd2770c131b97419034fb85173c2dc/native/ps5log/ps5log.h"
+lapy_log_hash="394af67d0f8b60b3335deb53396e52855ea2daa50ca914a456ea7663f48900c6"
 skip_sdk=false
 
 if [[ ${1:-} == "--skip-sdk" ]]; then
@@ -29,7 +38,7 @@ elif [[ $# -ne 0 ]]; then
     exit 2
 fi
 
-for command in wget unzip sha256sum tar make; do
+for command in git wget unzip sha256sum tar make; do
     command -v "$command" >/dev/null || {
         echo "missing required command: $command" >&2
         exit 2
@@ -88,6 +97,37 @@ fi
 if [[ -z $zlib_library ]]; then
     echo "the pinned native zlib archive was not found after compilation" >&2
     exit 2
+fi
+
+if ! $skip_sdk && [[ ! -f $lapy_source/source/lapy_elevation_protocol.h ]]; then
+    git clone -q https://github.com/mpereiraesaa/PS5-Lapy-JB-Daemon.git "$lapy_source"
+    git -C "$lapy_source" fetch -q origin "$lapy_commit"
+    git -C "$lapy_source" checkout -q --detach "$lapy_commit"
+fi
+if ! $skip_sdk; then
+    [[ $(git -C "$lapy_source" rev-parse HEAD) == "$lapy_commit" ]] || {
+        echo "the pinned Lapy checkout has the wrong commit" >&2; exit 2;
+    }
+    if [[ ! -x $lapy_sdk/bin/prospero-clang ]]; then
+        wget -q "$lapy_sdk_url" -O "$lapy_sdk_archive.download"
+        printf '%s  %s\n' "$lapy_sdk_hash" "$lapy_sdk_archive.download" |
+            sha256sum --check --strict
+        rm -rf -- "$lapy_sdk"
+        mkdir -p "$lapy_sdk"
+        unzip -q "$lapy_sdk_archive.download" -d "$lapy_sdk"
+        if [[ -d $lapy_sdk/ps5-payload-sdk ]]; then
+            cp -a "$lapy_sdk/ps5-payload-sdk/." "$lapy_sdk/"
+            rm -rf -- "$lapy_sdk/ps5-payload-sdk"
+        fi
+        mv "$lapy_sdk_archive.download" "$lapy_sdk_archive"
+    fi
+    if [[ ! -f $lapy_log ]]; then
+        mkdir -p "$(dirname "$lapy_log")"
+        wget -q "$lapy_log_url" -O "$lapy_log.download"
+        printf '%s  %s\n' "$lapy_log_hash" "$lapy_log.download" |
+            sha256sum --check --strict
+        mv "$lapy_log.download" "$lapy_log"
+    fi
 fi
 
 printf 'SDK_ROOT=%s\nZLIB_INCLUDE=%s\nZLIB_ARCHIVE=%s\n' \

@@ -23,6 +23,7 @@ for command in python3 sha256sum; do
     }
 done
 bash "$root/tools/setup-native-dependencies.sh" >/dev/null
+python3 -B "$root/tools/build-lapy-helper.py"
 # The launcher draws with ps5-opengl: fetch the pinned SDK and write its link group.
 bash "$root/tools/prepare-opengl.sh"
 
@@ -345,9 +346,10 @@ mkdir -p "$app/sce_sys" "$app/sce_module"
 "$tool" self --sign --in "$build/eboot.elf" --out "$app/eboot.bin" \
     --magic "$fself_magic"
 
-# Filesystem access is provided by a separately loaded upstream Lapy service.
-# Never retain the deprecated bundled helper in an incremental package.
-rm -f "$app/sandbox-elevator.elf"
+# The exact-title one-shot Lapy helper gives a resident service a bounded first chance,
+# then lets the app elevate itself through the local payload loader.
+cp "$root/build/lapy-owned-helper/lapy.elf" "$app/lapy.elf"
+cp "$root/build/lapy-owned-helper/lapy-manifest.json" "$app/lapy-manifest.json"
 # The self-update helper (make self-update-helper): the app sends it to the
 # console's payload loader when the player accepts an update.
 [[ -f $root/build/self-update/self-updater.elf ]] || {
@@ -402,6 +404,7 @@ done
 mkdir -p "$app/licenses"
 cp "$root/LICENSE" "$app/licenses/ProsperoLight-GPL.txt"
 cp "$root/THIRD_PARTY_NOTICES.md" "$app/licenses/THIRD_PARTY_NOTICES.md"
+cp "$root/build/lapy-owned-helper/LICENSE.Lapy" "$app/licenses/Lapy-MIT.txt"
 cp "$root/third_party/licenses/libpng.txt" "$app/licenses/libpng.txt"
 cp "$root/third_party/licenses/miniz.txt" "$app/licenses/miniz.txt"
 cp "$root/third_party/moonlight-common-c/LICENSE.txt" "$app/licenses/moonlight-common-c-LICENSE.txt"

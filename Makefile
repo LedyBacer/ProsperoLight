@@ -165,7 +165,7 @@ test-unit: $(HOST_UNIT_TEST) $(HOST_RUNTIME_TEST) $(HOST_ELEVATION_TEST)
 	@$(HOST_UNIT_TEST) $(GTEST_ARGS)
 	@printf '%s\n' '==> [test-unit] Running C++ allocation runtime tests'
 	@$(HOST_RUNTIME_TEST)
-	@printf '%s\n' '==> [test-unit] Running Lapy cooperative elevation client tests'
+	@printf '%s\n' '==> [test-unit] Running Lapy one-host elevation client tests'
 	@$(HOST_ELEVATION_TEST)
 
 $(HOST_UNIT_TEST): tests/test_prosperolight.cpp include/moonlight_config.hpp \
@@ -203,8 +203,8 @@ $(HOST_RUNTIME_TEST): tests/test_cpp_runtime.cpp tooling/native/app_cpp_runtime.
 		$(HOST_TEST_LDFLAGS) -o $@
 
 $(HOST_ELEVATION_TEST): tests/test_elevation.cpp src/elevation/elevation.cpp \
-		src/elevation/elevation.hpp
-	@printf '%s\n' '==> [test-unit] Compiling the Lapy cooperative elevation client test'
+		src/elevation/elevation.hpp src/elevation/protocol.hpp
+	@printf '%s\n' '==> [test-unit] Compiling the Lapy one-host elevation client test'
 	@mkdir -p -- $(@D)
 	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -Isrc/elevation \
 		tests/test_elevation.cpp $(HOST_TEST_LDFLAGS) -o $@

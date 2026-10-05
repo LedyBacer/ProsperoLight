@@ -174,7 +174,7 @@ tooling are maintained in this repository.
 | Category | Game |
 | Beta / stable | `01.000.080` / `01.000.060` |
 | Version source | [`sce_sys/param.json`](sce_sys/param.json) |
-| Writable data | `/data/prosperolight` (`/download0` without an upstream Lapy service) |
+| Writable data | `/data/prosperolight` (`/download0` if elevation is unavailable) |
 
 ## Features
 
@@ -520,9 +520,10 @@ stored by ProsperoLight or written to its configuration.
 
 ## Files on the console
 
-When it starts, ProsperoLight asks a separately loaded upstream Lapy owned-root
-service for filesystem access (the method ProsperoEden uses, see
-[`tooling/elevation`](tooling/elevation/README.md)). With it, everything the
+When it starts, ProsperoLight gives a resident upstream Lapy service a bounded
+first chance, then sends its packaged exact-title one-shot helper to the local
+payload loader (the method ProsperoEden uses, see
+[`tooling/elevation`](tooling/elevation/README.md)). With access, everything the
 app writes is in one folder that an update, a reinstall or a new title image
 does not touch:
 
@@ -541,10 +542,9 @@ The older copies stay where they were. To start over, delete
 `/data/prosperolight` while the app is closed. Keep `pairing/key.pem` private:
 it is what lets this console connect to a paired PC.
 
-Without a compatible upstream Lapy service waiting for the cooperative request,
-or if the request is refused, the app keeps working from its sandbox: `/app0` and
-`/download0`. The first line of the log says which it is (`status=0` means
-access was given).
+If neither elevation path succeeds, the app keeps working from its sandbox:
+`/app0` and `/download0`. The first line of the log records `existing`,
+`resident`, or `helper` (`status=0` means access was given).
 
 ## Source layout
 

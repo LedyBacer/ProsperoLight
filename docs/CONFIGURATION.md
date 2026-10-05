@@ -145,6 +145,9 @@ after title deletion or cache-management actions is not guaranteed.
 Native SaveData initialization is not part of this baseline; see
 [Platform findings](PLATFORM_NOTES.md).
 
+The packaged `lapy.elf` is built from the pinned upstream Lapy revision for
+title `PPSA99002`. A resident service remains compatible, but is optional.
+
 ### Settings list navigation
 
 The settings page scrolls vertically as the selected row moves out of view. Use
