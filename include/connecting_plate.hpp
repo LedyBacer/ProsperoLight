@@ -21,10 +21,10 @@
 namespace connecting
 {
 
-inline constexpr int kWidth = 1920;
-inline constexpr int kHeight = 1080;
+inline constexpr int kWidth = 3840;
+inline constexpr int kHeight = 2160;
 // The presenter reads surfaces whose height is a multiple of sixteen.
-inline constexpr int kSurfaceHeight = 1088;
+inline constexpr int kSurfaceHeight = 2176;
 
 // The progress bar, in pixels of the picture, and the colour of its fill.
 struct Bar

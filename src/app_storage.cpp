@@ -232,6 +232,7 @@ void storage::Initialize()
 
     paths.status = static_cast<int>(elevation::request(elevation::Capability::filesystem));
     const bool granted = paths.status == 0;
+    const bool sandboxed = is_file("/app0/eboot.bin");
     // Elevation leaves the effective group apart from the real one, and the
     // OpenGL runtime turns its shader cache off for such a process.
     const bool group_matched = getegid() == getgid() || setegid(getgid()) == 0;
@@ -244,11 +245,13 @@ void storage::Initialize()
         char probe[160];
         std::snprintf(probe, sizeof(probe), "%s/eboot.bin", kInstallDir);
         std::snprintf(paths.app, sizeof(paths.app), "%s",
-                      is_file(probe) ? kInstallDir : kSandboxApp);
+                      sandboxed        ? "/app0"
+                      : is_file(probe) ? kInstallDir
+                                       : kSandboxApp);
         data_ready = make_data_folders();
         // Without its folders the app keeps the sandbox's storage, by the
         // name it has outside the sandbox.
-        const char *base = data_ready ? kDataDir : kSandboxData;
+        const char *base = data_ready ? kDataDir : sandboxed ? "/download0" : kSandboxData;
         std::snprintf(paths.config, sizeof(paths.config), "%s/%sprosperolight-config.bin", base,
                       data_ready ? "config/" : "");
         std::snprintf(paths.config_temporary, sizeof(paths.config_temporary),
@@ -273,7 +276,7 @@ void storage::Initialize()
     // The OpenGL runtime keeps the shaders it compiled, so later launches, and
     // the first visit to each screen, skip that work.
     char shaders[176];
-    const char *base = !granted ? "/download0" : data_ready ? kDataDir : kSandboxData;
+    const char *base = data_ready ? kDataDir : sandboxed ? "/download0" : kSandboxData;
     std::snprintf(shaders, sizeof(shaders), "%s/cache", base);
     mkdir(shaders, 0777);
     std::snprintf(shaders, sizeof(shaders), "%s/cache/%s", base, kShaderCache);

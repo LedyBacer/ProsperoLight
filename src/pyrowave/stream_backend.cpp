@@ -78,7 +78,7 @@ struct OutputTrace
     };
     static constexpr size_t capacity = 32768;
     std::unique_ptr<Sample[]> samples;
-    size_t count{}, omitted{};
+    size_t count{}, omitted{}, next{};
     moonlight::FramePacing &pacer;
     unsigned mode, fps;
     OutputTrace(moonlight::FramePacing &p, unsigned m, unsigned f) : pacer(p), mode(m), fps(f)
@@ -90,10 +90,12 @@ struct OutputTrace
     {
         if (!samples)
             return;
+        samples[next] = sample;
+        next = (next + 1) % capacity;
         if (count == capacity)
             ++omitted;
         else
-            samples[count++] = sample;
+            ++count;
     }
     ~OutputTrace()
     {
@@ -120,7 +122,7 @@ struct OutputTrace
                           mode, fps, count, omitted) > 0;
         for (size_t i = 0; ok && i < count; ++i)
         {
-            const auto &v = samples[i];
+            const auto &v = samples[(count == capacity ? next + i : i) % capacity];
             ok = fprintf(file, "%d,%llu,%llu,%llu,%llu,%llu\n", v.frame, (unsigned long long)v.pts,
                          (unsigned long long)v.ready, (unsigned long long)v.submit,
                          (unsigned long long)v.observed, (unsigned long long)v.flips) > 0;

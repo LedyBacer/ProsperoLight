@@ -15,7 +15,7 @@ extern "C" {
 
 /* The launcher's connecting screen, for the stream to keep showing. */
 typedef struct moonlight_connecting_picture {
-    const uint8_t *rgba; /* 1920 x 1080 sRGB pixels, top row first */
+    const uint8_t *rgba; /* 3840 x 2160 sRGB pixels, top row first */
     float bar_x;         /* the progress bar, in pixels of the picture */
     float bar_y;
     float bar_width;
@@ -59,6 +59,9 @@ typedef struct moonlight_stream_metrics {
     uint64_t callback_to_flip_average_us;
     char error[192];
 } moonlight_stream_metrics_t;
+
+/* Resolve lazy decoder libraries before an elevation backend can change root. */
+void moonlight_native_decoder_warmup(int results[4]);
 
 int moonlight_stream_run(const moonlight_stream_options_t *options,
                          moonlight_stream_metrics_t *metrics);
