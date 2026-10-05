@@ -262,6 +262,19 @@ int main(int argc, char **argv)
     // A pretend catalog: when set, the launcher is told a newer version exists.
     static int update_checks = 0;
     bool offer_update = false;
+    // A pretend update helper: so many frames of download, then of unpacking.
+    struct PretendUpdate
+    {
+        bool installable = false;
+        bool fails = false;
+        bool begun = false;
+        bool cancelled = false;
+        bool applied = false;
+        int begins = 0;
+        int polls = 0;
+    };
+    static PretendUpdate pretend;
+    static int update_exits = 0;
 
     // The picture a session that starts a stream hands to the stream.
     std::vector<unsigned char> plate;
@@ -277,10 +290,12 @@ int main(int argc, char **argv)
         model.set_artwork_decoder(make_poster);
         if (offer_update)
             model.set_update_check(
-                [](char *version, std::size_t size)
+                [](launcher::UpdateOffer *offer)
                 {
                     ++update_checks;
-                    std::snprintf(version, size, "01.000.090");
+                    std::snprintf(offer->version, sizeof(offer->version), "01.000.090");
+                    offer->installable = pretend.installable;
+                    offer->size = 84000000;
                     return true;
                 });
         model.Initialize(now_ms);
@@ -295,6 +310,61 @@ int main(int argc, char **argv)
         view.set_storage({true, "/data/prosperolight/config", "/data/prosperolight/pairing",
                           "/data/prosperolight/logs"});
         view.show_stream_error(stream_error);
+        launcher::UpdateActions actions;
+        actions.begin = []
+        {
+            pretend.begun = true;
+            pretend.cancelled = pretend.applied = false;
+            pretend.polls = 0;
+            ++pretend.begins;
+            return true;
+        };
+        actions.poll = [](launcher::UpdateProgress *progress)
+        {
+            *progress = launcher::UpdateProgress{};
+            if (!pretend.begun)
+                return;
+            const int at = ++pretend.polls;
+            if (pretend.cancelled)
+            {
+                progress->phase = launcher::UpdatePhase::cancelled;
+            }
+            else if (at < 20)
+            {
+                progress->phase = launcher::UpdatePhase::starting;
+            }
+            else if (pretend.fails && at > 70)
+            {
+                progress->phase = launcher::UpdatePhase::failed;
+                std::snprintf(progress->error, sizeof(progress->error),
+                              "The download doesn't match the catalog's listing");
+            }
+            else if (at < 140)
+            {
+                progress->phase = launcher::UpdatePhase::downloading;
+                progress->total = 84000000;
+                progress->done = static_cast<std::uint64_t>(at - 20) * 700000;
+                std::snprintf(progress->time_left, sizeof(progress->time_left), "about 20 s left");
+            }
+            else if (at < 200)
+            {
+                progress->phase = launcher::UpdatePhase::unpacking;
+                progress->total = 190000000;
+                progress->done = static_cast<std::uint64_t>(at - 140) * 3166666;
+            }
+            else
+            {
+                progress->phase = launcher::UpdatePhase::ready;
+            }
+        };
+        actions.cancel = [] { pretend.cancelled = true; };
+        actions.apply = []
+        {
+            pretend.applied = true;
+            return true;
+        };
+        actions.finish = [] { pretend.begun = false; };
+        view.set_update_actions(actions);
         bool started = false;
         const auto step_frame = [&](const hui::InputFrame &input)
         {
@@ -324,6 +394,8 @@ int main(int argc, char **argv)
                 }
             }
             started = view.take_start_stream() || started;
+            if (view.take_update_exit())
+                ++update_exits;
             usleep(400); // lets the worker thread answer between frames
         };
         const auto render = [&](const std::string &name)
@@ -630,8 +702,47 @@ int main(int argc, char **argv)
                 {120, 0, Direction::none, "notice-gone"},
             },
             "");
-    offer_update = false;
     expect(update_checks == 1, "the catalog is asked once per launch");
+
+    // ---- an update the app can install: asked, downloaded, unpacked, then the app closes ----
+    pretend.installable = true;
+    session("self-update",
+            {
+                {150, 0, Direction::none, "offer"},
+                {10, confirm},
+                {80, 0, Direction::none, "downloading"},
+                {100, 0, Direction::none, "unpacking"},
+                {70, 0, Direction::none, "closing"},
+                {120, 0},
+            },
+            "");
+    expect(pretend.begins == 1 && pretend.applied, "Update now downloads, stages and applies");
+    expect(update_exits == 1, "a staged update asks the app to close, once");
+
+    // Skip keeps the version that runs; nothing is started.
+    pretend = PretendUpdate{};
+    pretend.installable = true;
+    session("self-update", {{150, 0}, {10, 0, Direction::left}, {10, confirm}, {60, 0}}, "");
+    expect(pretend.begins == 0 && update_exits == 1, "Skip starts nothing");
+
+    // Cancelled during the download: the launcher is back, nothing is applied.
+    pretend = PretendUpdate{};
+    pretend.installable = true;
+    session("self-update", {{150, 0}, {10, confirm}, {60, 0}, {10, back}, {60, 0, Direction::none, "cancelled"}}, "");
+    expect(pretend.begins == 1 && pretend.cancelled && !pretend.applied && update_exits == 1,
+           "cancelling leaves the app as it was");
+
+    // A refused download says why and offers another try.
+    pretend = PretendUpdate{};
+    pretend.installable = true;
+    pretend.fails = true;
+    session("self-update",
+            {{150, 0}, {10, confirm}, {120, 0, Direction::none, "failed"}, {10, 0, Direction::left}, {10, confirm}, {60, 0}},
+            "");
+    expect(pretend.begins == 1 && !pretend.applied && update_exits == 1,
+           "a failed update changes nothing and closes on request");
+    pretend = PretendUpdate{};
+    offer_update = false;
 
     // ---- About: one step back from the first tab ----
     session("about", {{30, previous}, {60, 0, Direction::none, "page"}, {10, back}, {30, 0}}, "");

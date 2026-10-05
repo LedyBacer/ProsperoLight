@@ -112,6 +112,18 @@ class View
 
     // True once, when the stream should start.
     bool take_start_stream();
+    // Installing a newer release (launcher_model.hpp): the actions that do it,
+    // and, once, that the app must close now so the helper can replace its files.
+    void set_update_actions(const UpdateActions &actions)
+    {
+        update_actions_ = actions;
+    }
+    bool take_update_exit();
+    // The question "Update now?" is on screen (a development build answers it itself).
+    bool update_offer_open() const
+    {
+        return update_ui_ == UpdateUi::offer;
+    }
     int screen() const
     {
         return screen_;
@@ -173,6 +185,9 @@ class View
     void draw_settings(hui::ui::Canvas &canvas, hui::ui::Painter &paint) const;
     void draw_about(hui::ui::Canvas &canvas, hui::ui::Painter &paint) const;
     void draw_pairing(hui::ui::Canvas &canvas) const;
+    void draw_update(hui::ui::Canvas &canvas) const;
+    void update_modal(const hui::InputFrame &input, float dt, hui::ui::Feedback &feedback);
+    void open_update_failure(const char *reason, hui::ui::Feedback &feedback);
     void draw_loader_tip(hui::ui::Canvas &canvas) const;
     void draw_connect_bar(hui::ui::Canvas &canvas) const;
     hui::ui::GlyphStyle glyphs(const hui::ui::Painter &paint) const;
@@ -237,6 +252,24 @@ class View
     hui::ui::InputPrompt port_prompt_;
     hui::ui::InputPrompt host_prompt_;
     hui::ui::Dialog unpair_dialog_;
+    // The update: the question, then the ring while the helper works.
+    enum class UpdateUi : std::uint8_t
+    {
+        hidden,
+        offer,
+        working,
+        closing,
+        failed,
+    };
+    UpdateUi update_ui_ = UpdateUi::hidden;
+    UpdateActions update_actions_;
+    UpdateOffer update_offer_;
+    UpdateProgress update_progress_;
+    hui::ui::Dialog update_dialog_;
+    hui::ui::ProgressRing update_ring_;
+    hui::tween::Spring update_fade_;
+    float update_closing_age_ = 0.0f;
+    bool update_exit_ = false;
     hui::ui::LoadingScreen loader_;
     float load_progress_ = 0.0f;
     bool launching_ = false;

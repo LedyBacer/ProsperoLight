@@ -133,6 +133,16 @@ void Model::Notify(NoticeKind kind, std::string title, std::string body, float s
     notices_.push_back({kind, std::move(title), std::move(body), seconds});
 }
 
+bool Model::TakeUpdateOffer(UpdateOffer *offer)
+{
+    if (!update_offered_)
+        return false;
+    update_offered_ = false;
+    if (offer)
+        *offer = update_offer_;
+    return true;
+}
+
 std::vector<Notice> Model::TakeNotices()
 {
     std::vector<Notice> taken;
@@ -495,8 +505,7 @@ void Model::Run(const Job &job, JobResult *result)
                     result->snapshot.online, result->snapshot.current_app_id);
         break;
     case JobKind::update:
-        result->update_available =
-            update_check_ && update_check_(result->update_version, sizeof(result->update_version));
+        result->update_available = update_check_ && update_check_(&result->update_offer);
         break;
     case JobKind::artwork:
     {
@@ -821,9 +830,14 @@ void Model::Apply(const Job &job, JobResult &result)
         return;
     case JobKind::update:
         // Only good news is shown; no network or "not listed" is silence.
-        if (result.update_available)
+        if (result.update_available && result.update_offer.installable)
+        {
+            update_offer_ = result.update_offer;
+            update_offered_ = true;
+        }
+        else if (result.update_available)
             Notify(NoticeKind::info, "Update available",
-                   std::string("ProsperoLight ") + result.update_version +
+                   std::string("ProsperoLight ") + result.update_offer.version +
                        " is out. Get it from homebrew.page.",
                    kUpdateNoticeSeconds);
         return;

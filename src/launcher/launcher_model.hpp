@@ -76,6 +76,49 @@ enum class Busy
 // and settings, Sunshine's state, pairing, and the requests that reach the
 // network. Requests run one at a time on a worker thread, so the screen keeps
 // moving while a PC is slow to answer; Poll() applies what they return.
+// A newer release the homebrew.page catalog lists
+// (third_party/update-check/self_update.h).
+struct UpdateOffer
+{
+    bool installable = false; // the app can download and install it by itself
+    char version[40] = {};    // the release's name, for display
+    std::uint64_t size = 0;   // the ZIP's size in bytes; 0 when the catalog doesn't say
+};
+
+enum class UpdatePhase : std::uint8_t
+{
+    idle,
+    starting,    // starting the helper
+    downloading, // done/total are bytes of the archive
+    unpacking,   // done/total are bytes unpacked
+    ready,       // staged and checked: apply or cancel
+    applying,    // the helper has the go-ahead: the app closes
+    cancelled,
+    failed, // error says why; nothing was changed
+};
+
+struct UpdateProgress
+{
+    UpdatePhase phase = UpdatePhase::idle;
+    std::uint64_t done = 0;
+    std::uint64_t total = 0; // 0 while it isn't known
+    char time_left[32] = {}; // "about 20 s left"; empty until it can be said
+    char error[160] = {};
+};
+
+// What installs the offered release. begin starts the download and the staging
+// on a thread of its own; poll is cheap, for every frame; cancel leaves the
+// app untouched; apply gives the go-ahead once staged (true: close the app
+// now); finish comes after a cancel or a failure, before beginning again.
+struct UpdateActions
+{
+    bool (*begin)() = nullptr;
+    void (*poll)(UpdateProgress *progress) = nullptr;
+    void (*cancel)() = nullptr;
+    bool (*apply)() = nullptr;
+    void (*finish)() = nullptr;
+};
+
 class Model
 {
   public:
@@ -163,7 +206,7 @@ class Model
     // Asks the catalog whether a newer version exists; true with its name in
     // version. It blocks for as long as the network takes, so it runs on the
     // worker, once, when nothing else is waiting.
-    using UpdateCheck = bool (*)(char *version, std::size_t size);
+    using UpdateCheck = bool (*)(UpdateOffer *offer);
     void set_update_check(UpdateCheck check)
     {
         update_check_ = check;
@@ -179,6 +222,9 @@ class Model
     bool TakeArtwork(ArtworkImage *image);
 
     std::vector<Notice> TakeNotices();
+    // A newer release the app can install by itself, once, when the catalog's
+    // answer has come. One it cannot install is a notice instead.
+    bool TakeUpdateOffer(UpdateOffer *offer);
 
   private:
     enum class JobKind
@@ -206,7 +252,7 @@ class Model
     {
         int result = 0;
         bool update_available = false;
-        char update_version[40] = {};
+        UpdateOffer update_offer;
         moonlight_backend_snapshot_t snapshot{};
         moonlight_discovered_host_t found[MOONLIGHT_DISCOVERY_MAX_HOSTS]{};
         std::uint32_t found_count = 0;
@@ -263,6 +309,8 @@ class Model
     WorkerStart worker_start_ = nullptr;
     UpdateCheck update_check_ = nullptr;
     bool update_checked_ = false;
+    UpdateOffer update_offer_;
+    bool update_offered_ = false;
 
     bool pairing_requested_ = false;
     bool pairing_active_ = false;

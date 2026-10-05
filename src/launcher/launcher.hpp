@@ -45,6 +45,7 @@ enum class Result
 {
     failed,       // the display or the fonts could not be opened
     start_stream, // *selection says what to stream
+    update_exit,  // an update is staged: close the app so the helper can replace its files
 };
 
 // Opens the display, the controller and the sound, runs the launcher until

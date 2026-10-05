@@ -13,6 +13,7 @@
 #include "app_storage.hpp"
 #include "../../platform/ps5/ps5_thread_placement.h"
 #include "connecting_plate.hpp"
+#include "self_update.h"
 #include "update_check.h"
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
@@ -37,6 +38,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <span>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -47,6 +49,12 @@ extern "C" int sceUserServiceGetLoginUserIdList(std::int32_t user_ids[4]);
 #endif
 #ifndef PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION
 #define PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION MOONLIGHT_STREAM_RESOLUTION_1080P
+#endif
+#ifndef PROSPEROLIGHT_UPDATE_DEV_OFFER
+#define PROSPEROLIGHT_UPDATE_DEV_OFFER 0
+#endif
+#ifndef PROSPEROLIGHT_UPDATE_AUTO_ACCEPT
+#define PROSPEROLIGHT_UPDATE_AUTO_ACCEPT 0
 #endif
 #ifndef PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST
 #define PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST 0
@@ -65,6 +73,16 @@ static_assert(PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST == 0 ||
               "STOP_ACTIVE_APP_SELF_TEST must be 0 or 1");
 
 extern "C" void prosperolight_release_splash(void);
+
+// The self-update kit's paths (third_party/update-check/self_update_paths.h):
+// with filesystem access /app0 and /download0 are not where the app's files are.
+extern "C" const char *prosperolight_self_update_path(int which)
+{
+    static const std::string helper = std::string(storage::paths().app) + "/self-updater.elf";
+    static const std::string param = std::string(storage::paths().app) + "/sce_sys/param.json";
+    static const std::string sequence = storage::setting_file("self-update-sequence");
+    return which == 0 ? helper.c_str() : which == 1 ? param.c_str() : sequence.c_str();
+}
 
 namespace launcher
 {
@@ -231,32 +249,164 @@ void CaptureConnecting(gfx::Renderer &renderer, View &view, Frame &frame, Select
              static_cast<long long>((sys::monotonic_us() - started) / 1000));
 }
 
-// Asks the homebrew.page catalog whether a newer ProsperoLight exists
-// (third_party/update-check). One HTTPS request; it runs on the worker.
-bool CheckForUpdate(char *version, std::size_t size)
+// Updates (third_party/update-check). Once per launch the worker asks the
+// homebrew.page catalog whether a newer ProsperoLight is listed: the kit
+// verifies the catalog's signature and the hashes before it believes the
+// answer. When the player says so, the release ZIP is downloaded from GitHub
+// and streamed to the self-update helper (self-updater.elf in the app's
+// folder, sent to the console's payload loader), which checks and unpacks it
+// beside the app and replaces the app's files once the app has closed.
+// Nothing is changed before the player confirms; a failure or a cancel leaves
+// the app as it was.
+std::mutex g_update_lock;
+self_update_check_result g_update_answer = SELF_UPDATE_UNKNOWN;
+self_update_offer g_update_offer{};
+self_update_job g_update_job{}; // zero until the first begin, as the kit asks
+bool g_update_begun = false;
+
+#if PROSPEROLIGHT_UPDATE_DEV_OFFER
+// Development only: update-offer.txt in the app's folder replaces the
+// catalog's answer, and with it the catalog's signature. Five lines: the new
+// content version, the release's name, its ZIP on GitHub, its SHA-256, its
+// size in bytes.
+bool DevelopmentOffer(self_update_offer *out)
 {
-    char title[10] = {};
-    char installed[12] = {};
-    // The app's own param.json: /app0 does not exist outside the sandbox.
-    const std::string param = std::string(storage::paths().app) + "/sce_sys/param.json";
-    if (!update_check_read_param(param.c_str(), title, installed))
+    const std::string path = std::string(storage::paths().app) + "/update-offer.txt";
+    std::FILE *file = std::fopen(path.c_str(), "r");
+    if (!file)
+        return false;
+    char lines[5][600] = {};
+    bool complete = true;
+    for (auto &line : lines)
     {
-        sys::log("[PL] update check: %s could not be read", param.c_str());
-        return false;
+        if (!std::fgets(line, sizeof(line), file))
+        {
+            complete = false;
+            break;
+        }
+        line[std::strcspn(line, "\r\n")] = '\0';
     }
-    const std::int64_t started = sys::monotonic_us();
-    update_check_result result{};
-    update_check_run(title, installed, &result);
-    sys::log("[PL] update check: installed=%s state=%d reason=%s http=%d error=%d available=%s "
-             "version=%s in %lld ms",
-             installed, static_cast<int>(result.state), update_check_reason_text(result.reason),
-             result.http_status, result.platform_error,
-             result.available[0] ? result.available : "-", result.version[0] ? result.version : "-",
-             static_cast<long long>((sys::monotonic_us() - started) / 1000));
-    if (result.state != UPDATE_CHECK_AVAILABLE)
+    std::fclose(file);
+    self_update_offer filled{};
+    const std::string param = std::string(storage::paths().app) + "/sce_sys/param.json";
+    if (!complete || !update_check_read_param(param.c_str(), filled.title, filled.installed))
         return false;
-    std::snprintf(version, size, "%s", result.version[0] ? result.version : result.available);
+    std::snprintf(filled.name, sizeof(filled.name), "ProsperoLight");
+    std::snprintf(filled.available, sizeof(filled.available), "%s", lines[0]);
+    std::snprintf(filled.version, sizeof(filled.version), "%s", lines[1]);
+    std::snprintf(filled.artifact, sizeof(filled.artifact), "%s", lines[2]);
+    std::snprintf(filled.sha256, sizeof(filled.sha256), "%s", lines[3]);
+    filled.size = std::strtoull(lines[4], nullptr, 10);
+    // Like the catalog, only a newer version is offered (content versions compare as text).
+    if (std::strcmp(filled.available, filled.installed) <= 0)
+        return false;
+    *out = filled;
     return true;
+}
+#endif
+
+// Blocks on the network; it runs on the model's worker.
+bool CheckForUpdate(UpdateOffer *offer)
+{
+    static const char *const kNames[] = {"available", "up-to-date", "unknown", "untrusted",
+                                         "not-installable"};
+    const std::int64_t started = sys::monotonic_us();
+    self_update_offer found{};
+    self_update_check_result state = self_update_check_self(&found);
+#if PROSPEROLIGHT_UPDATE_DEV_OFFER
+    if (DevelopmentOffer(&found))
+    {
+        sys::log("[PL] update check: DEVELOPMENT: update-offer.txt replaces the catalog's answer");
+        state = SELF_UPDATE_AVAILABLE;
+    }
+#endif
+    sys::log("[PL] update check: result=%s installed=%s available=%s version=%s size=%llu in "
+             "%lld ms",
+             static_cast<unsigned>(state) < 5 ? kNames[state] : "?",
+             found.installed[0] ? found.installed : "-", found.available[0] ? found.available : "-",
+             found.version[0] ? found.version : "-", static_cast<unsigned long long>(found.size),
+             static_cast<long long>((sys::monotonic_us() - started) / 1000));
+    if (state != SELF_UPDATE_AVAILABLE && state != SELF_UPDATE_NOT_INSTALLABLE)
+        return false;
+    {
+        const std::lock_guard<std::mutex> guard(g_update_lock);
+        g_update_answer = state;
+        g_update_offer = found;
+    }
+    offer->installable = state == SELF_UPDATE_AVAILABLE;
+    std::snprintf(offer->version, sizeof(offer->version), "%s",
+                  found.version[0] ? found.version : found.available);
+    offer->size = found.size;
+    return true;
+}
+
+bool BeginUpdate()
+{
+    const std::lock_guard<std::mutex> guard(g_update_lock);
+    if (g_update_answer != SELF_UPDATE_AVAILABLE)
+        return false;
+    if (g_update_begun)
+        self_update_finish(&g_update_job);
+    g_update_begun = self_update_start(&g_update_job, self_update_console(), &g_update_offer) == 1;
+    sys::log("[PL] update: %s %s", g_update_begun ? "updating to" : "could not begin for",
+             g_update_offer.available);
+    return g_update_begun;
+}
+
+void PollUpdate(UpdateProgress *progress)
+{
+    static int reported = -1;
+    const std::lock_guard<std::mutex> guard(g_update_lock);
+    *progress = UpdateProgress{};
+    if (!g_update_begun)
+        return;
+    self_update_status status{};
+    self_update_poll(&g_update_job, &status);
+    static constexpr UpdatePhase kPhases[] = {
+        UpdatePhase::idle,  UpdatePhase::starting, UpdatePhase::downloading, UpdatePhase::unpacking,
+        UpdatePhase::ready, UpdatePhase::applying, UpdatePhase::cancelled,   UpdatePhase::failed};
+    progress->phase =
+        static_cast<unsigned>(status.phase) < 8 ? kPhases[status.phase] : UpdatePhase::idle;
+    progress->done = status.done;
+    progress->total = status.total;
+    std::snprintf(progress->time_left, sizeof(progress->time_left), "%s", status.time_left);
+    std::snprintf(progress->error, sizeof(progress->error), "%s", status.error);
+    if (static_cast<int>(status.phase) != reported)
+    {
+        reported = static_cast<int>(status.phase);
+        sys::log("[PL] update: phase=%d done=%llu total=%llu error=%s", reported,
+                 static_cast<unsigned long long>(status.done),
+                 static_cast<unsigned long long>(status.total),
+                 status.error[0] ? status.error : "-");
+    }
+}
+
+void CancelUpdate()
+{
+    const std::lock_guard<std::mutex> guard(g_update_lock);
+    if (g_update_begun)
+        self_update_cancel(&g_update_job);
+}
+
+bool ApplyUpdate()
+{
+    const std::lock_guard<std::mutex> guard(g_update_lock);
+    if (!g_update_begun)
+        return false;
+    const bool going = self_update_apply(&g_update_job) == 1;
+    sys::log("[PL] update: %s",
+             going ? "staged; the helper replaces the files once ProsperoLight has closed"
+                   : "the helper did not take the go-ahead");
+    return going;
+}
+
+void FinishUpdate()
+{
+    const std::lock_guard<std::mutex> guard(g_update_lock);
+    if (!g_update_begun)
+        return;
+    self_update_finish(&g_update_job);
+    g_update_begun = false;
 }
 
 // Where the launcher's threads run. Threads on the console run first-in
@@ -378,6 +528,8 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             view.set_first_start(first_start);
             view.show_stream_error(stream_error);
             view.set_players(SignedInUsers());
+            view.set_update_actions(
+                {BeginUpdate, PollUpdate, CancelUpdate, ApplyUpdate, FinishUpdate});
             sys::log("[PL] launcher: sound, controller and screens after %lld ms", elapsed());
 
             Frame frame;
@@ -515,6 +667,34 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                     }
                 }
 #endif
+#if PROSPEROLIGHT_UPDATE_DEV_OFFER && PROSPEROLIGHT_UPDATE_AUTO_ACCEPT > 0
+                // Development only: an unattended console run says yes by itself.
+                {
+                    static std::int64_t offered_at = 0;
+                    static bool accepted = false;
+                    if (view.update_offer_open() && !accepted)
+                    {
+                        if (offered_at == 0)
+                            offered_at = sys::monotonic_us();
+                        else if (sys::monotonic_us() - offered_at >
+                                 PROSPEROLIGHT_UPDATE_AUTO_ACCEPT * INT64_C(1000000))
+                        {
+                            accepted = true;
+                            InputFrame yes;
+                            yes.connected = true;
+                            yes.pressed = hui::action_bit(hui::Action::confirm);
+                            view.update(yes, 0.0f, feedback);
+                            sys::log(
+                                "[PL] update: DEVELOPMENT: the offer was accepted by the build");
+                        }
+                    }
+                }
+#endif
+                if (view.take_update_exit())
+                {
+                    outcome = Result::update_exit;
+                    break;
+                }
                 if (view.take_start_stream() && FillSelection(model, selection))
                 {
                     CaptureConnecting(renderer, view, frame, selection);

@@ -33,6 +33,7 @@ extern "C" int sceKernelReleaseDirectMemory(std::int64_t direct_memory_start, st
 extern "C" int munmap(void *address, std::size_t length);
 extern "C" void prosperolight_release_splash(void);
 extern "C" int sceSystemServiceHideSplashScreen(void);
+extern "C" int sceSystemServiceLoadExec(const char *path, const char **arguments);
 extern "C" void *__dso_handle = nullptr;
 
 #ifndef PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS
@@ -267,6 +268,14 @@ int main()
         const launcher::Result result = launcher::Run(&selection, stream_error, first_start);
         first_start = false;
         stream_error[0] = '\0';
+        if (result == launcher::Result::update_exit)
+        {
+            // The self-update helper waits for this process to end, then puts
+            // the new version's files in place (third_party/update-check).
+            Log("[PL] main: closing for the update");
+            (void)sceSystemServiceLoadExec("exit", nullptr);
+            KeepProcessAlive();
+        }
         if (result != launcher::Result::start_stream)
         {
             // Nothing was drawn: the splash picture must not hide the home screen's way out.

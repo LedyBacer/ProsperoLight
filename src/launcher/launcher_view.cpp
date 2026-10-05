@@ -39,6 +39,7 @@ constexpr Rect kCreditsPanel{kMargin, kContentTop, 852.0f, 708.0f};
 constexpr Rect kStartPanel{kMargin + 876.0f, kContentTop, 852.0f, 708.0f};
 constexpr int kScreens = 4;
 constexpr Rect kPairPanel{960.0f - 440.0f, 250.0f, 880.0f, 560.0f};
+constexpr Rect kUpdatePanel{960.0f - 440.0f, 230.0f, 880.0f, 600.0f};
 constexpr int kColumns = 7;
 // How long the connecting screen stays before the stream takes the display,
 // and how far its bar gets meanwhile. The stream carries the bar on from there.
@@ -539,6 +540,9 @@ void View::build()
     host_prompt_.keyboard.set_layouts({address_layout()});
 
     unpair_dialog_.style.width = 720.0f;
+    update_dialog_.style.width = 800.0f;
+    update_ring_.style.thickness = 14.0f;
+    update_ring_.set_bounds({kUpdatePanel.cx() - 95.0f, kUpdatePanel.y + 196.0f, 190.0f, 190.0f});
 
     loader_.style.layout = ui::LoadingLayout::corner;
     loader_.style.veil = 0.62f;
@@ -604,6 +608,8 @@ void View::restyle()
     port_prompt_.style.theme = t;
     host_prompt_.style.theme = t;
     unpair_dialog_.style.theme = t;
+    update_dialog_.style.theme = t;
+    update_ring_.style.theme = t;
     loader_.style.theme = t;
     toasts_.style.theme = t;
     apply_ambient(true);
@@ -1073,7 +1079,34 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
         pin_.set_value(model_.pairing_pin());
     }
 
-    if (launching_)
+    // A newer release waits for a quiet moment: no other question is open.
+    UpdateOffer offered;
+    if (update_ui_ == UpdateUi::hidden && !launching_ && !pairing && age_ > 0.8f &&
+        !host_prompt_.is_open() && !port_prompt_.is_open() && !unpair_dialog_.is_open() &&
+        model_.TakeUpdateOffer(&offered))
+    {
+        update_offer_ = offered;
+        ui::DialogContent content;
+        content.icon = ui::StatusKind::info;
+        content.title = "Update available";
+        char size[48] = "";
+        if (offered.size != 0)
+            std::snprintf(size, sizeof(size), " (%.0f MB)",
+                          static_cast<double>(offered.size) / 1e6);
+        content.body = std::string("ProsperoLight ") + offered.version + " is out" + size +
+                       ".\nUpdate now downloads and checks it. ProsperoLight then closes "
+                       "while the new version is put in place.";
+        content.buttons = {{"Skip"}, {"Update now", ui::ButtonKind::primary}};
+        content.default_button = 1;
+        update_dialog_.open(std::move(content), feedback);
+        update_ui_ = UpdateUi::offer;
+    }
+
+    if (update_ui_ != UpdateUi::hidden)
+    {
+        update_modal(input, dt, feedback);
+    }
+    else if (launching_)
     {
         load_progress_ =
             std::min(load_progress_ + dt / kLaunchSeconds * kHandoverProgress, kHandoverProgress);
@@ -1192,6 +1225,11 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     port_prompt_.update(dt);
     host_prompt_.update(dt);
     unpair_dialog_.update(dt);
+    update_dialog_.update(dt);
+    update_ring_.update(dt);
+    update_fade_.target =
+        update_ui_ == UpdateUi::working || update_ui_ == UpdateUi::closing ? 1.0f : 0.0f;
+    update_fade_.update(dt, 14.0f);
     toasts_.update(dt, feedback);
     pair_fade_.target = pairing ? 1.0f : 0.0f;
     pair_fade_.update(dt, 14.0f);
@@ -1483,6 +1521,8 @@ void View::draw(Frame &frame) const
     port_prompt_.draw(above);
     host_prompt_.draw(above);
     unpair_dialog_.draw(above);
+    draw_update(above);
+    update_dialog_.draw(above);
     loader_.draw(above);
     draw_loader_tip(above);
     draw_connect_bar(above);
@@ -1989,6 +2029,162 @@ void View::draw_pairing(ui::Canvas &canvas) const
     pair_timer_.draw(canvas);
     paint.body("This closes by itself when Sunshine accepts the PIN.", panel.cx(),
                panel.y + panel.h - 36.0f, 21.0f, t.text_muted, gfx::Align::center);
+    list.pop_opacity();
+}
+
+bool View::take_update_exit()
+{
+    const bool exit = update_exit_;
+    update_exit_ = false;
+    return exit;
+}
+
+void View::open_update_failure(const char *reason, ui::Feedback &feedback)
+{
+    ui::DialogContent content;
+    content.icon = ui::StatusKind::danger;
+    content.title = "The update was not installed";
+    content.body = std::string(reason && reason[0] ? reason : "Something went wrong.") +
+                   "\nProsperoLight is as it was.";
+    content.buttons = {{"Close"}, {"Try again", ui::ButtonKind::primary}};
+    content.default_button = 1;
+    update_dialog_.open(std::move(content), feedback);
+    update_ui_ = UpdateUi::failed;
+}
+
+// The update's own input: while it shows, nothing under it is reached.
+void View::update_modal(const InputFrame &input, float dt, ui::Feedback &feedback)
+{
+    switch (update_ui_)
+    {
+    case UpdateUi::offer:
+    case UpdateUi::failed:
+    {
+        const ui::Event event = update_dialog_.handle(input, feedback);
+        if (event == ui::Event::activated && update_dialog_.choice() == 1)
+        {
+            update_progress_ = UpdateProgress{};
+            update_ring_.set_value(0.0f, true);
+            if (update_actions_.begin && update_actions_.begin())
+                update_ui_ = UpdateUi::working;
+            else
+                open_update_failure("The update could not start.", feedback);
+        }
+        else if (!update_dialog_.is_open())
+        {
+            update_ui_ = UpdateUi::hidden;
+        }
+        break;
+    }
+    case UpdateUi::working:
+    {
+        if (update_actions_.poll)
+            update_actions_.poll(&update_progress_);
+        const UpdateProgress &now = update_progress_;
+        update_ring_.style.mode =
+            now.total != 0 ? ui::ProgressMode::determinate : ui::ProgressMode::indeterminate;
+        if (now.total != 0)
+            update_ring_.set_value(
+                std::min(1.0f, static_cast<float>(static_cast<double>(now.done) /
+                                                  static_cast<double>(now.total))));
+        if (now.phase == UpdatePhase::ready)
+        {
+            if (update_actions_.apply && update_actions_.apply())
+            {
+                update_ui_ = UpdateUi::closing;
+                update_closing_age_ = 0.0f;
+                feedback.play(audio::Cue::saved);
+            }
+            else
+            {
+                if (update_actions_.finish)
+                    update_actions_.finish();
+                open_update_failure("The update helper did not answer.", feedback);
+            }
+        }
+        else if (now.phase == UpdatePhase::failed || now.phase == UpdatePhase::cancelled)
+        {
+            const bool cancelled = now.phase == UpdatePhase::cancelled;
+            const std::string reason = now.error;
+            if (update_actions_.finish)
+                update_actions_.finish();
+            if (cancelled)
+                update_ui_ = UpdateUi::hidden;
+            else
+                open_update_failure(reason.c_str(), feedback);
+        }
+        else if ((input.pressed & hui::action_bit(hui::Action::back)) != 0 &&
+                 update_actions_.cancel)
+        {
+            update_actions_.cancel();
+            feedback.play(audio::Cue::modal_close);
+        }
+        break;
+    }
+    case UpdateUi::closing:
+        // Long enough to read the last line; the helper waits for the app.
+        // Asked once: the launcher closes as soon as it hears it.
+        if (update_closing_age_ <= 1.5f && update_closing_age_ + dt > 1.5f)
+            update_exit_ = true;
+        update_closing_age_ += dt;
+        break;
+    default:
+        break;
+    }
+}
+
+// The update at work: a ring, what it is doing, and how much is left.
+void View::draw_update(ui::Canvas &canvas) const
+{
+    const float shown = update_fade_.value;
+    if (shown <= 0.01f)
+        return;
+    const ui::Theme &t = theme_;
+    gfx::DrawList &list = canvas.list;
+    list.rounded_rect({0, 0, gfx::kVirtualWidth, gfx::kVirtualHeight}, 0,
+                      Color::rgb(0x000000, 0.55f * shown));
+    list.push_opacity(shown);
+    const Rect panel = kUpdatePanel;
+    ui::draw_overlay_panel(canvas, t, panel, false, 0.6f);
+    ui::Painter paint(list, canvas.fonts, t, canvas.glass);
+    const bool closing = update_ui_ == UpdateUi::closing;
+    const UpdateProgress &now = update_progress_;
+    const char *doing = closing                                 ? "Updating"
+                        : now.phase == UpdatePhase::downloading ? "Downloading"
+                        : now.phase == UpdatePhase::unpacking   ? "Unpacking"
+                        : now.phase == UpdatePhase::ready || now.phase == UpdatePhase::applying
+                            ? "Finishing"
+                            : "Preparing";
+    paint.label(ui::upper(std::string("ProsperoLight ") + update_offer_.version), panel.cx(),
+                panel.y + 62.0f, 20.0f, t.text_muted, gfx::Align::center);
+    paint.heading(doing, panel.cx(), panel.y + 122.0f, 40.0f, gfx::Align::center);
+    update_ring_.draw(canvas);
+    char line[120] = "Starting the update helper";
+    if (closing)
+        std::snprintf(line, sizeof(line), "ProsperoLight closes now.");
+    else if (now.total != 0)
+        std::snprintf(line, sizeof(line), "%.1f of %.1f MB%s%s",
+                      static_cast<double>(now.done) / 1e6, static_cast<double>(now.total) / 1e6,
+                      now.time_left[0] ? "  \xC2\xB7  " : "", now.time_left);
+    paint.body(line, panel.cx(), panel.y + 442.0f, 26.0f, t.text, gfx::Align::center);
+    if (closing)
+    {
+        paint.body("Open it again when the console says it was updated.", panel.cx(),
+                   panel.y + panel.h - 54.0f, 22.0f, t.text_muted, gfx::Align::center);
+    }
+    else
+    {
+        // Nothing is changed before the download is checked; the way out is shown as its button.
+        const ui::GlyphStyle glyph = t.dark ? ui::GlyphStyle::dark() : ui::GlyphStyle::light();
+        const char *hint = "Cancel. Nothing is changed until the download is checked.";
+        const float width = ui::button_width(ui::Button::circle, 30.0f) + 12.0f +
+                            canvas.fonts.regular.font->measure(hint, 22.0f);
+        float x = panel.cx() - width * 0.5f;
+        ui::draw_button(list, canvas.fonts, glyph, ui::Button::circle, x, panel.y + panel.h - 70.0f,
+                        30.0f);
+        x += ui::button_width(ui::Button::circle, 30.0f) + 12.0f;
+        paint.body(hint, x, panel.y + panel.h - 62.0f, 22.0f, t.text_muted);
+    }
     list.pop_opacity();
 }
 
