@@ -348,6 +348,13 @@ mkdir -p "$app/sce_sys" "$app/sce_module"
 # Filesystem access is provided by a separately loaded upstream Lapy service.
 # Never retain the deprecated bundled helper in an incremental package.
 rm -f "$app/sandbox-elevator.elf"
+# The self-update helper (make self-update-helper): the app sends it to the
+# console's payload loader when the player accepts an update.
+[[ -f $root/build/self-update/self-updater.elf ]] || {
+    echo "build/self-update/self-updater.elf is missing; run make self-update-helper" >&2
+    exit 2
+}
+cp "$root/build/self-update/self-updater.elf" "$app/self-updater.elf"
 
 cp "$param" "$app/sce_sys/param.json"
 for asset in icon0.png pic0.dds pic1.dds snd0.at9; do
@@ -396,6 +403,7 @@ mkdir -p "$app/licenses"
 cp "$root/LICENSE" "$app/licenses/ProsperoLight-GPL.txt"
 cp "$root/THIRD_PARTY_NOTICES.md" "$app/licenses/THIRD_PARTY_NOTICES.md"
 cp "$root/third_party/licenses/libpng.txt" "$app/licenses/libpng.txt"
+cp "$root/third_party/licenses/miniz.txt" "$app/licenses/miniz.txt"
 cp "$root/third_party/moonlight-common-c/LICENSE.txt" "$app/licenses/moonlight-common-c-LICENSE.txt"
 if [[ ${PYROWAVE:-0} == 1 ]]; then
     cp "$root/src/pyrowave/LICENSE-MIT.txt" "$app/licenses/PS5-PyroWave-PoC-MIT.txt"

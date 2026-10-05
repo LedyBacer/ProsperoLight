@@ -12,6 +12,10 @@ LAN_TELEMETRY ?= 0
 STREAM_SELF_TEST_FPS ?= 0
 STREAM_SELF_TEST_RESOLUTION ?= 0
 STREAM_SELF_TEST_CODEC ?= 1
+# Development only: the update offer comes from update-offer.txt in the app's folder.
+UPDATE_DEV_OFFER ?= 0
+# With it: seconds after which the build accepts the offer by itself (0: the player answers).
+UPDATE_AUTO_ACCEPT ?= 0
 VIDEO_OUTPUT_SELF_TEST_FPS ?= 0
 STOP_ACTIVE_APP_SELF_TEST ?= 0
 # Tested one-flip overlap is on; dependency and audio experiments remain off.
@@ -40,6 +44,8 @@ APP_DEFINITIONS += PROSPEROLIGHT_LAN_TELEMETRY=$(LAN_TELEMETRY)
 APP_DEFINITIONS += PROSPEROLIGHT_STREAM_SELF_TEST_FPS=$(STREAM_SELF_TEST_FPS)
 APP_DEFINITIONS += PROSPEROLIGHT_STREAM_SELF_TEST_RESOLUTION=$(STREAM_SELF_TEST_RESOLUTION)
 APP_DEFINITIONS += PROSPEROLIGHT_STREAM_SELF_TEST_CODEC=$(STREAM_SELF_TEST_CODEC)
+APP_DEFINITIONS += PROSPEROLIGHT_UPDATE_DEV_OFFER=$(UPDATE_DEV_OFFER)
+APP_DEFINITIONS += PROSPEROLIGHT_UPDATE_AUTO_ACCEPT=$(UPDATE_AUTO_ACCEPT)
 APP_DEFINITIONS += PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS=$(VIDEO_OUTPUT_SELF_TEST_FPS)
 APP_DEFINITIONS += PROSPEROLIGHT_STOP_ACTIVE_APP_SELF_TEST=$(STOP_ACTIVE_APP_SELF_TEST)
 APP_DEFINITIONS += PROSPEROLIGHT_FEC_SIMD=$(FEC_SIMD)
@@ -117,10 +123,38 @@ doctor:
 	@printf '%s\n' '==> [doctor] Checking the Linux/WSL host without changing it'
 	@bash tools/doctor.sh
 
-test: test-unit test-integration test-performance-guards
+test: test-unit test-integration test-performance-guards test-self-update
 
 transport-deps:
 	@bash tools/pyrowave/apply-transport.sh
+
+# The self-update helper, a payload for the console's loader, travels in the
+# app's folder (third_party/self-update-helper, third_party/update-check).
+SELF_UPDATE_HELPER := build/self-update/self-updater.elf
+HOST_CC ?= clang
+
+.PHONY: self-update-helper test-self-update
+self-update-helper:
+	@printf '%s\n' '==> [self-update] Building the helper for the payload loader'
+	@bash tools/setup-native-dependencies.sh >/dev/null
+	@$(MAKE) --no-print-directory -s -C third_party/self-update-helper \
+		PS5_PAYLOAD_SDK="$(CURDIR)/.deps/native/ps5-payload-sdk" \
+		OUTPUT="$(CURDIR)/$(SELF_UPDATE_HELPER)"
+	@python3 tools/validate-loader-elf.py "$(SELF_UPDATE_HELPER)"
+
+test-self-update: test-deps
+	@printf '%s\n' '==> [test-self-update] Running the self-update engine against its helper'
+	@mkdir -p build/tests/self-update
+	@for name in miniz miniz_tinfl miniz_tdef miniz_zip; do \
+		$(HOST_CC) -std=c11 -O2 -w -g -fsanitize=address,undefined \
+			-c third_party/miniz/$$name.c -o build/tests/self-update/$$name.o || exit 1; \
+	done
+	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -g -fsanitize=address,undefined -fno-sanitize-recover=all \
+		-Ithird_party -Ithird_party/update-check \
+		third_party/self-update-helper/test_self_update.cpp third_party/self-update-helper/updater.cpp \
+		third_party/self-update-helper/archive.cpp third_party/self-update-helper/files.cpp \
+		build/tests/self-update/*.o -pthread $(HOST_TEST_LDFLAGS) -o build/tests/test_self_update
+	@build/tests/test_self_update
 
 test-deps:
 	@printf '%s\n' '==> [test-deps] Fetching the pinned host-only GoogleTest source'
@@ -362,3 +396,6 @@ controller-deps: $(if $(wildcard tools/pyrowave/apply-transport.sh),transport-de
 	@bash tools/controllers/apply-haptics.sh
 
 $(HOST_UNIT_TEST) test-integration test-stream-performance test-performance-guards: | controller-deps
+
+# Every package carries the helper that installs the next release.
+app ffpkg ffpfsc packages: self-update-helper
