@@ -114,7 +114,24 @@ ps5_network_metrics_t ps5_network_metrics_read(void)
 
 int socket(int domain, int type, int protocol)
 {
-    return network_result(sceNetSocket("moonlight", domain, type, protocol));
+    /* libcurl adds the BSD flags to the type. sceNetSocket takes the bare
+     * type and answers "protocol not supported" to anything else, which made
+     * every HTTPS request of the update check fail before it connected. */
+    int flags = 0;
+    int nonblocking = 0;
+#ifdef SOCK_CLOEXEC
+    flags |= SOCK_CLOEXEC;
+#endif
+#ifdef SOCK_NONBLOCK
+    flags |= SOCK_NONBLOCK;
+    nonblocking = (type & SOCK_NONBLOCK) != 0;
+#endif
+    const int id = network_result(sceNetSocket("moonlight", domain, type & ~flags, protocol));
+    if (id >= 0 && nonblocking) {
+        const int on = 1;
+        (void)sceNetSetsockopt(id, SOL_SOCKET, 0x1200 /* SO_NBIO */, &on, sizeof(on));
+    }
+    return id;
 }
 
 int bind(int socket_id, const struct sockaddr *address, socklen_t length)
@@ -481,6 +498,12 @@ static int parse_ipv4(const char *text, unsigned char octets[4])
 int __inet_pton(int family, const char *text, void *address)
 {
     unsigned char octets[4];
+    /* No IPv6 here, so no text is a valid IPv6 address: 0, not an error.
+     * libcurl asks this to tell a host name from an address, and took -1 for
+     * "an IPv6 address": it then sent no server name and compared the
+     * certificate with an address, so every HTTPS request failed. */
+    if (family == AF_INET6)
+        return 0;
     if (family != AF_INET) {
         errno = EAFNOSUPPORT;
         return -1;
