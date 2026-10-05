@@ -170,8 +170,8 @@ int main(int argc, char **argv)
     }
     const std::string assets = argv[1];
     const std::string output = argv[2];
-    const int width = argc > 4 ? std::atoi(argv[3]) : 1920;
-    const int height = argc > 4 ? std::atoi(argv[4]) : 1080;
+    const int width = argc > 4 ? std::atoi(argv[3]) : connecting::kWidth;
+    const int height = argc > 4 ? std::atoi(argv[4]) : connecting::kHeight;
     if (!open_context())
     {
         std::fprintf(stderr, "no surfaceless EGL OpenGL 4.5 context\n");
@@ -298,15 +298,16 @@ int main(int argc, char **argv)
                     offer->installable = pretend.installable;
                     offer->size = 84000000;
                     if (pretend.notes)
-                        offer->notes = "Streaming\n- PyroWave, a GPU codec for hosts that offer it.\n"
-                                       "- Frame pacing: Unpaced, Paced and Paced+VRR.\n"
-                                       "- More of the DualSense reaches the game: adaptive triggers, "
-                                       "light bar, motion and touchpad contacts.\nUpdates\n"
-                                       "- ProsperoLight installs new releases by itself.\n"
-                                       "Note: this release must be installed by hand; later ones "
-                                       "arrive through this dialog.\n"
-                                       "The decoder still limits the usable bitrate at 4K, as the "
-                                       "Settings screen shows.";
+                        offer->notes =
+                            "Streaming\n- PyroWave, a GPU codec for hosts that offer it.\n"
+                            "- Frame pacing: Unpaced, Paced and Paced+VRR.\n"
+                            "- More of the DualSense reaches the game: adaptive triggers, "
+                            "light bar, motion and touchpad contacts.\nUpdates\n"
+                            "- ProsperoLight installs new releases by itself.\n"
+                            "Note: this release must be installed by hand; later ones "
+                            "arrive through this dialog.\n"
+                            "The decoder still limits the usable bitrate at 4K, as the "
+                            "Settings screen shows.";
                     offer->notes_truncated = pretend.notes;
                     return true;
                 });
@@ -577,16 +578,16 @@ int main(int argc, char **argv)
     // The picture becomes a video frame; the stream draws the bar on it.
     expect(width == connecting::kWidth && height == connecting::kHeight &&
                plate.size() == static_cast<std::size_t>(width) * height * 4,
-           "the connecting screen is handed over as a 1920 x 1080 picture");
+           "the connecting screen is handed over as a full-resolution 4K picture");
     expect(plate_bar.progress > 0.29f && plate_bar.progress < 0.31f,
            "the launcher's bar stops at 30%, where the stream takes over");
     if (failures == 0)
     {
         connecting::Bar bar;
-        bar.x = plate_bar.rect.x;
-        bar.y = plate_bar.rect.y;
-        bar.width = plate_bar.rect.w;
-        bar.height = plate_bar.rect.h;
+        bar.x = plate_bar.rect.x * 2;
+        bar.y = plate_bar.rect.y * 2;
+        bar.width = plate_bar.rect.w * 2;
+        bar.height = plate_bar.rect.h * 2;
         bar.fill[0] = static_cast<std::uint8_t>(plate_bar.fill.r * 255.0f + 0.5f);
         bar.fill[1] = static_cast<std::uint8_t>(plate_bar.fill.g * 255.0f + 0.5f);
         bar.fill[2] = static_cast<std::uint8_t>(plate_bar.fill.b * 255.0f + 0.5f);
@@ -740,7 +741,9 @@ int main(int argc, char **argv)
     // Cancelled during the download: the launcher is back, nothing is applied.
     pretend = PretendUpdate{};
     pretend.installable = true;
-    session("self-update", {{150, 0}, {10, confirm}, {60, 0}, {10, back}, {60, 0, Direction::none, "cancelled"}}, "");
+    session("self-update",
+            {{150, 0}, {10, confirm}, {60, 0}, {10, back}, {60, 0, Direction::none, "cancelled"}},
+            "");
     expect(pretend.begins == 1 && pretend.cancelled && !pretend.applied && update_exits == 1,
            "cancelling leaves the app as it was");
 
@@ -749,7 +752,12 @@ int main(int argc, char **argv)
     pretend.installable = true;
     pretend.fails = true;
     session("self-update",
-            {{150, 0}, {10, confirm}, {120, 0, Direction::none, "failed"}, {10, 0, Direction::left}, {10, confirm}, {60, 0}},
+            {{150, 0},
+             {10, confirm},
+             {120, 0, Direction::none, "failed"},
+             {10, 0, Direction::left},
+             {10, confirm},
+             {60, 0}},
             "");
     expect(pretend.begins == 1 && !pretend.applied && update_exits == 1,
            "a failed update changes nothing and closes on request");
@@ -770,7 +778,8 @@ int main(int argc, char **argv)
              {10, confirm},
              {40, 0}},
             "");
-    expect(pretend.begins == 1, "What's new can be read, left and come back to, and Cross updates from it");
+    expect(pretend.begins == 1,
+           "What's new can be read, left and come back to, and Cross updates from it");
     pretend = PretendUpdate{};
     offer_update = false;
 
