@@ -108,12 +108,15 @@ The streaming protocol and decoder integration use pinned source revisions of
 corresponding `third_party/` source trees. None of these dependencies is
 claimed to be project-authored.
 
-## Update check
+## Update check and self-update
 
-`third_party/update-check/` is the update check of
+`third_party/update-check/` and `third_party/self-update-helper/` are the update check, the
+self-update engine and its helper of
 [ps5-native-app-boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate)
-(`examples/update-check`), Copyright (C) 2026 BlackBearReloaded,
-GPL-3.0-or-later. It asks the [homebrew.page](https://homebrew.page) catalog
+(`examples/update-check`, `examples/self-update`, `examples/self-update-helper`),
+Copyright (C) 2026 BlackBearReloaded, GPL-3.0-or-later. The helper reads ZIP archives with
+[miniz](https://github.com/richgel999/miniz) (`third_party/miniz`, MIT; its licence is
+`third_party/licenses/miniz.txt` and ships with the app). It asks the [homebrew.page](https://homebrew.page) catalog
 through libcurl, which the build takes from the pinned PacBrew release
 v0.40.2 and links statically with its dependencies. Their licence texts are in
 `third_party/licenses/`:

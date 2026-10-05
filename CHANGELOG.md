@@ -14,6 +14,9 @@
 - Two more stream shortcuts: Touchpad + L3 and Touchpad + R3 send the host's Back and
   Guide buttons.
 - New switches in Settings: menu sounds, quit the host app after a stream, diagnostic logs.
+- Updates from the app: when homebrew.page lists a newer release, a dialog offers it and
+  **Update now** downloads, checks and installs it; ProsperoLight closes while its files
+  are replaced. The ten-second notice remains for releases it cannot install itself.
 - Box art is decoded by libpng, and a raw exFAT installation image is built beside the
   compressed one.
 

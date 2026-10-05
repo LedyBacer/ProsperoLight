@@ -185,9 +185,9 @@ tooling are maintained in this repository.
   `/data/prosperolight` across application restarts and updates.
 - Pair with a two-minute PIN dialog with a countdown, and unpair after a
   confirmation.
-- Tell you when a newer version is listed on
-  [homebrew.page](https://homebrew.page): one notice for ten seconds, once per
-  launch. Nothing is downloaded or installed.
+- Update itself: when a newer version is listed on
+  [homebrew.page](https://homebrew.page), a dialog offers it once per launch and
+  **Update now** installs it. See [Update an installed copy](#update-an-installed-copy).
 - See every saved PC and its state in one list, and browse up to 64 advertised
   Sunshine applications as posters with launch/resume and stop controls.
 - Decode H.264 High and HEVC Main streams through VideoDec2 at 1080p, 1440p,
@@ -329,6 +329,31 @@ again, then publishes the `.ffpfsc` image, app-folder `.zip`, and `SHA256SUMS`.
 `.ffpkg` builds are never attached to a release.
 
 ## Update an installed copy
+
+### From the app
+
+Once each time it opens, ProsperoLight asks [homebrew.page](https://homebrew.page/ps5)
+which release of it is listed there. The request carries the app's title ID and nothing
+else. If the listed release is newer than the one running, a dialog offers it, with its
+version and download size:
+
+- **Update now** downloads the release ZIP from its GitHub release, checks it against the
+  SHA-256 in the catalog's signed list, and unpacks it beside the app. A ring shows how far
+  it is and the time left; ![Circle][circle] cancels, and nothing has changed until the end.
+  Then ProsperoLight closes, the update helper (`self-updater.elf`, sent to the console's
+  payload loader on port 9021) replaces the app's files, and the console shows a
+  notification. Open ProsperoLight again to use the new version.
+- **Skip** keeps the version you have. The dialog shows again the next time ProsperoLight
+  opens, not when you come back from a stream.
+
+If the download or the unpacking fails, the dialog says why and offers **Try again**; the
+app stays as it was. Without a network, or without an answer, nothing is shown. When
+ProsperoLight cannot install the release itself (it is not a ZIP on GitHub), a notice says
+**Update available** for ten seconds instead, and the steps below still work. The app must
+be installed as a folder (`/data/homebrew/PPSA99002`); a copy installed as an image cannot
+replace itself, and the dialog says so.
+
+### By hand
 
 1. Download either `PPSA99002.ffpfsc` or `PPSA99002.zip` from the latest GitHub
    release and verify it with `SHA256SUMS`.
