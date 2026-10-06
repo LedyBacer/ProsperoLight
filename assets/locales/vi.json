@@ -290,5 +290,21 @@
   "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · Tùy chỉnh · 1 FPS",
   "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "Tắt âm thanh trên PC · PS5: Thiết lập âm thanh",
   "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: Tối ưu trò chơi/màn hình",
-  "Could not save client settings": "Error · Cài đặt"
+  "Could not save client settings": "Error · Cài đặt",
+  "PC settings": "Cài đặt PC",
+  "Host extensions": "Phần mở rộng máy chủ",
+  "Host default": "Mặc định máy chủ",
+  "Host display": "Màn hình máy chủ",
+  "Physical display": "Màn hình vật lý",
+  "Virtual display": "Màn hình ảo",
+  "Host resolution scale": "Tỷ lệ độ phân giải",
+  "Reset PC settings": "Đặt lại cài đặt PC",
+  "Selected PC": "Cài đặt PC",
+  "Select a PC first": "Máy tính: Không có",
+  "Host VRR": "VRR · Phiên máy chủ",
+  "Vibepollo only. Off preserves standard Sunshine requests.": "Vibepollo: Bật · Sunshine: Tắt",
+  "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Vibepollo · Màn hình ảo · VRR",
+  "Virtual display requires a ready host driver.": "Màn hình ảo · Vibepollo",
+  "Saved for this PC. DS4/DS5 emulation is selected on the host.": "Cài đặt PC · DS4/DS5: Phiên máy chủ",
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100%: Độ phân giải · 50–100%"
 }

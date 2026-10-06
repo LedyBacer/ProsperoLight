@@ -290,5 +290,21 @@
   "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · מותאם אישית · 1 FPS",
   "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "השתקת שמע במחשב · PS5: שמע",
   "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: מיטוב המשחק/התצוגה",
-  "Could not save client settings": "Error · הגדרות"
+  "Could not save client settings": "Error · הגדרות",
+  "PC settings": "הגדרות מחשב",
+  "Host extensions": "הרחבות המארח",
+  "Host default": "ברירת מחדל של המארח",
+  "Host display": "תצוגת המארח",
+  "Physical display": "תצוגה פיזית",
+  "Virtual display": "תצוגה וירטואלית",
+  "Host resolution scale": "קנה מידה של הרזולוציה",
+  "Reset PC settings": "איפוס הגדרות מחשב",
+  "Selected PC": "הגדרות מחשב",
+  "Select a PC first": "מחשבים: אין",
+  "Host VRR": "VRR · הפעלת מארח",
+  "Vibepollo only. Off preserves standard Sunshine requests.": "Vibepollo: פעיל · Sunshine: כבוי",
+  "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Vibepollo · תצוגה וירטואלית · VRR",
+  "Virtual display requires a ready host driver.": "תצוגה וירטואלית · Vibepollo",
+  "Saved for this PC. DS4/DS5 emulation is selected on the host.": "הגדרות מחשב · DS4/DS5: הפעלת מארח",
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100%: רזולוציה · 50–100%"
 }

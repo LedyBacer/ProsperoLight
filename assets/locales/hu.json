@@ -290,5 +290,21 @@
   "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · Egyéni · 1 FPS",
   "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "PC hangjának némítása · PS5: Audió konfiguráció",
   "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: Játék/kijelző optimalizálása",
-  "Could not save client settings": "Error · Beállítások"
+  "Could not save client settings": "Error · Beállítások",
+  "PC settings": "PC-beállítások",
+  "Host extensions": "Gazdagép-bővítmények",
+  "Host default": "Gazdagép alapértéke",
+  "Host display": "Gazdagép kijelzője",
+  "Physical display": "Fizikai kijelző",
+  "Virtual display": "Virtuális kijelző",
+  "Host resolution scale": "Felbontás skálázása",
+  "Reset PC settings": "PC-beállítások visszaállítása",
+  "Selected PC": "PC-beállítások",
+  "Select a PC first": "Számítógépek: Nincs",
+  "Host VRR": "VRR · Gazdagép-munkamenet",
+  "Vibepollo only. Off preserves standard Sunshine requests.": "Vibepollo: Be · Sunshine: Ki",
+  "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Vibepollo · Virtuális kijelző · VRR",
+  "Virtual display requires a ready host driver.": "Virtuális kijelző · Vibepollo",
+  "Saved for this PC. DS4/DS5 emulation is selected on the host.": "PC-beállítások · DS4/DS5: Gazdagép-munkamenet",
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100%: Felbontás · 50–100%"
 }

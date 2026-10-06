@@ -290,5 +290,21 @@
   "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · تایبەت · 1 FPS",
   "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "بێدەنگکردنی کۆمپیوتەر · PS5: دەنگ",
   "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: باشترکردنی یاری/پیشاندەر",
-  "Could not save client settings": "Error · ڕێکخستنەکان"
+  "Could not save client settings": "Error · ڕێکخستنەکان",
+  "PC settings": "ڕێکخستنی کۆمپیوتەر",
+  "Host extensions": "پاشکۆکانی میواندار",
+  "Host default": "بنەڕەتی میواندار",
+  "Host display": "پیشاندەری میواندار",
+  "Physical display": "پیشاندەری فیزیکی",
+  "Virtual display": "پیشاندەری مەجازی",
+  "Host resolution scale": "پێوەری وێنەی میواندار",
+  "Reset PC settings": "گەڕاندنەوەی ڕێکخستن",
+  "Selected PC": "ڕێکخستنی کۆمپیوتەر",
+  "Select a PC first": "کۆمپیوتەرەکان: هیچ",
+  "Host VRR": "VRR · دانیشتنی خانەخوێ",
+  "Vibepollo only. Off preserves standard Sunshine requests.": "Vibepollo: چالاک · Sunshine: ناچالاک",
+  "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Vibepollo · پیشاندەری مەجازی · VRR",
+  "Virtual display requires a ready host driver.": "پیشاندەری مەجازی · Vibepollo",
+  "Saved for this PC. DS4/DS5 emulation is selected on the host.": "ڕێکخستنی کۆمپیوتەر · DS4/DS5: دانیشتنی خانەخوێ",
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100%: ڕوونی · 50–100%"
 }

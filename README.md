@@ -685,3 +685,17 @@ Select 30, 60, 90, 120, or Custom in Settings. Custom reveals a slider directly 
 Sources: [Moonlight request implementation](https://github.com/moonlight-stream/moonlight-qt/blob/master/app/backend/nvhttp.cpp), [Sunshine configuration](https://docs.lizardbyte.dev/projects/sunshine/master/md_docs_2configuration.html), [Vibepollo display automation change](https://github.com/Nonary/Vibepollo/releases/tag/1.6.0-apollo).
 
 Further Vibepollo options should be optional and capability-aware: virtual display selection can complement host preferences, and `clientVrrRequested` is a host display hint, not proof of PS5 VRR. Keep scaling at its default unless explicitly requested. Encoder, RTSS, and frame-generation configuration remains on the host. These additional overrides are not enabled by this change.
+
+### Per-PC host settings
+
+Use **PCs → PC settings**, or the **Host session** section in Settings. The named selected PC owns these settings; switching PCs does not copy them. Settings are stored by server identity, with an address/port fallback before pairing. Removing a PC clears its preferences; Reset PC settings restores defaults.
+
+Host audio, optimization, and quitting the host app are now per-PC. Existing global choices provide migration defaults for PCs without saved preferences. FPS/codec/bitrate and PS5 presentation settings remain client-wide.
+
+**Host extensions** defaults to Off: ordinary Sunshine receives the standard request. Select Vibepollo only for a compatible host. Its advanced options default to the host policy: Host VRR and Host display omit overrides, and 100% resolution scale omits scaling. Turning extensions off preserves saved advanced choices but sends none of them. These options apply to both launch and resume.
+
+Host VRR is experimental and requests Vibepollo virtual-display capture timing, rather than enabling TV VRR. Automatic virtual-display policy in current Vibepollo can use a fixed 1000 Hz virtual output for more precise capture timestamps; it does not change the requested stream FPS. Explicit virtual display selection requires the host to advertise a ready driver. A scale below 100% may lower effective resolution; application overrides on the host can take priority.
+
+The launch controller mask (`gcmap` and `remoteControllersBitmap`) contains only connected PS5 controllers, up to four. Vibepollo requests also carry their PlayStation mask (`psmap`, intersected with `gcmap`). In current Vibepollo this supports PlayStation compatibility policy for Proton launches; it is not a DS4/DS5 selector. Controller arrival events continue to identify PlayStation controllers for hot-plug. DS4 versus DS5 is selected in the host's ViGEm/VHF configuration, so the client does not expose a nonfunctional selector.
+
+Sources: [host request parsing](https://github.com/Nonary/Vibepollo/blob/master/src/nvhttp.cpp), [Proton launch policy](https://github.com/Nonary/Vibepollo/blob/master/src/process.cpp), [host controller profile selection](https://github.com/Nonary/Vibepollo/blob/master/src/platform/windows/input.cpp).

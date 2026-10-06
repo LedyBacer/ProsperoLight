@@ -950,7 +950,7 @@ class ToolTests(unittest.TestCase):
         view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
         model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
 
-        self.assertCodeContains('host_actions_.set_items({{"Change port"}, {"Unpair"}});', view)
+        self.assertCodeContains('host_actions_.set_items({{"Change port"}, {"Unpair"}, {"PC settings"}});', view)
         self.assertCodeContains('port_prompt_.set_title("Sunshine port");', view)
         self.assertCodeContains("port_prompt_.keyboard.set_layouts({ui::KeyboardLayout::numeric()});", view)
         # An empty entry means Sunshine's default port.

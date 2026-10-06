@@ -290,5 +290,21 @@
   "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · தனிப்பயன் · 1 FPS",
   "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "கணினி ஒலியை முடக்கு · PS5: ஆடியோ உள்ளமைவு",
   "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: விளையாட்டு/திரையை மேம்படுத்து",
-  "Could not save client settings": "Error · அமைப்புகள்"
+  "Could not save client settings": "Error · அமைப்புகள்",
+  "PC settings": "கணினி அமைப்புகள்",
+  "Host extensions": "ஹோஸ்ட் நீட்டிப்புகள்",
+  "Host default": "ஹோஸ்ட் இயல்புநிலை",
+  "Host display": "ஹோஸ்ட் திரை",
+  "Physical display": "இயற்பியல் திரை",
+  "Virtual display": "மெய்நிகர் திரை",
+  "Host resolution scale": "தெளிவுத்திறன் அளவு",
+  "Reset PC settings": "கணினி அமைப்புகளை மீட்டமை",
+  "Selected PC": "கணினி அமைப்புகள்",
+  "Select a PC first": "கணினிகள்: எதுவுமில்லை",
+  "Host VRR": "VRR · ஹோஸ்ட் அமர்வு",
+  "Vibepollo only. Off preserves standard Sunshine requests.": "Vibepollo: இயக்கு · Sunshine: அணை",
+  "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Vibepollo · மெய்நிகர் திரை · VRR",
+  "Virtual display requires a ready host driver.": "மெய்நிகர் திரை · Vibepollo",
+  "Saved for this PC. DS4/DS5 emulation is selected on the host.": "கணினி அமைப்புகள் · DS4/DS5: ஹோஸ்ட் அமர்வு",
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100%: தெளிவுத்திறன் · 50–100%"
 }
