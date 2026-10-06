@@ -23,7 +23,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-PlayStation%205-003791?logo=playstation&amp;logoColor=white" alt="PlayStation 5">
   <img src="https://img.shields.io/badge/video-H.264%20%7C%20HEVC%20%7C%20PyroWave-70E1DC" alt="H.264, HEVC and PyroWave">
-  <img src="https://img.shields.io/badge/frame%20rate-60%20%7C%2090%20%7C%20120%20FPS-5BBEFF" alt="60, 90, and 120 FPS">
+  <img src="https://img.shields.io/badge/frame%20rate-30–120%20FPS-5BBEFF" alt="30 through 120 FPS">
   <img src="https://img.shields.io/badge/audio-Stereo%20%7C%205.1%20Opus-7DD3FC" alt="Stereo and 5.1 Opus audio">
   <img src="https://img.shields.io/badge/UI-OpenGL-5DDFA4" alt="OpenGL launcher">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
@@ -36,7 +36,7 @@ The picture shows the launcher running on a PlayStation 5 with a paired Sunshine
 ## Highlights
 
 - Native PS5 hardware streaming through VideoDec2 and AGC at 1080p, 1440p,
-  and 2160p, with independently selectable 60, 90, and 120 FPS stream targets.
+  and 2160p, with independently selectable 30, 60, 90, and 120 FPS stream targets, plus Custom (30–120 FPS in steps of 1).
 - Decoding and presentation on separate threads: a late flip never holds back
   decoding, and every display refresh shows the newest decoded frame. See the
   [measured bitrate limits](#bitrate-limits) before raising the bitrate.
@@ -661,3 +661,41 @@ Copyright © 2026 BlackBearReloaded. Licensed under GPL-3.0-or-later; see [LICEN
 
 This project was developed with AI assistance from OpenAI and/or Anthropic tools.
 <!-- bbr-footer:end -->
+
+### Interface language
+
+Settings → Language opens a scrolling dropdown with the Moonlight Qt language
+set (30 translations plus English). Automatic follows the console language at
+startup; unsupported/error results use English. Manual selection applies
+immediately and is preserved across restarts without changing pairing or stream
+settings. Readable translations are stored in `assets/locales/*.json`. See
+[localization maintenance](tools/i18n/README.md) for fonts, source attribution,
+and regeneration after editing a catalog. Some complex-script and mixed-direction
+layouts still need native-speaker visual review. Diagnostic logs and stream
+performance measurements keep their technical English labels.
+
+### Client FPS and host options
+
+Select 30, 60, 90, 120, or Custom in Settings. Custom reveals a slider directly below the selector (30–120, step 1). Its selection and value persist; selecting a preset hides the slider.
+
+**Mute host audio** requests audio on the PS5 without playback on the PC (`localAudioPlayMode=0`). Turning it off requests playback on both. Actual host silence depends on the host audio device/routing; a virtual audio sink is typically required. An already active host session can keep its existing audio policy.
+
+**Optimize game/display settings** sends the standard Moonlight `sops` request. GeForce Experience can optimize game settings. Sunshine can use it for display automation, rather than game quality. Vibepollo removed the requirement for this flag in its display automation; it may have no effect there. Both options preserve the previous defaults (mute and optimization enabled) and apply to the next launch/resume request.
+
+Sources: [Moonlight request implementation](https://github.com/moonlight-stream/moonlight-qt/blob/master/app/backend/nvhttp.cpp), [Sunshine configuration](https://docs.lizardbyte.dev/projects/sunshine/master/md_docs_2configuration.html), [Vibepollo display automation change](https://github.com/Nonary/Vibepollo/releases/tag/1.6.0-apollo).
+
+Further Vibepollo options should be optional and capability-aware: virtual display selection can complement host preferences, and `clientVrrRequested` is a host display hint, not proof of PS5 VRR. Keep scaling at its default unless explicitly requested. Encoder, RTSS, and frame-generation configuration remains on the host. These additional overrides are not enabled by this change.
+
+### Per-PC host settings
+
+Use **PCs → PC settings**, or the **Host session** section in Settings. The named selected PC owns these settings; switching PCs does not copy them. Settings are stored by server identity, with an address/port fallback before pairing. Removing a PC clears its preferences; Reset PC settings restores defaults.
+
+Host audio, optimization, and quitting the host app are now per-PC. Existing global choices provide migration defaults for PCs without saved preferences. FPS/codec/bitrate and PS5 presentation settings remain client-wide.
+
+**Host extensions** defaults to Off: ordinary Sunshine receives the standard request. Select Vibepollo only for a compatible host. Its advanced options default to the host policy: Host VRR and Host display omit overrides, and 100% resolution scale omits scaling. Turning extensions off preserves saved advanced choices but sends none of them. These options apply to both launch and resume.
+
+Host VRR is experimental and requests Vibepollo virtual-display capture timing, rather than enabling TV VRR. Automatic virtual-display policy in current Vibepollo can use a fixed 1000 Hz virtual output for more precise capture timestamps; it does not change the requested stream FPS. Explicit virtual display selection requires the host to advertise a ready driver. A scale below 100% may lower effective resolution; application overrides on the host can take priority.
+
+The launch controller mask (`gcmap` and `remoteControllersBitmap`) contains only connected PS5 controllers, up to four. Vibepollo requests also carry their PlayStation mask (`psmap`, intersected with `gcmap`). In current Vibepollo this supports PlayStation compatibility policy for Proton launches; it is not a DS4/DS5 selector. Controller arrival events continue to identify PlayStation controllers for hot-plug. DS4 versus DS5 is selected in the host's ViGEm/VHF configuration, so the client does not expose a nonfunctional selector.
+
+Sources: [host request parsing](https://github.com/Nonary/Vibepollo/blob/master/src/nvhttp.cpp), [Proton launch policy](https://github.com/Nonary/Vibepollo/blob/master/src/process.cpp), [host controller profile selection](https://github.com/Nonary/Vibepollo/blob/master/src/platform/windows/input.cpp).

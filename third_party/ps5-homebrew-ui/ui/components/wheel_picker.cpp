@@ -275,9 +275,7 @@ void WheelPicker::draw(Canvas &canvas) const
     const Color resting = on_page ? paint.page_text() : theme.text;
     const Color quiet = on_page ? paint.page_text_muted() : theme.text_muted;
     if (!title_.empty())
-        paint.label(fit_label(paint, title_, style.title_size, bounds_.w), bounds_.x,
-                    bounds_.y + style.title_size * 0.82f, style.title_size,
-                    style.on_page ? paint.page_text_muted() : theme.text_muted);
+        paint.bounded_label(title_, bounds_.x, bounds_.y + style.title_size * 0.82f, style.title_size, style.on_page ? paint.page_text_muted() : theme.text_muted, bounds_.w);
 
     const auto placed = [&](const Rect &r)
     { return Rect{bounds_.x + r.x, bounds_.y + r.y, r.w, r.h}; };

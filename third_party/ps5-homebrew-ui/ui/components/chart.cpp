@@ -81,8 +81,7 @@ Frame begin_chart(Canvas &canvas, Painter &paint, const ChartStyle &style, const
     if (placement == LegendPlacement::top && legend_width > in.w - title_width - 18.0f)
         placement = LegendPlacement::bottom;
     if (!title.empty())
-        paint.label(fit_label(paint, title, style.title_size, in.w), in.x,
-                    in.y + style.title_size * 0.9f, style.title_size, ink.text);
+        paint.bounded_label(title, in.x, in.y + style.title_size * 0.9f, style.title_size, ink.text, in.w);
     if (!title.empty() || placement == LegendPlacement::top)
     {
         frame.plot.y += line;
@@ -339,8 +338,7 @@ void Legend::draw_at(Canvas &canvas, const Rect &bounds) const
                                      ink.text.with_alpha(a), gfx::Align::right) +
                          10.0f;
             const float left = bounds.x + style.swatch + 10.0f;
-            paint.label(fit_label(paint, item.label, size, std::max(right - left, 20.0f)), left,
-                        cy + size * 0.35f, size, ink.muted.with_alpha(a));
+            paint.bounded_label(item.label, left, cy + size * 0.35f, size, ink.muted.with_alpha(a), std::max(right - left, 20.0f));
         }
         return;
     }
@@ -378,8 +376,7 @@ void Legend::draw_at(Canvas &canvas, const Rect &bounds) const
             float room = widths[i] - style.swatch - 8.0f + 0.5f;
             if (!item.value.empty())
                 room -= 8.0f + number_width(paint, item.value, size);
-            text_x += paint.label(fit_label(paint, item.label, size, std::max(room, 16.0f)), text_x,
-                                  cy + size * 0.35f, size, ink.muted.with_alpha(a));
+            text_x += paint.bounded_label(item.label, text_x, cy + size * 0.35f, size, ink.muted.with_alpha(a), std::max(room, 16.0f));
             if (!item.value.empty())
                 draw_number(paint, list, item.value, text_x + 8.0f, cy + size * 0.35f, size,
                             ink.text.with_alpha(a));
@@ -812,9 +809,7 @@ void BarChart::draw(Canvas &canvas) const
                 first_letters(categories_[static_cast<std::size_t>(c)], letters);
             const float centre = start + (static_cast<float>(c) + 0.5f) * slot;
             if (across)
-                paint.label(fit_label(paint, name, axis.label_size, plot.x - frame.plot.x - 8.0f),
-                            plot.x - 10.0f, centre + axis.label_size * 0.35f, axis.label_size, tone,
-                            gfx::Align::right);
+                paint.bounded_label(name, plot.x - 10.0f, centre + axis.label_size * 0.35f, axis.label_size, tone, plot.x - frame.plot.x - 8.0f, gfx::Align::right);
             else
                 paint.label(name, centre, plot.y + plot.h + axis.label_size + 6.0f, axis.label_size,
                             tone, gfx::Align::center);

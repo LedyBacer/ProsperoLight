@@ -201,10 +201,10 @@ void HoldButton::draw(Canvas &canvas) const
     const float lead = has_glyph ? glyph_w + 2.0f * ring_reach : 0.0f;
     const float lead_gap = has_glyph ? style.gap : 0.0f;
     const float room = std::max(content.w - 2.0f * m.padding - lead - lead_gap, 0.0f);
-    const std::string text = fit_label(paint, label, m.text_size, room);
-    const std::string nudge = fit_label(paint, hint, m.text_size, room);
-    const float text_w = tween::lerp(paint.label_width(text, m.text_size),
-                                     paint.label_width(nudge, m.text_size), hinting);
+    const std::string &text = label;
+    const std::string &nudge = hint;
+    const float text_w = std::min(tween::lerp(paint.label_width(text, m.text_size),
+                                     paint.label_width(nudge, m.text_size), hinting), room);
     const float x = content.cx() - (lead + lead_gap + text_w) * 0.5f;
     const bool lined = style.variant == HoldVariant::underline;
     const float cy = content.cy() - (lined ? style.line_height * 0.5f + 1.0f : 0.0f);
@@ -229,9 +229,9 @@ void HoldButton::draw(Canvas &canvas) const
     const float text_x = x + lead + lead_gap;
     const float baseline = baseline_for(cy, m.text_size);
     if (hinting < 0.99f)
-        paint.label(text, text_x, baseline, m.text_size, ink.with_alpha(1.0f - hinting));
+        paint.bounded_label(text, text_x, baseline, m.text_size, ink.with_alpha(1.0f - hinting), room);
     if (hinting > 0.01f)
-        paint.label(nudge, text_x, baseline, m.text_size, ink.with_alpha(hinting));
+        paint.bounded_label(nudge, text_x, baseline, m.text_size, ink.with_alpha(hinting), room);
 
     if (lined)
     {

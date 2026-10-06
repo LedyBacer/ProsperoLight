@@ -127,7 +127,7 @@ bool LoadFont(gfx::Renderer &renderer, const char *name, gfx::Font *font, ui::Fo
 {
     std::string data;
     const std::string path = Assets() + "/fonts/" + name;
-    if (!save::read_file(path, &data, 8u << 20) || !font->load(data))
+    if (!save::read_file(path, &data, 32u << 20) || !font->load(data))
     {
         sys::log("[PL] launcher: font %s failed: %s", name, font->error().c_str());
         return false;

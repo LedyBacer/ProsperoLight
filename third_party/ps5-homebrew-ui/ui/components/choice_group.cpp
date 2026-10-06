@@ -257,8 +257,7 @@ void ChoiceGroup::draw(Canvas &canvas) const
     const Color resting = style.on_page ? paint.page_text() : theme.text;
     const Color quiet = style.on_page ? paint.page_text_muted() : theme.text_muted;
     if (!title_.empty())
-        paint.label(fit_label(paint, title_, style.title_size, bounds_.w), bounds_.x,
-                    bounds_.y + style.title_size * 0.82f, style.title_size, quiet);
+        paint.bounded_label(title_, bounds_.x, bounds_.y + style.title_size * 0.82f, style.title_size, quiet, bounds_.w);
     if (items_.empty())
         return;
 
@@ -305,18 +304,14 @@ void ChoiceGroup::draw(Canvas &canvas) const
         const float room = std::max(cell.x + cell.w - style.padding - left, 30.0f);
         if (description.empty())
         {
-            paint.label(fit_label(paint, label, style.label_size, room), left,
-                        cell.cy() + style.label_size * 0.35f, style.label_size, ink);
+            paint.bounded_label(label, left, cell.cy() + style.label_size * 0.35f, style.label_size, ink, room);
         }
         else
         {
             const float block = style.label_size + style.description_size * 1.25f;
             const float first = cell.cy() - block * 0.5f + style.label_size * 0.84f;
-            paint.label(fit_label(paint, label, style.label_size, room), left, first,
-                        style.label_size, ink);
-            paint.body(fit_body(paint, description, style.description_size, room), left,
-                       first + style.description_size * 1.3f, style.description_size,
-                       gfx::mix(quiet, ink, focus * 0.6f));
+            paint.bounded_label(label, left, first, style.label_size, ink, room);
+            paint.bounded_body(description, left, first + style.description_size * 1.3f, style.description_size, gfx::mix(quiet, ink, focus * 0.6f), room);
         }
         if (disabled)
             list.pop_opacity();

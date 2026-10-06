@@ -344,8 +344,7 @@ void ProfilePicker::draw_card(Canvas &canvas, int index, float entrance) const
         const float arm = reach * 0.42f;
         list.line(cx - arm, avatar_cy, cx + arm, avatar_cy, 4.0f, ink);
         list.line(cx, avatar_cy - arm, cx, avatar_cy + arm, 4.0f, ink);
-        paint.label(fit_label(paint, style.add_label, style.name_size, room), cx, name_y,
-                    style.name_size, ink, gfx::Align::center);
+        paint.bounded_label(style.add_label, cx, name_y, style.name_size, ink, room, gfx::Align::center);
     }
     else
     {
@@ -371,18 +370,14 @@ void ProfilePicker::draw_card(Canvas &canvas, int index, float entrance) const
                 paint.stroke(face.inset(-6.0f), std::min(theme.radius, face.w * 0.5f) + 6.0f, 3.0f,
                              accent.with_alpha(f));
         }
-        paint.label(fit_label(paint, who.name, style.name_size, room), cx, name_y, style.name_size,
-                    theme.text, gfx::Align::center);
+        paint.bounded_label(who.name, cx, name_y, style.name_size, theme.text, room, gfx::Align::center);
         const float detail_y = name_y + style.detail_size + 10.0f;
         if (!who.detail.empty())
-            paint.body(fit_body(paint, who.detail, style.detail_size, room), cx, detail_y,
-                       style.detail_size, theme.text_muted, gfx::Align::center);
+            paint.bounded_body(who.detail, cx, detail_y, style.detail_size, theme.text_muted, room, gfx::Align::center);
         if (!who.extra.empty() && f > 0.02f && style.expand > 0.0f)
         {
             list.push_opacity(tween::clamp01(f * 1.6f - 0.6f));
-            paint.body(fit_body(paint, who.extra, style.detail_size, room), cx,
-                       detail_y + style.detail_size + 12.0f, style.detail_size,
-                       gfx::mix(theme.text_muted, theme.text, 0.6f), gfx::Align::center);
+            paint.bounded_body(who.extra, cx, detail_y + style.detail_size + 12.0f, style.detail_size, gfx::mix(theme.text_muted, theme.text, 0.6f), room, gfx::Align::center);
             list.pop_opacity();
         }
         if (style.slots && who.controller >= 1 && who.controller <= 4)

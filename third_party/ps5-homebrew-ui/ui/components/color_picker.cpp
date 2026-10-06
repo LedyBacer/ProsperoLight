@@ -497,8 +497,7 @@ void ColorPicker::draw(Canvas &canvas) const
     const Color quiet = style.on_page ? paint.page_text_muted() : theme.text_muted;
     const Color resting = style.on_page ? paint.page_text() : theme.text;
     if (!title_.empty())
-        paint.label(fit_label(paint, title_, style.title_size, bounds_.w), bounds_.x,
-                    bounds_.y + style.title_size * 0.82f, style.title_size, quiet);
+        paint.bounded_label(title_, bounds_.x, bounds_.y + style.title_size * 0.82f, style.title_size, quiet, bounds_.w);
 
     const Layout at = layout();
     const auto placed = [&](const Rect &r)
@@ -634,8 +633,7 @@ void ColorPicker::draw(Canvas &canvas) const
         if (style.hex)
         {
             const float first = box.y + box.h + 6.0f + style.hex_size;
-            paint.label(fit_label(paint, hex(), style.hex_size, column.w), column.x, first,
-                        style.hex_size, resting);
+            paint.bounded_label(hex(), column.x, first, style.hex_size, resting, column.w);
             char text[48];
             if (style.kind == ColorPickerKind::hsv)
             {
@@ -659,8 +657,7 @@ void ColorPicker::draw(Canvas &canvas) const
             {
                 std::snprintf(text, sizeof(text), "Custom");
             }
-            paint.body(fit_body(paint, text, 19.0f, column.w), column.x, first + 19.0f * 1.4f,
-                       19.0f, quiet);
+            paint.bounded_body(text, column.x, first + 19.0f * 1.4f, 19.0f, quiet, column.w);
         }
     }
 }

@@ -312,13 +312,10 @@ void draw_card(Canvas &canvas, const ComponentStyle &style, const CardLook &look
         float baseline = picture.y + picture.h - look.text_inset - bar_room;
         if (two)
         {
-            paint.body(fit_body(paint, item.subtitle, look.subtitle_size, room), x,
-                       baseline - look.subtitle_size * 0.2f, look.subtitle_size,
-                       ink.with_alpha(0.78f), look.align);
+            paint.bounded_body(item.subtitle, x, baseline - look.subtitle_size * 0.2f, look.subtitle_size, ink.with_alpha(0.78f), room, look.align);
             baseline -= look.subtitle_size * 1.3f;
         }
-        paint.label(fit_label(paint, item.title, look.title_size, room), x,
-                    baseline - look.title_size * 0.2f, look.title_size, ink, look.align);
+        paint.bounded_label(item.title, x, baseline - look.title_size * 0.2f, look.title_size, ink, room, look.align);
         list.pop_opacity();
     }
 
@@ -392,12 +389,9 @@ void draw_card(Canvas &canvas, const ComponentStyle &style, const CardLook &look
         const float room = std::max(in.w - 2.0f * inset, 20.0f);
         const float x = text_x(look.align, in, inset);
         const float first = bed.y + bed.h + look.text_gap + look.title_size * 0.82f;
-        paint.label(fit_label(paint, item.title, look.title_size, room), x, first, look.title_size,
-                    ink, look.align);
+        paint.bounded_label(item.title, x, first, look.title_size, ink, room, look.align);
         if (look.subtitle_size > 0.0f && !item.subtitle.empty())
-            paint.body(fit_body(paint, item.subtitle, look.subtitle_size, room), x,
-                       first + look.subtitle_size * 1.3f, look.subtitle_size,
-                       gfx::mix(quiet, ink, focus * 0.5f), look.align);
+            paint.bounded_body(item.subtitle, x, first + look.subtitle_size * 1.3f, look.subtitle_size, gfx::mix(quiet, ink, focus * 0.5f), room, look.align);
         list.pop_opacity();
     }
 

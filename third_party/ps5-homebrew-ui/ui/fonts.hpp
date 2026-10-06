@@ -6,6 +6,7 @@
 
 #include "gfx/draw_list.hpp"
 #include "gfx/font.hpp"
+#include "ui/text_lane.hpp"
 
 #include <cstdint>
 #include <string>
@@ -59,27 +60,31 @@ inline std::string upper(std::string_view value)
 }
 
 // Draws word-wrapped text from its first baseline at y, at most max_lines
-// lines (the last one ends in an ellipsis if text remains). Returns the
+// lines; overflow remains readable by slow clipped scrolling. Returns the
 // baseline after the last line drawn.
 inline float paragraph(gfx::DrawList &list, const FontRef &font, std::string_view value, float x,
                        float y, float size, float width, float line_height, gfx::Color color,
                        int max_lines = 99, gfx::Align align = gfx::Align::left)
 {
     const std::vector<std::string> lines = font.font->wrap(value, size, width);
-    int drawn = 0;
-    for (const std::string &line : lines)
-    {
-        const bool last =
-            drawn + 1 == max_lines && lines.size() > static_cast<std::size_t>(max_lines);
-        if (last)
-            text(list, font, font.font->fit(line + " \xE2\x80\xA6", size, width), x, y, size, color,
-                 align);
-        else
-            text(list, font, line, x, y, size, color, align);
-        y += line_height;
-        if (++drawn >= max_lines)
-            break;
+    max_lines = std::max(max_lines, 1);
+    const int visible = std::min(max_lines, static_cast<int>(lines.size()));
+    const float left = align == gfx::Align::right ? x-width : align == gfx::Align::center ? x-width*0.5f : x;
+    const float distance = std::max(static_cast<int>(lines.size())-visible, 0)*line_height;
+    const float offset = text_lane_offset(text_lane_seconds(), distance, 0.0f);
+    list.push_clip({left, y-size*1.3f, width, std::max((visible-1)*line_height+size*1.8f, size*1.8f)});
+    list.readable_text(true);
+    for (std::size_t i=0; i<lines.size(); ++i) {
+        const float baseline = y+static_cast<float>(i)*line_height-offset;
+        const float measured = font.measure(lines[i], size);
+        if (measured > width) {
+            const float horizontal = text_lane_offset(text_lane_seconds(), measured, width);
+            text(list, font, lines[i], left-horizontal, baseline, size, color);
+        } else text(list, font, lines[i], x, baseline, size, color, align);
     }
+    list.readable_text(false);
+    list.pop_clip();
+    y += visible*line_height;
     return y;
 }
 

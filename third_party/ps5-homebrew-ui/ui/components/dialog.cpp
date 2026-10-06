@@ -322,15 +322,15 @@ void Dialog::draw(Canvas &canvas) const
     {
         const float top =
             panel.y + at.title_top + static_cast<float>(i) * style.title_size * kTitleLine;
-        paint.heading(at.title[i], text_x, top + style.title_size * 0.88f, style.title_size,
-                      theme.text, align);
+        paint.bounded_heading(at.title[i], text_x, top + style.title_size * 0.88f, style.title_size,
+                      theme.text, inner_width()-(has_icon() && !style.centered ? style.icon_size+style.gap*1.3f : 0.0f), align);
     }
     for (std::size_t i = 0; i < at.body.size(); ++i)
     {
         const float top =
             panel.y + at.body_top + static_cast<float>(i) * style.body_size * style.body_line;
-        paint.body(at.body[i], text_x, top + style.body_size * 0.95f, style.body_size,
-                   theme.text_muted, align);
+        paint.bounded_body(at.body[i], text_x, top + style.body_size * 0.95f, style.body_size,
+                   theme.text_muted, inner_width()-(has_icon() && !style.centered ? style.icon_size+style.gap*1.3f : 0.0f), align);
     }
 
     // A destructive answer is the same button in a theme whose main colour
@@ -350,7 +350,7 @@ void Dialog::draw(Canvas &canvas) const
         const Rect r{block_x + local.x, block_y + local.y, local.w, local.h};
         Look look;
         look.press = i == choice_ ? tween::clamp01(press_.value) : 0.0f;
-        const std::string label = fit_label(paint, button.label, 24.0f, r.w - 28.0f);
+        const std::string &label = button.label;
         if (button.destructive)
             alarm_paint.button(r, label, ButtonKind::primary, look);
         else

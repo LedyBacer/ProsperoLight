@@ -152,6 +152,20 @@ static int load_server_info(gs_server_t *server, bool https)
     (void)xml_search(response.body, response.length, "ServerCodecModeSupport", &codec_mode);
     (void)xml_search(response.body, response.length, "hostname", &hostname);
     (void)xml_search(response.body, response.length, "uniqueid", &unique_id);
+    server->host_capabilities = 0;
+    {
+        const char *tags[] = {"VirtualDisplayCapable", "VirtualDisplayDriverReady",
+                              "VirtualDisplayHDRCapable", "FrameLimiterSupported",
+                              "VirtualDisplayFrameLimiterEnabled"};
+        for (unsigned i = 0; i < 5; ++i)
+        {
+            char *value = NULL;
+            if (xml_search(response.body, response.length, tags[i], &value) == GS_OK && value &&
+                (!strcmp(value, "1") || !strcmp(value, "true")))
+                server->host_capabilities |= 1u << i;
+            free(value);
+        }
+    }
     server->paired = !strcmp(paired, "1");
     server->current_game = atoi(current_game);
     server->server_major_version = atoi(app_version);
@@ -529,19 +543,31 @@ int gs_applist(gs_server_t *server, app_entry_t **list)
 }
 
 int gs_start_app(gs_server_t *server, STREAM_CONFIGURATION *configuration, int app_id, bool sops,
-                 bool local_audio, int gamepad_mask)
+                 bool local_audio, int gamepad_mask, const gs_host_options_t *options)
 {
     char uuid[37];
     http_response_t response = {0};
     char *field = NULL;
     uint32_t key_id = 0;
     char key_hex[sizeof(configuration->remoteInputAesKey) * 2 + 1];
+    char host_query[160];
     const char *hdr_capabilities;
     int fps;
     int surround_info;
     int result;
 
     gs_error = "";
+    gamepad_mask &= 0xffff;
+    if (options && options->extensions && options->virtual_display == 1 &&
+        (server->host_capabilities & 3u) != 3u)
+    {
+        gs_error = "Host virtual display is unavailable or its driver is not ready";
+        return GS_FAILED;
+    }
+    gs_host_query(host_query, sizeof(host_query), options, (unsigned)gamepad_mask);
+    LOGI("Host launch options: gamepads=%x capabilities=%x extensions=%d optional_query=%s",
+         (unsigned)gamepad_mask, server->host_capabilities, options && options->extensions,
+         host_query[0] ? host_query : "none");
     if (rng_fill(server->identity, (unsigned char *)configuration->remoteInputAesKey,
                  sizeof(configuration->remoteInputAesKey)) != GS_OK)
         return GS_FAILED;
@@ -564,11 +590,11 @@ int gs_start_app(gs_server_t *server, STREAM_CONFIGURATION *configuration, int a
                      "/%s?uniqueid=%s&uuid=%s&appid=%d&mode=%dx%dx%d"
                      "&additionalStates=1&sops=%d&rikey=%s&rikeyid=%u"
                      "&localAudioPlayMode=%d&surroundAudioInfo=%d"
-                     "&remoteControllersBitmap=%d&gcmap=%d%s%s",
+                     "&remoteControllersBitmap=%d&gcmap=%d%s%s%s",
                      server->current_game ? "resume" : "launch", GS_UNIQUE_ID, uuid, app_id,
                      configuration->width, configuration->height, fps, sops ? 1 : 0, key_hex,
                      (unsigned)key_id, local_audio ? 1 : 0, surround_info, gamepad_mask,
-                     gamepad_mask, hdr_capabilities, LiGetLaunchUrlQueryParameters());
+                     gamepad_mask, hdr_capabilities, LiGetLaunchUrlQueryParameters(), host_query);
     if (result != GS_OK)
         return result;
     if (xml_status(response.body, response.length) != 200)

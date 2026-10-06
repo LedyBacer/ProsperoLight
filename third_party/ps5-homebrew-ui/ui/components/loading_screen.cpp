@@ -509,9 +509,7 @@ void LoadingScreen::draw(Canvas &canvas) const
     end();
     begin(1);
     if (!subtitle.empty())
-        paint.body(fit_body(paint, subtitle, style.subtitle_size, l.text_width), l.title_x,
-                   l.title_baseline + style.subtitle_size * 1.9f, style.subtitle_size, quiet,
-                   l.align);
+        paint.bounded_body(subtitle, l.title_x, l.title_baseline + style.subtitle_size * 1.9f, style.subtitle_size, quiet, l.text_width, l.align);
     end();
 
     // ---- the tip: a label, dots, and two texts while one replaces the other ----

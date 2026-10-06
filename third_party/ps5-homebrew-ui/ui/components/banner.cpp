@@ -119,8 +119,9 @@ Banner::Layout Banner::layout(const Fonts &fonts) const
 
     out.text_x = left;
     const float text_w = std::max(right - left, 60.0f);
+    out.text_width = text_w;
     if (!title.empty())
-        out.title = fit_label(paint, title, style.title_size, text_w);
+        out.title = title;
     if (!body.empty())
         out.body = wrap_body(paint, body, style.body_size, text_w, std::max(style.body_lines, 1));
     const float text_h = (out.title.empty() ? 0.0f : style.title_size * kTitleLine) +
@@ -318,13 +319,14 @@ void Banner::draw(Canvas &canvas) const
     float y = body.y + at.text_top;
     if (!at.title.empty())
     {
-        flat.label(at.title, body.x + at.text_x, y + style.title_size * 0.9f, style.title_size,
-                   ink);
+        flat.bounded_label(at.title, body.x + at.text_x, y + style.title_size * 0.9f,
+                           style.title_size, ink, at.text_width);
         y += style.title_size * kTitleLine;
     }
     for (const std::string &line : at.body)
     {
-        flat.body(line, body.x + at.text_x, y + style.body_size * 0.95f, style.body_size, quiet);
+        flat.bounded_body(line, body.x + at.text_x, y + style.body_size * 0.95f, style.body_size,
+                          quiet, at.text_width);
         y += style.body_size * style.body_line;
     }
 

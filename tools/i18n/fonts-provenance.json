@@ -1,0 +1,16 @@
+{
+  "fonts": {
+    "NotoSans": "0e6d59dcddd6a2c3e74547ff447dbcfc9d4ec339d53e35528791800a2555d604",
+    "NotoSansArabic": "eb11a2ca19daf1245be3f9dd398c302a5569e420806d268f6ba8d440861525f3",
+    "NotoSansHebrew": "13633f107554fd9d35b2e99ae9782c649326165b432dc2ce107c761e2d308536",
+    "NotoSansDevanagari": "3091f1aa3428af8b68b87c3e2ef2ac32bfebd5f6d9f709ba027dc247fab90062",
+    "NotoSansTamil": "667d74e14de51f411d8e885fa0332cc5d161d7a8c091f9409e302fc91afb16b6",
+    "NotoSansThai": "dc326303c87041b107789da787418000224dce0a589f3f40d44f24221949dd72",
+    "NotoSansSC": "7163f46e1800ce2b79fcdeb5e853bf5961b8693a74aabf7995a267d5f5436c39",
+    "NotoSansTC": "f9dd5d50e3a8dd01d9a45dd166b27167687e6a3eab1bdbf5946dd07efaee9189",
+    "NotoSansJP": "84a9666f86d9b3e236836862336b3d6a1e0e6f4dc18eb6fb9d27d3459dbafff8",
+    "NotoSansKR": "63f00de3883c372b149dd651577d4234a98175e04c3d1bec20366b22e3131609"
+  },
+  "shaped_glyphs": 880,
+  "codepoints": 2017
+}

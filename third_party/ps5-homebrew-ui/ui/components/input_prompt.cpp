@@ -304,7 +304,7 @@ void InputPrompt::draw(Canvas &canvas) const
             Look look;
             look.press = i == pressed_ ? tween::clamp01(press_.value) : 0.0f;
             const std::string &label = i == kDone ? style.done_label : style.cancel_label;
-            paint.button(r, fit_label(paint, label, 24.0f, r.w - 28.0f),
+            paint.button(r, label,
                          i == kDone ? ButtonKind::primary : ButtonKind::secondary, look);
         }
         // One ring that glides between the two answers.

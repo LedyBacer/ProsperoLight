@@ -70,6 +70,14 @@ class Painter
                gfx::Align align = gfx::Align::left);
     float body_width(std::string_view text, float size) const;
 
+    // Complete text, clipped to its allocated lane; long text scrolls slowly.
+    float bounded_heading(std::string_view text, float x, float baseline, float size,
+                          gfx::Color color, float width, gfx::Align align = gfx::Align::left);
+    float bounded_label(std::string_view text, float x, float baseline, float size,
+                        gfx::Color color, float width, gfx::Align align = gfx::Align::left);
+    float bounded_body(std::string_view text, float x, float baseline, float size,
+                       gfx::Color color, float width, gfx::Align align = gfx::Align::left);
+
     // ---- building blocks ----
     // The corner size for a control of this rectangle ("pill" resolved).
     float control_radius(const gfx::Rect &r) const;

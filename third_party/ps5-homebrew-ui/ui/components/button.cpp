@@ -384,8 +384,8 @@ void PushButton::draw(Canvas &canvas) const
     const float glyph_gap = glyph_w > 0.0f ? style.gap : 0.0f;
     const float room =
         std::max(content.w - 2.0f * m.padding - lead - lead_gap - glyph_w - glyph_gap, 0.0f);
-    const std::string text = fit_label(paint, label, m.text_size, room);
-    const float text_w = label.empty() ? 0.0f : paint.label_width(text, m.text_size);
+    const std::string &text = label;
+    const float text_w = label.empty() ? 0.0f : std::min(paint.label_width(text, m.text_size), room);
     const float total = lead + lead_gap + text_w + glyph_gap + glyph_w;
 
     float x = content.cx() - total * 0.5f;
@@ -415,7 +415,7 @@ void PushButton::draw(Canvas &canvas) const
         {
             const float text_x = x + lead + lead_gap;
             const float baseline = baseline_for(cy, m.text_size);
-            paint.label(text, text_x, baseline, m.text_size, ink);
+            paint.bounded_label(text, text_x, baseline, m.text_size, ink, room);
             if (style.role == ButtonRole::ghost)
                 list.rounded_rect({text_x, baseline + m.text_size * 0.42f, text_w, 2.0f}, 0.0f,
                                   ink.with_alpha(0.45f));

@@ -39,6 +39,7 @@ bool square_joints(const Theme &theme)
 void ButtonGroup::set_items(std::vector<GroupItem> items)
 {
     items_ = std::move(items);
+    item_rects_.clear();
     chosen_.assign(items_.size(), tween::Spring{});
     for (std::size_t i = 0; i < items_.size(); ++i)
         chosen_[i].snap(items_[i].selected ? 1.0f : 0.0f);
@@ -56,6 +57,12 @@ void ButtonGroup::set_bounds(const Rect &bounds)
         return;
     bounds_ = bounds;
     retarget(true);
+}
+
+void ButtonGroup::set_item_rects(std::vector<Rect> rects)
+{
+    item_rects_ = std::move(rects);
+    retarget(false);
 }
 
 void ButtonGroup::set_focus(int index, bool snap)
@@ -102,6 +109,8 @@ bool ButtonGroup::is_selected(int index) const
 
 Rect ButtonGroup::item_rect(int index) const
 {
+    if (index >= 0 && item_rects_.size() == items_.size() && index < count())
+        return item_rects_[static_cast<std::size_t>(index)];
     const ButtonMetrics m =
         button_metrics(style.size, style.height, style.text_size, style.padding);
     const int n = std::max(count(), 1);
@@ -120,9 +129,18 @@ Rect ButtonGroup::item_rect(int index) const
 
 Rect ButtonGroup::rect() const
 {
-    const Rect first = item_rect(0);
-    const Rect last = item_rect(std::max(count() - 1, 0));
-    return {first.x, first.y, last.x + last.w - first.x, last.y + last.h - first.y};
+    Rect out = item_rect(0);
+    for (int i = 1; i < count(); ++i)
+    {
+        const Rect r = item_rect(i);
+        const float right = std::max(out.x + out.w, r.x + r.w);
+        const float bottom = std::max(out.y + out.h, r.y + r.h);
+        out.x = std::min(out.x, r.x);
+        out.y = std::min(out.y, r.y);
+        out.w = right - out.x;
+        out.h = bottom - out.y;
+    }
+    return out;
 }
 
 void ButtonGroup::retarget(bool snap)
@@ -235,15 +253,16 @@ void ButtonGroup::draw_content(Canvas &canvas, Painter &paint, const ButtonMetri
     const float lead = style.icon_width > 0.0f ? style.icon_width : 0.0f;
     const float lead_gap = lead > 0.0f && !item.label.empty() ? kIconGap : 0.0f;
     const float room = std::max(content.w - 2.0f * m.padding - lead - lead_gap, 0.0f);
-    const std::string text = fit_label(paint, item.label, m.text_size, room);
-    const float text_w = item.label.empty() ? 0.0f : paint.label_width(text, m.text_size);
+    const std::string &text = item.label;
+    const float text_w =
+        item.label.empty() ? 0.0f : std::min(paint.label_width(text, m.text_size), room);
     const float x = content.cx() - (lead + lead_gap + text_w) * 0.5f;
     if (lead > 0.0f && icon)
         icon(canvas, {x, content.cy() - lead * 0.5f, lead, lead}, item, index, ink, focus);
     if (!item.label.empty())
     {
         const float baseline = baseline_for(content.cy(), m.text_size);
-        paint.label(text, x + lead + lead_gap, baseline, m.text_size, ink);
+        paint.bounded_label(text, x + lead + lead_gap, baseline, m.text_size, ink, room);
         if (style.role == ButtonRole::ghost && !style.joined && !is_selected(index))
             canvas.list.rounded_rect(
                 {x + lead + lead_gap, baseline + m.text_size * 0.42f, text_w, 2.0f}, 0.0f,
@@ -593,9 +612,8 @@ void SplitButton::draw(Canvas &canvas) const
                       face.ink.with_alpha(0.35f));
 
     const float room = std::max(main.w - 2.0f * m.padding, 0.0f);
-    paint.label(fit_label(paint, label, m.text_size, room), main.cx() + dx,
-                baseline_for(main.cy() + dy, m.text_size), m.text_size, face.ink,
-                gfx::Align::center);
+    paint.bounded_label(label, main.cx() + dx, baseline_for(main.cy() + dy, m.text_size),
+                        m.text_size, face.ink, room, gfx::Align::center);
     // The chevron turns over while the menu is open.
     const float size = m.text_size * 0.62f;
     const float depth = size * 0.28f * (1.0f - 2.0f * tween::clamp01(open_amount_.value));

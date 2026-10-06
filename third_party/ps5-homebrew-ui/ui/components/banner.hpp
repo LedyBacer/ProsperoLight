@@ -158,6 +158,7 @@ class Banner
         gfx::Rect panel;      // on screen, at rest
         float icon_cx = 0.0f; // the rest is relative to the panel
         float text_x = 0.0f;
+        float text_width = 0.0f;
         float text_top = 0.0f;
         std::string title;
         std::vector<std::string> body;

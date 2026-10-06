@@ -405,11 +405,9 @@ void NotificationCenter::draw_row(Canvas &canvas, const Rect &row, const Notific
             title_right = std::min(title_right, body_right);
     }
 
-    paint.label(fit_label(paint, note.title, style.title_size, std::max(title_right - left, 40.0f)),
-                left, first, style.title_size, ink);
+    paint.bounded_label(note.title, left, first, style.title_size, ink, std::max(title_right - left, 40.0f));
     if (!second.empty())
-        paint.body(fit_body(paint, second, style.body_size, std::max(body_right - left, 40.0f)),
-                   left, under, style.body_size, quiet);
+        paint.bounded_body(second, left, under, style.body_size, quiet, std::max(body_right - left, 40.0f));
 }
 
 void NotificationCenter::draw(Canvas &canvas) const
@@ -452,10 +450,7 @@ void NotificationCenter::draw(Canvas &canvas) const
             std::snprintf(number, sizeof(number), "%d", fresh);
             summary = number + style.unread_suffix;
         }
-        paint.body(fit_body(paint, summary, style.meta_size + 2.0f,
-                            std::max(button.x - bar.x - 16.0f, 40.0f)),
-                   bar.x + 2.0f, bar.cy() + (style.meta_size + 2.0f) * 0.35f,
-                   style.meta_size + 2.0f, muted);
+        paint.bounded_body(summary, bar.x + 2.0f, bar.cy() + (style.meta_size + 2.0f) * 0.35f, style.meta_size + 2.0f, muted, std::max(button.x - bar.x - 16.0f, 40.0f));
 
         const float press = tween::clamp01(clear_press_.value);
         Look look;
@@ -465,9 +460,7 @@ void NotificationCenter::draw(Canvas &canvas) const
         list.push_transform(scale, button.cx(), button.cy(), 0.0f, 0.0f);
         const ButtonFace face = draw_button_face(inside, theme, button, ButtonRole::secondary, look,
                                                  -1.0f, !style.on_panel);
-        paint.label(fit_label(paint, style.clear_label, style.button_text, button.w - 16.0f),
-                    face.content.cx(), face.content.cy() + style.button_text * 0.35f,
-                    style.button_text, face.ink, gfx::Align::center);
+        paint.bounded_label(style.clear_label, face.content.cx(), face.content.cy() + style.button_text * 0.35f, style.button_text, face.ink, button.w - 16.0f, gfx::Align::center);
         list.pop_transform();
     }
     list_.draw(canvas);

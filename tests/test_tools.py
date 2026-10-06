@@ -20,6 +20,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ToolTests(unittest.TestCase):
+    def assertCodeContains(self, expected, source):
+        # Label localization and formatter line breaks do not alter widget
+        # contracts; retain checks of IDs, options, handlers and calls.
+        source = re.sub(r'i18n::tr\(("(?:[^"\\]|\\.)*")\)', r'\1', source)
+        self.assertIn(re.sub(r'\s+', '', expected), re.sub(r'\s+', '', source))
+
     @unittest.skipUnless(shutil.which("llvm-config-18"), "requires LLVM 18 host tools")
     def test_native_toolchain_is_shared_and_rejects_a_mismatched_compiler(self):
         environment = os.environ.copy()
@@ -130,7 +136,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("job.kind = JobKind::stop;", request)
         self.assertIn("requests_.push_back(job);", request)
         self.assertNotIn("moonlight_backend_stop_app", request)
-        self.assertIn('busy == Busy::stopping     ? "Stopping the app"', view)
+        self.assertCodeContains('busy == Busy::stopping     ? "Stopping the app"', view)
 
     def test_hdr_supports_every_stream_resolution(self):
         stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
@@ -161,10 +167,10 @@ class ToolTests(unittest.TestCase):
 
         for fps in (60, 90, 120):
             self.assertIn(f"#define MOONLIGHT_STREAM_FPS_{fps} {fps}U", config)
-        self.assertIn('form_.add_choice(kFrameRate, "Frame rate", {"60 FPS", "90 FPS", "120 FPS"}, 0)',
+        self.assertCodeContains('form_.add_choice(kFrameRate, "Frame rate", {"30 FPS", "60 FPS", "90 FPS", "120 FPS", "Custom"}, 1)',
                       view)
         # Frame rate and bitrate keep their released widgets; nothing is typed.
-        self.assertIn('form_.add_slider(kBitrate, "Bitrate", 20.0f, kBitrateStep, kBitrateMax,', view)
+        self.assertCodeContains('form_.add_slider(kBitrate, "Bitrate", 20.0f, kBitrateStep, kBitrateMax,', view)
         self.assertNotIn("number_prompt_", view)
         self.assertIn("selection->stream_fps = config.stream_fps;", platform)
         self.assertIn("options.stream_fps = selection.stream_fps;", launcher)
@@ -190,7 +196,7 @@ class ToolTests(unittest.TestCase):
         view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
 
         self.assertIn("#define MOONLIGHT_AUDIO_51_SURROUND 1U", config)
-        self.assertIn('form_.add_choice(kAudio, "Audio", {"Stereo", "5.1 surround"}, 0)', view)
+        self.assertCodeContains('form_.add_choice(kAudio, "Audio", {"Stereo", "5.1 surround"}, 0)', view)
         self.assertIn("selection->audio_configuration = config.audio_configuration;", platform)
         self.assertIn("options.audio_configuration = selection.audio_configuration;", launcher)
         self.assertIn("audio_configuration = AUDIO_CONFIGURATION_51_SURROUND;", stream)
@@ -635,7 +641,7 @@ class ToolTests(unittest.TestCase):
         # The launcher takes a picture of its connecting screen, without the
         # bar's fill, and the stream is given it.
         self.assertIn("CaptureConnecting(renderer, view, frame, selection);", platform)
-        self.assertIn("if (!plate_ && load_progress_ > 0.0f)", view)
+        self.assertCodeContains("if (!plate_ && load_progress_ > 0.0f)", view)
         self.assertIn("options.connecting = &picture;", main)
         # The stream shows it before anything slow, and moves the bar on at
         # each step of the connection.
@@ -768,7 +774,7 @@ class ToolTests(unittest.TestCase):
         # Only an available update is shown, for ten seconds.
         self.assertIn("constexpr float kUpdateNoticeSeconds = 10.0f;", model)
         self.assertIn("if (result.update_available)", model)
-        self.assertIn("notice.seconds > 0.0f", view)
+        self.assertCodeContains("notice.seconds > 0.0f", view)
         # Shipping libcurl means shipping its notices.
         for name in ("libcurl", "OpenSSL", "zlib", "zstd", "libpsl"):
             self.assertIn(name, notices)
@@ -889,7 +895,7 @@ class ToolTests(unittest.TestCase):
         # The launcher draws the buttons' glyphs and names none of them in text.
         view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
         self.assertEqual(view.count("ui::Button::touchpad"), 4)
-        self.assertIn("ui::draw_hints(list, canvas.fonts, glyphs(paint), hints, count, kRight, true);",
+        self.assertCodeContains("ui::draw_hints(list, canvas.fonts, glyphs(paint), hints, count, kRight, true);",
                       view)
         for text in re.findall(r'"((?:[^"\\]|\\.)*)"', view):
             for name in ("Cross", "Circle", "Square", "Triangle", "Options", "Touchpad", "L1", "R1"):
@@ -898,8 +904,8 @@ class ToolTests(unittest.TestCase):
     def test_launcher_has_four_screens(self):
         view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
         platform = (ROOT / "src/launcher/launcher_ps5.cpp").read_text(encoding="utf-8")
-        self.assertIn('tabs_.set_tabs({{"PCs"}, {"Games"}, {"Settings"}, {"About"}});', view)
-        self.assertIn("constexpr int kScreens = 4;", view)
+        self.assertCodeContains('tabs_.set_tabs({{"PCs"}, {"Games"}, {"Settings"}, {"About"}});', view)
+        self.assertCodeContains("constexpr int kScreens = 4;", view)
         # About gives credit, as ProsperoEden's page does, and names the folders.
         about = view[view.index("void View::draw_about(") : view.index("void View::draw_pairing(")]
         # C++ concatenates adjacent literals, including across formatted lines.
@@ -907,9 +913,9 @@ class ToolTests(unittest.TestCase):
         for text in ("Powered by Moonlight", "moonlight-stream.org", "Sunshine developers",
                      "brought to you by BlackBearReloaded", "made with ElevenLabs",
                      '"Version " + version_', "files_.draw(canvas);"):
-            self.assertIn(text, about)
+            self.assertCodeContains(text, about)
         self.assertIn("view.set_storage(StorageFolders());", platform)
-        self.assertIn('form_.add_header("Diagnostics");', view)
+        self.assertCodeContains('form_.add_header("Diagnostics");', view)
 
     def test_every_sunshine_request_uses_the_port_saved_for_that_pc(self):
         config = (ROOT / "include/moonlight_config.hpp").read_text(encoding="utf-8")
@@ -944,12 +950,12 @@ class ToolTests(unittest.TestCase):
         view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
         model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
 
-        self.assertIn('host_actions_.set_items({{"Change port"}, {"Unpair"}});', view)
-        self.assertIn('port_prompt_.set_title("Sunshine port");', view)
-        self.assertIn("port_prompt_.keyboard.set_layouts({ui::KeyboardLayout::numeric()});", view)
+        self.assertCodeContains('host_actions_.set_items({{"Change port"}, {"Unpair"}, {"PC settings"}});', view)
+        self.assertCodeContains('port_prompt_.set_title("Sunshine port");', view)
+        self.assertCodeContains("port_prompt_.keyboard.set_layouts({ui::KeyboardLayout::numeric()});", view)
         # An empty entry means Sunshine's default port.
-        self.assertIn("port_prompt_.style.allow_empty = true;", view)
-        self.assertIn("model_.SetPort(text.c_str(), &error)", view)
+        self.assertCodeContains("port_prompt_.style.allow_empty = true;", view)
+        self.assertCodeContains("model_.SetPort(text.c_str(), &error)", view)
         set_port = model[model.index("bool Model::SetPort(") : model.index("void Model::StopApp()")]
         # Requests queued for the old endpoint are dropped when the port changes.
         self.assertLess(set_port.index("moonlight_config_set_host_port("),
@@ -989,7 +995,7 @@ class ToolTests(unittest.TestCase):
         # Each widget asks for a cue; the launcher plays it from its sound set.
         self.assertIn("for (const audio::CueEvent &event : feedback.cues)", platform)
         self.assertIn("sounds.play(mixer,", platform)
-        self.assertIn("t.sounds = audio::SoundSet::glass;", view)
+        self.assertCodeContains("t.sounds = audio::SoundSet::glass;", view)
         recordings = sorted(path.name for path in (ROOT / "assets/audio/sfx/glass").glob("*.wav"))
         for cue in ("focus", "select", "back", "tab", "toggle", "slider", "error", "notify",
                     "modal_open", "modal_close", "launch", "welcome", "saved"):

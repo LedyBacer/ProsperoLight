@@ -147,8 +147,7 @@ void StatTile::draw(Canvas &canvas) const
         paint.panel(bounds_);
     const Rect in = bounds_.inset(style.padding);
 
-    paint.label(fit_label(paint, label, style.label_size, in.w), in.x,
-                in.y + style.label_size * 0.8f, style.label_size, theme.text_muted);
+    paint.bounded_label(label, in.x, in.y + style.label_size * 0.8f, style.label_size, theme.text_muted, in.w);
 
     // The figure is the tile's own Counter wearing the tile's current style:
     // a copy, because draw() may not change the tile.
@@ -195,8 +194,7 @@ void StatTile::draw(Canvas &canvas) const
         {
             const float room = in.x + in.w - x - 10.0f;
             if (room > 40.0f)
-                paint.body(fit_body(paint, style.delta_note, size, room), x + 10.0f, baseline, size,
-                           theme.text_muted);
+                paint.bounded_body(style.delta_note, x + 10.0f, baseline, size, theme.text_muted, room);
         }
         bottom = baseline + size * 0.3f;
     }
@@ -360,8 +358,7 @@ void EmptyState::draw(Canvas &canvas) const
     {
         begin();
         y += style.gap + style.title_size;
-        paint.label(fit_label(paint, title, style.title_size, width), cx,
-                    y - style.title_size * 0.2f, style.title_size, theme.text, gfx::Align::center);
+        paint.bounded_label(title, cx, y - style.title_size * 0.2f, style.title_size, theme.text, width, gfx::Align::center);
         end();
     }
     if (!lines.empty())
