@@ -56,9 +56,9 @@ template <typename Measure> std::string fit(std::string_view text, float width, 
     std::string cut(text);
     while (!cut.empty())
     {
-        do
-            cut.pop_back();
-        while (!cut.empty() && (static_cast<unsigned char>(cut.back()) & 0xc0) == 0x80);
+        std::size_t start = cut.size()-1;
+        while (start > 0 && (static_cast<unsigned char>(cut[start]) & 0xc0) == 0x80) --start;
+        cut.resize(start);
         while (!cut.empty() && cut.back() == ' ')
             cut.pop_back();
         if (measure(cut + "...") <= width)

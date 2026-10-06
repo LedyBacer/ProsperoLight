@@ -321,17 +321,14 @@ void ListView::draw(Canvas &canvas) const
                 const float room = std::max(right - left, 40.0f);
                 if (item.subtitle.empty())
                 {
-                    paint.label(fit_label(paint, item.title, style.title_size, room), left,
-                                row.cy() + style.title_size * 0.34f, style.title_size, ink);
+                    paint.bounded_label(item.title, left, row.cy() + style.title_size * 0.34f, style.title_size, ink, room);
                 }
                 else
                 {
                     const float block = style.title_size + style.subtitle_size * 1.25f;
                     const float first = row.cy() - block * 0.5f + style.title_size * 0.84f;
-                    paint.label(fit_label(paint, item.title, style.title_size, room), left, first,
-                                style.title_size, ink);
-                    paint.body(fit_body(paint, item.subtitle, style.subtitle_size, room), left,
-                               first + style.subtitle_size * 1.3f, style.subtitle_size, quiet);
+                    paint.bounded_label(item.title, left, first, style.title_size, ink, room);
+                    paint.bounded_body(item.subtitle, left, first + style.subtitle_size * 1.3f, style.subtitle_size, quiet, room);
                 }
             }
         }

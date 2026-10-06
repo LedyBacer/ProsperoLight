@@ -196,9 +196,7 @@ void Countdown::draw(Canvas &canvas) const
         draw_number(paint, list, time, cx, cy + fitted * 0.35f, fitted, figure, gfx::Align::center);
         list.pop_transform();
         if (!label.empty())
-            paint.label(fit_label(paint, label, style.label_size, bounds_.w), cx,
-                        bounds_.y + size + style.label_size + 4.0f, style.label_size, ink.muted,
-                        gfx::Align::center);
+            paint.bounded_label(label, cx, bounds_.y + size + style.label_size + 4.0f, style.label_size, ink.muted, bounds_.w, gfx::Align::center);
         return;
     }
 
@@ -208,9 +206,9 @@ void Countdown::draw(Canvas &canvas) const
     const float room = std::max(bounds_.w - time_width - 12.0f, 0.0f);
     const std::string caption = label.empty() || room < 30.0f
                                     ? std::string()
-                                    : fit_label(paint, label, style.label_size, room);
+                                    : label;
     const float caption_width =
-        caption.empty() ? 0.0f : paint.label_width(caption, style.label_size) + 12.0f;
+        caption.empty() ? 0.0f : std::min(paint.label_width(caption, style.label_size), room) + 12.0f;
     const float group = caption_width + time_width;
     float x = bounds_.x;
     if (style.align == gfx::Align::right)
@@ -219,7 +217,7 @@ void Countdown::draw(Canvas &canvas) const
         x = bounds_.cx() - group * 0.5f;
     const float cy = bounds_.cy();
     if (!caption.empty())
-        paint.label(caption, x, cy + style.label_size * 0.35f, style.label_size, ink.muted);
+        paint.bounded_label(caption, x, cy + style.label_size * 0.35f, style.label_size, ink.muted, room);
     const float figure_cx = x + caption_width + time_width * 0.5f;
     list.push_transform(1.0f + bump, figure_cx, cy, 0.0f, 0.0f);
     draw_number(paint, list, time, x + caption_width, cy + size * 0.35f, size, figure);
@@ -379,8 +377,7 @@ void StorageBar::draw(Canvas &canvas) const
                                     format_value(capacity_, style.decimals) + style.unit;
         const float width = draw_number(paint, list, figures, bounds_.x + bounds_.w,
                                         y + size * 0.86f, size, ink.muted, gfx::Align::right);
-        paint.label(fit_label(paint, title, size, std::max(bounds_.w - width - 16.0f, 20.0f)),
-                    bounds_.x, y + size * 0.86f, size, ink.text);
+        paint.bounded_label(title, bounds_.x, y + size * 0.86f, size, ink.text, std::max(bounds_.w - width - 16.0f, 20.0f));
         y += size + style.spacing;
     }
 
@@ -602,8 +599,7 @@ void StatusBar::draw(Canvas &canvas) const
 
     const float left = bounds_.x + style.padding;
     if (!title.empty() && right - left > 40.0f)
-        paint.label(fit_label(paint, title, style.text_size, right - left), left,
-                    cy + style.text_size * 0.35f, style.text_size, ink.text);
+        paint.bounded_label(title, left, cy + style.text_size * 0.35f, style.text_size, ink.text, right - left);
 }
 
 } // namespace hui::ui

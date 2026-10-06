@@ -17,6 +17,8 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <sstream>
 #include <vector>
 
 namespace
@@ -37,7 +39,7 @@ struct Baked
     int y = 0;
 };
 
-std::vector<int> codepoints()
+std::vector<int> codepoints(const char *extra_file)
 {
     std::vector<int> result;
     for (int c = 32; c < 127; ++c)
@@ -56,6 +58,15 @@ std::vector<int> codepoints()
                          0x201E, 0x2022, 0x2026, 0x20AC, 0x2122, 0x2190, 0x2191, 0x2192,
                          0x2193, 0x2713, 0x2588, 0x25CF, 0x25B2, 0x25B6, 0x25BC, 0x25C0};
     result.insert(result.end(), std::begin(extra), std::end(extra));
+    if (extra_file)
+    {
+        std::ifstream input(extra_file);
+        unsigned value;
+        while (input >> std::hex >> value)
+            result.push_back(static_cast<int>(value));
+    }
+    std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
     return result;
 }
 
@@ -71,7 +82,8 @@ int main(int argc, char **argv)
 {
     if (argc < 3)
     {
-        std::fprintf(stderr, "usage: %s font.ttf out.huifont [pixel_size] [sdf_range] [atlas]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s font.ttf out.huifont [pixel_size] [sdf_range] [atlas]\n",
+                     argv[0]);
         return 2;
     }
     const float pixel_size = argc > 3 ? std::strtof(argv[3], nullptr) : 56.0f;
@@ -79,19 +91,76 @@ int main(int argc, char **argv)
     const int atlas_size = argc > 5 ? std::atoi(argv[5]) : 1024;
 
     std::ifstream input(argv[1], std::ios::binary);
-    std::vector<unsigned char> ttf((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    std::vector<unsigned char> ttf((std::istreambuf_iterator<char>(input)),
+                                   std::istreambuf_iterator<char>());
     stbtt_fontinfo font;
-    if (ttf.empty() || !stbtt_InitFont(&font, ttf.data(), stbtt_GetFontOffsetForIndex(ttf.data(), 0)))
+    if (ttf.empty() ||
+        !stbtt_InitFont(&font, ttf.data(), stbtt_GetFontOffsetForIndex(ttf.data(), 0)))
     {
         std::fprintf(stderr, "cannot read font %s\n", argv[1]);
         return 1;
     }
     const float scale = stbtt_ScaleForMappingEmToPixels(&font, pixel_size);
 
-    std::vector<Baked> glyphs;
-    for (int codepoint : codepoints())
+    struct Face
     {
-        if (codepoint != ' ' && stbtt_FindGlyphIndex(&font, codepoint) == 0)
+        std::vector<unsigned char> data;
+        stbtt_fontinfo info{};
+    };
+    std::vector<Face> fallback;
+    for (int i = 8; i < argc; ++i)
+    {
+        Face face;
+        std::ifstream input(argv[i], std::ios::binary);
+        face.data.assign(std::istreambuf_iterator<char>(input), {});
+        fallback.push_back(std::move(face));
+    }
+    for (auto &face : fallback)
+        if (face.data.empty() || !stbtt_InitFont(&face.info, face.data.data(),
+                                                 stbtt_GetFontOffsetForIndex(face.data.data(), 0)))
+            return 1;
+    struct Shaped
+    {
+        unsigned face{}, glyph{};
+        float advance{}, x{}, y{};
+    };
+    std::map<int, Shaped> shaped;
+    if (argc > 7)
+    {
+        std::ifstream input(argv[7]);
+        unsigned cp;
+        Shaped glyph;
+        while (input >> cp >> glyph.face >> glyph.glyph >> glyph.advance >> glyph.x >> glyph.y)
+            shaped.emplace(static_cast<int>(cp), glyph);
+    }
+    std::vector<Baked> glyphs;
+    for (int codepoint : codepoints(argc > 6 ? argv[6] : nullptr))
+    {
+        const stbtt_fontinfo *face = &font;
+        int glyph_index = stbtt_FindGlyphIndex(face, codepoint);
+        const auto prepared = shaped.find(codepoint);
+        if (prepared != shaped.end())
+        {
+            if (prepared->second.face == 0 || prepared->second.face > fallback.size())
+                return 1;
+            face = &fallback[prepared->second.face - 1].info;
+            glyph_index = static_cast<int>(prepared->second.glyph);
+        }
+        else if (glyph_index == 0)
+        {
+            for (const auto &candidate : fallback)
+            {
+                const int found = stbtt_FindGlyphIndex(&candidate.info, codepoint);
+                if (found)
+                {
+                    face = &candidate.info;
+                    glyph_index = found;
+                    break;
+                }
+            }
+        }
+        const float glyph_scale = stbtt_ScaleForMappingEmToPixels(face, pixel_size);
+        if (codepoint != ' ' && glyph_index == 0)
         {
             std::fprintf(stderr, "skipping U+%04X (not in font)\n", codepoint);
             continue;
@@ -100,11 +169,18 @@ int main(int argc, char **argv)
         glyph.codepoint = codepoint;
         int advance = 0;
         int bearing = 0;
-        stbtt_GetCodepointHMetrics(&font, codepoint, &advance, &bearing);
-        glyph.advance = static_cast<float>(advance) * scale;
-        glyph.bitmap = stbtt_GetCodepointSDF(&font, scale, codepoint, range, 128,
-                                             128.0f / static_cast<float>(range), &glyph.w, &glyph.h,
-                                             &glyph.xoff, &glyph.yoff);
+        stbtt_GetGlyphHMetrics(face, glyph_index, &advance, &bearing);
+        glyph.advance =
+            (prepared == shaped.end() ? static_cast<float>(advance) : prepared->second.advance) *
+            glyph_scale;
+        glyph.bitmap = stbtt_GetGlyphSDF(face, glyph_scale, glyph_index, range, 128,
+                                         128.0f / static_cast<float>(range), &glyph.w, &glyph.h,
+                                         &glyph.xoff, &glyph.yoff);
+        if (prepared != shaped.end())
+        {
+            glyph.xoff += static_cast<int>(prepared->second.x * glyph_scale);
+            glyph.yoff -= static_cast<int>(prepared->second.y * glyph_scale);
+        }
         glyphs.push_back(glyph);
     }
 
@@ -112,7 +188,8 @@ int main(int argc, char **argv)
     std::vector<Baked *> order;
     for (Baked &glyph : glyphs)
         order.push_back(&glyph);
-    std::sort(order.begin(), order.end(), [](const Baked *a, const Baked *b) { return a->h > b->h; });
+    std::sort(order.begin(), order.end(),
+              [](const Baked *a, const Baked *b) { return a->h > b->h; });
     int pen_x = 1;
     int pen_y = 1;
     int shelf = 0;
@@ -177,7 +254,8 @@ int main(int argc, char **argv)
 
     std::vector<unsigned char> out;
     put(out, header);
-    std::sort(glyphs.begin(), glyphs.end(), [](const Baked &a, const Baked &b) { return a.codepoint < b.codepoint; });
+    std::sort(glyphs.begin(), glyphs.end(),
+              [](const Baked &a, const Baked &b) { return a.codepoint < b.codepoint; });
     for (const Baked &glyph : glyphs)
     {
         ff::Glyph record{};
@@ -191,9 +269,8 @@ int main(int argc, char **argv)
         record.advance = glyph.advance;
         put(out, record);
     }
-    std::sort(kerns.begin(), kerns.end(), [](const ff::Kern &a, const ff::Kern &b) {
-        return a.first != b.first ? a.first < b.first : a.second < b.second;
-    });
+    std::sort(kerns.begin(), kerns.end(), [](const ff::Kern &a, const ff::Kern &b)
+              { return a.first != b.first ? a.first < b.first : a.second < b.second; });
     for (const ff::Kern &kern : kerns)
         put(out, kern);
     out.insert(out.end(), atlas.begin(), atlas.end());
@@ -207,7 +284,7 @@ int main(int argc, char **argv)
     std::fclose(file);
     for (Baked &glyph : glyphs)
         stbtt_FreeSDF(glyph.bitmap, nullptr);
-    std::printf("%s: %zu glyphs, %zu kerning pairs, atlas %dx%d, %zu bytes\n", argv[2], glyphs.size(),
-                kerns.size(), atlas_size, atlas_height, out.size());
+    std::printf("%s: %zu glyphs, %zu kerning pairs, atlas %dx%d, %zu bytes\n", argv[2],
+                glyphs.size(), kerns.size(), atlas_size, atlas_height, out.size());
     return 0;
 }

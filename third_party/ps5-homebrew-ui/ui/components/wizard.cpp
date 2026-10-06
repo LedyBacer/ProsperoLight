@@ -389,26 +389,20 @@ void Wizard::draw_marker(Canvas &canvas, int index) const
         const float room = std::max(in.x + in.w - x, 40.0f);
         if (step.caption.empty())
         {
-            paint.label(fit_label(paint, step.label, style.label_size, room), x,
-                        cy + style.label_size * 0.35f, style.label_size, title);
+            paint.bounded_label(step.label, x, cy + style.label_size * 0.35f, style.label_size, title, room);
         }
         else
         {
-            paint.label(fit_label(paint, step.label, style.label_size, room), x, cy - 3.0f,
-                        style.label_size, title);
-            paint.body(fit_body(paint, step.caption, style.caption_size, room), x,
-                       cy + style.caption_size + 3.0f, style.caption_size, note);
+            paint.bounded_label(step.label, x, cy - 3.0f, style.label_size, title, room);
+            paint.bounded_body(step.caption, x, cy + style.caption_size + 3.0f, style.caption_size, note, room);
         }
         return;
     }
     const float room = std::max(in.w / static_cast<float>(count()) - 12.0f, 40.0f);
     const float baseline = cy + reach + style.label_gap + style.label_size * 0.8f;
-    paint.label(fit_label(paint, step.label, style.label_size, room), cx, baseline,
-                style.label_size, title, gfx::Align::center);
+    paint.bounded_label(step.label, cx, baseline, style.label_size, title, room, gfx::Align::center);
     if (!step.caption.empty())
-        paint.body(fit_body(paint, step.caption, style.caption_size, room), cx,
-                   baseline + style.caption_size * 1.4f, style.caption_size, note,
-                   gfx::Align::center);
+        paint.bounded_body(step.caption, cx, baseline + style.caption_size * 1.4f, style.caption_size, note, room, gfx::Align::center);
 }
 
 void Wizard::draw_compact(Canvas &canvas) const
@@ -430,13 +424,11 @@ void Wizard::draw_compact(Canvas &canvas) const
     else
         std::snprintf(counter, sizeof(counter), "%s %d %s %d", style.step_word.c_str(), step_ + 1,
                       style.of_word.c_str(), n);
-    const float used = paint.label(fit_label(paint, counter, style.label_size, in.w), in.x,
-                                   baseline, style.label_size, finished() ? strong : quiet);
+    const float used = paint.bounded_label(counter, in.x, baseline, style.label_size, finished() ? strong : quiet, in.w);
     if (!finished() && in.w - used > 80.0f)
     {
         const WizardStep &step = steps_[static_cast<std::size_t>(step_)];
-        paint.label(fit_label(paint, step.label, style.label_size, in.w - used - 18.0f),
-                    in.x + used + 18.0f, baseline, style.label_size, strong);
+        paint.bounded_label(step.label, in.x + used + 18.0f, baseline, style.label_size, strong, in.w - used - 18.0f);
     }
 
     float x = in.x;

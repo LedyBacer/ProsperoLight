@@ -18,6 +18,7 @@
 #include "stream_profile.hpp"
 #include "lan_http_report.hpp"
 #include "connecting_plate.hpp"
+#include "i18n.hpp"
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
 
@@ -40,6 +41,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <set>
 #include <unistd.h>
 #include <vector>
 
@@ -79,7 +81,7 @@ bool load_font(hui::gfx::Renderer &renderer, const std::string &path, hui::gfx::
                hui::ui::FontRef *ref)
 {
     std::string data;
-    if (!hui::save::read_file(path, &data) || !font->load(data))
+    if (!hui::save::read_file(path, &data, 32u << 20) || !font->load(data))
     {
         std::fprintf(stderr, "cannot load font %s\n", path.c_str());
         return false;
@@ -169,6 +171,7 @@ int main(int argc, char **argv)
         return 2;
     }
     const std::string assets = argv[1];
+    setenv("PROSPEROLIGHT_LOCALE_DIR", (assets + "/locales").c_str(), 1);
     const std::string output = argv[2];
     const int width = argc > 4 ? std::atoi(argv[3]) : connecting::kWidth;
     const int height = argc > 4 ? std::atoi(argv[4]) : connecting::kHeight;
@@ -416,6 +419,8 @@ int main(int argc, char **argv)
             frame.reset();
             frame.glass_texture = renderer.glass_texture();
             view.draw(frame);
+            if (std::getenv("PROSPEROLIGHT_LAYOUT_CHECK") && name.find("row-") != std::string::npos)
+                return;
             renderer.begin();
             renderer.backdrop(frame.backdrop);
             renderer.draw(frame.scene);
@@ -484,6 +489,66 @@ int main(int argc, char **argv)
         model.Shutdown();
         return started;
     };
+
+    if (std::getenv("PROSPEROLIGHT_LAYOUT_CHECK"))
+    {
+        fake::erase_saved_file();
+        session("layout-discovery", {{90, 0}}, "");
+        static std::set<std::string> violations;
+        static std::string locale;
+        hui::gfx::DrawList::text_audit = [](std::string_view value, const hui::gfx::Rect &bounds,
+                                            const hui::gfx::Rect &clip, bool readable)
+        {
+            if (value.ends_with("...") || value.ends_with("\xE2\x80\xA6"))
+                violations.insert(locale + " | truncated: " + std::string(value));
+            if (readable || bounds.y + bounds.h <= clip.y || bounds.y >= clip.y + clip.h)
+                return;
+            if (bounds.x < clip.x - 2.0f || bounds.x + bounds.w > clip.x + clip.w + 2.0f)
+            {
+                char geometry[128];
+                std::snprintf(geometry, sizeof(geometry), " | x=%.1f width=%.1f lane=%.1f..%.1f",
+                              bounds.x, bounds.w, clip.x, clip.x + clip.w);
+                violations.insert(locale + " | " + std::string(value) + geometry);
+            }
+        };
+        for (unsigned lang = 0; lang < std::size(i18n::languages); ++lang)
+        {
+            locale = i18n::languages[lang].code;
+            expect(i18n::select(static_cast<int>(lang) + 1), "layout locale selection");
+            std::vector<Step> script = {{30, options},
+                                        {30, 0, Direction::none, "settings"},
+                                        {10, confirm},
+                                        {30, 0, Direction::none, "languages"},
+                                        {10, back}};
+            std::array<std::string, 32> captures;
+            for (int row = 0; row < 32; ++row)
+            {
+                captures[row] = "row-" + std::to_string(row);
+                script.push_back({10, 0, Direction::down});
+                script.push_back({20, 0, Direction::none, captures[row].c_str()});
+            }
+            session(("layout-" + locale).c_str(), script, "");
+            session(("layout-pcs-" + locale).c_str(),
+                    {{90, 0, Direction::none, "pcs"},
+                     {20, 0, Direction::right},
+                     {20, confirm, Direction::none, "actions"},
+                     {20, back},
+                     {20, 0, Direction::right},
+                     {20, confirm, Direction::none, "dialog"},
+                     {20, back}},
+                    "");
+            session(("layout-error-" + locale).c_str(), {{80, 0, Direction::none, "error"}},
+                    i18n::tr("Could not connect to Sunshine"));
+            session(("layout-about-" + locale).c_str(),
+                    {{30, previous}, {60, 0, Direction::none, "page"}}, "");
+        }
+        hui::gfx::DrawList::text_audit = nullptr;
+        for (const auto &violation : violations)
+            std::fprintf(stderr, "TEXT_OVERFLOW: %s\n", violation.c_str());
+        (void)i18n::select(0);
+        expect(violations.empty(), "all locales fit screen/clips or use readable scrolling");
+        return failures ? 1 : 0;
+    }
 
     // ---- first start: nothing saved, the network is searched ----
     fake::erase_saved_file();
@@ -650,6 +715,17 @@ int main(int argc, char **argv)
     // ---- back from a stream that failed ----
     session("games", {{80, 0, Direction::none, "stream-error"}}, "Sunshine closed the connection");
 
+    // Language is a modal, scrolling Select rather than a cycling choice.
+    session("language",
+            {{30, options},
+             {10, confirm},
+             {30, 0, Direction::none, "dropdown"},
+             {10, 0, Direction::down},
+             {10, back},
+             {20, 0}},
+            "");
+    expect(i18n::selected() == 0, "closing the language dropdown preserves Automatic");
+
     // ---- Settings: the frame-rate presets and the bitrate slider, beside the new rows ----
     (void)prosperolight::host_quit_set_enabled(false);
     moonlight_config_t initial_settings{};
@@ -662,6 +738,7 @@ int main(int argc, char **argv)
     session("settings",
             {
                 {30, options},
+                {10, 0, Direction::down},
                 {30, 0, Direction::none, "pyrowave-hdr"},
                 {10, 0, Direction::down},
                 {20, 0, Direction::left},

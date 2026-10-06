@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "i18n.hpp"
 #include "launcher/launcher_view.hpp"
 
 #include "host_quit_preferences.hpp"
@@ -81,6 +82,7 @@ enum FormId
     kLogging,
     kUiSound,
     kHostQuit,
+    kLanguage,
 };
 
 constexpr float kBitrateStep = 10.0f;
@@ -157,8 +159,8 @@ ui::Theme moonlight_theme()
     ui::Theme t = theme_by_id("acrylic");
     t.id = "moonlight";
     t.name = "Moonlight";
-    t.family = "Frosted glass";
-    t.summary = "ProsperoLight's night blue under frosted panels";
+    t.family = i18n::tr("Frosted glass");
+    t.summary = i18n::tr("ProsperoLight's night blue under frosted panels");
     t.backdrop.colors[0] = Color::rgb(0x030816);
     t.backdrop.colors[1] = Color::rgb(0x0a1a4a);
     t.backdrop.colors[2] = Color::rgb(0x1f5fd0);
@@ -194,9 +196,11 @@ void View::set_players(int count)
 
 void View::set_storage(const Storage &storage)
 {
+    storage_ = storage;
     storage_access_ = storage.access;
-    files_.set_items(
-        {{"Settings", storage.settings}, {"Pairing", storage.pairing}, {"Logs", storage.logs}});
+    files_.set_items({{i18n::tr("Settings"), storage.settings},
+                      {i18n::tr("Pairing"), storage.pairing},
+                      {i18n::tr("Logs"), storage.logs}});
 }
 
 void View::show_stream_error(const char *message)
@@ -304,13 +308,16 @@ bool View::take_start_stream()
 
 void View::build()
 {
-    tabs_.set_tabs({{"PCs"}, {"Games"}, {"Settings"}, {"About"}});
+    form_.clear();
+    tabs_.set_tabs(
+        {{i18n::tr("PCs")}, {i18n::tr("Games")}, {i18n::tr("Settings")}, {i18n::tr("About")}});
     tabs_.style.kind = ui::TabKind::pill;
+    tabs_.style.width = ui::TabWidth::fill;
     tabs_.style.on_page = true;
     tabs_.style.height = 52.0f;
     tabs_.style.text_size = 25.0f;
-    tabs_.style.padding = 28.0f;
-    tabs_.set_bounds({470.0f, 62.0f, 680.0f, 52.0f});
+    tabs_.style.padding = 18.0f;
+    tabs_.set_bounds({470.0f, 62.0f, 840.0f, 52.0f});
     tabs_.set_active(0, true);
     tabs_.set_focused(false);
 
@@ -354,21 +361,21 @@ void View::build()
     open_games_.glyph = ui::Button::cross;
     open_games_.style.justify = ui::ButtonJustify::between;
 
-    host_actions_.set_items({{"Change port"}, {"Unpair"}});
+    host_actions_.set_items({{i18n::tr("Change port")}, {i18n::tr("Unpair")}});
     host_actions_.style.exits.left = true;
     host_actions_.style.exits.right = true;
 
-    remove_.label = "Remove";
-    remove_.hint = "Hold";
+    remove_.label = i18n::tr("Remove");
+    remove_.hint = i18n::tr("Hold");
     remove_.style.variant = ui::HoldVariant::fill;
     remove_.style.role = ui::ButtonRole::secondary;
     remove_.style.size = ui::ButtonSize::medium;
 
-    empty_.title = "No PCs yet";
-    empty_.body = "Start Sunshine on a PC on this network and it appears here, "
-                  "or add it by its "
-                  "address.";
-    empty_.action = "Add a PC";
+    empty_.title = i18n::tr("No PCs yet");
+    empty_.body = i18n::tr("Start Sunshine on a PC on this network and it appears here, "
+                           "or add it by its "
+                           "address.");
+    empty_.action = i18n::tr("Add a PC");
     empty_.style.max_text_width = 620.0f;
     empty_.style.title_size = 36.0f;
     empty_.style.body_size = 24.0f;
@@ -403,12 +410,12 @@ void View::build()
     start_.glyph = ui::Button::cross;
     start_.style.size = ui::ButtonSize::large;
     start_.set_bounds({kMargin, 374.0f, 330.0f, 72.0f});
-    stop_.label = "Stop app";
+    stop_.label = i18n::tr("Stop app");
     stop_.glyph = ui::Button::square;
     stop_.style.role = ui::ButtonRole::secondary;
     stop_.style.size = ui::ButtonSize::large;
     stop_.set_bounds({kMargin + 350.0f, 374.0f, 250.0f, 72.0f});
-    shelf_.title = "Apps on this PC";
+    shelf_.title = i18n::tr("Apps on this PC");
     shelf_.style.rule = ui::SectionRule::trailing;
     shelf_.set_bounds({kMargin, 494.0f, kRight - kMargin, 40.0f});
     no_apps_.style.max_text_width = 640.0f;
@@ -418,61 +425,84 @@ void View::build()
     loading_apps_.style.kind = ui::SpinnerKind::arc;
     loading_apps_.set_bounds({930.0f, 500.0f, 60.0f, 60.0f});
 
+    language_.set_label(i18n::tr("Language"));
+    std::vector<ui::SelectOption> language_options{{i18n::tr("Automatic (console language)")}};
+    for (const auto &language : i18n::languages)
+        language_options.emplace_back(i18n::tr(language.name));
+    language_.set_options(std::move(language_options));
+    language_.set_index(i18n::selected());
+    language_.style.label = ui::SelectLabel::none;
+    language_.style.max_rows = 7;
+    language_.style.popover_width = 640.0f;
+    language_.set_limits({kMargin, 160.0f, kRight - kMargin, 770.0f});
     // ---- Settings ----
-    form_.add_header("Video");
+    form_.add_action(kLanguage, i18n::tr("Language")).text =
+        i18n::selected() == 0 ? i18n::tr("Automatic (console language)")
+                              : i18n::tr(i18n::languages[i18n::selected() - 1].name);
+    form_.row(kLanguage)->description =
+        i18n::tr("Language changes immediately. Automatic follows the console language.");
+    form_.add_header(i18n::tr("Video"));
     form_
-        .add_choice(kResolution, "Resolution",
+        .add_choice(kResolution, i18n::tr("Resolution"),
                     {"1920 \xC3\x97 1080", "2560 \xC3\x97 1440", "3840 \xC3\x97 2160"}, 0)
-        .description = "The picture Sunshine encodes. 1440p is scaled to the 4K output.";
-    form_.add_choice(kFrameRate, "Frame rate", {"60 FPS", "90 FPS", "120 FPS"}, 0).description =
-        "90 and 120 FPS use the 119.88 Hz output mode.";
-    form_.add_choice(kCodec, "Video codec", {"H.264", "HEVC", "PyroWave"}, 0).description =
-        "PyroWave needs a compatible host, high bitrate and wired LAN.";
-    form_.add_choice(kChroma, "Chroma sampling", {"4:2:0", "4:4:4"}, 0).description =
-        "4:4:4 is available with PyroWave; native codecs use 4:2:0.";
+        .description = i18n::tr("The picture Sunshine encodes. 1440p is scaled to the 4K output.");
+    form_.add_choice(kFrameRate, i18n::tr("Frame rate"), {"60 FPS", "90 FPS", "120 FPS"}, 0)
+        .description = i18n::tr("90 and 120 FPS use the 119.88 Hz output mode.");
+    form_.add_choice(kCodec, i18n::tr("Video codec"), {"H.264", "HEVC", "PyroWave"}, 0)
+        .description = i18n::tr("PyroWave needs a compatible host, high bitrate and wired LAN.");
+    form_.add_choice(kChroma, i18n::tr("Chroma sampling"), {"4:2:0", "4:4:4"}, 0).description =
+        i18n::tr("4:4:4 is available with PyroWave; native codecs use 4:2:0.");
     form_.add_toggle(kHdr, "HDR", false).description =
-        "HDR10 through HEVC Main10 or 10-bit PyroWave, when advertised by the "
-        "PC.";
-    ui::FormRow &bitrate =
-        form_.add_slider(kBitrate, "Bitrate", 20.0f, kBitrateStep, kBitrateMax, kBitrateStep);
+        i18n::tr("HDR10 through HEVC Main10 or 10-bit PyroWave, when advertised by the "
+                 "PC.");
+    ui::FormRow &bitrate = form_.add_slider(kBitrate, i18n::tr("Bitrate"), 20.0f, kBitrateStep,
+                                            kBitrateMax, kBitrateStep);
     bitrate.unit = " Mbps";
-    bitrate.description = "Higher is not always better: the decoder sets the limit.";
-    form_.add_header("Sound");
-    form_.add_choice(kAudio, "Audio", {"Stereo", "5.1 surround"}, 0).description =
-        "48 kHz Opus, decoded on the console.";
-    form_.add_toggle(kUiSound, "Menu sounds", true).description =
-        "Menu navigation and confirmation sounds.";
-    form_.add_header("Host session");
-    form_.add_toggle(kHostQuit, "Quit host app after stream", false).description =
-        "Stop the game or app on the PC when leaving the stream.";
-    form_.add_header("Display");
-    form_.add_choice(kArea, "Picture size", {"TV safe", "Edge to edge"}, 0).description =
-        "TV safe keeps a margin for televisions that crop the picture.";
-    form_.add_toggle(kVsync, "V-Sync", true).description =
-        "Off shows each frame at once: lower latency, visible tearing.";
-    form_.add_choice(kPacing, "Frame pacing", {"Unpaced", "Paced", "Paced+VRR"}, 0).description =
-        "Smooth frame timing; VRR uses fixed refresh if unavailable.";
-    form_.add_header("Decoder");
-    form_.add_choice(kPipeline, "Pipeline", {"Classic", "Adaptive (experimental)"}, 0).description =
-        "Classic decodes one frame at a time. Adaptive overlaps "
-        "frames when decoding falls behind.";
+    bitrate.description = i18n::tr("Higher is not always better: the decoder sets the limit.");
+    form_.add_header(i18n::tr("Sound"));
+    form_.add_choice(kAudio, i18n::tr("Audio"), {i18n::tr("Stereo"), i18n::tr("5.1 surround")}, 0)
+        .description = i18n::tr("48 kHz Opus, decoded on the console.");
+    form_.add_toggle(kUiSound, i18n::tr("Menu sounds"), true).description =
+        i18n::tr("Menu navigation and confirmation sounds.");
+    form_.add_header(i18n::tr("Host session"));
+    form_.add_toggle(kHostQuit, i18n::tr("Quit host app after stream"), false).description =
+        i18n::tr("Stop the game or app on the PC when leaving the stream.");
+    form_.add_header(i18n::tr("Display"));
     form_
-        .add_stepper(kCores, "CPU cores", MOONLIGHT_DECODER_CORES_DEFAULT,
+        .add_choice(kArea, i18n::tr("Picture size"),
+                    {i18n::tr("TV safe"), i18n::tr("Edge to edge")}, 0)
+        .description = i18n::tr("TV safe keeps a margin for televisions that crop the picture.");
+    form_.add_toggle(kVsync, i18n::tr("V-Sync"), true).description =
+        i18n::tr("Off shows each frame at once: lower latency, visible tearing.");
+    form_
+        .add_choice(kPacing, i18n::tr("Frame pacing"),
+                    {i18n::tr("Unpaced"), i18n::tr("Paced"), i18n::tr("Paced+VRR")}, 0)
+        .description = i18n::tr("Smooth frame timing; VRR uses fixed refresh if unavailable.");
+    form_.add_header(i18n::tr("Decoder"));
+    form_
+        .add_choice(kPipeline, i18n::tr("Pipeline"),
+                    {i18n::tr("Classic"), i18n::tr("Adaptive (experimental)")}, 0)
+        .description = i18n::tr("Classic decodes one frame at a time. Adaptive overlaps "
+                                "frames when decoding falls behind.");
+    form_
+        .add_stepper(kCores, i18n::tr("CPU cores"), MOONLIGHT_DECODER_CORES_DEFAULT,
                      MOONLIGHT_DECODER_CORES_MIN, MOONLIGHT_DECODER_CORES_MAX)
-        .description = "Cores reserved for decoding; the stream uses the rest.";
-    form_.add_header("Diagnostics");
-    form_.add_toggle(kLogging, "Diagnostic logs", true).description =
-        "Bounded logs and output interval traces saved after the stream.";
+        .description = i18n::tr("Cores reserved for decoding; the stream uses the rest.");
+    form_.add_header(i18n::tr("Diagnostics"));
+    form_.add_toggle(kLogging, i18n::tr("Diagnostic logs"), true).description =
+        i18n::tr("Bounded logs and output interval traces saved after the stream.");
     form_.style.row_height = 66.0f;
     form_.style.header_height = 54.0f;
     form_.style.label_size = 26.0f;
+    form_.style.on_text = i18n::tr("On");
+    form_.style.off_text = i18n::tr("Off");
     form_.style.control_width = 440.0f;
     // Wide enough for "1000 Mbps", which the PyroWave range reaches.
     form_.style.number_width = 156.0f;
     form_.style.highlight.kind = ui::HighlightKind::tint;
     form_.set_bounds({kMargin - 20.0f, kContentTop - 8.0f, 1060.0f, 720.0f});
 
-    headroom_.label = "Decoder load";
+    headroom_.label = i18n::tr("Decoder load");
     headroom_.style.shape = ui::MeterShape::linear;
     headroom_.style.height = 18.0f;
     headroom_.style.peak_hold = false;
@@ -516,7 +546,7 @@ void View::build()
     pair_timer_.style.shape = ui::CountdownShape::ring;
     pair_timer_.style.thickness = 8.0f;
     pair_timer_.style.on_panel = true;
-    pair_timer_.label = "left";
+    pair_timer_.label = i18n::tr("left");
     pair_timer_.set_bounds({kPairPanel.cx() - 60.0f, kPairPanel.y + 368.0f, 120.0f, 120.0f});
 
     port_prompt_.style.width = 560.0f;
@@ -525,8 +555,8 @@ void View::build()
     port_prompt_.style.allow_empty = true;
     port_prompt_.style.key_height = 66.0f;
     port_prompt_.style.buttons = false;
-    port_prompt_.set_title("Sunshine port");
-    port_prompt_.field.set_helper("Sunshine's default is 47989");
+    port_prompt_.set_title(i18n::tr("Sunshine port"));
+    port_prompt_.field.set_helper(i18n::tr("Sunshine's default is 47989"));
     port_prompt_.keyboard.set_layouts({ui::KeyboardLayout::numeric()});
 
     host_prompt_.style.width = 560.0f;
@@ -534,10 +564,10 @@ void View::build()
     host_prompt_.style.auto_capital = false;
     host_prompt_.style.key_height = 62.0f;
     host_prompt_.style.buttons = false;
-    host_prompt_.style.empty_error = "Type the PC's address";
-    host_prompt_.set_title("Add a PC");
-    host_prompt_.field.set_label("Address of the PC");
-    host_prompt_.field.set_helper("For example 192.168.1.50, or 192.168.1.50:48989");
+    host_prompt_.style.empty_error = i18n::tr("Type the PC's address");
+    host_prompt_.set_title(i18n::tr("Add a PC"));
+    host_prompt_.field.set_label(i18n::tr("Address of the PC"));
+    host_prompt_.field.set_helper(i18n::tr("For example 192.168.1.50, or 192.168.1.50:48989"));
     host_prompt_.keyboard.set_layouts({address_layout()});
 
     unpair_dialog_.style.width = 720.0f;
@@ -604,6 +634,7 @@ void View::restyle()
     no_apps_.style.theme = t;
     loading_apps_.style.theme = t;
     form_.style.theme = t;
+    language_.style.theme = t;
     profile_panel_.style.theme = t;
     headroom_.style.theme = t;
     profile_details_.style.theme = t;
@@ -671,8 +702,8 @@ void View::sync_hosts()
         items.push_back(std::move(item));
     }
     ui::ListItem add;
-    add.title = "Add a PC";
-    add.subtitle = "By address, with a port if needed";
+    add.title = i18n::tr("Add a PC");
+    add.subtitle = i18n::tr("By address, with a port if needed");
     items.push_back(std::move(add));
     const int count = static_cast<int>(items.size());
     hosts_.set_items(std::move(items));
@@ -699,32 +730,34 @@ void View::sync_host_panel()
     const moonlight_config_host_t &host = config.hosts[index];
     const HostStatus status = model_.host_status(index);
     const unsigned port = moonlight_config_host_port(&host);
-    char text[64];
+    char text[256];
     std::vector<ui::DetailItem> items;
-    items.push_back({"Address", host.address});
+    items.push_back({i18n::tr("Address"), host.address});
     std::snprintf(text, sizeof(text),
-                  port == MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT ? "%u (Sunshine's default)" : "%u",
+                  port == MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT ? i18n::tr("%u (Sunshine's default)")
+                                                             : "%u",
                   port);
-    items.push_back({"Port", text});
-    items.push_back({"Connection", !status.known   ? "Checking"
-                                   : status.online ? "Local network"
-                                                   : "Not answering"});
-    items.push_back({"Pairing", !status.known || !status.online ? "Unknown"
-                                : status.paired                 ? "Paired with this PS5"
-                                                                : "Not paired yet"});
+    items.push_back({i18n::tr("Port"), text});
+    items.push_back({i18n::tr("Connection"), !status.known   ? i18n::tr("Checking")
+                                             : status.online ? i18n::tr("Local network")
+                                                             : i18n::tr("Not answering")});
+    items.push_back({i18n::tr("Pairing"), !status.known || !status.online ? i18n::tr("Unknown")
+                                          : status.paired ? i18n::tr("Paired with this PS5")
+                                                          : i18n::tr("Not paired yet")});
     if (status.online && status.paired)
     {
-        std::snprintf(text, sizeof(text), "%u available", status.app_count);
-        items.push_back({"Apps", text});
-        items.push_back({"Running now", status.current_app_id == 0 ? "Nothing"
-                                        : status.running[0]        ? status.running
-                                                                   : "An app"});
+        std::snprintf(text, sizeof(text), i18n::tr("%u available"), status.app_count);
+        items.push_back({i18n::tr("Apps"), text});
+        items.push_back({i18n::tr("Running now"), status.current_app_id == 0 ? i18n::tr("Nothing")
+                                                  : status.running[0]        ? status.running
+                                                                             : i18n::tr("An app")});
     }
     host_details_.set_items(std::move(items));
-    open_games_.label = status.online && status.paired ? "Open games"
-                        : status.online                ? "Pair this PC"
-                                                       : "Try again";
-    host_actions_.item(1).label = status.online && status.paired ? "Unpair" : "Pair";
+    open_games_.label = status.online && status.paired ? i18n::tr("Open games")
+                        : status.online                ? i18n::tr("Pair this PC")
+                                                       : i18n::tr("Try again");
+    host_actions_.item(1).label =
+        status.online && status.paired ? i18n::tr("Unpair") : i18n::tr("Pair");
     host_actions_.item(1).disabled = !status.online;
     shown_host_ = static_cast<int>(index);
 }
@@ -775,7 +808,7 @@ void View::sync_games()
     }
     const bool running = model_.selected_app() < backend.app_count &&
                          backend.apps[model_.selected_app()].id == backend.current_app_id;
-    start_.label = running ? "Resume stream" : "Start stream";
+    start_.label = running ? i18n::tr("Resume stream") : i18n::tr("Start stream");
     stop_.set_disabled(backend.current_app_id == 0 || model_.busy() == Busy::stopping);
 }
 
@@ -845,22 +878,26 @@ void View::apply_setting(int id)
         break;
     case kPacing:
         if (!moonlight::save_presentation_mode(static_cast<unsigned>(form_.choice_index(kPacing))))
-            toasts_.push(ui::StatusKind::danger, "Could not save frame pacing", "Try again.");
+            toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save frame pacing"),
+                         i18n::tr("Try again."));
         sync_settings_from_config();
         return;
     case kLogging:
         if (!prosperolight_logs_set_enabled(form_.toggle_value(kLogging)))
-            toasts_.push(ui::StatusKind::danger, "Could not save logging", "Try again.");
+            toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save logging"),
+                         i18n::tr("Try again."));
         sync_settings_from_config();
         return;
     case kHostQuit:
         if (!prosperolight::host_quit_set_enabled(form_.toggle_value(kHostQuit)))
-            toasts_.push(ui::StatusKind::danger, "Could not save host app quit", "Try again.");
+            toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save host app quit"),
+                         i18n::tr("Try again."));
         sync_settings_from_config();
         return;
     case kUiSound:
         if (!prosperolight::ui_sound_set_enabled(form_.toggle_value(kUiSound)))
-            toasts_.push(ui::StatusKind::danger, "Could not save menu sounds", "Try again.");
+            toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save menu sounds"),
+                         i18n::tr("Try again."));
         sync_settings_from_config();
         return;
     case kAudio:
@@ -907,7 +944,7 @@ void View::sync_profile(bool snap)
     const bool hevc_limits = config.stream_resolution == MOONLIGHT_STREAM_RESOLUTION_2160P && hevc;
     limits_apply_ = pyro || hevc_limits || h264_red || h264_yellow || h264_60;
     const float scale = hevc_limits ? limit.freezes * 1.3f : 1000.0f;
-    headroom_.label = limits_apply_ ? "Decoder load" : "Requested bitrate";
+    headroom_.label = limits_apply_ ? i18n::tr("Decoder load") : i18n::tr("Requested bitrate");
     headroom_.style.value_scale = scale;
     headroom_.style.warning_at = pyro                      ? 0.500001f
                                  : h264_red || h264_yellow ? 0.0f
@@ -924,14 +961,14 @@ void View::sync_profile(bool snap)
 
     const bool fast = config.stream_fps > MOONLIGHT_STREAM_FPS_60;
     std::vector<ui::DetailItem> items;
-    items.push_back({"TV output", fast ? "119.88 Hz" : "59.94 Hz"});
-    items.push_back({"Codec", pyro                 ? codec_name(config)
-                              : config.hdr_enabled ? "HEVC Main10, HDR10"
-                              : hevc               ? "HEVC Main"
-                                                   : "H.264 High"});
-    items.push_back({"Sound", config.audio_configuration == MOONLIGHT_AUDIO_51_SURROUND
-                                  ? "5.1 surround, 48 kHz"
-                                  : "Stereo, 48 kHz"});
+    items.push_back({i18n::tr("TV output"), fast ? "119.88 Hz" : "59.94 Hz"});
+    items.push_back({i18n::tr("Codec"), pyro                 ? codec_name(config)
+                                        : config.hdr_enabled ? "HEVC Main10, HDR10"
+                                        : hevc               ? "HEVC Main"
+                                                             : "H.264 High"});
+    items.push_back({i18n::tr("Sound"), config.audio_configuration == MOONLIGHT_AUDIO_51_SURROUND
+                                            ? i18n::tr("5.1 surround, 48 kHz")
+                                            : i18n::tr("Stereo, 48 kHz")});
     profile_details_.set_items(std::move(items));
 
     const bool online = model_.backend_valid() && backend.online;
@@ -941,36 +978,40 @@ void View::sync_profile(bool snap)
         config.video_codec, config.chroma_sampling, config.hdr_enabled != 0);
     const bool no_pyro =
         online && pyro && !(backend.pyrowave_profiles & selected_profile.capability);
-    char text[200];
+    char text[2048];
     if (no_hdr || no_hevc || no_pyro)
     {
-        warning_.title = no_pyro  ? "PyroWave profile unavailable"
-                         : no_hdr ? "This PC cannot encode HDR"
-                                  : "This PC cannot encode HEVC";
-        std::snprintf(text, sizeof(text), "%s does not advertise it. The stream will not start.",
-                      backend.name[0] ? backend.name : "The PC");
+        warning_.title = no_pyro  ? i18n::tr("PyroWave profile unavailable")
+                         : no_hdr ? i18n::tr("This PC cannot encode HDR")
+                                  : i18n::tr("This PC cannot encode HEVC");
+        std::snprintf(text, sizeof(text),
+                      i18n::tr("%s does not advertise it. The stream will not start."),
+                      backend.name[0] ? backend.name : i18n::tr("The PC"));
     }
     else
     {
-        warning_.title = "Decoder load recommendation";
+        warning_.title = i18n::tr("Decoder load recommendation");
         if (pyro)
-            std::snprintf(text, sizeof(text),
-                          "Smooth up to 500 Mbps. Above 500 Mbps stability may decrease; above "
-                          "700 Mbps packet loss is more likely. Use wired LAN.");
+            std::snprintf(
+                text, sizeof(text), "%s",
+                i18n::tr("Smooth up to 500 Mbps. Above 500 Mbps stability may decrease; above "
+                         "700 Mbps packet loss is more likely. Use wired LAN."));
         else if (h264_red)
-            std::snprintf(text, sizeof(text),
-                          "H.264 4K120 can drop frames at any bitrate. Lower the frame rate or "
-                          "use HEVC/PyroWave.");
+            std::snprintf(
+                text, sizeof(text), "%s",
+                i18n::tr("H.264 4K120 can drop frames at any bitrate. Lower the frame rate or "
+                         "use HEVC/PyroWave."));
         else if (h264_yellow)
-            std::snprintf(text, sizeof(text), "H.264 4K90 may drop frames at any bitrate.");
+            std::snprintf(text, sizeof(text), "%s",
+                          i18n::tr("H.264 4K90 may drop frames at any bitrate."));
         else if (h264_60)
-            std::snprintf(text, sizeof(text),
-                          "Smooth up to 80 Mbps at 4K60. Above 80 Mbps the picture "
-                          "may stutter.");
+            std::snprintf(text, sizeof(text), "%s",
+                          i18n::tr("Smooth up to 80 Mbps at 4K60. Above 80 Mbps the picture "
+                                   "may stutter."));
         else
             std::snprintf(text, sizeof(text),
-                          "Smooth up to %.0f Mbps. Above %.0f Mbps the picture "
-                          "freezes about once a second.",
+                          i18n::tr("Smooth up to %.0f Mbps. Above %.0f Mbps the picture "
+                                   "freezes about once a second."),
                           static_cast<double>(limit.smooth), static_cast<double>(limit.freezes));
     }
     warning_.body = text;
@@ -979,11 +1020,11 @@ void View::sync_profile(bool snap)
                       (hevc_limits && bitrate > limit.smooth);
     warning_.set_shown(warn, snap);
 
-    static const char *const kShort[] = {"1080p", "1440p", "4K"};
+    static const char *const kShort[] = {"1080p", "1440p", i18n::tr("4K")};
     char chip[64];
     std::snprintf(chip, sizeof(chip), "%s  \xC2\xB7  %u FPS%s",
                   kShort[std::min(config.stream_resolution, 2u)], config.stream_fps,
-                  config.hdr_enabled ? "  \xC2\xB7  HDR" : "");
+                  config.hdr_enabled ? i18n::tr("  \xC2\xB7  HDR") : "");
     profile_.label = chip;
 }
 
@@ -1066,7 +1107,7 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     if (!pending_error_.empty() && age_ > 0.6f)
     {
         show(1, nullptr);
-        toasts_.push(ui::StatusKind::danger, "The stream ended", pending_error_, 10.0f);
+        toasts_.push(ui::StatusKind::danger, i18n::tr("The stream ended"), pending_error_, 10.0f);
         pending_error_.clear();
     }
     if (model_.revision() != seen_revision_)
@@ -1113,8 +1154,9 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
             const char last = line.back();
             if (starts("- "))
                 blocks.push_back(ui::TextBlock::bullet(line.substr(2)));
-            else if (starts("Warning:") || starts("Caution:") || starts("Important:") ||
-                     starts("Note:") || starts("Tip:"))
+            else if (starts(i18n::tr("Warning:")) || starts(i18n::tr("Caution:")) ||
+                     starts(i18n::tr("Important:")) || starts(i18n::tr("Note:")) ||
+                     starts(i18n::tr("Tip:")))
                 blocks.push_back(ui::TextBlock::quote(line));
             else if (line.size() <= 60 && last != '.' && last != ':' && last != '!' &&
                      last != '?' && last != ',' && last != ';')
@@ -1123,8 +1165,8 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
                 blocks.push_back(ui::TextBlock::paragraph(line));
         }
         if (!blocks.empty() && update_offer_.notes_truncated)
-            blocks.push_back(
-                ui::TextBlock::paragraph("The rest is on the app's page on homebrew.page."));
+            blocks.push_back(ui::TextBlock::paragraph(
+                i18n::tr("The rest is on the app's page on homebrew.page.")));
         update_notes_.set_content(std::move(blocks));
         open_update_offer(feedback, false);
     }
@@ -1183,6 +1225,10 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     else if (pairing)
     {
         // Sunshine holds the request until the PIN is typed or it times out.
+    }
+    else if (language_.is_open())
+    {
+        update_settings(input, feedback);
     }
     else if (input.is_pressed(Action::page_next) || input.is_pressed(Action::page_prev))
     {
@@ -1243,6 +1289,7 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     no_apps_.update(dt);
     loading_apps_.update(dt);
     form_.update(dt);
+    language_.update(dt);
     files_.update(dt);
     headroom_.update(dt);
     profile_details_.update(dt);
@@ -1318,19 +1365,21 @@ void View::update_hosts(const InputFrame &input, ui::Feedback &feedback)
             {
                 char port[8];
                 std::snprintf(port, sizeof(port), "%u", moonlight_config_host_port(host));
-                port_prompt_.field.set_label(std::string("Port of ") +
-                                             (host && host->name[0] ? host->name : "this PC"));
+                port_prompt_.field.set_label(
+                    std::string(i18n::tr("Port of ")) +
+                    (host && host->name[0] ? host->name : i18n::tr("this PC")));
                 port_prompt_.open(feedback, port);
             }
             else if (model_.backend().paired)
             {
                 ui::DialogContent content;
                 content.icon = ui::StatusKind::question;
-                content.title = std::string("Unpair ") +
-                                (model_.backend().name[0] ? model_.backend().name : "this PC") +
-                                "?";
-                content.body = "This PS5 will need a new PIN to use it again.";
-                content.buttons = {{"Cancel"}, {"Unpair", ui::ButtonKind::primary, true}};
+                content.title =
+                    std::string(i18n::tr("Unpair ")) +
+                    (model_.backend().name[0] ? model_.backend().name : i18n::tr("this PC")) + "?";
+                content.body = i18n::tr("This PS5 will need a new PIN to use it again.");
+                content.buttons = {{i18n::tr("Cancel")},
+                                   {i18n::tr("Unpair"), ui::ButtonKind::primary, true}};
                 unpair_dialog_.open(std::move(content), feedback);
             }
             else
@@ -1429,8 +1478,8 @@ void View::update_games(const InputFrame &input, ui::Feedback &feedback)
             model_.SelectApp(static_cast<unsigned>(apps_.focus()));
             const moonlight_backend_snapshot_t &backend = model_.backend();
             start_.label = backend.apps[model_.selected_app()].id == backend.current_app_id
-                               ? "Resume stream"
-                               : "Start stream";
+                               ? i18n::tr("Resume stream")
+                               : i18n::tr("Start stream");
             apply_ambient(false);
         }
         else if (event == ui::Event::activated)
@@ -1473,9 +1522,9 @@ void View::launch(ui::Feedback &feedback)
         return;
     const moonlight_config_t &config = model_.config();
     const moonlight_backend_snapshot_t &backend = model_.backend();
-    char text[200];
+    char text[2048];
     std::snprintf(text, sizeof(text),
-                  "%s  \xC2\xB7  %s  \xC2\xB7  %u FPS  \xC2\xB7  %s  \xC2\xB7  %u Mbps",
+                  i18n::tr("%s  \xC2\xB7  %s  \xC2\xB7  %u FPS  \xC2\xB7  %s  \xC2\xB7  %u Mbps"),
                   backend.name, resolution_name(config.stream_resolution), config.stream_fps,
                   codec_name(config), config.bitrate_mbps);
     loader_.title = backend.apps[model_.selected_app()].name;
@@ -1488,8 +1537,37 @@ void View::launch(ui::Feedback &feedback)
 
 void View::update_settings(const InputFrame &input, ui::Feedback &feedback)
 {
-    if (form_.handle(input, feedback) == ui::Event::changed)
+    if (language_.is_open())
+    {
+        if (language_.handle(input, feedback) == ui::Event::changed)
+        {
+            if (i18n::select(language_.index()))
+            {
+                build();
+                restyle();
+                set_storage(storage_);
+                sync();
+                tabs_.set_active(screen_, true);
+                form_.set_focus(0, true);
+            }
+            else
+            {
+                language_.set_index(i18n::selected());
+                toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save language"),
+                             i18n::tr("Try again."));
+            }
+        }
+        return;
+    }
+    const auto event = form_.handle(input, feedback);
+    if (event == ui::Event::changed)
         apply_setting(form_.changed_id());
+    if (event == ui::Event::activated && form_.changed_id() == kLanguage)
+    {
+        const auto row = form_.row_rect(form_.focus());
+        language_.set_bounds({row.x + row.w - 440.0f, row.y, 440.0f, row.h});
+        language_.open(feedback);
+    }
 }
 
 // ---- drawing -------------------------------------------------------------
@@ -1554,6 +1632,7 @@ void View::draw(Frame &frame) const
     draw_update(above);
     draw_update_notes(above);
     update_dialog_.draw(above);
+    language_.draw_popover(above);
     loader_.draw(above);
     draw_loader_tip(above);
     draw_connect_bar(above);
@@ -1599,8 +1678,8 @@ void View::draw_footer(ui::Canvas &canvas, ui::Painter &paint) const
     {
         if (busy == Busy::searching)
             searching_.draw(canvas);
-        paint.body(busy == Busy::searching ? "Searching this network for Sunshine"
-                                           : "No PC selected",
+        paint.body(busy == Busy::searching ? i18n::tr("Searching this network for Sunshine")
+                                           : i18n::tr("No PC selected"),
                    kMargin + (busy == Busy::searching ? 50.0f : 0.0f), 1018.0f, 24.0f,
                    paint.page_text_muted());
     }
@@ -1612,14 +1691,14 @@ void View::draw_footer(ui::Canvas &canvas, ui::Painter &paint) const
                           : ready                         ? t.success
                           : backend.online                ? t.warning
                                                           : t.danger;
-        const char *state = busy == Busy::stopping     ? "Stopping the app"
-                            : busy == Busy::unpairing  ? "Unpairing"
-                            : busy == Busy::refreshing ? "Checking"
-                            : !valid                   ? "Checking"
-                            : model_.reconnecting()    ? "Reconnecting"
-                            : ready                    ? "Sunshine ready"
-                            : backend.online           ? "Pairing required"
-                                                       : "Not answering";
+        const char *state = busy == Busy::stopping     ? i18n::tr("Stopping the app")
+                            : busy == Busy::unpairing  ? i18n::tr("Unpairing")
+                            : busy == Busy::refreshing ? i18n::tr("Checking")
+                            : !valid                   ? i18n::tr("Checking")
+                            : model_.reconnecting()    ? i18n::tr("Reconnecting")
+                            : ready                    ? i18n::tr("Sunshine ready")
+                            : backend.online           ? i18n::tr("Pairing required")
+                                                       : i18n::tr("Not answering");
         list.circle(kMargin + 8.0f, 1009.0f, 7.0f, dot);
         if (ready)
             list.glow({kMargin + 1.0f, 1002.0f, 14.0f, 14.0f}, 7.0f, 10.0f, dot.with_alpha(0.5f));
@@ -1636,37 +1715,38 @@ void View::draw_footer(ui::Canvas &canvas, ui::Painter &paint) const
     {
         const HostStatus status =
             on_host() ? model_.host_status(static_cast<unsigned>(host_focus())) : HostStatus{};
-        hints[count++] = {ui::Button::dpad, "Choose"};
+        hints[count++] = {ui::Button::dpad, i18n::tr("Choose")};
         hints[count++] = {ui::Button::cross, !on_host() || model_.config().host_count == 0
-                                                 ? "Add a PC"
-                                             : host_zone_ == 3                ? "Hold to remove"
-                                             : host_zone_ == 2                ? "Select"
-                                             : status.online && status.paired ? "Open"
-                                             : status.online                  ? "Pair"
-                                                                              : "Try again"};
-        hints[count++] = {ui::Button::triangle, "Search again"};
+                                                 ? i18n::tr("Add a PC")
+                                             : host_zone_ == 3 ? i18n::tr("Hold to remove")
+                                             : host_zone_ == 2 ? i18n::tr("Select")
+                                             : status.online && status.paired ? i18n::tr("Open")
+                                             : status.online                  ? i18n::tr("Pair")
+                                                             : i18n::tr("Try again")};
+        hints[count++] = {ui::Button::triangle, i18n::tr("Search again")};
     }
     else if (screen_ == 1)
     {
-        hints[count++] = {ui::Button::dpad, "Choose"};
+        hints[count++] = {ui::Button::dpad, i18n::tr("Choose")};
         if (!apps_.items().empty())
-            hints[count++] = {ui::Button::cross, "Start"};
+            hints[count++] = {ui::Button::cross, i18n::tr("Start")};
         else
-            hints[count++] = {ui::Button::cross, !host                               ? "PCs"
-                                                 : backend.online && !backend.paired ? "Pair"
-                                                                                     : "Try again"};
+            hints[count++] = {ui::Button::cross, !host ? i18n::tr("PCs")
+                                                 : backend.online && !backend.paired
+                                                     ? i18n::tr("Pair")
+                                                     : i18n::tr("Try again")};
         if (backend.current_app_id)
-            hints[count++] = {ui::Button::square, "Stop app"};
-        hints[count++] = {ui::Button::circle, "PCs"};
+            hints[count++] = {ui::Button::square, i18n::tr("Stop app")};
+        hints[count++] = {ui::Button::circle, i18n::tr("PCs")};
     }
     else if (screen_ == 2)
     {
-        hints[count++] = {ui::Button::dpad, "Choose and change"};
-        hints[count++] = {ui::Button::circle, "PCs"};
+        hints[count++] = {ui::Button::dpad, i18n::tr("Choose and change")};
+        hints[count++] = {ui::Button::circle, i18n::tr("PCs")};
     }
     else
     {
-        hints[count++] = {ui::Button::circle, "PCs"};
+        hints[count++] = {ui::Button::circle, i18n::tr("PCs")};
     }
     ui::draw_hints(list, canvas.fonts, glyphs(paint), hints, count, kRight, true);
 }
@@ -1708,10 +1788,10 @@ void View::draw_host_state(ui::Canvas &canvas, const Rect &row, int index) const
     const ui::Theme &t = theme_;
     ui::Painter paint(canvas.list, canvas.fonts, t, canvas.glass);
     const HostStatus status = model_.host_status(static_cast<unsigned>(index));
-    const char *text = !status.known    ? "Checking"
-                       : !status.online ? "Offline"
-                       : status.paired  ? "Ready"
-                                        : "Pair to use";
+    const char *text = !status.known    ? i18n::tr("Checking")
+                       : !status.online ? i18n::tr("Offline")
+                       : status.paired  ? i18n::tr("Ready")
+                                        : i18n::tr("Pair to use");
     const Color ink = !status.known || !status.online ? t.text_muted
                       : status.paired                 ? t.success
                                                       : t.warning;
@@ -1722,52 +1802,52 @@ void View::draw_hosts(ui::Canvas &canvas, ui::Painter &paint) const
 {
     const ui::Theme &t = theme_;
     const moonlight_config_t &config = model_.config();
-    paint.heading("Your PCs", kMargin - 2.0f, 212.0f, 52.0f, paint.page_text());
+    paint.heading(i18n::tr("Your PCs"), kMargin - 2.0f, 212.0f, 52.0f, paint.page_text());
     if (config.host_count == 0)
     {
         empty_.draw(canvas);
         return;
     }
-    char saved[24];
-    std::snprintf(saved, sizeof(saved), "%u saved", config.host_count);
-    paint.body(saved, kMargin + paint.heading_width("Your PCs", 52.0f) + 22.0f, 212.0f, 24.0f,
-               paint.page_text_muted());
+    char saved[256];
+    std::snprintf(saved, sizeof(saved), i18n::tr("%u saved"), config.host_count);
+    paint.body(saved, kMargin + paint.heading_width(i18n::tr("Your PCs"), 52.0f) + 22.0f, 212.0f,
+               24.0f, paint.page_text_muted());
     hosts_.draw(canvas);
 
     host_panel_.draw(canvas, kHostPanel);
     const Rect inside = host_inside();
     if (!on_host())
     {
-        paint.heading("Add a PC", inside.x, inside.y + 44.0f, 40.0f);
+        paint.heading(i18n::tr("Add a PC"), inside.x, inside.y + 44.0f, 40.0f);
+        ui::paragraph(
+            canvas.list, canvas.fonts.regular,
+            i18n::tr("PCs running Sunshine on this network appear by themselves. Add one by "
+                     "hand "
+                     "when it is on another network, or when discovery is blocked."),
+            inside.x, inside.y + 100.0f, 25.0f, inside.w, 38.0f, t.text_muted);
         ui::paragraph(canvas.list, canvas.fonts.regular,
-                      "PCs running Sunshine on this network appear by themselves. Add one by "
-                      "hand "
-                      "when it is on another network, or when discovery is blocked.",
-                      inside.x, inside.y + 100.0f, 25.0f, inside.w, 38.0f, t.text_muted);
-        ui::paragraph(canvas.list, canvas.fonts.regular,
-                      "Type its address, for example 192.168.1.50. Add a port "
-                      "after a colon if "
-                      "Sunshine does not use 47989: 192.168.1.50:48989.",
+                      i18n::tr("Type its address, for example 192.168.1.50. Add a port "
+                               "after a colon if "
+                               "Sunshine does not use 47989: 192.168.1.50:48989."),
                       inside.x, inside.y + 250.0f, 25.0f, inside.w, 38.0f, t.text_muted);
         return;
     }
     const unsigned index = static_cast<unsigned>(host_focus());
     const moonlight_config_host_t &host = config.hosts[index];
     const HostStatus status = model_.host_status(index);
-    const std::string name =
-        canvas.fonts.display.font->fit(host.name[0] ? host.name : host.address, 44.0f, 520.0f);
-    paint.heading(name, inside.x, inside.y + 44.0f, 44.0f);
-    const float width = paint.heading_width(name, 44.0f);
+    const std::string name = host.name[0] ? host.name : host.address;
+    paint.bounded_heading(name, inside.x, inside.y + 44.0f, 44.0f, t.text, 520.0f);
+    const float width = std::min(paint.heading_width(name, 44.0f), 520.0f);
     const bool reconnecting = index == config.selected_host && model_.reconnecting();
     const Color state = !status.known || reconnecting ? t.text_muted
                         : !status.online              ? t.text_muted
                         : status.paired               ? t.success
                                                       : t.warning;
-    const char *word = reconnecting     ? "Reconnecting"
-                       : !status.known  ? "Checking"
-                       : !status.online ? "Offline"
-                       : status.paired  ? "Online and paired"
-                                        : "Online, not paired";
+    const char *word = reconnecting     ? i18n::tr("Reconnecting")
+                       : !status.known  ? i18n::tr("Checking")
+                       : !status.online ? i18n::tr("Offline")
+                       : status.paired  ? i18n::tr("Online and paired")
+                                        : i18n::tr("Online, not paired");
     canvas.list.circle(inside.x + width + 34.0f, inside.y + 30.0f, 7.0f, state);
     paint.label(word, inside.x + width + 52.0f, inside.y + 39.0f, 23.0f, state);
 
@@ -1826,41 +1906,42 @@ void View::draw_games(ui::Canvas &canvas, ui::Painter &paint) const
 
     if (apps_.items().empty())
     {
-        paint.heading("Games", kMargin - 2.0f, 212.0f, 52.0f, ink);
+        paint.heading(i18n::tr("Games"), kMargin - 2.0f, 212.0f, 52.0f, ink);
         const bool waiting = host && (!model_.backend_valid() || model_.busy() == Busy::refreshing);
         if (waiting)
         {
             loading_apps_.draw(canvas);
-            paint.body("Asking the PC for its apps", 960.0f, 610.0f, 26.0f, quiet,
+            paint.body(i18n::tr("Asking the PC for its apps"), 960.0f, 610.0f, 26.0f, quiet,
                        gfx::Align::center);
             return;
         }
         ui::EmptyState state = no_apps_;
         if (!host)
         {
-            state.title = "No PC selected";
-            state.body = "Choose a PC first, or add one by its address.";
-            state.action = "PCs";
+            state.title = i18n::tr("No PC selected");
+            state.body = i18n::tr("Choose a PC first, or add one by its address.");
+            state.action = i18n::tr("PCs");
         }
         else if (!backend.online)
         {
-            state.title = model_.reconnecting() ? "Reconnecting" : "The PC is not answering";
-            state.body = "ProsperoLight keeps trying. Check that Sunshine is running "
-                         "on the PC.";
-            state.action = "Try again";
+            state.title = model_.reconnecting() ? i18n::tr("Reconnecting")
+                                                : i18n::tr("The PC is not answering");
+            state.body = i18n::tr("ProsperoLight keeps trying. Check that Sunshine is running "
+                                  "on the PC.");
+            state.action = i18n::tr("Try again");
         }
         else if (!backend.paired)
         {
-            state.title = "This PC is not paired";
-            state.body = "Pair it once with a PIN to see its apps.";
-            state.action = "Pair this PC";
+            state.title = i18n::tr("This PC is not paired");
+            state.body = i18n::tr("Pair it once with a PIN to see its apps.");
+            state.action = i18n::tr("Pair this PC");
         }
         else
         {
-            state.title = "No apps on this PC";
-            state.body = "Sunshine returned an empty list. Add apps in Sunshine, "
-                         "then try again.";
-            state.action = "Try again";
+            state.title = i18n::tr("No apps on this PC");
+            state.body = i18n::tr("Sunshine returned an empty list. Add apps in Sunshine, "
+                                  "then try again.");
+            state.action = i18n::tr("Try again");
         }
         state.draw(canvas);
         return;
@@ -1870,18 +1951,19 @@ void View::draw_games(ui::Canvas &canvas, ui::Painter &paint) const
         backend.apps[std::min(model_.selected_app(), backend.app_count - 1)];
     const bool running = backend.current_app_id == app.id;
     paint.label(ui::upper(backend.name), kMargin, 186.0f, 20.0f, gfx::mix(t.primary, ink, 0.25f));
-    paint.heading(canvas.fonts.display.font->fit(app.name, 76.0f, 1180.0f), kMargin - 3.0f, 268.0f,
-                  76.0f, ink);
+    paint.bounded_heading(app.name, kMargin - 3.0f, 268.0f, 76.0f, ink, 1180.0f);
     const bool offline = !backend.online;
     const Color state = offline ? t.text_muted : running ? t.success : quiet;
     list.circle(kMargin + 8.0f, 316.0f, 7.0f, state);
     const float word =
-        paint.label(offline   ? (model_.reconnecting() ? "Reconnecting" : "The PC is not answering")
-                    : running ? "Running on the PC"
-                              : "Ready to start",
+        paint.label(offline   ? (model_.reconnecting() ? i18n::tr("Reconnecting")
+                                                       : i18n::tr("The PC is not answering"))
+                    : running ? i18n::tr("Running on the PC")
+                              : i18n::tr("Ready to start"),
                     kMargin + 26.0f, 325.0f, 24.0f, running && !offline ? t.success : ink);
-    char text[160];
-    std::snprintf(text, sizeof(text), "%s   \xC2\xB7   %u FPS   \xC2\xB7   %s   \xC2\xB7   %u Mbps",
+    char text[512];
+    std::snprintf(text, sizeof(text),
+                  i18n::tr("%s   \xC2\xB7   %u FPS   \xC2\xB7   %s   \xC2\xB7   %u Mbps"),
                   resolution_name(config.stream_resolution), config.stream_fps, codec_name(config),
                   config.bitrate_mbps);
     paint.body(text, kMargin + 26.0f + word + 30.0f, 325.0f, 24.0f, quiet);
@@ -1896,18 +1978,20 @@ void View::draw_settings(ui::Canvas &canvas, ui::Painter &paint) const
 {
     gfx::DrawList &list = canvas.list;
     const ui::Theme &t = theme_;
-    paint.heading("Settings", kMargin - 2.0f, 212.0f, 52.0f, paint.page_text());
-    paint.body("Changes are saved as you make them",
-               kMargin + paint.heading_width("Settings", 52.0f) + 22.0f, 212.0f, 24.0f,
+    paint.heading(i18n::tr("Settings"), kMargin - 2.0f, 212.0f, 52.0f, paint.page_text());
+    paint.body(i18n::tr("Changes are saved as you make them"),
+               kMargin + paint.heading_width(i18n::tr("Settings"), 52.0f) + 22.0f, 212.0f, 24.0f,
                paint.page_text_muted());
     if (!version_.empty())
-        paint.body("ProsperoLight " + version_, kRight, 212.0f, 21.0f, paint.page_text_muted(),
-                   gfx::Align::right);
+        paint.body(i18n::tr("ProsperoLight ") + version_, kRight, 212.0f, 21.0f,
+                   paint.page_text_muted(), gfx::Align::right);
     form_.draw(canvas);
 
+    list.push_clip(kProfilePanel);
     profile_panel_.draw(canvas, kProfilePanel);
     const Rect inside = profile_inside();
-    paint.label(ui::upper("This stream"), inside.x, inside.y + 20.0f, 19.0f, t.text_muted);
+    paint.label(ui::upper(i18n::tr("This stream")), inside.x, inside.y + 20.0f, 19.0f,
+                t.text_muted);
     paint.heading(profile_.label, inside.x, inside.y + 72.0f, 36.0f);
     headroom_.draw(canvas);
     if (warning_.visible())
@@ -1916,46 +2000,59 @@ void View::draw_settings(ui::Canvas &canvas, ui::Painter &paint) const
     }
     else
     {
-        char text[120];
+        char text[2048];
         if (model_.config().video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
-            std::snprintf(text, sizeof(text), "Smooth up to 500 Mbps. Wired LAN recommended.");
+            std::snprintf(text, sizeof(text), "%s",
+                          i18n::tr("Smooth up to 500 Mbps. Wired LAN recommended."));
         else if (model_.config().video_codec == MOONLIGHT_VIDEO_CODEC_H264 && limits_apply_)
-            std::snprintf(text, sizeof(text), "Smooth up to 80 Mbps at this frame rate.");
+            std::snprintf(text, sizeof(text), "%s",
+                          i18n::tr("Smooth up to 80 Mbps at this frame rate."));
         else if (limits_apply_)
-            std::snprintf(text, sizeof(text), "Smooth up to %.0f Mbps at this frame rate.",
+            std::snprintf(text, sizeof(text),
+                          i18n::tr("Smooth up to %.0f Mbps at this frame rate."),
                           static_cast<double>(limit_for(model_.config().stream_fps).smooth));
         else
-            std::snprintf(text, sizeof(text), "No measured decoder limit for this profile.");
-        paint.body(text, inside.x, inside.y + 214.0f, 22.0f, t.text_muted);
+            std::snprintf(text, sizeof(text), "%s",
+                          i18n::tr("No measured decoder limit for this profile."));
+        paint.bounded_body(text, inside.x, inside.y + 214.0f, 22.0f, t.text_muted, inside.w);
         profile_details_.draw(canvas);
     }
 
+    list.pop_clip();
+
     // What the controller does during a stream, in the buttons' own shapes.
+    list.push_clip(kShortcutPanel);
     shortcut_panel_.draw(canvas, kShortcutPanel);
     const Rect keys = shortcut_panel_.content_rect(kShortcutPanel).inset(12.0f);
-    paint.label(ui::upper("During a stream"), keys.x, keys.y + 20.0f, 19.0f, t.text_muted);
+    paint.label(ui::upper(i18n::tr("During a stream")), keys.x, keys.y + 20.0f, 19.0f,
+                t.text_muted);
     struct Shortcut
     {
         ui::Button second;
         const char *what;
     };
-    static constexpr Shortcut kShortcuts[] = {
-        {ui::Button::l1, "Leave stream"},      {ui::Button::r1, "Statistics"},
-        {ui::Button::square, "Mouse mode"},    {ui::Button::triangle, "Keyboard"},
-        {ui::Button::left_stick, "Host Back"}, {ui::Button::right_stick, "Host Guide"},
+    const Shortcut kShortcuts[] = {
+        {ui::Button::l1, i18n::tr("Leave stream")},
+        {ui::Button::r1, i18n::tr("Statistics")},
+        {ui::Button::square, i18n::tr("Mouse mode")},
+        {ui::Button::triangle, i18n::tr("Keyboard")},
+        {ui::Button::left_stick, i18n::tr("Host Back")},
+        {ui::Button::right_stick, i18n::tr("Host Guide")},
     };
     const ui::GlyphStyle glyph = t.dark ? ui::GlyphStyle::dark() : ui::GlyphStyle::light();
     for (int i = 0; i < 6; ++i)
     {
-        const float cy = keys.y + 60.0f + static_cast<float>(i % 3) * 44.0f;
-        const float column = keys.x + static_cast<float>(i / 3) * keys.w * 0.5f;
+        const float cy = keys.y + 36.0f + static_cast<float>(i) * 26.0f;
+        const float column = keys.x;
         float x = column;
-        ui::draw_button(list, canvas.fonts, glyph, ui::Button::touchpad, x, cy, 32.0f);
-        x += ui::button_width(ui::Button::touchpad, 32.0f) + 10.0f;
+        ui::draw_button(list, canvas.fonts, glyph, ui::Button::touchpad, x, cy, 22.0f);
+        x += ui::button_width(ui::Button::touchpad, 22.0f) + 10.0f;
         x += paint.body("+", x, cy + 8.0f, 24.0f, t.text_muted) + 10.0f;
-        ui::draw_button(list, canvas.fonts, glyph, kShortcuts[i].second, x, cy, 32.0f);
-        paint.body(kShortcuts[i].what, column + 138.0f, cy + 8.0f, 21.0f, t.text);
+        ui::draw_button(list, canvas.fonts, glyph, kShortcuts[i].second, x, cy, 22.0f);
+        paint.bounded_body(kShortcuts[i].what, column + 118.0f, cy + 7.0f, 20.0f, t.text,
+                           keys.w - 118.0f);
     }
+    list.pop_clip();
 }
 
 // Credits and first steps, after ProsperoEden's About page.
@@ -1965,55 +2062,62 @@ void View::draw_about(ui::Canvas &canvas, ui::Painter &paint) const
     const ui::Theme &t = theme_;
     const ui::FontRef &regular = canvas.fonts.regular;
     const Color rule = t.text_muted.with_alpha(0.28f);
-    paint.heading("About ProsperoLight", kMargin - 2.0f, 212.0f, 52.0f, paint.page_text());
-    paint.body("Credits and first steps",
-               kMargin + paint.heading_width("About ProsperoLight", 52.0f) + 22.0f, 212.0f, 24.0f,
-               paint.page_text_muted());
+    paint.heading(i18n::tr("About ProsperoLight"), kMargin - 2.0f, 212.0f, 52.0f,
+                  paint.page_text());
+    paint.body(i18n::tr("Credits and first steps"),
+               kMargin + paint.heading_width(i18n::tr("About ProsperoLight"), 52.0f) + 22.0f,
+               212.0f, 24.0f, paint.page_text_muted());
 
     credits_panel_.draw(canvas, kCreditsPanel);
     const Rect left = credits_panel_.content_rect(kCreditsPanel).inset(14.0f);
     const float bottom = left.y + left.h - 6.0f;
-    paint.label(ui::upper("Project credits"), left.x, left.y + 20.0f, 19.0f, t.text_muted);
-    paint.heading("Powered by Moonlight", left.x, left.y + 72.0f, 38.0f);
-    ui::paragraph(list, regular,
-                  "ProsperoLight speaks the Moonlight protocol through moonlight-common-c. "
-                  "All "
-                  "credit for it goes to the Moonlight developers and contributors.",
-                  left.x, left.y + 118.0f, 24.0f, left.w, 34.0f, t.text, 3);
+    paint.label(ui::upper(i18n::tr("Project credits")), left.x, left.y + 20.0f, 19.0f,
+                t.text_muted);
+    paint.heading(i18n::tr("Powered by Moonlight"), left.x, left.y + 72.0f, 38.0f);
+    ui::paragraph(
+        list, regular,
+        i18n::tr("ProsperoLight speaks the Moonlight protocol through moonlight-common-c. "
+                 "All "
+                 "credit for it goes to the Moonlight developers and contributors."),
+        left.x, left.y + 118.0f, 24.0f, left.w, 34.0f, t.text, 3);
     paint.label("moonlight-stream.org", left.x, left.y + 226.0f, 24.0f, t.primary);
     list.rounded_rect({left.x, left.y + 252.0f, left.w, 1.0f}, 0.0f, rule);
-    paint.label(ui::upper("Thanks"), left.x, left.y + 288.0f, 19.0f, t.text_muted);
+    paint.label(ui::upper(i18n::tr("Thanks")), left.x, left.y + 288.0f, 19.0f, t.text_muted);
     ui::paragraph(list, regular,
-                  "Thanks to the Sunshine developers for the host on the PC, to "
-                  "the whole PS5 "
-                  "homebrew community, and to every developer whose tools and "
-                  "libraries make "
-                  "ProsperoLight possible.",
+                  i18n::tr("Thanks to the Sunshine developers for the host on the PC, to "
+                           "the whole PS5 "
+                           "homebrew community, and to every developer whose tools and "
+                           "libraries make "
+                           "ProsperoLight possible."),
                   left.x, left.y + 326.0f, 24.0f, left.w, 34.0f, t.text, 3);
     list.rounded_rect({left.x, left.y + 426.0f, left.w, 1.0f}, 0.0f, rule);
-    paint.label(ui::upper("PS5 edition"), left.x, left.y + 462.0f, 19.0f, t.text_muted);
+    paint.label(ui::upper(i18n::tr("PS5 edition")), left.x, left.y + 462.0f, 19.0f, t.text_muted);
     ui::paragraph(list, regular,
-                  "ProsperoLight is an unofficial PS5 client brought to you by "
-                  "BlackBearReloaded.",
+                  i18n::tr("ProsperoLight is an unofficial PS5 client brought to you by "
+                           "BlackBearReloaded."),
                   left.x, left.y + 500.0f, 24.0f, left.w, 34.0f, t.text, 2);
-    paint.body("Menu sound effects made with ElevenLabs.", left.x, bottom, 20.0f, t.text_muted);
+    paint.body(i18n::tr("Menu sound effects made with ElevenLabs."), left.x, bottom, 20.0f,
+               t.text_muted);
     if (!version_.empty())
-        paint.label("Version " + version_, left.x + left.w, bottom, 20.0f, t.primary,
+        paint.label(i18n::tr("Version ") + version_, left.x + left.w, bottom, 20.0f, t.primary,
                     gfx::Align::right);
 
     start_panel_.draw(canvas, kStartPanel);
     const Rect right = start_panel_.content_rect(kStartPanel).inset(14.0f);
-    paint.label(ui::upper("Getting started"), right.x, right.y + 20.0f, 19.0f, t.text_muted);
-    paint.heading("Stream from your PC", right.x, right.y + 72.0f, 38.0f);
+    paint.label(ui::upper(i18n::tr("Getting started")), right.x, right.y + 20.0f, 19.0f,
+                t.text_muted);
+    paint.heading(i18n::tr("Stream from your PC"), right.x, right.y + 72.0f, 38.0f);
     struct Step
     {
         const char *title;
         const char *body;
     };
-    static constexpr Step kSteps[] = {
-        {"Run Sunshine on the PC", "Keep it open, on the same network as this PS5."},
-        {"Pair once", "Choose the PC in PCs, then type the PIN shown here into Sunshine."},
-        {"Play", "Pick an app in Games and start it."},
+    const Step kSteps[] = {
+        {i18n::tr("Run Sunshine on the PC"),
+         i18n::tr("Keep it open, on the same network as this PS5.")},
+        {i18n::tr("Pair once"),
+         i18n::tr("Choose the PC in PCs, then type the PIN shown here into Sunshine.")},
+        {i18n::tr("Play"), i18n::tr("Pick an app in Games and start it.")},
     };
     for (int i = 0; i < 3; ++i)
     {
@@ -2025,10 +2129,12 @@ void View::draw_about(ui::Canvas &canvas, ui::Painter &paint) const
         paint.body(kSteps[i].body, right.x + 60.0f, y + 30.0f, 22.0f, t.text_muted);
     }
     list.rounded_rect({right.x, right.y + 350.0f, right.w, 1.0f}, 0.0f, rule);
-    paint.label(ui::upper("Files on this PS5"), right.x, right.y + 386.0f, 19.0f, t.text_muted);
+    paint.label(ui::upper(i18n::tr("Files on this PS5")), right.x, right.y + 386.0f, 19.0f,
+                t.text_muted);
     files_.draw(canvas);
-    paint.body(storage_access_ ? "An update or a reinstall does not touch them."
-                               : "Kept in the app's own storage: no filesystem access at start-up.",
+    paint.body(storage_access_
+                   ? i18n::tr("An update or a reinstall does not touch them.")
+                   : i18n::tr("Kept in the app's own storage: no filesystem access at start-up."),
                right.x, right.y + right.h - 6.0f, 20.0f, t.text_muted);
 }
 
@@ -2045,20 +2151,19 @@ void View::draw_pairing(ui::Canvas &canvas) const
     const Rect panel = kPairPanel;
     ui::draw_overlay_panel(canvas, t, panel, false, 0.6f);
     ui::Painter paint(list, canvas.fonts, t, canvas.glass);
-    const char *name = model_.backend().name[0] ? model_.backend().name : "the PC";
+    const char *name = model_.backend().name[0] ? model_.backend().name : i18n::tr("the PC");
     const bool ready = model_.pairing_pin()[0] != '\0';
-    paint.label(ui::upper("Pairing"), panel.cx(), panel.y + 62.0f, 20.0f, t.text_muted,
+    paint.label(ui::upper(i18n::tr("Pairing")), panel.cx(), panel.y + 62.0f, 20.0f, t.text_muted,
                 gfx::Align::center);
-    paint.heading(canvas.fonts.display.font->fit(ready ? std::string("Enter this PIN on ") + name
-                                                       : "Preparing a PIN",
-                                                 40.0f, panel.w - 80.0f),
-                  panel.cx(), panel.y + 122.0f, 40.0f, gfx::Align::center);
-    paint.body(ready ? "Open Sunshine on the PC, choose PIN, and type the code."
-                     : "Asking Sunshine for a pairing request.",
+    paint.bounded_heading(
+        ready ? std::string(i18n::tr("Enter this PIN on ")) + name : i18n::tr("Preparing a PIN"),
+        panel.cx(), panel.y + 122.0f, 40.0f, t.text, panel.w - 80.0f, gfx::Align::center);
+    paint.body(ready ? i18n::tr("Open Sunshine on the PC, choose PIN, and type the code.")
+                     : i18n::tr("Asking Sunshine for a pairing request."),
                panel.cx(), panel.y + 168.0f, 24.0f, t.text_muted, gfx::Align::center);
     pin_.draw(canvas);
     pair_timer_.draw(canvas);
-    paint.body("This closes by itself when Sunshine accepts the PIN.", panel.cx(),
+    paint.body(i18n::tr("This closes by itself when Sunshine accepts the PIN."), panel.cx(),
                panel.y + panel.h - 36.0f, 21.0f, t.text_muted, gfx::Align::center);
     list.pop_opacity();
 }
@@ -2076,18 +2181,19 @@ void View::open_update_offer(ui::Feedback &feedback, bool on_notes)
     const bool with_notes = !update_notes_.content().empty();
     ui::DialogContent content;
     content.icon = ui::StatusKind::info;
-    content.title = "Update available";
+    content.title = i18n::tr("Update available");
     char size[48] = "";
     if (update_offer_.size != 0)
         std::snprintf(size, sizeof(size), " (%.0f MB)",
                       static_cast<double>(update_offer_.size) / 1e6);
-    content.body = std::string("ProsperoLight ") + update_offer_.version + " is out" + size +
-                   ".\nUpdate now downloads and checks it. ProsperoLight then closes "
-                   "while the new version is put in place.";
-    content.buttons.push_back({"Skip"});
+    content.body = std::string(i18n::tr("ProsperoLight ")) + update_offer_.version +
+                   i18n::tr(" is out") + size +
+                   i18n::tr(".\nUpdate now downloads and checks it. ProsperoLight then closes "
+                            "while the new version is put in place.");
+    content.buttons.push_back({i18n::tr("Skip")});
     if (with_notes)
-        content.buttons.push_back({"What's new"});
-    content.buttons.push_back({"Update now", ui::ButtonKind::primary});
+        content.buttons.push_back({i18n::tr("What's new")});
+    content.buttons.push_back({i18n::tr("Update now"), ui::ButtonKind::primary});
     content.default_button =
         with_notes && on_notes ? 1 : static_cast<int>(content.buttons.size()) - 1;
     update_dialog_.open(std::move(content), feedback);
@@ -2101,7 +2207,7 @@ void View::begin_update(ui::Feedback &feedback)
     if (update_actions_.begin && update_actions_.begin())
         update_ui_ = UpdateUi::working;
     else
-        open_update_failure("The update could not start.", feedback);
+        open_update_failure(i18n::tr("The update could not start."), feedback);
 }
 
 // What's new: the release notes, to read before deciding.
@@ -2118,9 +2224,9 @@ void View::draw_update_notes(ui::Canvas &canvas) const
     const Rect panel = kNotesPanel;
     ui::draw_overlay_panel(canvas, t, panel, false, 0.6f);
     ui::Painter paint(list, canvas.fonts, t, canvas.glass);
-    paint.label(ui::upper(std::string("ProsperoLight ") + update_offer_.version), panel.x + 64.0f,
-                panel.y + 62.0f, 20.0f, t.text_muted);
-    paint.heading("What's new", panel.x + 64.0f, panel.y + 116.0f, 40.0f);
+    paint.label(ui::upper(std::string(i18n::tr("ProsperoLight ")) + update_offer_.version),
+                panel.x + 64.0f, panel.y + 62.0f, 20.0f, t.text_muted);
+    paint.heading(i18n::tr("What's new"), panel.x + 64.0f, panel.y + 116.0f, 40.0f);
     update_notes_.draw(canvas);
     // What the buttons do here, as the buttons themselves.
     const ui::GlyphStyle glyph = t.dark ? ui::GlyphStyle::dark() : ui::GlyphStyle::light();
@@ -2129,8 +2235,8 @@ void View::draw_update_notes(ui::Canvas &canvas) const
         ui::Button button;
         const char *what;
     };
-    static constexpr Hint kHints[] = {{ui::Button::cross, "Update now"},
-                                      {ui::Button::circle, "Back"}};
+    const Hint kHints[] = {{ui::Button::cross, i18n::tr("Update now")},
+                           {ui::Button::circle, i18n::tr("Back")}};
     float x = panel.x + 64.0f;
     const float cy = panel.y + panel.h - 74.0f;
     for (const Hint &hint : kHints)
@@ -2146,10 +2252,10 @@ void View::open_update_failure(const char *reason, ui::Feedback &feedback)
 {
     ui::DialogContent content;
     content.icon = ui::StatusKind::danger;
-    content.title = "The update was not installed";
-    content.body = std::string(reason && reason[0] ? reason : "Something went wrong.") +
-                   "\nProsperoLight is as it was.";
-    content.buttons = {{"Close"}, {"Try again", ui::ButtonKind::primary}};
+    content.title = i18n::tr("The update was not installed");
+    content.body = std::string(reason && reason[0] ? reason : i18n::tr("Something went wrong.")) +
+                   i18n::tr("\nProsperoLight is as it was.");
+    content.buttons = {{i18n::tr("Close")}, {i18n::tr("Try again"), ui::ButtonKind::primary}};
     content.default_button = 1;
     update_dialog_.open(std::move(content), feedback);
     update_ui_ = UpdateUi::failed;
@@ -2207,7 +2313,7 @@ void View::update_modal(const InputFrame &input, float dt, ui::Feedback &feedbac
             {
                 if (update_actions_.finish)
                     update_actions_.finish();
-                open_update_failure("The update helper did not answer.", feedback);
+                open_update_failure(i18n::tr("The update helper did not answer."), feedback);
             }
         }
         else if (now.phase == UpdatePhase::failed || now.phase == UpdatePhase::cancelled)
@@ -2257,34 +2363,35 @@ void View::draw_update(ui::Canvas &canvas) const
     ui::Painter paint(list, canvas.fonts, t, canvas.glass);
     const bool closing = update_ui_ == UpdateUi::closing;
     const UpdateProgress &now = update_progress_;
-    const char *doing = closing                                 ? "Updating"
-                        : now.phase == UpdatePhase::downloading ? "Downloading"
-                        : now.phase == UpdatePhase::unpacking   ? "Unpacking"
+    const char *doing = closing                                 ? i18n::tr("Updating")
+                        : now.phase == UpdatePhase::downloading ? i18n::tr("Downloading")
+                        : now.phase == UpdatePhase::unpacking   ? i18n::tr("Unpacking")
                         : now.phase == UpdatePhase::ready || now.phase == UpdatePhase::applying
-                            ? "Finishing"
-                            : "Preparing";
-    paint.label(ui::upper(std::string("ProsperoLight ") + update_offer_.version), panel.cx(),
-                panel.y + 62.0f, 20.0f, t.text_muted, gfx::Align::center);
+                            ? i18n::tr("Finishing")
+                            : i18n::tr("Preparing");
+    paint.label(ui::upper(std::string(i18n::tr("ProsperoLight ")) + update_offer_.version),
+                panel.cx(), panel.y + 62.0f, 20.0f, t.text_muted, gfx::Align::center);
     paint.heading(doing, panel.cx(), panel.y + 122.0f, 40.0f, gfx::Align::center);
     update_ring_.draw(canvas);
-    char line[120] = "Starting the update helper";
+    char line[2048];
+    std::snprintf(line, sizeof(line), "%s", i18n::tr("Starting the update helper"));
     if (closing)
-        std::snprintf(line, sizeof(line), "ProsperoLight closes now.");
+        std::snprintf(line, sizeof(line), "%s", i18n::tr("ProsperoLight closes now."));
     else if (now.total != 0)
-        std::snprintf(line, sizeof(line), "%.1f of %.1f MB%s%s",
+        std::snprintf(line, sizeof(line), i18n::tr("%.1f of %.1f MB%s%s"),
                       static_cast<double>(now.done) / 1e6, static_cast<double>(now.total) / 1e6,
                       now.time_left[0] ? "  \xC2\xB7  " : "", now.time_left);
     paint.body(line, panel.cx(), panel.y + 442.0f, 26.0f, t.text, gfx::Align::center);
     if (closing)
     {
-        paint.body("Open it again when the console says it was updated.", panel.cx(),
+        paint.body(i18n::tr("Open it again when the console says it was updated."), panel.cx(),
                    panel.y + panel.h - 54.0f, 22.0f, t.text_muted, gfx::Align::center);
     }
     else
     {
         // Nothing is changed before the download is checked; the way out is shown as its button.
         const ui::GlyphStyle glyph = t.dark ? ui::GlyphStyle::dark() : ui::GlyphStyle::light();
-        const char *hint = "Cancel. Nothing is changed until the download is checked.";
+        const char *hint = i18n::tr("Cancel. Nothing is changed until the download is checked.");
         const float width = ui::button_width(ui::Button::circle, 30.0f) + 12.0f +
                             canvas.fonts.regular.font->measure(hint, 22.0f);
         float x = panel.cx() - width * 0.5f;
@@ -2313,7 +2420,8 @@ void View::draw_connect_bar(ui::Canvas &canvas) const
     ui::Painter paint(list, canvas.fonts, theme_, 0);
     const Color ink = Color::rgb(0xffffff);
     const float radius = kConnectBar.h * 0.5f;
-    paint.label("Connecting", kConnectBar.x, kConnectBar.y - 20.0f, 22.0f, ink.with_alpha(0.85f));
+    paint.label(i18n::tr("Connecting"), kConnectBar.x, kConnectBar.y - 20.0f, 22.0f,
+                ink.with_alpha(0.85f));
     list.rounded_rect(kConnectBar, radius, ink.with_alpha(0.16f));
     if (!plate_ && load_progress_ > 0.0f)
         list.rounded_rect({kConnectBar.x, kConnectBar.y,
@@ -2333,7 +2441,7 @@ void View::draw_loader_tip(ui::Canvas &canvas) const
     list.push_opacity(shown);
     ui::Painter paint(list, canvas.fonts, theme_, 0);
     const Color ink = Color::rgb(0xffffff);
-    paint.label("Tip", kMargin, 780.0f, 21.0f, ink.with_alpha(0.7f));
+    paint.label(i18n::tr("Tip"), kMargin, 780.0f, 21.0f, ink.with_alpha(0.7f));
     const ui::GlyphStyle glyph = ui::GlyphStyle::dark();
     const float cy = 826.0f;
     float x = kMargin;
@@ -2342,7 +2450,7 @@ void View::draw_loader_tip(ui::Canvas &canvas) const
     x += paint.body("+", x, cy + 9.0f, 26.0f, ink.with_alpha(0.7f)) + 12.0f;
     ui::draw_button(list, canvas.fonts, glyph, ui::Button::l1, x, cy, 38.0f);
     x += ui::button_width(ui::Button::l1, 38.0f) + 18.0f;
-    paint.body("ends the stream and returns here", x, cy + 9.0f, 26.0f, ink);
+    paint.body(i18n::tr("ends the stream and returns here"), x, cy + 9.0f, 26.0f, ink);
     list.pop_opacity();
 }
 

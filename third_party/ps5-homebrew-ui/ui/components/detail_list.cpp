@@ -442,15 +442,12 @@ void DetailList::draw(Canvas &canvas) const
         if (rows)
         {
             first = r.cy() - text_h * 0.5f + lh * 0.5f + style.value_size * 0.35f;
-            paint.label(fit_label(paint, item.label, style.label_size, label_room), left,
-                        r.cy() - text_h * 0.5f + lh * 0.5f + style.label_size * 0.35f,
-                        style.label_size, quiet);
+            paint.bounded_label(item.label, left, r.cy() - text_h * 0.5f + lh * 0.5f + style.label_size * 0.35f, style.label_size, quiet, label_room);
         }
         else
         {
             const float top = r.y + style.padding_y;
-            paint.label(fit_label(paint, item.label, style.label_size, label_room), left,
-                        top + style.label_size * 0.86f, style.label_size, quiet);
+            paint.bounded_label(item.label, left, top + style.label_size * 0.86f, style.label_size, quiet, label_room);
             first = top + style.label_size * 1.15f + style.stack_gap + lh * 0.5f +
                     style.value_size * 0.35f;
         }
@@ -468,8 +465,7 @@ void DetailList::draw(Canvas &canvas) const
         }
         else if (one_line)
         {
-            paint.body(fit_body(paint, item.value, style.value_size, room), at, first,
-                       style.value_size, value_ink, align);
+            paint.bounded_body(item.value, at, first, style.value_size, value_ink, room, align);
         }
         else
         {

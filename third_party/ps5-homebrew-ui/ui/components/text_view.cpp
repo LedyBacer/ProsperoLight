@@ -763,9 +763,7 @@ void TextView::draw_toc(Canvas &canvas, Painter &paint) const
             continue;
         const float left = box.x + 16.0f + (block.level > 1 ? 16.0f : 0.0f);
         const float room = std::max(box.x + box.w - 8.0f - left, 20.0f);
-        paint.label(fit_label(paint, block.text, size, room), left,
-                    top + style.toc_row * 0.5f + size * 0.34f, size,
-                    index == current ? ink : quiet);
+        paint.bounded_label(block.text, left, top + style.toc_row * 0.5f + size * 0.34f, size, index == current ? ink : quiet, room);
     }
     list.pop_clip();
     list.rounded_rect({box.x + box.w + style.toc_gap * 0.5f - 0.75f, box.y, 1.5f, box.h}, 0.0f,
@@ -796,9 +794,7 @@ void TextView::draw_footer(Canvas &canvas, Painter &paint) const
         paint.label(percent, foot.x + foot.w, baseline, size, ink, gfx::Align::right);
     const int current = current_heading();
     if (current >= 0)
-        paint.label(fit_label(paint, blocks_[static_cast<std::size_t>(current)].text, size,
-                              std::max(foot.w - taken - 24.0f, 40.0f)),
-                    foot.x, baseline, size, quiet);
+        paint.bounded_label(blocks_[static_cast<std::size_t>(current)].text, foot.x, baseline, size, quiet, std::max(foot.w - taken - 24.0f, 40.0f));
 }
 
 void TextView::draw(Canvas &canvas) const

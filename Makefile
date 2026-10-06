@@ -216,11 +216,14 @@ test-integration:
 	@printf '%s\n' '==> [test-integration] Running host tooling integration tests'
 	@python3 -m unittest discover -s tests -p 'test_*.py' -v
 
-.PHONY: launcher-check fonts
+.PHONY: launcher-check launcher-layout-check fonts
 # The launcher on the PC: behaviour checks and a picture of every state.
 launcher-check:
 	@printf '%s\n' '==> [launcher-check] Running the launcher against a pretend Sunshine network'
 	@bash tools/render-launcher.sh build/launcher-pictures
+
+launcher-layout-check:
+	@PROSPEROLIGHT_LAYOUT_CHECK=1 bash tools/render-launcher.sh build/layout-pictures 960 540
 
 fonts:
 	@printf '%s\n' '==> [fonts] Baking the launcher fonts from third_party/fonts'

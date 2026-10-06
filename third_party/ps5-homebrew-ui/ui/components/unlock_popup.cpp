@@ -343,16 +343,13 @@ void UnlockPopup::draw(Canvas &canvas) const
     float y = r.cy() - block * 0.5f;
     if (has_kicker)
     {
-        paint.label(fit_label(paint, upper(kicker), style.kicker_size, room), left,
-                    y + style.kicker_size * 0.84f, style.kicker_size, theme.text_muted);
+        paint.bounded_label(upper(kicker), left, y + style.kicker_size * 0.84f, style.kicker_size, theme.text_muted, room);
         y += style.kicker_size + 8.0f;
     }
-    paint.label(fit_label(paint, current_.title, style.title_size, room), left,
-                y + style.title_size * 0.82f, style.title_size, theme.text);
+    paint.bounded_label(current_.title, left, y + style.title_size * 0.82f, style.title_size, theme.text, room);
     y += style.title_size + 8.0f;
     if (has_subtitle)
-        paint.body(fit_body(paint, current_.subtitle, style.subtitle_size, room), left,
-                   y + style.subtitle_size * 0.82f, style.subtitle_size, theme.text_muted);
+        paint.bounded_body(current_.subtitle, left, y + style.subtitle_size * 0.82f, style.subtitle_size, theme.text_muted, room);
 
     // ---- the shine: one narrow band of light crossing the plate ----
     if (style.shine && !calm && style.shine_time > 0.0f)

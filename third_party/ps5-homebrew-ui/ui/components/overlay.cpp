@@ -34,20 +34,6 @@ bool can_frost(const Canvas &canvas, const Theme &theme)
            theme.style == SurfaceStyle::glow;
 }
 
-// Removes whole UTF-8 characters from the end until the line and "..." fit.
-template <typename Measure> std::string ellipsize(std::string line, float width, Measure measure)
-{
-    while (!line.empty() && measure(line + "...") > width)
-    {
-        do
-            line.pop_back();
-        while (!line.empty() && (static_cast<unsigned char>(line.back()) & 0xc0) == 0x80);
-        while (!line.empty() && line.back() == ' ')
-            line.pop_back();
-    }
-    return line + "...";
-}
-
 // Greedy word wrap. Measuring is the caller's, so one routine serves every
 // face a theme may pick for its body, label and heading.
 template <typename Measure>
@@ -103,12 +89,10 @@ std::vector<std::string> wrap(std::string_view text, float width, int max_lines,
     }
     if (!line.empty() || cut)
         lines.push_back(line);
-    for (std::size_t i = 0; i < lines.size(); ++i)
-    {
-        const bool last = i + 1 == lines.size();
-        // A single word wider than the column is cut as well.
-        if ((last && cut) || measure(lines[i]) > width)
-            lines[i] = ellipsize(lines[i], width, measure);
+    if (cut && !lines.empty()) {
+        std::string tail(text.substr(at));
+        std::replace(tail.begin(), tail.end(), '\n', ' ');
+        lines.back() += " " + tail;
     }
     return lines;
 }

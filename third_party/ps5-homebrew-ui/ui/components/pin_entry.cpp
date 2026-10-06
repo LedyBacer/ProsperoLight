@@ -370,9 +370,7 @@ void PinEntry::draw(Canvas &canvas) const
                         0.0f);
 
     if (!label_.empty())
-        paint.label(fit_label(paint, label_, style.label_size, bounds_.w), bounds_.x,
-                    bounds_.y + style.label_size * 0.82f, style.label_size,
-                    gfx::mix(page_quiet, page_ink, focus));
+        paint.bounded_label(label_, bounds_.x, bounds_.y + style.label_size * 0.82f, style.label_size, gfx::mix(page_quiet, page_ink, focus), bounds_.w);
 
     // How far the success colour has reached a box.
     const auto filled = [&](int index)
@@ -488,11 +486,9 @@ void PinEntry::draw(Canvas &canvas) const
                            (style.spin && style.chevrons ? kChevronRoom : 0.0f) +
                            style.message_gap + style.message_size * 0.82f;
     if (!error_.empty())
-        paint.body(fit_body(paint, error_, style.message_size, bounds_.w), bounds_.x, baseline,
-                   style.message_size, theme.danger.with_alpha(wrong));
+        paint.bounded_body(error_, bounds_.x, baseline, style.message_size, theme.danger.with_alpha(wrong), bounds_.w);
     if (!message_.empty() && wrong < 0.99f)
-        paint.body(fit_body(paint, message_, style.message_size, bounds_.w), bounds_.x, baseline,
-                   style.message_size, page_quiet.with_alpha(1.0f - wrong));
+        paint.bounded_body(message_, bounds_.x, baseline, style.message_size, page_quiet.with_alpha(1.0f - wrong), bounds_.w);
 
     list.pop_transform();
 }

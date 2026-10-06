@@ -659,10 +659,9 @@ void ImageViewer::draw_caption(Canvas &canvas, Painter &paint) const
     canvas.list.push_opacity(1.0f - 0.85f * swap_.value);
     const float room = std::max(right - st.x, 40.0f);
     const float taken =
-        paint.label(fit_label(paint, image.title, size, room), st.x, baseline, size, ink);
+        paint.bounded_label(image.title, st.x, baseline, size, ink, room);
     if (!image.caption.empty() && room - taken > 120.0f)
-        paint.body(fit_body(paint, image.caption, size, room - taken - 18.0f), st.x + taken + 18.0f,
-                   baseline, size, quiet);
+        paint.bounded_body(image.caption, st.x + taken + 18.0f, baseline, size, quiet, room - taken - 18.0f);
     canvas.list.pop_opacity();
 }
 

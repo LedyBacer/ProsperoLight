@@ -268,8 +268,7 @@ void ProgressBar::draw(Canvas &canvas) const
                                 gfx::Align::right) +
                     16.0f;
         if (!label.empty())
-            paint.label(fit_label(paint, label, size, std::max(room, 40.0f)), bounds_.x, baseline,
-                        size, theme.text_muted);
+            paint.bounded_label(label, bounds_.x, baseline, size, theme.text_muted, std::max(room, 40.0f));
     }
     else if (style.placement == LabelPlacement::right)
     {
@@ -571,8 +570,7 @@ void ProgressRing::draw(Canvas &canvas) const
     }
     else
     {
-        paint.label(fit_label(paint, label, small, hole * 1.7f), cx, cy + small * 0.35f, small,
-                    theme.text_muted, gfx::Align::center);
+        paint.bounded_label(label, cx, cy + small * 0.35f, small, theme.text_muted, hole * 1.7f, gfx::Align::center);
     }
 }
 
@@ -779,8 +777,7 @@ void Meter::draw_linear(Canvas &canvas, Painter &paint) const
                     16.0f;
         }
         if (!label.empty())
-            paint.label(fit_label(paint, label, style.text_size, std::max(room, 40.0f)), bounds_.x,
-                        baseline, style.text_size, theme.text_muted);
+            paint.bounded_label(label, bounds_.x, baseline, style.text_size, theme.text_muted, std::max(room, 40.0f));
     }
 
     const float radius = bar_radius(theme, style.radius_source, style.radius, bar.h);
@@ -906,9 +903,7 @@ void Meter::draw_radial(Canvas &canvas, Painter &paint) const
     }
     // The label sits in the opening at the bottom of the dial.
     if (!label.empty())
-        paint.label(fit_label(paint, label, style.text_size, diameter * 0.9f), cx,
-                    cy + diameter * 0.5f - 2.0f, style.text_size, theme.text_muted,
-                    gfx::Align::center);
+        paint.bounded_label(label, cx, cy + diameter * 0.5f - 2.0f, style.text_size, theme.text_muted, diameter * 0.9f, gfx::Align::center);
 }
 
 } // namespace hui::ui

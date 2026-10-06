@@ -1,0 +1,16 @@
+{
+  "fonts": {
+    "NotoSans": "9c9f208055523bb6e4f61ad74dfe0c41573aa785f6a7822659d80cc4e540629e",
+    "NotoSansArabic": "bfd58e6ea5108664cb6087a23bd925762ff4a0af00a86d3d5c60d962df8ebf23",
+    "NotoSansHebrew": "396872e119e93d9e455a8e162e0bc7f23c4938932a7a5808bc898c13253b215c",
+    "NotoSansDevanagari": "6f41028748c115d2019d7ca19926eb39e02bbbedbea1438dbd7af975edb53202",
+    "NotoSansTamil": "b593c64fddf79ece93dcaaa3a1b83e0ae8ab7fa918226a6eaa22d3b5f38515e9",
+    "NotoSansThai": "e44a8e7cbc2cba11c63242d3fa50b53eb6b373b01863a0c5e03af367d3298f18",
+    "NotoSansSC": "97dcb6c0017d4ce88a291c7f6835acfdf715d686d277f46f6bdaf3e39dec20e3",
+    "NotoSansTC": "9c80045e64bd288a79fba63e57d8b4e77dd7a00a768c14dae8d812e8f92555a8",
+    "NotoSansJP": "ea16fdaabcf3ad9e2b8301b0024232e2c72152cb5cac6cb25f4ed4e0c728c412",
+    "NotoSansKR": "3b1f127b42311d4ace88b229b25214bf104ccca5dba8ba645f6cd7fb073316a5"
+  },
+  "shaped_glyphs": 824,
+  "codepoints": 1860
+}

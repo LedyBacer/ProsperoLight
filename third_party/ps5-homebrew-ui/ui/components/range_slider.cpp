@@ -278,8 +278,7 @@ void Slider::draw(Canvas &canvas) const
             room -= paint.label(text(), bounds_.x + bounds_.w, parts.label_baseline,
                                 style.value_size, resting, gfx::Align::right) +
                     16.0f;
-        paint.label(fit_label(paint, label_, style.label_size, std::max(room, 40.0f)), bounds_.x,
-                    parts.label_baseline, style.label_size, gfx::mix(quiet, resting, focus * 0.5f));
+        paint.bounded_label(label_, bounds_.x, parts.label_baseline, style.label_size, gfx::mix(quiet, resting, focus * 0.5f), std::max(room, 40.0f));
     }
 
     Rect track = parts.track;
@@ -428,9 +427,7 @@ void RangeSlider::draw(Canvas &canvas) const
             room -= paint.label(text(), bounds_.x + bounds_.w, parts.label_baseline,
                                 style.value_size, resting, gfx::Align::right) +
                     16.0f;
-        paint.label(fit_label(paint, label_, style.label_size, std::max(room, 40.0f)), bounds_.x,
-                    parts.label_baseline, style.label_size,
-                    gfx::mix(quiet, resting, active * 0.5f));
+        paint.bounded_label(label_, bounds_.x, parts.label_baseline, style.label_size, gfx::mix(quiet, resting, active * 0.5f), std::max(room, 40.0f));
     }
 
     // ---- the track, as Painter::slider builds it ----

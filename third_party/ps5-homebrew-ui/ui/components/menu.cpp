@@ -450,8 +450,7 @@ void Menu::draw(Canvas &canvas) const
                                  style.shortcut_size, quiet, gfx::Align::right);
             right -= 16.0f;
         }
-        paint.label(fit_label(paint, item.label, style.text_size, std::max(right - left, 40.0f)),
-                    left, cy + style.text_size * 0.35f, style.text_size, ink);
+        paint.bounded_label(item.label, left, cy + style.text_size * 0.35f, style.text_size, ink, std::max(right - left, 40.0f));
         list.pop_opacity();
     }
 

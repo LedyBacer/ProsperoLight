@@ -985,12 +985,10 @@ void MediaControls::draw(Canvas &canvas) const
         if (g.text.w > 60.0f && !title.empty())
         {
             const float baseline = g.row_cy + style.title_size * 0.35f;
-            const float used = paint.label(fit_label(paint, title, style.title_size, g.text.w),
-                                           g.text.x, baseline, style.title_size, ink);
+            const float used = paint.bounded_label(title, g.text.x, baseline, style.title_size, ink, g.text.w);
             const float room = g.text.w - used - 18.0f;
             if (!artist.empty() && room > 90.0f)
-                paint.body(fit_body(paint, artist, style.artist_size, room),
-                           g.text.x + used + 18.0f, baseline, style.artist_size, quiet);
+                paint.bounded_body(artist, g.text.x + used + 18.0f, baseline, style.artist_size, quiet, room);
         }
     }
     else

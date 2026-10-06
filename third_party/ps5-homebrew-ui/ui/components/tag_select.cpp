@@ -377,8 +377,7 @@ void TagSelect::draw(Canvas &canvas) const
         title_room -= used + 20.0f;
     }
     if (!title_.empty())
-        paint.label(fit_label(paint, title_, style.title_size, std::max(title_room, 40.0f)),
-                    bounds_.x, baseline, style.title_size, quiet);
+        paint.bounded_label(title_, bounds_.x, baseline, style.title_size, quiet, std::max(title_room, 40.0f));
     if (options_.empty())
         return;
 

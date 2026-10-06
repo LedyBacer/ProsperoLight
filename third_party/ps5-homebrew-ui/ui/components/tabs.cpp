@@ -436,8 +436,8 @@ void TabBar::draw(Canvas &canvas) const
         // A pixel to spare: a tab sized from its label must not cut that label
         // because two sums of the same numbers rounded differently.
         const std::string label =
-            fit_label(paint, item.label, style.text_size, std::max(room - extras, 24.0f) + 1.0f);
-        const float label_w = paint.label_width(label, style.text_size);
+            item.label;
+        const float label_w = std::min(paint.label_width(label, style.text_size), std::max(room - extras, 24.0f));
         float x = tab.cx() - (label_w + extras) * 0.5f;
         // Text on a rule sits a little higher: the bar takes the bottom.
         const float cy = tab.cy() - (style.kind == TabKind::underline ? style.thickness : 0.0f);
@@ -449,7 +449,7 @@ void TabBar::draw(Canvas &canvas) const
                       ink);
             x += style.glyph_width + (item.label.empty() ? 0.0f : style.glyph_gap);
         }
-        paint.label(label, x, cy + style.text_size * 0.35f, style.text_size, ink);
+        paint.bounded_label(label, x, cy + style.text_size * 0.35f, style.text_size, ink, std::max(room-extras,24.0f));
         x += label_w;
         if (item.badge > 0)
         {
