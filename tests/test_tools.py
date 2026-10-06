@@ -167,7 +167,7 @@ class ToolTests(unittest.TestCase):
 
         for fps in (60, 90, 120):
             self.assertIn(f"#define MOONLIGHT_STREAM_FPS_{fps} {fps}U", config)
-        self.assertCodeContains('form_.add_choice(kFrameRate, "Frame rate", {"60 FPS", "90 FPS", "120 FPS"}, 0)',
+        self.assertCodeContains('form_.add_choice(kFrameRate, "Frame rate", {"30 FPS", "60 FPS", "90 FPS", "120 FPS", "Custom"}, 1)',
                       view)
         # Frame rate and bitrate keep their released widgets; nothing is typed.
         self.assertCodeContains('form_.add_slider(kBitrate, "Bitrate", 20.0f, kBitrateStep, kBitrateMax,', view)

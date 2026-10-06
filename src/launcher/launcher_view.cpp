@@ -8,6 +8,7 @@
 #include "launcher/launcher_view.hpp"
 
 #include "host_quit_preferences.hpp"
+#include "client_preferences.hpp"
 #include "lan_http_report.hpp"
 #include "presentation_preferences.hpp"
 #include "stream_profile.hpp"
@@ -83,6 +84,9 @@ enum FormId
     kUiSound,
     kHostQuit,
     kLanguage,
+    kCustomFps,
+    kOptimizeHost,
+    kMuteHost,
 };
 
 constexpr float kBitrateStep = 10.0f;
@@ -446,8 +450,12 @@ void View::build()
         .add_choice(kResolution, i18n::tr("Resolution"),
                     {"1920 \xC3\x97 1080", "2560 \xC3\x97 1440", "3840 \xC3\x97 2160"}, 0)
         .description = i18n::tr("The picture Sunshine encodes. 1440p is scaled to the 4K output.");
-    form_.add_choice(kFrameRate, i18n::tr("Frame rate"), {"60 FPS", "90 FPS", "120 FPS"}, 0)
-        .description = i18n::tr("90 and 120 FPS use the 119.88 Hz output mode.");
+    form_
+        .add_choice(kFrameRate, i18n::tr("Frame rate"),
+                    {"30 FPS", "60 FPS", "90 FPS", "120 FPS", i18n::tr("Custom")}, 1)
+        .description = i18n::tr("30–120 FPS. Custom adjusts one frame at a time.");
+    form_.add_slider(kCustomFps, i18n::tr("Custom frame rate"), 60.0f, 30.0f, 120.0f, 1.0f).unit =
+        " FPS";
     form_.add_choice(kCodec, i18n::tr("Video codec"), {"H.264", "HEVC", "PyroWave"}, 0)
         .description = i18n::tr("PyroWave needs a compatible host, high bitrate and wired LAN.");
     form_.add_choice(kChroma, i18n::tr("Chroma sampling"), {"4:2:0", "4:4:4"}, 0).description =
@@ -465,6 +473,11 @@ void View::build()
     form_.add_toggle(kUiSound, i18n::tr("Menu sounds"), true).description =
         i18n::tr("Menu navigation and confirmation sounds.");
     form_.add_header(i18n::tr("Host session"));
+    form_.add_toggle(kMuteHost, i18n::tr("Mute host audio"), true).description = i18n::tr(
+        "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.");
+    form_.add_toggle(kOptimizeHost, i18n::tr("Optimize game/display settings"), true).description =
+        i18n::tr("GeForce Experience game settings or Sunshine display policy. Vibepollo may "
+                 "ignore this flag.");
     form_.add_toggle(kHostQuit, i18n::tr("Quit host app after stream"), false).description =
         i18n::tr("Stop the game or app on the PC when leaving the stream.");
     form_.add_header(i18n::tr("Display"));
@@ -816,9 +829,18 @@ void View::sync_settings_from_config()
 {
     const moonlight_config_t &config = model_.config();
     form_.set_choice(kResolution, static_cast<int>(std::min(config.stream_resolution, 2u)));
-    form_.set_choice(kFrameRate, config.stream_fps >= MOONLIGHT_STREAM_FPS_120  ? 2
-                                 : config.stream_fps >= MOONLIGHT_STREAM_FPS_90 ? 1
-                                                                                : 0);
+    const bool custom = prosperolight::client_preferences().custom_fps ||
+                        (config.stream_fps != 30 && config.stream_fps != 60 &&
+                         config.stream_fps != 90 && config.stream_fps != 120);
+    form_.set_choice(kFrameRate, custom                    ? 4
+                                 : config.stream_fps == 30 ? 0
+                                 : config.stream_fps == 60 ? 1
+                                 : config.stream_fps == 90 ? 2
+                                                           : 3);
+    form_.set_visible(kCustomFps, custom);
+    form_.set_slider(kCustomFps, static_cast<float>(config.stream_fps));
+    form_.set_toggle(kMuteHost, prosperolight::client_preferences().mute_host);
+    form_.set_toggle(kOptimizeHost, prosperolight::client_preferences().optimize);
     form_.set_choice(kCodec, static_cast<int>(std::min(config.video_codec, 2u)));
     form_.set_choice(kChroma, config.chroma_sampling == MOONLIGHT_CHROMA_444 ? 1 : 0);
     form_.row(kChroma)->disabled = config.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE;
@@ -854,10 +876,40 @@ void View::apply_setting(int id)
         break;
     case kFrameRate:
     {
-        static constexpr unsigned kRates[] = {MOONLIGHT_STREAM_FPS_60, MOONLIGHT_STREAM_FPS_90,
-                                              MOONLIGHT_STREAM_FPS_120};
-        config.stream_fps = kRates[std::clamp(form_.choice_index(kFrameRate), 0, 2)];
+        const int selected = std::clamp(form_.choice_index(kFrameRate), 0, 4);
+        auto preferences = prosperolight::client_preferences();
+        preferences.custom_fps = selected == 4;
+        if (!prosperolight::client_preferences_save(preferences))
+        {
+            toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save client settings"),
+                         i18n::tr("Try again."));
+            sync_settings_from_config();
+            return;
+        }
+        if (selected < 4)
+        {
+            static constexpr unsigned kRates[] = {30, 60, 90, 120};
+            config.stream_fps = kRates[selected];
+        }
         break;
+    }
+    case kCustomFps:
+        config.stream_fps =
+            static_cast<unsigned>(std::clamp(form_.slider_value(kCustomFps), 30.0f, 120.0f));
+        break;
+    case kMuteHost:
+    case kOptimizeHost:
+    {
+        auto preferences = prosperolight::client_preferences();
+        if (id == kMuteHost)
+            preferences.mute_host = form_.toggle_value(kMuteHost);
+        else
+            preferences.optimize = form_.toggle_value(kOptimizeHost);
+        if (!prosperolight::client_preferences_save(preferences))
+            toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save client settings"),
+                         i18n::tr("Try again."));
+        sync_settings_from_config();
+        return;
     }
     case kCodec:
         config.video_codec = static_cast<std::uint32_t>(form_.choice_index(kCodec));

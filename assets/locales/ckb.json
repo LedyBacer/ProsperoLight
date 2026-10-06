@@ -282,5 +282,13 @@
   "the PC": "کۆمپیوتەرەکان",
   "this PC": "کۆمپیوتەرەکان",
   "On": "چالاک",
-  "Off": "ناچالاک"
+  "Off": "ناچالاک",
+  "Custom": "تایبەت",
+  "Custom frame rate": "ژمارەی فریم بە خواست",
+  "Mute host audio": "بێدەنگکردنی کۆمپیوتەر",
+  "Optimize game/display settings": "باشترکردنی یاری/پیشاندەر",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · تایبەت · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "بێدەنگکردنی کۆمپیوتەر · PS5: دەنگ",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: باشترکردنی یاری/پیشاندەر",
+  "Could not save client settings": "Error · ڕێکخستنەکان"
 }

@@ -282,5 +282,13 @@
   "the PC": "Számítógépek",
   "this PC": "Számítógépek",
   "On": "Be",
-  "Off": "Ki"
+  "Off": "Ki",
+  "Custom": "Egyéni",
+  "Custom frame rate": "Egyéni képkockasebesség",
+  "Mute host audio": "PC hangjának némítása",
+  "Optimize game/display settings": "Játék/kijelző optimalizálása",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · Egyéni · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "PC hangjának némítása · PS5: Audió konfiguráció",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: Játék/kijelző optimalizálása",
+  "Could not save client settings": "Error · Beállítások"
 }

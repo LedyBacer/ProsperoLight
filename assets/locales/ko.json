@@ -282,5 +282,13 @@
   "the PC": "컴퓨터",
   "this PC": "컴퓨터",
   "On": "켜짐",
-  "Off": "꺼짐"
+  "Off": "꺼짐",
+  "Custom": "사용자 지정",
+  "Custom frame rate": "사용자 지정 프레임률",
+  "Mute host audio": "PC 오디오 음소거",
+  "Optimize game/display settings": "게임/디스플레이 최적화",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · 사용자 지정 · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "PC 오디오 음소거 · PS5: 오디오 구성",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: 게임/디스플레이 최적화",
+  "Could not save client settings": "Error · 설정"
 }

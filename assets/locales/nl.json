@@ -282,5 +282,13 @@
   "the PC": "Computers",
   "this PC": "Computers",
   "On": "Aan",
-  "Off": "Uit"
+  "Off": "Uit",
+  "Custom": "Aangepast",
+  "Custom frame rate": "Aangepaste beeldsnelheid",
+  "Mute host audio": "Geluid op pc dempen",
+  "Optimize game/display settings": "Spel/scherm optimaliseren",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · Aangepast · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "Geluid op pc dempen · PS5: Audio­configuratie",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: Spel/scherm optimaliseren",
+  "Could not save client settings": "Error · Instellingen"
 }

@@ -282,5 +282,13 @@
   "the PC": "מחשבים",
   "this PC": "מחשבים",
   "On": "פעיל",
-  "Off": "כבוי"
+  "Off": "כבוי",
+  "Custom": "מותאם אישית",
+  "Custom frame rate": "קצב תמונות מותאם אישית",
+  "Mute host audio": "השתקת שמע במחשב",
+  "Optimize game/display settings": "מיטוב המשחק/התצוגה",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · מותאם אישית · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "השתקת שמע במחשב · PS5: שמע",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: מיטוב המשחק/התצוגה",
+  "Could not save client settings": "Error · הגדרות"
 }

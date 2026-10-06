@@ -282,5 +282,13 @@
   "the PC": "コンピューター",
   "this PC": "コンピューター",
   "On": "オン",
-  "Off": "オフ"
+  "Off": "オフ",
+  "Custom": "カスタム",
+  "Custom frame rate": "カスタムフレームレート",
+  "Mute host audio": "PCの音声をミュート",
+  "Optimize game/display settings": "ゲーム／画面設定を最適化",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · カスタム · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "PCの音声をミュート · PS5: オーディオ構成",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: ゲーム／画面設定を最適化",
+  "Could not save client settings": "Error · 設定"
 }

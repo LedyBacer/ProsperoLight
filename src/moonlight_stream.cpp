@@ -6,6 +6,7 @@
 
 /* Native game Moonlight/Sunshine Videodec2 zero-copy stream. */
 
+#include "client_preferences.hpp"
 #include "ps5_dualsense.hpp"
 
 #include <limits.h>
@@ -3818,7 +3819,9 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
     }
     resume_requested = server->current_game == target_id;
     gamepad_mask = prosperolight::dualsense::ActiveMask();
-    result = gs_start_app(server, configuration, target_id, true, false, gamepad_mask);
+    result =
+        gs_start_app(server, configuration, target_id, prosperolight::client_preferences().optimize,
+                     !prosperolight::client_preferences().mute_host, gamepad_mask);
     snprintf(notification.message, sizeof(notification.message),
              "Native NVHTTP launch: rc=%08x action=%s target=%s id=%d gamepads=%x rtsp=%s error=%s",
              (uint32_t)result, resume_requested ? "resume" : "launch",

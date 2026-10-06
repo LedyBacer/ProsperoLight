@@ -37,6 +37,7 @@ struct FormRow
     int id = 0; // yours; what changed_id() and the getters use
     std::string label;
     std::string description; // shown while the row is focused, and by help_text()
+    bool visible = true;     // hidden rows take no space and cannot receive focus
     bool disabled = false;   // focusable and dimmed; every input is refused
 
     // ---- toggle ----
@@ -188,6 +189,7 @@ class Form
     void set_stepper(int id, int value);
     void set_value_text(int id, std::string text);
     void set_disabled(int id, bool disabled);
+    void set_visible(int id, bool visible);
 
     // ---- the five rules ----
     void set_bounds(const gfx::Rect &bounds);
