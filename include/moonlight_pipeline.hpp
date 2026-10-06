@@ -75,6 +75,13 @@ inline ThreadLayout plan_thread_layout(uint64_t process_mask, uint64_t decoder_m
     return layout;
 }
 
+// Default Videodec2 depth is four pictures. Punktfunk reserves five, so the
+// experimental switch and reference-frame invalidation both ask for six.
+inline int32_t decoder_dpb_frames(int experimental_host_dpb, int reference_frame_invalidation)
+{
+    return experimental_host_dpb || reference_frame_invalidation ? 6 : 4;
+}
+
 // Drain pending decoder output only while nothing else is queued: pipelined
 // throughput when behind, depth-one latency when keeping up.
 inline bool should_drain(bool drain_enabled, unsigned depth, unsigned in_flight, int pending_frames)

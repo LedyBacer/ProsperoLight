@@ -118,6 +118,13 @@ static_assert(PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES >= 0 && PROSPEROLIGHT_CATCHUP_Q
               "catch-up must act before moonlight-common-c's 15-frame queue overflows");
 static_assert(PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION == 0 ||
               PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION == 1);
+// Punktfunk's NVENC GameStream path reserves five reference frames. A four-deep
+// slot returns OVERSIZE_DECODE. Off unless that host is the one under test.
+#ifndef PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB
+#define PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB 0
+#endif
+static_assert(PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB == 0 ||
+              PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB == 1);
 static_assert(FRAME_SLOT_COUNT >= moonlight::kMaxDecoderDepth + 4u &&
                   INPUT_SLOT_COUNT >= moonlight::kMaxDecoderDepth + 2u &&
                   SUBMISSION_QUEUE_CAPACITY > moonlight::kMaxDecoderDepth &&
@@ -4040,7 +4047,8 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     config.max_level = decoder_max_level(mode, stream_fps);
     config.max_width = (int32_t)mode->max_width;
     config.max_height = (int32_t)mode->max_height;
-    config.max_dpb_frames = PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION ? 6 : 4;
+    config.max_dpb_frames = moonlight::decoder_dpb_frames(
+        PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB, PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION);
     config.compute_queue = (uint64_t)compute_queue;
     config.cpu_priority = DECODER_CPU_PRIORITY;
     config.optimize_progressive = 1;

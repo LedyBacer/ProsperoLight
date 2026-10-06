@@ -107,6 +107,7 @@ interval:
 | `GPU_TIMESTAMPS` | 0 | Opt-in GPU render timing (`gpu_render` in the summary). |
 | `CATCHUP_QUEUE_FRAMES` | 0 | Opt-in: a queue of this many frames for 250 ms requests a keyframe. |
 | `REFERENCE_FRAME_INVALIDATION` | 0 | Opt-in: advertise RFI and use a six-frame DPB. |
+| `EXPERIMENTAL_HOST_DPB` | 0 | Opt-in six-picture slot for Punktfunk's five-reference GameStream stream. Does not advertise RFI. |
 
 `DECODER_CPU_AFFINITY`, `PRESENT_EVERY_N` and `FRAME_PACING` are removed; the
 first is now the cores setting, the others no longer apply.

@@ -35,6 +35,8 @@ INPUT_POLL_US ?= 2000
 GPU_TIMESTAMPS ?= 0
 CATCHUP_QUEUE_FRAMES ?= 0
 REFERENCE_FRAME_INVALIDATION ?= 0
+# Six-picture decoder slot. Off by default; Punktfunk's GameStream encoder needs it.
+EXPERIMENTAL_HOST_DPB ?= 0
 # Milliseconds the display is left alone after a stream above 60 Hz or in HDR.
 HFR_SETTLE_MS ?= 5000
 APP_DEFINITIONS ?= GL_GLEXT_PROTOTYPES=1
@@ -61,6 +63,7 @@ APP_DEFINITIONS += INPUT_POLL_US=$(INPUT_POLL_US)
 APP_DEFINITIONS += PROSPEROLIGHT_GPU_TIMESTAMPS=$(GPU_TIMESTAMPS)
 APP_DEFINITIONS += PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES=$(CATCHUP_QUEUE_FRAMES)
 APP_DEFINITIONS += PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION=$(REFERENCE_FRAME_INVALIDATION)
+APP_DEFINITIONS += PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB=$(EXPERIMENTAL_HOST_DPB)
 APP_INCLUDE_PATHS ?= third_party/ps5-homebrew-ui third_party/update-check .deps/ps5-opengl/current/include include src src/gamestream platform/ps5 third_party/moonlight-common-c/src third_party/moonlight-common-c/enet/include third_party/moonlight-common-c/nanors third_party/moonlight-common-c/nanors/deps third_party/moonlight-common-c/nanors/deps/obl third_party/mbedtls/include third_party/opus/include
 APP_STATIC_ARCHIVES ?= .deps/ps5-opengl/libps5opengl-group.a build/stream-deps/libmoonlight-common-c.a build/stream-deps/libopus.a build/stream-deps/libmbedtls.a build/stream-deps/libmbedx509.a build/stream-deps/libmbedcrypto.a
 # The launcher draws with ps5-opengl: its AGC import libraries replace the app's own.
