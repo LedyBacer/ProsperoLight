@@ -35,10 +35,11 @@ this repository. No Sony SDK file is included.
 
 ## Lapy elevation helper
 
-The build pins revision `54a095c0f19161825e845daa760a03b446e654fa` of
-[mpereiraesaa's PS5-Lapy-JB-Daemon](https://github.com/mpereiraesaa/PS5-Lapy-JB-Daemon),
-which builds on ArkSama's project. Its exact-title one-shot helper is MIT
-licensed, verified against its build manifest, and ships with `Lapy-MIT.txt`.
+The build pins revision `c3bdfe3a399366d8eacfc580f20b19fd03b16ca3` of
+[BlackBearReloaded's PS5-Lapy-JB-Daemon](https://github.com/blackbearreloaded/PS5-Lapy-JB-Daemon),
+which incorporates work from mpereiraesaa and ArkSama's project. Its exact-title
+one-shot helper is MIT licensed, verified against its build manifest, and ships
+with `Lapy-MIT.txt`.
 
 Target C++ compilation uses the LLVM libc++ headers distributed by the public
 SDK. Those headers retain the Apache-2.0 WITH LLVM-exception license recorded

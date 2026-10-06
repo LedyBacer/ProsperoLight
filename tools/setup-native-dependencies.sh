@@ -20,12 +20,12 @@ sdk_url="https://github.com/ps5-payload-dev/sdk/releases/download/v0.42/ps5-payl
 sdk_hash="8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da"
 zlib_url="https://zlib.net/fossils/zlib-$zlib_version.tar.gz"
 zlib_hash="bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
-lapy_commit="54a095c0f19161825e845daa760a03b446e654fa"
-lapy_source="$root/.deps/PS5-Lapy-JB-Daemon-54a095c"
-lapy_sdk="$root/.deps/lapy-ps5-payload-sdk-v0.40"
-lapy_sdk_archive="$root/.deps/lapy-ps5-payload-sdk-v0.40.zip"
-lapy_sdk_url="https://github.com/ps5-payload-dev/sdk/releases/download/v0.40/ps5-payload-sdk.zip"
-lapy_sdk_hash="617fb702df3551f709b2db0a014e618cf39334c9348395a9b005e6504d076a42"
+lapy_commit="c3bdfe3a399366d8eacfc580f20b19fd03b16ca3"
+lapy_source="$root/.deps/PS5-Lapy-JB-Daemon-c3bdfe3"
+lapy_sdk="$root/.deps/lapy-ps5-payload-sdk-v0.42"
+lapy_sdk_archive="$root/.deps/lapy-ps5-payload-sdk-v0.42.zip"
+lapy_sdk_url="https://github.com/ps5-payload-dev/sdk/releases/download/v0.42/ps5-payload-sdk.zip"
+lapy_sdk_hash="8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da"
 lapy_log="$root/.deps/lapy-ps5log-1ae1f918/ps5log.h"
 lapy_log_url="https://raw.githubusercontent.com/mpereiraesaa/ps5-agc-gears/1ae1f9182abd2770c131b97419034fb85173c2dc/native/ps5log/ps5log.h"
 lapy_log_hash="394af67d0f8b60b3335deb53396e52855ea2daa50ca914a456ea7663f48900c6"
@@ -100,7 +100,7 @@ if [[ -z $zlib_library ]]; then
 fi
 
 if ! $skip_sdk && [[ ! -f $lapy_source/source/lapy_elevation_protocol.h ]]; then
-    git clone -q https://github.com/mpereiraesaa/PS5-Lapy-JB-Daemon.git "$lapy_source"
+    git clone -q https://github.com/blackbearreloaded/PS5-Lapy-JB-Daemon.git "$lapy_source"
     git -C "$lapy_source" fetch -q origin "$lapy_commit"
     git -C "$lapy_source" checkout -q --detach "$lapy_commit"
 fi
