@@ -22,8 +22,9 @@ def main():
     runner, image, inner = sys.argv[1:]
     inner = Path(inner)
     with tempfile.TemporaryDirectory(prefix='prosperolight-pfsc-') as folder:
-        subprocess.run([runner, 'unpack', image, folder, '--no-progress'], check=True)
-        files = sorted(p for p in Path(folder).rglob('*') if p.is_file())
+        output = Path(folder) / 'unpacked'
+        subprocess.run([runner, 'unpack', image, str(output), '--no-progress'], check=True)
+        files = sorted(p for p in output.rglob('*') if p.is_file())
         if len(files) != 1 or files[0].name != inner.name:
             raise SystemExit('PFSC must contain exactly the named inner exFAT volume')
         if files[0].stat().st_size != inner.stat().st_size or digest(files[0]) != digest(inner):
