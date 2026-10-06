@@ -2,7 +2,7 @@
 # ps5-native-app-boilerplate - Build ProsperoLight's pinned one-host Lapy helper.
 # Copyright (C) 2026 BlackBearReloaded
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Build and verify the pinned upstream Lapy helper for ProsperoLight."""
+"""Build and verify the pinned Lapy helper for ProsperoLight."""
 
 import hashlib
 import json
@@ -14,9 +14,9 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 TITLE = "PPSA99002"
-LAPY = ROOT / ".deps/PS5-Lapy-JB-Daemon-54a095c"
+LAPY = ROOT / ".deps/PS5-Lapy-JB-Daemon-c3bdfe3"
 PS5LOG = ROOT / ".deps/lapy-ps5log-1ae1f918"
-SDK = ROOT / ".deps/lapy-ps5-payload-sdk-v0.40"
+SDK = ROOT / ".deps/lapy-ps5-payload-sdk-v0.42"
 SOURCE = LAPY / f"build/owned_root_helper-{TITLE}"
 OUTPUT = ROOT / "build/lapy-owned-helper"
 
