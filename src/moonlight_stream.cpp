@@ -517,6 +517,35 @@ extern "C"
     int32_t sceVideodec2Flush(void *decoder, videodec2_frame_t *frame, videodec2_output_t *output);
 }
 
+extern "C" void moonlight_native_decoder_warmup(int results[4])
+{
+    videodec2_compute_memory_t compute{};
+    compute.size = sizeof(compute);
+    results[0] = sceVideodec2QueryComputeMemoryInfo(&compute);
+    for (unsigned index = 0; index < 3; ++index)
+    {
+        const native_video_mode_t *mode =
+            find_video_mode(index == 0 ? MOONLIGHT_VIDEO_CODEC_H264 : MOONLIGHT_VIDEO_CODEC_HEVC,
+                            MOONLIGHT_STREAM_RESOLUTION_2160P, index == 2);
+        videodec2_decoder_config_t config{};
+        videodec2_decoder_memory_t memory{};
+        config.size = sizeof(config);
+        config.resource_type = 1;
+        config.codec_type = mode->codec_type;
+        config.profile = mode->profile;
+        config.max_level = mode->max_level;
+        config.max_width = mode->max_width;
+        config.max_height = mode->max_height;
+        config.max_dpb_frames = 4;
+        config.pipeline_depth = 1;
+        config.cpu_affinity = moonlight::kClassicDecoderCpuMask;
+        config.cpu_priority = DECODER_CPU_PRIORITY;
+        config.optimize_progressive = 1;
+        memory.size = sizeof(memory);
+        results[index + 1] = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
+    }
+}
+
 static notification_request_t notification;
 static std::atomic<int> connection_terminated;
 static std::atomic<int> connection_error;

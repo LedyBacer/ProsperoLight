@@ -71,6 +71,8 @@ class FramePacing
             initialized_ = true;
             last_frame_ = frame;
             last_source_ = source_us;
+            cadence_source_ = source_us;
+            cadence_frame_ = frame;
             slot_ = ready_us;
         }
         else if (frame != last_frame_)
@@ -78,12 +80,17 @@ class FramePacing
             bool rate_changed = false;
             const int64_t frames = int64_t(frame) - last_frame_;
             uint64_t advance = frames > 0 && frames < 240 ? uint64_t(frames) * period_ : 0;
-            if (advance && source_us > last_source_ && last_source_)
+            // Estimate over a source-frame window. Filtering individual deltas
+            // rejects short jitter samples but accepts long ones, biasing the
+            // period upward until a 60 FPS source is paced at about 40 FPS.
+            const int64_t cadence_frames = int64_t(frame) - cadence_frame_;
+            if (cadence_frames >= 32 && cadence_frames < 240 &&
+                source_us > cadence_source_ && cadence_source_)
             {
-                const uint64_t delta = source_us - last_source_;
-                const uint64_t sample = delta / uint64_t(frames);
-                // Arrival-derived fallback PTS can be bursty. Reject impossible
-                // rates and require persistent evidence before changing cadence.
+                const uint64_t delta = source_us - cadence_source_;
+                const uint64_t sample = delta / uint64_t(cadence_frames);
+                cadence_source_ = source_us;
+                cadence_frame_ = frame;
                 if (sample >= 8000 && sample <= 40000)
                 {
                     if (sample > period_ * 112 / 100 || sample < period_ * 88 / 100)
@@ -96,23 +103,30 @@ class FramePacing
                             candidate_ = sample;
                             candidate_count_ = 1;
                         }
-                        if (candidate_count_ >= 6)
+                        if (candidate_count_ >= 3)
                         {
-                            period_q16_ = (delta << 16) / uint64_t(frames);
-                            period_ = std::clamp<uint64_t>(sample, 8333, 33333);
+                            period_q16_ = (delta << 16) / uint64_t(cadence_frames);
                             candidate_count_ = 0;
                             rate_changed = true;
                         }
                     }
                     else
                     {
-                        period_q16_ = (period_q16_ * 31 + (delta << 16) / uint64_t(frames)) / 32;
-                        period_ = std::clamp<uint64_t>(period_q16_ >> 16, 8333, 33333);
+                        period_q16_ = (period_q16_ * 7 +
+                                       (delta << 16) / uint64_t(cadence_frames)) / 8;
                         candidate_count_ = 0;
                     }
                     period_q16_ = std::clamp<uint64_t>(period_q16_, (UINT64_C(1000000) << 16) / 120,
                                                        (UINT64_C(1000000) << 16) / 30);
+                    period_ = period_q16_ >> 16;
                 }
+            }
+            else if (cadence_frames <= 0 || cadence_frames >= 240 ||
+                     source_us < cadence_source_ || !cadence_source_)
+            {
+                cadence_source_ = source_us;
+                cadence_frame_ = frame;
+                candidate_count_ = 0;
             }
             if (advance)
             {
@@ -227,10 +241,11 @@ class FramePacing
 
   private:
     uint64_t period_q16_ = (UINT64_C(1000000) << 16) / 60, fractional_{};
-    uint64_t period_ = 16666, nominal_period_ = 16666, slot_{}, submitted_{}, last_source_{};
+    uint64_t period_ = 16666, nominal_period_ = 16666, slot_{}, submitted_{}, last_source_{},
+             cadence_source_{};
     uint64_t reserve_ = 1500, candidate_{}, wake_lead_ = 100;
     unsigned candidate_count_{}, clean_{};
-    int32_t last_frame_{};
+    int32_t last_frame_{}, cadence_frame_{};
     bool initialized_{};
 };
 

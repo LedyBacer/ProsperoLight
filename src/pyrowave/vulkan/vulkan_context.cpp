@@ -14,6 +14,7 @@ static void require(bool ok, const char *reason)
 }
 void VulkanContext::init(bool presentation)
 {
+    Util::register_thread_index(0);
 #ifdef __PROSPERO__
     volkInitializeCustom(vk_icdGetInstanceProcAddr);
 #else

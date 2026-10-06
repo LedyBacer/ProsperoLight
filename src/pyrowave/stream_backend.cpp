@@ -78,7 +78,7 @@ struct OutputTrace
     };
     static constexpr size_t capacity = 32768;
     std::unique_ptr<Sample[]> samples;
-    size_t count{}, omitted{};
+    size_t count{}, omitted{}, next{};
     moonlight::FramePacing &pacer;
     unsigned mode, fps;
     OutputTrace(moonlight::FramePacing &p, unsigned m, unsigned f) : pacer(p), mode(m), fps(f)
@@ -90,10 +90,12 @@ struct OutputTrace
     {
         if (!samples)
             return;
+        samples[next] = sample;
+        next = (next + 1) % capacity;
         if (count == capacity)
             ++omitted;
         else
-            samples[count++] = sample;
+            ++count;
     }
     ~OutputTrace()
     {
@@ -120,7 +122,7 @@ struct OutputTrace
                           mode, fps, count, omitted) > 0;
         for (size_t i = 0; ok && i < count; ++i)
         {
-            const auto &v = samples[i];
+            const auto &v = samples[(count == capacity ? next + i : i) % capacity];
             ok = fprintf(file, "%d,%llu,%llu,%llu,%llu,%llu\n", v.frame, (unsigned long long)v.pts,
                          (unsigned long long)v.ready, (unsigned long long)v.submit,
                          (unsigned long long)v.observed, (unsigned long long)v.flips) > 0;
@@ -183,6 +185,9 @@ void wait_prepared_frame(void *context)
 
 void *worker(void *)
 {
+    // Initialization and this worker use the single Granite index serially.
+    // Without registration Granite logs and flushes stderr on each decode.
+    Util::register_thread_index(0);
     auto &s = *session;
     moonlight::FramePacing pacer;
     moonlight::SourceTimestamp source_clock;
@@ -200,10 +205,12 @@ void *worker(void *)
     uint64_t vblanks = counters.vblanks;
     bool refresh_reported = false;
     unsigned windows = 0;
+    uint64_t stall_count = 0, last_stall_log = 0;
     try
     {
         for (;;)
         {
+            const uint64_t iteration_started = now_us();
             Frame frame;
             {
                 std::unique_lock<std::mutex> lock(s.mutex);
@@ -231,6 +238,7 @@ void *worker(void *)
                 }
             }
 
+            const uint64_t dequeued = now_us();
             frame.presentation_us = source_clock.update(frame.rtp_timestamp, frame.presentation_us);
             PyroWaveFraming::Frame parsed;
             std::string error;
@@ -250,7 +258,26 @@ void *worker(void *)
             ++s.decoded;
             s.backend->update_hud(nullptr, native_agc_hud_enabled() != 0);
             PacingWait wait{&s, &pacer, &frame, mode, refresh};
+            const uint64_t preparation_started = now_us();
             auto timing = s.backend->present(wait_prepared_frame, &wait, paced);
+            const uint64_t finished = now_us();
+            if (finished - preparation_started > 50000 || preparation_started - dequeued > 50000)
+            {
+                ++stall_count;
+                if (finished - last_stall_log >= 1000000)
+                {
+                    log_line("PyroWave stall: count=%llu frame=%d dequeue_us=%llu ingest_us=%llu "
+                             "acquire_ms=%.3f record_ms=%.3f submit_ms=%.3f prepared_wait_ms=%.3f "
+                             "pacing_ms=%.3f present_ms=%.3f completion_ms=%.3f gpu_ms=%.3f",
+                             (unsigned long long)stall_count, frame.number,
+                             (unsigned long long)(dequeued - iteration_started),
+                             (unsigned long long)(preparation_started - dequeued),
+                             timing.acquire_ms, timing.record_ms, timing.submit_ms,
+                             timing.prepared_wait_ms, timing.pacing_ms, timing.present_ms,
+                             timing.completion_ms, timing.total_ms);
+                    last_stall_log = finished;
+                }
+            }
             decode_ms += timing.decode_ms;
             render_ms += timing.render_ms;
             ++samples;

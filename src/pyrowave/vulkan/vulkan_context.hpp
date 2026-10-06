@@ -83,3 +83,9 @@ struct Output
     void prepare();
     ~Output();
 };
+
+// Granite exposes one thread index for the externally serialized decoder.
+namespace Util
+{
+void register_thread_index(unsigned index);
+}

@@ -250,8 +250,14 @@ int main()
 {
     // Resolve process-owned system modules before storage grants filesystem access.
     prosperolight::native_modules::PrepareBeforeStorage();
+    int decoder_warmup[4] = {-1, -1, -1, -1};
+    if (prosperolight::native_modules::Result(prosperolight::native_modules::video_decoder) == 0)
+        moonlight_native_decoder_warmup(decoder_warmup);
     storage::Initialize();
     prosperolight::native_modules::LogResults();
+    std::printf("[PL] decoder libraries: before-storage core=%08x h264=%08x hevc=%08x hdr=%08x\n",
+                static_cast<unsigned>(decoder_warmup[0]), static_cast<unsigned>(decoder_warmup[1]),
+                static_cast<unsigned>(decoder_warmup[2]), static_cast<unsigned>(decoder_warmup[3]));
     // From here a fault leaves a report beside the log.
     crash::Install(storage::paths().logs, storage::log_descriptor());
 #if PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS != 0

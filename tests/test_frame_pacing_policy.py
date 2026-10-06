@@ -56,6 +56,20 @@ int main() {
         assert(target>=previous+2000000 && target<=previous+2010000);
         assert(p.stats.resets);
     }
+    // Capture jitter alternates long and short PTS deltas for twenty minutes.
+    // The source is still 60 FPS; cadence must not drift into a 40 FPS cap.
+    moonlight::FramePacing jittered;
+    jittered.reset(60);
+    uint64_t previous_jittered=0;
+    for(int frame=1;frame<72000;frame++) {
+        uint64_t source=uint64_t(frame)*1000000/60+(frame%2?10000:0);
+        uint64_t ready=1000000+uint64_t(frame)*1000000/60;
+        auto target=jittered.target(frame,source,ready);
+        jittered.submitted(target,target,target-ready);
+        previous_jittered=target;
+    }
+    assert(previous_jittered>0);
+    assert(jittered.stats.period_us>16500 && jittered.stats.period_us<16800);
     // Fixed 60-on-120 must not rush two frames into adjacent refreshes.
     moonlight::FramePacing fixed;
     fixed.reset(60);

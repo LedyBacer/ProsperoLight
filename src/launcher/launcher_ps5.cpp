@@ -232,10 +232,10 @@ void CaptureConnecting(gfx::Renderer &renderer, View &view, Frame &frame, Select
                 std::memcpy(selection->connecting_rgba.data() + static_cast<std::size_t>(y) * row,
                             pixels.data() + static_cast<std::size_t>(kHeight - 1 - y) * row, row);
             const View::ConnectBar bar = view.connecting_bar();
-            selection->connecting_bar[0] = bar.rect.x;
-            selection->connecting_bar[1] = bar.rect.y;
-            selection->connecting_bar[2] = bar.rect.w;
-            selection->connecting_bar[3] = bar.rect.h;
+            selection->connecting_bar[0] = bar.rect.x * 2.0f;
+            selection->connecting_bar[1] = bar.rect.y * 2.0f;
+            selection->connecting_bar[2] = bar.rect.w * 2.0f;
+            selection->connecting_bar[3] = bar.rect.h * 2.0f;
             selection->connecting_fill[0] = static_cast<std::uint8_t>(bar.fill.r * 255.0f + 0.5f);
             selection->connecting_fill[1] = static_cast<std::uint8_t>(bar.fill.g * 255.0f + 0.5f);
             selection->connecting_fill[2] = static_cast<std::uint8_t>(bar.fill.b * 255.0f + 0.5f);
