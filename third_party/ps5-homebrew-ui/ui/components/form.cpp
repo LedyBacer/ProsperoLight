@@ -243,8 +243,27 @@ float Form::type(float size) const
     return style.compact ? std::max(size * 0.9f, std::min(size, 20.0f)) : size;
 }
 
+void Form::set_visible(int id, bool visible)
+{
+    FormRow *item = row(id);
+    if (!item || item->visible == visible)
+        return;
+    item->visible = visible;
+    if (focus_ >= 0 && !rows_[static_cast<std::size_t>(focus_)].visible)
+    {
+        int to = next(focus_, -1);
+        if (to < 0)
+            to = next(focus_, 1);
+        focus_ = to;
+    }
+    layout();
+    retarget(true);
+}
+
 float Form::base_size(int index) const
 {
+    if (!rows_[static_cast<std::size_t>(index)].visible)
+        return 0.0f;
     const bool header = rows_[static_cast<std::size_t>(index)].kind == FormRowKind::header;
     return (header ? style.header_height : style.row_height) * scale();
 }
@@ -253,7 +272,8 @@ float Form::base_size(int index) const
 float Form::fold_size(int index) const
 {
     const FormRow &row = rows_[static_cast<std::size_t>(index)];
-    if (!style.description_inline || row.description.empty() || row.kind == FormRowKind::header)
+    if (!row.visible || !style.description_inline || row.description.empty() ||
+        row.kind == FormRowKind::header)
         return 0.0f;
     return type(style.description_size) * 1.5f;
 }
@@ -263,7 +283,8 @@ float Form::target_top(int index) const
 {
     float y = 0.0f;
     for (int i = 0; i < index; ++i)
-        y += base_size(i) + style.gap * scale();
+        y += base_size(i) +
+             (rows_[static_cast<std::size_t>(i)].visible ? style.gap * scale() : 0.0f);
     if (focus_ >= 0 && focus_ < index)
         y += fold_size(focus_);
     return y;
@@ -288,7 +309,7 @@ void Form::layout()
     {
         tops_[static_cast<std::size_t>(i)] = y;
         y += base_size(i) + fold_size(i) * rows_[static_cast<std::size_t>(i)].open.value +
-             style.gap * scale();
+             (rows_[static_cast<std::size_t>(i)].visible ? style.gap * scale() : 0.0f);
     }
 }
 
@@ -303,7 +324,8 @@ Rect Form::row_rect(int index) const
 bool Form::focusable(int index) const
 {
     const FormRowKind kind = rows_[static_cast<std::size_t>(index)].kind;
-    return kind != FormRowKind::header && (kind != FormRowKind::value || style.focus_values);
+    return rows_[static_cast<std::size_t>(index)].visible && kind != FormRowKind::header &&
+           (kind != FormRowKind::value || style.focus_values);
 }
 
 // The next focusable row in a direction, or -1 at the end.
@@ -709,7 +731,8 @@ void Form::draw_row(Canvas &canvas, Painter &paint, const FormRow &row, const Re
         look.press = row.press.value;
         look.disabled = row.disabled;
         paint.slider({at.x, cy - height * 0.5f, at.w - number, height}, row.shown.value, look);
-        paint.bounded_label(slider_text(row), at.x + at.w, cy + value_size * 0.35f, value_size, ink, number - 8.0f, gfx::Align::right);
+        paint.bounded_label(slider_text(row), at.x + at.w, cy + value_size * 0.35f, value_size, ink,
+                            number - 8.0f, gfx::Align::right);
         label_end = at.x;
         break;
     }
@@ -753,13 +776,14 @@ void Form::draw_row(Canvas &canvas, Painter &paint, const FormRow &row, const Re
             {
                 // A value may take up to its column; the label gets the rest.
                 const float room = end - left - (right - left) * style.label_ratio;
-                const float width =
-                    paint.bounded_label(row.text, end, baseline, value_size, quiet, std::max(room, 80.0f), gfx::Align::right);
+                const float width = paint.bounded_label(row.text, end, baseline, value_size, quiet,
+                                                        std::max(room, 80.0f), gfx::Align::right);
                 label_end = end - width;
             }
             else
             {
-                paint.bounded_label(row.text, column, baseline, value_size, quiet, std::max(end - column, 80.0f));
+                paint.bounded_label(row.text, column, baseline, value_size, quiet,
+                                    std::max(end - column, 80.0f));
                 label_end = column;
             }
         }
@@ -775,7 +799,8 @@ void Form::draw_row(Canvas &canvas, Painter &paint, const FormRow &row, const Re
 
     if (!style.values_right)
         label_end = std::min(label_end, control_rect(line, 0.0f).x);
-    paint.bounded_label(row.label, left, cy + label_size * 0.35f, label_size, label_ink, std::max(label_end - 18.0f - left, 40.0f));
+    paint.bounded_label(row.label, left, cy + label_size * 0.35f, label_size, label_ink,
+                        std::max(label_end - 18.0f - left, 40.0f));
     list.pop_opacity();
 
     // The description is not dimmed with a disabled row: it is what explains it.
@@ -784,7 +809,8 @@ void Form::draw_row(Canvas &canvas, Painter &paint, const FormRow &row, const Re
     {
         const float size = type(style.description_size);
         list.push_opacity(tween::clamp01(unfolded));
-        paint.bounded_body(row.description, left, rect.y + base - 9.0f * scale() + size * 0.8f, size, quiet, rect.w - 2.0f * style.padding);
+        paint.bounded_body(row.description, left, rect.y + base - 9.0f * scale() + size * 0.8f,
+                           size, quiet, rect.w - 2.0f * style.padding);
         list.pop_opacity();
     }
 }
@@ -844,6 +870,9 @@ void Form::draw(Canvas &canvas) const
     {
         for (int i = 0; i + 1 < count; ++i)
         {
+            if (!rows_[static_cast<std::size_t>(i)].visible ||
+                !rows_[static_cast<std::size_t>(i + 1)].visible)
+                continue;
             const Rect row = row_rect(i);
             const float alpha = visibility(row) * entrance(i);
             if (alpha <= 0.0f || rows_[static_cast<std::size_t>(i)].kind == FormRowKind::header ||
@@ -891,6 +920,8 @@ void Form::draw(Canvas &canvas) const
     for (int i = 0; i < count; ++i)
     {
         const FormRow &row = rows_[static_cast<std::size_t>(i)];
+        if (!row.visible)
+            continue;
         const Rect rect = row_rect(i);
         const float arrived = entrance(i);
         const float alpha = visibility(rect) * arrived;

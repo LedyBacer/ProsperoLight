@@ -282,5 +282,13 @@
   "the PC": "Комп’ютери",
   "this PC": "Комп’ютери",
   "On": "Увімк.",
-  "Off": "Вимк."
+  "Off": "Вимк.",
+  "Custom": "Власна",
+  "Custom frame rate": "Власна частота кадрів",
+  "Mute host audio": "Вимкнути звук на ПК",
+  "Optimize game/display settings": "Оптимізувати гру/дисплей",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · Власна · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "Вимкнути звук на ПК · PS5: Конфігурація аудіо",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: Оптимізувати гру/дисплей",
+  "Could not save client settings": "Error · Налаштування"
 }

@@ -19,6 +19,7 @@
 #include "lan_http_report.hpp"
 #include "connecting_plate.hpp"
 #include "i18n.hpp"
+#include "client_preferences.hpp"
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
 
@@ -528,6 +529,24 @@ int main(int argc, char **argv)
                 script.push_back({20, 0, Direction::none, captures[row].c_str()});
             }
             session(("layout-" + locale).c_str(), script, "");
+            moonlight_config_t custom_layout{};
+            moonlight_config_load(&custom_layout);
+            custom_layout.stream_fps = 60;
+            auto custom_preferences = prosperolight::client_preferences();
+            custom_preferences.custom_fps = true;
+            expect(prosperolight::client_preferences_save(custom_preferences),
+                   "layout Custom selection");
+            session(("layout-custom-" + locale).c_str(),
+                    {{30, options},
+                     {10, 0, Direction::down},
+                     {10, 0, Direction::down},
+                     {20, 0, Direction::none, "custom-choice"},
+                     {10, 0, Direction::down},
+                     {20, 0, Direction::none, "custom-slider"}},
+                    "", &custom_layout);
+            custom_preferences.custom_fps = false;
+            expect(prosperolight::client_preferences_save(custom_preferences),
+                   "layout preset selection");
             session(("layout-pcs-" + locale).c_str(),
                     {{90, 0, Direction::none, "pcs"},
                      {20, 0, Direction::right},
@@ -726,6 +745,37 @@ int main(int argc, char **argv)
             "");
     expect(i18n::selected() == 0, "closing the language dropdown preserves Automatic");
 
+    moonlight_config_t custom_settings{};
+    moonlight_config_load(&custom_settings);
+    custom_settings.stream_fps = 60;
+    session("custom-fps",
+            {{30, options},
+             {10, 0, Direction::down},
+             {10, 0, Direction::down},
+             {10, 0, Direction::right},
+             {10, 0, Direction::right},
+             {10, 0, Direction::right},
+             {30, 0, Direction::none, "shown"},
+             {10, 0, Direction::down},
+             {10, 0, Direction::left},
+             {30, 0, Direction::none, "119-fps"}},
+            "", &custom_settings);
+    moonlight_config_t custom_saved{};
+    moonlight_config_load(&custom_saved);
+    expect(custom_saved.stream_fps == 119 && prosperolight::client_preferences().custom_fps,
+           "Custom retains the chosen integer FPS and its independent mode");
+    session("custom-fps-reopen",
+            {{30, options},
+             {10, 0, Direction::down},
+             {10, 0, Direction::down},
+             {30, 0, Direction::none, "restored"},
+             {10, 0, Direction::left},
+             {30, 0, Direction::none, "hidden"}},
+            "");
+    moonlight_config_load(&custom_saved);
+    expect(custom_saved.stream_fps == 120 && !prosperolight::client_preferences().custom_fps,
+           "Choosing a preset leaves Custom and hides its slider");
+
     // ---- Settings: the frame-rate presets and the bitrate slider, beside the new rows ----
     (void)prosperolight::host_quit_set_enabled(false);
     moonlight_config_t initial_settings{};
@@ -751,6 +801,8 @@ int main(int argc, char **argv)
                 {10, 0, Direction::down},
                 {20, 0, Direction::left},
                 {40, 0, Direction::none, "bitrate-slider"},
+                {10, 0, Direction::down},
+                {10, 0, Direction::down},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},

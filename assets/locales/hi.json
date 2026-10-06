@@ -282,5 +282,13 @@
   "the PC": "कंप्यूटर",
   "this PC": "कंप्यूटर",
   "On": "चालू",
-  "Off": "बंद"
+  "Off": "बंद",
+  "Custom": "कस्टम",
+  "Custom frame rate": "कस्टम फ़्रेम दर",
+  "Mute host audio": "पीसी की आवाज़ बंद करें",
+  "Optimize game/display settings": "गेम/डिस्प्ले अनुकूलित करें",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · कस्टम · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "पीसी की आवाज़ बंद करें · PS5: ऑडियो",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: गेम/डिस्प्ले अनुकूलित करें",
+  "Could not save client settings": "Error · सेटिंग्स"
 }

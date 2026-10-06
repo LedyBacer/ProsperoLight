@@ -282,5 +282,13 @@
   "the PC": "Bilgisayarlar",
   "this PC": "Bilgisayarlar",
   "On": "Açık",
-  "Off": "Kapalı"
+  "Off": "Kapalı",
+  "Custom": "Özel",
+  "Custom frame rate": "Özel kare hızı",
+  "Mute host audio": "PC sesini kapat",
+  "Optimize game/display settings": "Oyunu/ekranı optimize et",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · Özel · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "PC sesini kapat · PS5: Ses konfigürasyonu",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: Oyunu/ekranı optimize et",
+  "Could not save client settings": "Error · Ayarlar"
 }

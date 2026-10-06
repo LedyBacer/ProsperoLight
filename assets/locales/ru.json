@@ -282,5 +282,13 @@
   "the PC": "ПК",
   "this PC": "этот ПК",
   "On": "Вкл.",
-  "Off": "Выкл."
+  "Off": "Выкл.",
+  "Custom": "Своя",
+  "Custom frame rate": "Своя частота кадров",
+  "Mute host audio": "Отключить звук на ПК",
+  "Optimize game/display settings": "Оптимизировать игру/дисплей",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS. Своя частота меняется с шагом 1 FPS.",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "Звук только на PS5. На хосте требуется подходящее аудиоустройство.",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "Игровые настройки GFE или дисплей Sunshine. Vibepollo может игнорировать флаг.",
+  "Could not save client settings": "Не удалось сохранить настройки клиента"
 }

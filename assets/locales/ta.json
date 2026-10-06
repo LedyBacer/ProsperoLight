@@ -282,5 +282,13 @@
   "the PC": "கணினிகள்",
   "this PC": "கணினிகள்",
   "On": "இயக்கு",
-  "Off": "அணை"
+  "Off": "அணை",
+  "Custom": "தனிப்பயன்",
+  "Custom frame rate": "தனிப்பயன் பிரேம் வீதம்",
+  "Mute host audio": "கணினி ஒலியை முடக்கு",
+  "Optimize game/display settings": "விளையாட்டு/திரையை மேம்படுத்து",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · தனிப்பயன் · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "கணினி ஒலியை முடக்கு · PS5: ஆடியோ உள்ளமைவு",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: விளையாட்டு/திரையை மேம்படுத்து",
+  "Could not save client settings": "Error · அமைப்புகள்"
 }

@@ -282,5 +282,13 @@
   "the PC": "Computadores",
   "this PC": "Computadores",
   "On": "Ligado",
-  "Off": "Desligado"
+  "Off": "Desligado",
+  "Custom": "Personalizado",
+  "Custom frame rate": "Taxa de quadros personalizada",
+  "Mute host audio": "Silenciar áudio do PC",
+  "Optimize game/display settings": "Otimizar jogo/tela",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · Personalizado · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "Silenciar áudio do PC · PS5: Configurações de áudio",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: Otimizar jogo/tela",
+  "Could not save client settings": "Error · Configurações"
 }

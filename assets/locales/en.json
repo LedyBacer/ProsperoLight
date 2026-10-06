@@ -282,5 +282,13 @@
   "the PC": "the PC",
   "this PC": "this PC",
   "On": "On",
-  "Off": "Off"
+  "Off": "Off",
+  "Custom": "Custom",
+  "Custom frame rate": "Custom frame rate",
+  "Mute host audio": "Mute host audio",
+  "Optimize game/display settings": "Optimize game/display settings",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS. Custom adjusts one frame at a time.",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.",
+  "Could not save client settings": "Could not save client settings"
 }

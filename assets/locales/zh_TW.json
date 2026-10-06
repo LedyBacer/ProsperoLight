@@ -282,5 +282,13 @@
   "the PC": "電腦",
   "this PC": "電腦",
   "On": "開",
-  "Off": "關"
+  "Off": "關",
+  "Custom": "自訂",
+  "Custom frame rate": "自訂影格率",
+  "Mute host audio": "將PC音訊靜音",
+  "Optimize game/display settings": "最佳化遊戲／顯示設定",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · 自訂 · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "將PC音訊靜音 · PS5: 音訊組態",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: 最佳化遊戲／顯示設定",
+  "Could not save client settings": "Error · 設定"
 }

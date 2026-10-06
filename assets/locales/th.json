@@ -282,5 +282,13 @@
   "the PC": "คอมพิวเตอร์",
   "this PC": "คอมพิวเตอร์",
   "On": "เปิด",
-  "Off": "ปิด"
+  "Off": "ปิด",
+  "Custom": "กำหนดเอง",
+  "Custom frame rate": "อัตราเฟรมที่กำหนดเอง",
+  "Mute host audio": "ปิดเสียงบนพีซี",
+  "Optimize game/display settings": "ปรับเกม/จอภาพให้เหมาะสม",
+  "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · กำหนดเอง · 1 FPS",
+  "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "ปิดเสียงบนพีซี · PS5: เสียง",
+  "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: ปรับเกม/จอภาพให้เหมาะสม",
+  "Could not save client settings": "Error · การตั้งค่า"
 }
