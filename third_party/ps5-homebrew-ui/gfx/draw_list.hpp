@@ -129,6 +129,10 @@ class DrawList
 {
   public:
     void clear();
+    // Optional build-host layout audit. Null in normal builds.
+    inline static void (*text_audit)(std::string_view, const Rect &, const Rect &, bool) = nullptr;
+    void readable_text(bool on) { readable_depth_ += on ? 1 : -1; }
+
 
     // ---- shapes ----
     void rounded_rect(const Rect &r, float radius, Color fill);
@@ -233,6 +237,7 @@ class DrawList
     std::vector<float> opacities_;
     Transform transform_;
     float opacity_ = 1.0f;
+    int readable_depth_ = 0;
     std::vector<GlyphQuad> glyph_scratch_;
     std::vector<MeshVertex> mesh_;
     std::vector<std::uint32_t> index_scratch_;

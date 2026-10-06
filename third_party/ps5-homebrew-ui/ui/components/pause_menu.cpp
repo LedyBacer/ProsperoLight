@@ -276,8 +276,7 @@ void PauseMenu::draw(Canvas &canvas) const
         const float mark = style.kicker_size * 0.8f;
         paint.fill({x, y + style.kicker_size * 0.1f, 4.0f, mark},
                    theme.corner == Corner::round ? 2.0f : 0.0f, theme.accent);
-        paint.label(fit_label(paint, upper(kicker), style.kicker_size, room - 14.0f), x + 14.0f,
-                    y + style.kicker_size * 0.84f, style.kicker_size, theme.text_muted);
+        paint.bounded_label(upper(kicker), x + 14.0f, y + style.kicker_size * 0.84f, style.kicker_size, theme.text_muted, room - 14.0f);
         leave();
         y += style.kicker_size + 14.0f;
     }
@@ -295,8 +294,7 @@ void PauseMenu::draw(Canvas &canvas) const
     if (!subtitle.empty())
     {
         arrive();
-        paint.body(fit_body(paint, subtitle, style.subtitle_size, room), x,
-                   y + style.subtitle_size * 0.9f, style.subtitle_size, theme.text_muted);
+        paint.bounded_body(subtitle, x, y + style.subtitle_size * 0.9f, style.subtitle_size, theme.text_muted, room);
         leave();
         y += style.subtitle_size + 10.0f;
     }

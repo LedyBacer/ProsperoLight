@@ -279,8 +279,7 @@ void TextField::draw(Canvas &canvas) const
                                             gfx::Align::right);
             room -= width + 18.0f;
         }
-        paint.label(fit_label(paint, label_, style.label_size, room), bounds_.x, baseline,
-                    style.label_size, gfx::mix(quiet, ink, focus));
+        paint.bounded_label(label_, bounds_.x, baseline, style.label_size, gfx::mix(quiet, ink, focus), room);
     }
 
     const Rect field = field_rect();
@@ -312,8 +311,7 @@ void TextField::draw(Canvas &canvas) const
             white ? Painter::on(theme.light).with_alpha(0.5f) : (line ? quiet : theme.text_muted);
         // It steps aside for the caret instead of sitting under it.
         const float x = field.x + (line ? 2.0f : 20.0f) + 12.0f * focus;
-        paint.body(fit_body(paint, placeholder_, kTextSize, room - 12.0f), x,
-                   field.cy() + kTextSize * 0.35f, kTextSize, faint);
+        paint.bounded_body(placeholder_, x, field.cy() + kTextSize * 0.35f, kTextSize, faint, room - 12.0f);
     }
 
     if (wrong > 0.01f)
@@ -328,11 +326,9 @@ void TextField::draw(Canvas &canvas) const
 
     const float baseline = field.y + field.h + style.helper_gap + style.helper_size * 0.82f;
     if (!error_.empty())
-        paint.body(fit_body(paint, error_, style.helper_size, bounds_.w), bounds_.x, baseline,
-                   style.helper_size, theme.danger.with_alpha(wrong));
+        paint.bounded_body(error_, bounds_.x, baseline, style.helper_size, theme.danger.with_alpha(wrong), bounds_.w);
     if (!helper_.empty() && wrong < 0.99f)
-        paint.body(fit_body(paint, helper_, style.helper_size, bounds_.w), bounds_.x, baseline,
-                   style.helper_size, quiet.with_alpha(1.0f - wrong));
+        paint.bounded_body(helper_, bounds_.x, baseline, style.helper_size, quiet.with_alpha(1.0f - wrong), bounds_.w);
 
     list.pop_opacity();
     list.pop_transform();

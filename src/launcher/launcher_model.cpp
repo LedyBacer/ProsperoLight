@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "i18n.hpp"
 #include "launcher/launcher_model.hpp"
 #include "stream_profile.hpp"
 
@@ -42,6 +43,7 @@ Model::~Model()
 
 void Model::Initialize(std::uint64_t now_ms)
 {
+    i18n::initialize(std::string(storage::paths().app) + "/assets/locales");
     now_ms_ = now_ms;
     (void)moonlight_config_load(&config_);
     ResetSelected();
@@ -154,7 +156,8 @@ void Model::Save()
 {
     save_pending_ = false;
     if (!moonlight_config_save(&config_))
-        Notify(NoticeKind::error, "Settings were not saved", "The console refused the file.");
+        Notify(NoticeKind::error, i18n::tr("Settings were not saved"),
+               i18n::tr("The console refused the file."));
 }
 
 void Model::SettingsChanged()
@@ -267,23 +270,23 @@ void Model::StartPairing()
     const moonlight_config_host_t *host = selected_host();
     if (!host)
     {
-        Notify(NoticeKind::error, "No PC to pair", "Add a Sunshine PC first.");
+        Notify(NoticeKind::error, i18n::tr("No PC to pair"), i18n::tr("Add a Sunshine PC first."));
         return;
     }
     if (pairing())
         return;
     if (!backend_.online)
     {
-        Notify(NoticeKind::error, "Sunshine is not answering",
-               "The PC must be online before pairing.");
+        Notify(NoticeKind::error, i18n::tr("Sunshine is not answering"),
+               i18n::tr("The PC must be online before pairing."));
         return;
     }
     if (backend_.paired)
         return;
     if (backend_.current_app_id)
     {
-        Notify(NoticeKind::error, "An app is running on this PC",
-               "Stop it on the device that started it, then search again.");
+        Notify(NoticeKind::error, i18n::tr("An app is running on this PC"),
+               i18n::tr("Stop it on the device that started it, then search again."));
         return;
     }
     pairing_requested_ = true;
@@ -296,12 +299,14 @@ void Model::Unpair()
         return;
     if (!backend_.online)
     {
-        Notify(NoticeKind::error, "Sunshine is not answering", "The PC must be online to unpair.");
+        Notify(NoticeKind::error, i18n::tr("Sunshine is not answering"),
+               i18n::tr("The PC must be online to unpair."));
         return;
     }
     if (backend_.current_app_id)
     {
-        Notify(NoticeKind::error, "An app is running", "Stop it before unpairing.");
+        Notify(NoticeKind::error, i18n::tr("An app is running"),
+               i18n::tr("Stop it before unpairing."));
         return;
     }
     Job job;
@@ -321,7 +326,8 @@ void Model::RemoveHost()
     if (!moonlight_config_remove_host(&updated, config_.selected_host) ||
         !moonlight_config_save(&updated))
     {
-        Notify(NoticeKind::error, "Could not remove this PC", "The PC list was not saved.");
+        Notify(NoticeKind::error, i18n::tr("Could not remove this PC"),
+               i18n::tr("The PC list was not saved."));
         return;
     }
     config_ = updated;
@@ -331,7 +337,8 @@ void Model::RemoveHost()
     DropSelectedRequests();
     ResetSelected();
     QueueSelectedRefresh();
-    Notify(NoticeKind::success, name + " removed", "Sunshine still has this PS5 in its list.");
+    Notify(NoticeKind::success, name + i18n::tr(" removed"),
+           i18n::tr("Sunshine still has this PS5 in its list."));
 }
 
 bool Model::AddHost(const char *text, std::string *error)
@@ -340,15 +347,15 @@ bool Model::AddHost(const char *text, std::string *error)
     std::uint16_t port = 0;
     if (!moonlight_config_parse_endpoint(text, address, &port))
     {
-        *error = "Type an address such as 192.168.1.50, or 192.168.1.50:48989";
+        *error = i18n::tr("Type an address such as 192.168.1.50, or 192.168.1.50:48989");
         return false;
     }
     // Without a port, a PC already saved at this address keeps the port it has.
     const int index =
-        moonlight_config_upsert_host(&config_, address, port, "Sunshine PC", "", true);
+        moonlight_config_upsert_host(&config_, address, port, i18n::tr("Sunshine PC"), "", true);
     if (index < 0)
     {
-        *error = "The list is full. Remove a PC first.";
+        *error = i18n::tr("The list is full. Remove a PC first.");
         return false;
     }
     config_.selected_host = static_cast<std::uint32_t>(index);
@@ -365,13 +372,13 @@ bool Model::SetPort(const char *text, std::string *error)
     const bool blank = !text || text[std::strspn(text, " \t")] == '\0';
     if (!selected_host() || (!blank && !moonlight_config_parse_port(text, &port)))
     {
-        *error = "Type a port from 1 to 65535";
+        *error = i18n::tr("Type a port from 1 to 65535");
         return false;
     }
     const int index = moonlight_config_set_host_port(&config_, config_.selected_host, port);
     if (index < 0)
     {
-        *error = "Could not change the port of this PC";
+        *error = i18n::tr("Could not change the port of this PC");
         return false;
     }
     config_.selected_host = static_cast<std::uint32_t>(index);
@@ -388,13 +395,13 @@ void Model::StopApp()
         return;
     if (!backend_.current_app_id)
     {
-        Notify(NoticeKind::info, "Nothing is running on this PC");
+        Notify(NoticeKind::info, i18n::tr("Nothing is running on this PC"));
         return;
     }
     if (!backend_.paired)
     {
-        Notify(NoticeKind::error, "This PS5 is not paired",
-               "Stop the app on the device that started it, or in Sunshine.");
+        Notify(NoticeKind::error, i18n::tr("This PS5 is not paired"),
+               i18n::tr("Stop the app on the device that started it, or in Sunshine."));
         return;
     }
     for (const Job &queued : requests_)
@@ -418,14 +425,16 @@ bool Model::RequestStream()
     if (!backend_.online)
     {
         Notify(NoticeKind::error,
-               health_.Reconnecting() ? "Sunshine is reconnecting" : "Sunshine is not answering",
-               health_.Reconnecting() ? "Try again in a moment." : "The PC is offline.");
+               health_.Reconnecting() ? i18n::tr("Sunshine is reconnecting")
+                                      : i18n::tr("Sunshine is not answering"),
+               health_.Reconnecting() ? i18n::tr("Try again in a moment.")
+                                      : i18n::tr("The PC is offline."));
         return false;
     }
     if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_HEVC && !backend_.hevc_supported)
     {
-        Notify(NoticeKind::error, "This PC cannot encode HEVC",
-               "Choose H.264 in Settings, or change the encoder on the PC.");
+        Notify(NoticeKind::error, i18n::tr("This PC cannot encode HEVC"),
+               i18n::tr("Choose H.264 in Settings, or change the encoder on the PC."));
         return false;
     }
     if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
@@ -434,16 +443,17 @@ bool Model::RequestStream()
             config_.video_codec, config_.chroma_sampling, config_.hdr_enabled != 0);
         if (!(backend_.pyrowave_profiles & profile.capability))
         {
-            Notify(NoticeKind::error, "This PyroWave profile is unavailable",
-                   "Choose a supported chroma/HDR profile or configure Vibepollo on the PC.");
+            Notify(NoticeKind::error, i18n::tr("This PyroWave profile is unavailable"),
+                   i18n::tr(
+                       "Choose a supported chroma/HDR profile or configure Vibepollo on the PC."));
             return false;
         }
     }
     if (config_.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE && config_.hdr_enabled &&
         !backend_.main10_supported)
     {
-        Notify(NoticeKind::error, "This PC cannot encode HDR",
-               "Turn HDR off in Settings, or enable HEVC Main10 on the PC.");
+        Notify(NoticeKind::error, i18n::tr("This PC cannot encode HDR"),
+               i18n::tr("Turn HDR off in Settings, or enable HEVC Main10 on the PC."));
         return false;
     }
     return true;
@@ -610,8 +620,8 @@ void Model::Poll(std::uint64_t now_ms)
         {
             moonlight_backend_snapshot_t failed{};
             (void)moonlight_backend_pair_poll(&failed, nullptr);
-            Notify(NoticeKind::error, "Pairing did not start",
-                   failed.error[0] ? failed.error : "Sunshine refused the request.");
+            Notify(NoticeKind::error, i18n::tr("Pairing did not start"),
+                   failed.error[0] ? failed.error : i18n::tr("Sunshine refused the request."));
         }
         else
         {
@@ -659,10 +669,11 @@ void Model::PollPairing()
     }
     (void)Remember(host, completed.http_port, completed, completed.online != 0);
     if (paired)
-        Notify(NoticeKind::success, std::string("Paired with ") + backend_.name);
+        Notify(NoticeKind::success, std::string(i18n::tr("Paired with ")) + backend_.name);
     else
-        Notify(NoticeKind::error, "Pairing failed",
-               completed.error[0] ? completed.error : "The PIN was not accepted in time.");
+        Notify(NoticeKind::error, i18n::tr("Pairing failed"),
+               completed.error[0] ? completed.error
+                                  : i18n::tr("The PIN was not accepted in time."));
     ++revision_;
 }
 
@@ -766,12 +777,13 @@ void Model::ApplyDiscovery(const JobResult &result)
     if (!had_host && selected_host())
         ResetSelected();
     if (added == 1)
-        Notify(NoticeKind::success, "Found a new PC");
+        Notify(NoticeKind::success, i18n::tr("Found a new PC"));
     else if (added > 1)
-        Notify(NoticeKind::success, "Found " + std::to_string(added) + " new PCs");
+        Notify(NoticeKind::success,
+               i18n::tr("Found ") + std::to_string(added) + i18n::tr(" new PCs"));
     else if (!selected_host())
-        Notify(NoticeKind::info, "No PC found on this network",
-               "Start Sunshine on the PC, or add it by its address.");
+        Notify(NoticeKind::info, i18n::tr("No PC found on this network"),
+               i18n::tr("Start Sunshine on the PC, or add it by its address."));
     QueueSelectedRefresh();
     QueueSweep();
     ++revision_;
@@ -795,7 +807,8 @@ bool Model::ApplySelected(const Job &job, const JobResult &result)
         backend_.online = 0;
         backend_.result = result.snapshot.result;
         Copy(backend_.error, sizeof(backend_.error),
-             result.snapshot.error[0] ? result.snapshot.error : "Sunshine did not answer");
+             result.snapshot.error[0] ? result.snapshot.error
+                                      : i18n::tr("Sunshine did not answer"));
     }
     backend_valid_ = true;
     if (selected_app_ >= backend_.app_count)
@@ -836,9 +849,9 @@ void Model::Apply(const Job &job, JobResult &result)
             update_offered_ = true;
         }
         else if (result.update_available)
-            Notify(NoticeKind::info, "Update available",
-                   std::string("ProsperoLight ") + result.update_offer.version +
-                       " is out. Get it from homebrew.page.",
+            Notify(NoticeKind::info, i18n::tr("Update available"),
+                   std::string(i18n::tr("ProsperoLight ")) + result.update_offer.version +
+                       i18n::tr(" is out. Get it from homebrew.page."),
                    kUpdateNoticeSeconds);
         return;
     default:
@@ -861,24 +874,27 @@ void Model::Apply(const Job &job, JobResult &result)
     if (job.kind == JobKind::unpair)
     {
         if (result.result != 0)
-            Notify(NoticeKind::error, "Unpairing failed",
-                   backend_.error[0] ? backend_.error : "Sunshine rejected the request.");
+            Notify(NoticeKind::error, i18n::tr("Unpairing failed"),
+                   backend_.error[0] ? backend_.error : i18n::tr("Sunshine rejected the request."));
         else if (was_paired)
-            Notify(NoticeKind::success, "Unpaired", "Pair again to use this PC.");
+            Notify(NoticeKind::success, i18n::tr("Unpaired"),
+                   i18n::tr("Pair again to use this PC."));
     }
     else if (job.kind == JobKind::stop)
     {
         if (result.result != 0)
             Notify(NoticeKind::error,
-                   health_.Reconnecting() ? "Could not confirm the stop" : "The app did not stop",
-                   backend_.error[0] ? backend_.error : "Sunshine rejected the request.");
+                   health_.Reconnecting() ? i18n::tr("Could not confirm the stop")
+                                          : i18n::tr("The app did not stop"),
+                   backend_.error[0] ? backend_.error : i18n::tr("Sunshine rejected the request."));
         else if (was_running)
-            Notify(NoticeKind::success, "App stopped");
+            Notify(NoticeKind::success, i18n::tr("App stopped"));
     }
     else if (job.kind == JobKind::refresh && job.announce && !backend_.online)
     {
         Notify(NoticeKind::warning,
-               std::string(backend_.name[0] ? backend_.name : job.host) + " is not answering",
+               std::string(backend_.name[0] ? backend_.name : job.host) +
+                   i18n::tr(" is not answering"),
                backend_.error);
     }
 }

@@ -160,9 +160,7 @@ void ChoicePicker::draw(Canvas &canvas, const ChoiceStyle &look, const Rect &rec
         if (option)
             option(canvas, {area.x, area.y, area.w, 2.0f * (cy - area.y)}, index, focus);
         else
-            paint.label(fit_label(paint, options_[static_cast<std::size_t>(index)], look.value_size,
-                                  area.w),
-                        area.cx(), baseline, look.value_size, ink, gfx::Align::center);
+            paint.bounded_label(options_[static_cast<std::size_t>(index)], area.cx(), baseline, look.value_size, ink, area.w, gfx::Align::center);
         list.pop_transform();
         list.pop_opacity();
     };

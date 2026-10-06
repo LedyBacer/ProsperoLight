@@ -275,6 +275,12 @@ float DrawList::text(const Font &font, std::uint32_t font_texture, std::string_v
 {
     glyph_scratch_.clear();
     const float width = font.layout(text, x, baseline, size, align, glyph_scratch_, tracking);
+    if (text_audit && color.a * opacity_ > 0.1f) {
+        const float left = align == Align::right ? x-width : align == Align::center ? x-width*0.5f : x;
+        const Rect bounds = apply({left, baseline-size, width, size*1.3f});
+        const Rect clip = clips_.empty() ? Rect{0,0,kVirtualWidth,kVirtualHeight} : clips_.back();
+        text_audit(text, bounds, clip, readable_depth_ > 0);
+    }
     const float range = font.sdf_range(size) * transform_.scale;
     // A font handle names a slot the shader samples by itself: such glyphs
     // join the current run. Any other texture is bound per run, as images are.

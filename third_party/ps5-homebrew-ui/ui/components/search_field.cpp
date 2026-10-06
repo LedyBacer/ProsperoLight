@@ -548,8 +548,7 @@ void SearchField::draw_field(Canvas &canvas, Painter &paint) const
     else if (!placeholder_.empty())
     {
         // It steps aside for the caret instead of sitting under it.
-        paint.body(fit_body(paint, placeholder_, style.text_size, room - 12.0f),
-                   text_x + 12.0f * focus, baseline, style.text_size, quiet);
+        paint.bounded_body(placeholder_, text_x + 12.0f * focus, baseline, style.text_size, quiet, room - 12.0f);
     }
     const bool lit = style.caret_period <= 0.0f || style.reduced_motion ||
                      std::fmod(blink_, style.caret_period) < style.caret_period * 0.5f;
@@ -625,9 +624,7 @@ void SearchField::draw_list(Canvas &canvas, Painter &paint) const
         }
         if (!row.detail.empty())
         {
-            right -= paint.body(fit_body(paint, row.detail, style.detail_size, rect.w * 0.4f),
-                                right, rect.cy() + style.detail_size * 0.35f, style.detail_size,
-                                soft, gfx::Align::right);
+            right -= paint.bounded_body(row.detail, right, rect.cy() + style.detail_size * 0.35f, style.detail_size, soft, rect.w * 0.4f, gfx::Align::right);
             right -= 16.0f;
         }
 
@@ -663,9 +660,7 @@ void SearchField::draw_list(Canvas &canvas, Painter &paint) const
     {
         const Rect rect = row_rect(0);
         list.push_opacity(tween::cubic_out(results_age_ / 0.2f));
-        paint.body(fit_body(paint, style.empty_text, style.row_size, rect.w - 2.0f * kRowInset),
-                   rect.x + kRowInset, rect.cy() + style.row_size * 0.35f, style.row_size,
-                   base_quiet);
+        paint.bounded_body(style.empty_text, rect.x + kRowInset, rect.cy() + style.row_size * 0.35f, style.row_size, base_quiet, rect.w - 2.0f * kRowInset);
         list.pop_opacity();
     }
 

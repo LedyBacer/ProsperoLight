@@ -73,6 +73,8 @@ jobs:
 
       - name: Check launcher behavior and layout with software OpenGL
         run: make launcher-check
+      - name: Check localized text bounds across all languages
+        run: make launcher-layout-check
 
       - name: Verify scalar and SIMD streaming dependencies on the host
         run: make test-stream-performance

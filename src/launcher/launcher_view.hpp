@@ -236,6 +236,7 @@ class View
     std::string art_host_;
     // Settings
     hui::ui::Form form_;
+    hui::ui::Select language_;
     hui::ui::Panel profile_panel_;
     hui::ui::Meter headroom_;
     hui::ui::DetailList profile_details_;
@@ -247,6 +248,7 @@ class View
     hui::ui::Panel start_panel_;
     hui::ui::DetailList files_;
     bool storage_access_ = false;
+    Storage storage_;
     // overlays
     hui::tween::Spring pair_fade_;
     hui::ui::PinEntry pin_;

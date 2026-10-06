@@ -12,10 +12,11 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cxx=$(command -v "${HOST_CXX:-clang++}")
 mkdir -p "$root/build/host" "$root/assets/fonts"
 "$cxx" -std=c++20 -O2 -w "$root/tools/font-baker/bake_font.cpp" -o "$root/build/host/bake_font"
+fallback=("$root"/third_party/fonts/i18n/NotoSans{,Arabic,Hebrew,Devanagari,Tamil,Thai,SC,TC,JP,KR}.ttf)
 while read -r source output size range; do
     [[ -n $source ]] || continue
     "$root/build/host/bake_font" "$root/third_party/fonts/$source" \
-        "$root/assets/fonts/$output.huifont" "$size" "$range" 2048
+        "$root/assets/fonts/$output.huifont" "$size" "$range" 4096 "$root/tools/i18n/codepoints.txt" "$root/tools/i18n/glyphs.tsv" "${fallback[@]}"
 done <<'FONTS'
 Inter-Regular.ttf inter-regular 56 8
 Inter-SemiBold.ttf inter-semibold 56 8
@@ -23,3 +24,5 @@ Montserrat-Medium.ttf montserrat-medium 56 8
 DejaVuSansMono.ttf dejavu-sans-mono 52 8
 FONTS
 cp "$root"/third_party/fonts/*-LICENSE.txt "$root/assets/fonts/"
+
+cp "$root"/third_party/fonts/i18n/*-LICENSE.txt "$root/assets/fonts/"

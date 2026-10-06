@@ -211,14 +211,13 @@ void ToastStack::draw_toast(Canvas &canvas, const Toast &toast, const Rect &r) c
     if (!body.empty())
         block += kBodyGap + static_cast<float>(body.size()) * style.body_size * kBodyLine;
     const float block_top = top + (room - block) * 0.5f;
-    paint.label(fit_label(paint, toast.title, style.title_size, text_width), x,
-                block_top + style.title_size * 0.88f, style.title_size, theme.text);
+    paint.bounded_label(toast.title, x, block_top + style.title_size * 0.88f, style.title_size, theme.text, text_width);
     for (std::size_t i = 0; i < body.size(); ++i)
     {
         const float line_top = block_top + style.title_size * kTitleLine + kBodyGap +
                                static_cast<float>(i) * style.body_size * kBodyLine;
-        paint.body(body[i], x, line_top + style.body_size * 0.9f, style.body_size,
-                   theme.text_muted);
+        paint.bounded_body(body[i], x, line_top + style.body_size * 0.9f, style.body_size,
+                   theme.text_muted, text_width);
     }
 
     if (bar)

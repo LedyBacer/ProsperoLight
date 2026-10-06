@@ -661,3 +661,15 @@ Copyright © 2026 BlackBearReloaded. Licensed under GPL-3.0-or-later; see [LICEN
 
 This project was developed with AI assistance from OpenAI and/or Anthropic tools.
 <!-- bbr-footer:end -->
+
+### Interface language
+
+Settings → Language opens a scrolling dropdown with the Moonlight Qt language
+set (30 translations plus English). Automatic follows the console language at
+startup; unsupported/error results use English. Manual selection applies
+immediately and is preserved across restarts without changing pairing or stream
+settings. Readable translations are stored in `assets/locales/*.json`. See
+[localization maintenance](tools/i18n/README.md) for fonts, source attribution,
+and regeneration after editing a catalog. Some complex-script and mixed-direction
+layouts still need native-speaker visual review. Diagnostic logs and stream
+performance measurements keep their technical English labels.

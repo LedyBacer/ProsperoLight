@@ -260,12 +260,9 @@ void Panel::draw(Canvas &canvas, const Rect &bounds) const
         const float slot = header_right ? std::min(style.header_slot, width * 0.5f) : 0.0f;
         const float room = std::max(left + width - slot - x - (slot > 0.0f ? 12.0f : 0.0f), 20.0f);
         const float baseline = top + style.title_size * 0.86f;
-        paint.label(fit_label(paint, title, style.title_size, room), x, baseline, style.title_size,
-                    theme.text);
+        paint.bounded_label(title, x, baseline, style.title_size, theme.text, room);
         if (!subtitle.empty())
-            paint.body(fit_body(paint, subtitle, style.subtitle_size, room), x,
-                       baseline + style.subtitle_size * 1.3f, style.subtitle_size,
-                       theme.text_muted);
+            paint.bounded_body(subtitle, x, baseline + style.subtitle_size * 1.3f, style.subtitle_size, theme.text_muted, room);
         if (header_right)
             header_right(canvas, {left + width - slot, head.y, slot, head.h});
         if (style.header_rule)

@@ -316,9 +316,7 @@ void Select::draw(Canvas &canvas) const
     const float focus = focus_.value;
     const bool above = style.label == SelectLabel::above && !label_.empty();
     if (above)
-        paint.label(fit_label(paint, label_, style.label_size, bounds_.w), bounds_.x,
-                    bounds_.y + style.label_size * 0.82f, style.label_size,
-                    style.on_page ? paint.page_text_muted() : theme.text_muted);
+        paint.bounded_label(label_, bounds_.x, bounds_.y + style.label_size * 0.82f, style.label_size, style.on_page ? paint.page_text_muted() : theme.text_muted, bounds_.w);
 
     const float shift = style.reduced_motion ? 0.0f : shake(refusal_.value, canvas.time, 8.0f);
     Rect box = field_rect();
@@ -350,12 +348,10 @@ void Select::draw(Canvas &canvas) const
     {
         // The label keeps at most half the field; the value gets the rest.
         const float room = std::max(right - left, 40.0f);
-        const std::string name = fit_label(paint, label_, style.value_size, room * 0.5f);
-        const float used = paint.label(name, left, baseline, style.value_size, theme.text_muted);
+        const float used = paint.bounded_label(label_, left, baseline, style.value_size, theme.text_muted, room * 0.5f);
         const float value_room = std::max(room - used - 24.0f, 30.0f);
         float end = right;
-        end -= paint.label(fit_label(paint, text, style.value_size, value_room), end, baseline,
-                           style.value_size, ink, gfx::Align::right);
+        end -= paint.bounded_label(text, end, baseline, style.value_size, ink, value_room, gfx::Align::right);
         if (chosen && options_[static_cast<std::size_t>(index_)].swatch.a > 0.0f)
             list.circle(end - 20.0f, box.cy(), 8.0f,
                         options_[static_cast<std::size_t>(index_)].swatch);
@@ -368,8 +364,7 @@ void Select::draw(Canvas &canvas) const
                         options_[static_cast<std::size_t>(index_)].swatch);
             left += 30.0f;
         }
-        paint.label(fit_label(paint, text, style.value_size, std::max(right - left, 40.0f)), left,
-                    baseline, style.value_size, ink);
+        paint.bounded_label(text, left, baseline, style.value_size, ink, std::max(right - left, 40.0f));
     }
 
     if (style.focus_ring && !ring_first)

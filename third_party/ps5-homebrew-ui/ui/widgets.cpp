@@ -6,9 +6,11 @@
 
 #include "core/tween.hpp"
 #include "ui/pixel_font.hpp"
+#include "ui/text_lane.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <string>
 
 namespace hui::ui
@@ -142,6 +144,61 @@ float Painter::label(std::string_view value, float x, float baseline, float size
         return text(list_, font(theme_.label), upper(value), x, baseline, size * 0.86f, color,
                     align, theme_.tracking);
     return text(list_, font(theme_.label), value, x, baseline, size, color, align, theme_.tracking);
+}
+
+namespace
+{
+float readable_offset(float distance)
+{
+    return text_lane_offset(text_lane_seconds(), distance, 0.0f);
+}
+}
+
+float Painter::bounded_heading(std::string_view value, float x, float baseline, float size,
+                              gfx::Color color, float width, gfx::Align align)
+{
+    const float measured = heading_width(value, size);
+    width = std::max(width, 1.0f);
+    if (measured <= width) return heading(value, x, baseline, size, color, align);
+    const float left = align == gfx::Align::right ? x-width : align == gfx::Align::center ? x-width*0.5f : x;
+    list_.push_clip({left, baseline-size*1.5f, width, size*2.0f});
+    list_.readable_text(true);
+    heading(value, left-readable_offset(measured-width), baseline, size, color);
+    list_.readable_text(false);
+    list_.pop_clip();
+    return width;
+}
+
+float Painter::bounded_label(std::string_view value, float x, float baseline, float size,
+                            gfx::Color color, float width, gfx::Align align)
+{
+    const float measured = label_width(value, size);
+    width = std::max(width, 1.0f);
+    if (measured <= width) return label(value, x, baseline, size, color, align);
+    const float left = align == gfx::Align::right ? x-width :
+                       align == gfx::Align::center ? x-width*0.5f : x;
+    list_.push_clip({left, baseline-size*1.5f, width, size*2.0f});
+    list_.readable_text(true);
+    label(value, left-readable_offset(measured-width), baseline, size, color);
+    list_.readable_text(false);
+    list_.pop_clip();
+    return width;
+}
+
+float Painter::bounded_body(std::string_view value, float x, float baseline, float size,
+                           gfx::Color color, float width, gfx::Align align)
+{
+    const float measured = body_width(value, size);
+    width = std::max(width, 1.0f);
+    if (measured <= width) return body(value, x, baseline, size, color, align);
+    const float left = align == gfx::Align::right ? x-width :
+                       align == gfx::Align::center ? x-width*0.5f : x;
+    list_.push_clip({left, baseline-size*1.5f, width, size*2.0f});
+    list_.readable_text(true);
+    body(value, left-readable_offset(measured-width), baseline, size, color);
+    list_.readable_text(false);
+    list_.pop_clip();
+    return width;
 }
 
 float Painter::label_width(std::string_view value, float size) const
@@ -576,7 +633,7 @@ void Painter::button(const gfx::Rect &r, std::string_view value, ButtonKind kind
         list_.rounded_rect({r.cx() - w * 0.5f, r.y + r.h - 13.0f, w, 2.0f}, 0.0f,
                            ink.with_alpha(0.45f));
     }
-    label(value, content.cx(), baseline_for(content.cy(), 24), 24, ink, gfx::Align::center);
+    bounded_label(value, content.cx(), baseline_for(content.cy(), 24), 24, ink, content.w - 28.0f, gfx::Align::center);
     focus_ring(r, radius, look.focus);
     if (look.disabled)
         list_.pop_opacity();

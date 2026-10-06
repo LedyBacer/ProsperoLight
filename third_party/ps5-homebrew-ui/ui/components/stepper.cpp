@@ -187,8 +187,7 @@ void Stepper::draw(Canvas &canvas, const StepperStyle &look, const Rect &rect, f
     const auto number = [&](int value, float dy, float opacity)
     {
         list.push_opacity(opacity);
-        paint.label(fit_label(paint, text_for(value), look.value_size, room), box.cx(),
-                    baseline + dy, look.value_size, ink, gfx::Align::center);
+        paint.bounded_label(text_for(value), box.cx(), baseline + dy, look.value_size, ink, room, gfx::Align::center);
         list.pop_opacity();
     };
     if (t > 0.01f)

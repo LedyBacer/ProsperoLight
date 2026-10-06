@@ -462,9 +462,7 @@ void NodeMap::draw(Canvas &canvas) const
             const float focus = highlight_.coverage(box) * active;
             const Color rest = node.state == NodeState::locked ? quiet : gfx::mix(quiet, ink, 0.7f);
             list.push_opacity(entrance(i));
-            paint.label(fit_label(paint, node.label, style.label_size, style.label_width), box.cx(),
-                        box.y + box.h + style.label_gap + below + style.label_size * 0.8f,
-                        style.label_size, gfx::mix(rest, ink, focus), gfx::Align::center);
+            paint.bounded_label(node.label, box.cx(), box.y + box.h + style.label_gap + below + style.label_size * 0.8f, style.label_size, gfx::mix(rest, ink, focus), style.label_width, gfx::Align::center);
             list.pop_opacity();
         }
     }

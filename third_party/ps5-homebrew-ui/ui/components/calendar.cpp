@@ -480,10 +480,8 @@ void Calendar::draw(Canvas &canvas) const
     {
         const std::size_t weekday = static_cast<std::size_t>((start_column() + i) % 7);
         const float cx = area.x + static_cast<float>(i) * (column + style.cell_gap) + column * 0.5f;
-        paint.label(fit_label(paint, style.weekdays[weekday], style.weekday_size, column), cx,
-                    in.y + style.title_height + style.weekday_height * 0.5f +
-                        style.weekday_size * 0.35f,
-                    style.weekday_size, ink.muted, gfx::Align::center);
+        paint.bounded_label(style.weekdays[weekday], cx, in.y + style.title_height + style.weekday_height * 0.5f +
+                        style.weekday_size * 0.35f, style.weekday_size, ink.muted, column, gfx::Align::center);
     }
 
     // The months move inside the calendar, never over its neighbours.

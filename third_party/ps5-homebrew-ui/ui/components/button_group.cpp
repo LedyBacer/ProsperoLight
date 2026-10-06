@@ -235,15 +235,15 @@ void ButtonGroup::draw_content(Canvas &canvas, Painter &paint, const ButtonMetri
     const float lead = style.icon_width > 0.0f ? style.icon_width : 0.0f;
     const float lead_gap = lead > 0.0f && !item.label.empty() ? kIconGap : 0.0f;
     const float room = std::max(content.w - 2.0f * m.padding - lead - lead_gap, 0.0f);
-    const std::string text = fit_label(paint, item.label, m.text_size, room);
-    const float text_w = item.label.empty() ? 0.0f : paint.label_width(text, m.text_size);
+    const std::string &text = item.label;
+    const float text_w = item.label.empty() ? 0.0f : std::min(paint.label_width(text, m.text_size), room);
     const float x = content.cx() - (lead + lead_gap + text_w) * 0.5f;
     if (lead > 0.0f && icon)
         icon(canvas, {x, content.cy() - lead * 0.5f, lead, lead}, item, index, ink, focus);
     if (!item.label.empty())
     {
         const float baseline = baseline_for(content.cy(), m.text_size);
-        paint.label(text, x + lead + lead_gap, baseline, m.text_size, ink);
+        paint.bounded_label(text, x + lead + lead_gap, baseline, m.text_size, ink, room);
         if (style.role == ButtonRole::ghost && !style.joined && !is_selected(index))
             canvas.list.rounded_rect(
                 {x + lead + lead_gap, baseline + m.text_size * 0.42f, text_w, 2.0f}, 0.0f,
@@ -593,9 +593,7 @@ void SplitButton::draw(Canvas &canvas) const
                       face.ink.with_alpha(0.35f));
 
     const float room = std::max(main.w - 2.0f * m.padding, 0.0f);
-    paint.label(fit_label(paint, label, m.text_size, room), main.cx() + dx,
-                baseline_for(main.cy() + dy, m.text_size), m.text_size, face.ink,
-                gfx::Align::center);
+    paint.bounded_label(label, main.cx() + dx, baseline_for(main.cy() + dy, m.text_size), m.text_size, face.ink, room, gfx::Align::center);
     // The chevron turns over while the menu is open.
     const float size = m.text_size * 0.62f;
     const float depth = size * 0.28f * (1.0f - 2.0f * tween::clamp01(open_amount_.value));

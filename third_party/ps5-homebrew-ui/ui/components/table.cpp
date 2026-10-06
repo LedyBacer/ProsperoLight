@@ -564,11 +564,9 @@ void Table::draw_cells(Canvas &canvas, Painter &paint, const std::vector<Column>
             draw_number(paint, list, fit_number(paint, text, style.text_size, cell.w), at, baseline,
                         style.text_size, ink, column.align);
         else if (column.strong)
-            paint.label(fit_label(paint, text, style.text_size, cell.w), at, baseline,
-                        style.text_size, ink, column.align);
+            paint.bounded_label(text, at, baseline, style.text_size, ink, cell.w, column.align);
         else
-            paint.body(fit_body(paint, text, style.text_size, cell.w), at, baseline,
-                       style.text_size, quiet, column.align);
+            paint.bounded_body(text, at, baseline, style.text_size, quiet, cell.w, column.align);
     }
 }
 

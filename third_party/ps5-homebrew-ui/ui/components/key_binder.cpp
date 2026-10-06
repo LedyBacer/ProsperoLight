@@ -428,8 +428,7 @@ void KeyBinder::draw(Canvas &canvas) const
             const float strength = is_default() ? 0.5f : 1.0f;
             draw_reset(list, right - 14.0f, cy, 13.0f, quiet.with_alpha(strength));
             right -= 44.0f;
-            paint.label(fit_label(paint, style.reset_label, style.label_size, right - left), left,
-                        cy + style.label_size * 0.35f, style.label_size, ink.with_alpha(strength));
+            paint.bounded_label(style.reset_label, left, cy + style.label_size * 0.35f, style.label_size, ink.with_alpha(strength), right - left);
             continue;
         }
 
@@ -459,12 +458,9 @@ void KeyBinder::draw(Canvas &canvas) const
                 paint.label_width(binding.label, style.label_size) + style.padding;
             const float room = right - left - label_room;
             if (room > 60.0f)
-                paint.body(fit_body(paint, style.listening_text, style.hint_size, room), right,
-                           cy + style.hint_size * 0.35f, style.hint_size, base_quiet,
-                           gfx::Align::right);
+                paint.bounded_body(style.listening_text, right, cy + style.hint_size * 0.35f, style.hint_size, base_quiet, room, gfx::Align::right);
             list.pop_opacity();
-            paint.label(fit_label(paint, binding.label, style.label_size, right - left), left,
-                        cy + style.label_size * 0.35f, style.label_size, base_ink);
+            paint.bounded_label(binding.label, left, cy + style.label_size * 0.35f, style.label_size, base_ink, right - left);
             continue;
         }
 
@@ -487,8 +483,7 @@ void KeyBinder::draw(Canvas &canvas) const
             right -= width;
         }
         right -= 18.0f;
-        paint.label(fit_label(paint, binding.label, style.label_size, right - left), left,
-                    cy + style.label_size * 0.35f, style.label_size, ink);
+        paint.bounded_label(binding.label, left, cy + style.label_size * 0.35f, style.label_size, ink, right - left);
         list.pop_opacity();
     }
     list.pop_clip();

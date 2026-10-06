@@ -330,10 +330,7 @@ void SideNav::draw(Canvas &canvas) const
         if (i > 0)
             list.rounded_rect({inner_x + 6.0f, line_y - 0.75f, inner_w - 12.0f, 1.5f}, 0.0f, hair);
         if (title > 0.01f)
-            paint.label(fit_label(paint, upper(entry.section), style.section_size,
-                                  style.expanded_width - 2.0f * style.padding - 24.0f),
-                        inner_x + 12.0f, row.y - 12.0f, style.section_size,
-                        theme.text_muted.with_alpha(title));
+            paint.bounded_label(upper(entry.section), inner_x + 12.0f, row.y - 12.0f, style.section_size, theme.text_muted.with_alpha(title), style.expanded_width - 2.0f * style.padding - 24.0f);
         list.pop_opacity();
     }
     if (pinned(count - 1))
@@ -489,9 +486,7 @@ void SideNav::draw(Canvas &canvas) const
                         style.badge_size, Painter::on(body), gfx::Align::center);
             room -= width + 12.0f;
         }
-        paint.label(fit_label(paint, entry.label, style.text_size, std::max(room, 40.0f)),
-                    label_x + shift, at.row.cy() + style.text_size * 0.35f, style.text_size,
-                    at.ink);
+        paint.bounded_label(entry.label, label_x + shift, at.row.cy() + style.text_size * 0.35f, style.text_size, at.ink, std::max(room, 40.0f));
         list.pop_opacity();
     }
     list.pop_clip();

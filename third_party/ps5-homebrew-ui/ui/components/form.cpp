@@ -709,8 +709,7 @@ void Form::draw_row(Canvas &canvas, Painter &paint, const FormRow &row, const Re
         look.press = row.press.value;
         look.disabled = row.disabled;
         paint.slider({at.x, cy - height * 0.5f, at.w - number, height}, row.shown.value, look);
-        paint.label(fit_label(paint, slider_text(row), value_size, number - 8.0f), at.x + at.w,
-                    cy + value_size * 0.35f, value_size, ink, gfx::Align::right);
+        paint.bounded_label(slider_text(row), at.x + at.w, cy + value_size * 0.35f, value_size, ink, number - 8.0f, gfx::Align::right);
         label_end = at.x;
         break;
     }
@@ -755,14 +754,12 @@ void Form::draw_row(Canvas &canvas, Painter &paint, const FormRow &row, const Re
                 // A value may take up to its column; the label gets the rest.
                 const float room = end - left - (right - left) * style.label_ratio;
                 const float width =
-                    paint.label(fit_label(paint, row.text, value_size, std::max(room, 80.0f)), end,
-                                baseline, value_size, quiet, gfx::Align::right);
+                    paint.bounded_label(row.text, end, baseline, value_size, quiet, std::max(room, 80.0f), gfx::Align::right);
                 label_end = end - width;
             }
             else
             {
-                paint.label(fit_label(paint, row.text, value_size, std::max(end - column, 80.0f)),
-                            column, baseline, value_size, quiet);
+                paint.bounded_label(row.text, column, baseline, value_size, quiet, std::max(end - column, 80.0f));
                 label_end = column;
             }
         }
@@ -778,8 +775,7 @@ void Form::draw_row(Canvas &canvas, Painter &paint, const FormRow &row, const Re
 
     if (!style.values_right)
         label_end = std::min(label_end, control_rect(line, 0.0f).x);
-    paint.label(fit_label(paint, row.label, label_size, std::max(label_end - 18.0f - left, 40.0f)),
-                left, cy + label_size * 0.35f, label_size, label_ink);
+    paint.bounded_label(row.label, left, cy + label_size * 0.35f, label_size, label_ink, std::max(label_end - 18.0f - left, 40.0f));
     list.pop_opacity();
 
     // The description is not dimmed with a disabled row: it is what explains it.
@@ -788,8 +784,7 @@ void Form::draw_row(Canvas &canvas, Painter &paint, const FormRow &row, const Re
     {
         const float size = type(style.description_size);
         list.push_opacity(tween::clamp01(unfolded));
-        paint.body(fit_body(paint, row.description, size, rect.w - 2.0f * style.padding), left,
-                   rect.y + base - 9.0f * scale() + size * 0.8f, size, quiet);
+        paint.bounded_body(row.description, left, rect.y + base - 9.0f * scale() + size * 0.8f, size, quiet, rect.w - 2.0f * style.padding);
         list.pop_opacity();
     }
 }

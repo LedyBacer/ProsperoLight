@@ -578,10 +578,7 @@ void RadialMenu::draw_wedge(Canvas &canvas, int index, Color on_scrim) const
                                : (align == gfx::Align::right
                                       ? x - left
                                       : std::min(2.0f * std::min(x - left, right - x), 320.0f));
-        paint.label(fit_label(paint, item.label, style.label_size, std::max(room, 40.0f)), x,
-                    y + style.label_size * 0.35f * (1.0f - up), style.label_size,
-                    on_scrim.with_alpha((0.74f + 0.26f * lit) * (item.disabled ? 0.55f : 1.0f)),
-                    align);
+        paint.bounded_label(item.label, x, y + style.label_size * 0.35f * (1.0f - up), style.label_size, on_scrim.with_alpha((0.74f + 0.26f * lit) * (item.disabled ? 0.55f : 1.0f)), std::max(room, 40.0f), align);
     }
     list.pop_opacity();
 }
@@ -642,9 +639,7 @@ void RadialMenu::draw_hub_item(Canvas &canvas, const Rect &area, int index, floa
                         (item.value.empty() ? 0.0f : small * 1.6f);
     const float x = area.cx() + (index == focus_ ? shake(refusal_.value, canvas.time, 8.0f) : 0.0f);
     float y = area.cy() - block * 0.5f + drop;
-    paint.label(fit_label(paint, item.label, style.title_size, area.w), x,
-                y + style.title_size * 0.84f, style.title_size,
-                theme.text.with_alpha(item.disabled ? 0.55f : 1.0f), gfx::Align::center);
+    paint.bounded_label(item.label, x, y + style.title_size * 0.84f, style.title_size, theme.text.with_alpha(item.disabled ? 0.55f : 1.0f), area.w, gfx::Align::center);
     y += style.title_size + 8.0f;
     for (const std::string &line : lines)
     {
@@ -655,8 +650,7 @@ void RadialMenu::draw_hub_item(Canvas &canvas, const Rect &area, int index, floa
     {
         // What a disabled wedge says here is why it cannot be used.
         const Color note = item.disabled ? gfx::mix(theme.danger, theme.text, 0.25f) : theme.text;
-        paint.label(fit_label(paint, item.value, small, area.w), x, y + small * 1.25f, small, note,
-                    gfx::Align::center);
+        paint.bounded_label(item.value, x, y + small * 1.25f, small, note, area.w, gfx::Align::center);
     }
     canvas.list.pop_opacity();
 }

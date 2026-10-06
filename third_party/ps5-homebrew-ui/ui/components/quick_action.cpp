@@ -177,9 +177,7 @@ void QuickAction::draw(Canvas &canvas) const
         const float text_x = gx + glyph_w + style.gap;
         const float room =
             std::max(content.x + content.w - style.text_padding * 0.5f - text_x, 0.0f);
-        paint.label(fit_label(paint, label, style.text_size, room), text_x,
-                    content.cy() + style.text_size * 0.35f, style.text_size,
-                    face.ink.with_alpha(words));
+        paint.bounded_label(label, text_x, content.cy() + style.text_size * 0.35f, style.text_size, face.ink.with_alpha(words), room);
     }
     list.pop_opacity();
 

@@ -322,8 +322,7 @@ void Timeline::draw(Canvas &canvas) const
             const float baseline = r.y + r.h - 12.0f;
             const float x = in.x + style.padding;
             const float width =
-                paint.label(fit_label(paint, entry.title, style.group_size, right - x), x, baseline,
-                            style.group_size, ink.muted);
+                paint.bounded_label(entry.title, x, baseline, style.group_size, ink.muted, right - x);
             if (right - (x + width + 14.0f) > 20.0f)
                 list.rounded_rect({x + width + 14.0f, baseline - style.group_size * 0.35f,
                                    right - (x + width + 14.0f), 1.5f},
@@ -373,19 +372,15 @@ void Timeline::draw(Canvas &canvas) const
         if (!entry.time.empty() && style.time == TimelineTime::column)
         {
             const float edge = in.x + style.padding + style.time_width;
-            paint.body(fit_body(paint, entry.time, style.time_size, style.time_width), edge,
-                       baseline - (style.title_size - style.time_size) * 0.2f, style.time_size,
-                       quiet, gfx::Align::right);
+            paint.bounded_body(entry.time, edge, baseline - (style.title_size - style.time_size) * 0.2f, style.time_size, quiet, style.time_width, gfx::Align::right);
         }
         else if (!entry.time.empty() && style.time == TimelineTime::line)
         {
             const float width =
-                paint.body(fit_body(paint, entry.time, style.time_size, title_room * 0.45f), right,
-                           baseline, style.time_size, quiet, gfx::Align::right);
+                paint.bounded_body(entry.time, right, baseline, style.time_size, quiet, title_room * 0.45f, gfx::Align::right);
             title_room -= width + 14.0f;
         }
-        paint.label(fit_label(paint, entry.title, style.title_size, std::max(title_room, 30.0f)),
-                    text_left, baseline, style.title_size, strong);
+        paint.bounded_label(entry.title, text_left, baseline, style.title_size, strong, std::max(title_room, 30.0f));
         float y = r.y + style.padding_y + title_line();
         if (style.body_lines > 0 && !entry.body.empty())
         {
