@@ -20,6 +20,7 @@
 #include "connecting_plate.hpp"
 #include "i18n.hpp"
 #include "client_preferences.hpp"
+#include "host_preferences.hpp"
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
 
@@ -608,8 +609,10 @@ int main(int argc, char **argv)
                 {50, 0, Direction::none, "unpair-dialog"},
                 {10, back},
                 {20, 0, Direction::right},
+                {20, 0, Direction::right},
                 {20, confirm},
                 {40, 0, Direction::none, "remove-hold", confirm},
+                {20, 0, Direction::left},
                 {20, 0, Direction::left},
                 {20, 0, Direction::left},
                 {20, 0, Direction::left},
@@ -811,6 +814,12 @@ int main(int argc, char **argv)
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
                 {10, 0, Direction::down},
+                {10, 0, Direction::down},
+                {10, 0, Direction::down},
+
+                {10, 0, Direction::down},
+                {10, 0, Direction::down},
+                {10, 0, Direction::down},
                 {10, 0, Direction::right},
                 {10, 0},
                 {10, 0, Direction::right},
@@ -831,10 +840,36 @@ int main(int argc, char **argv)
         expect(saved.video_codec == MOONLIGHT_VIDEO_CODEC_H264 && saved.hdr_enabled == 0,
                "choosing H.264 turns HDR off");
         expect(moonlight::presentation_mode() == 2u, "the new pacing row persists Paced+VRR");
-        expect(prosperolight::host_quit_enabled(), "host app quit toggle persists");
+        expect(saved.host_count &&
+                   prosperolight::host_preferences(&saved.hosts[saved.selected_host]).quit_host,
+               "per-PC host app quit toggle persists");
         expect(!prosperolight_logs_enabled(), "the new diagnostics row persists logs off");
     }
 
+    session("per-pc-settings",
+            {{30, 0},
+             {10, 0, Direction::right},
+             {10, 0, Direction::right},
+             {10, 0, Direction::right},
+             {10, 0, Direction::right},
+             {10, confirm},
+             {20, 0, Direction::right},
+             {10, 0, Direction::down},
+             {10, 0, Direction::right},
+             {10, 0, Direction::right},
+             {10, 0, Direction::down},
+             {10, 0, Direction::right},
+             {10, 0, Direction::right},
+             {10, 0, Direction::down},
+             {10, 0, Direction::left},
+             {30, 0, Direction::none, "advanced"}},
+            "");
+    moonlight_config_t per_pc_config{};
+    moonlight_config_load(&per_pc_config);
+    const auto per_pc =
+        prosperolight::host_preferences(&per_pc_config.hosts[per_pc_config.selected_host]);
+    expect(per_pc.extensions && per_pc.vrr == 2 && per_pc.display == 2 && per_pc.scale == 95,
+           "PC settings action saves the selected host's extension choices");
     // ---- a newer version in the catalog: one notice, for ten seconds ----
     offer_update = true;
     session("update",

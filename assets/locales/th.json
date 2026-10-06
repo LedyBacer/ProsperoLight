@@ -290,5 +290,21 @@
   "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · กำหนดเอง · 1 FPS",
   "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "ปิดเสียงบนพีซี · PS5: เสียง",
   "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: ปรับเกม/จอภาพให้เหมาะสม",
-  "Could not save client settings": "Error · การตั้งค่า"
+  "Could not save client settings": "Error · การตั้งค่า",
+  "PC settings": "การตั้งค่าพีซี",
+  "Host extensions": "ส่วนขยายโฮสต์",
+  "Host default": "ค่าเริ่มต้นของโฮสต์",
+  "Host display": "จอภาพโฮสต์",
+  "Physical display": "จอภาพจริง",
+  "Virtual display": "จอภาพเสมือน",
+  "Host resolution scale": "มาตราส่วนความละเอียด",
+  "Reset PC settings": "รีเซ็ตการตั้งค่าพีซี",
+  "Selected PC": "การตั้งค่าพีซี",
+  "Select a PC first": "คอมพิวเตอร์: ไม่มี",
+  "Host VRR": "VRR · เซสชันโฮสต์",
+  "Vibepollo only. Off preserves standard Sunshine requests.": "Vibepollo: เปิด · Sunshine: ปิด",
+  "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Vibepollo · จอภาพเสมือน · VRR",
+  "Virtual display requires a ready host driver.": "จอภาพเสมือน · Vibepollo",
+  "Saved for this PC. DS4/DS5 emulation is selected on the host.": "การตั้งค่าพีซี · DS4/DS5: เซสชันโฮสต์",
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100%: ความละเอียด · 50–100%"
 }

@@ -290,5 +290,21 @@
   "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS. Своя частота меняется с шагом 1 FPS.",
   "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "Звук только на PS5. На хосте требуется подходящее аудиоустройство.",
   "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "Игровые настройки GFE или дисплей Sunshine. Vibepollo может игнорировать флаг.",
-  "Could not save client settings": "Не удалось сохранить настройки клиента"
+  "Could not save client settings": "Не удалось сохранить настройки клиента",
+  "PC settings": "Настройки ПК",
+  "Host extensions": "Расширения хоста",
+  "Host default": "Как на хосте",
+  "Host display": "Дисплей хоста",
+  "Physical display": "Физический дисплей",
+  "Virtual display": "Виртуальный дисплей",
+  "Host resolution scale": "Масштаб разрешения хоста",
+  "Reset PC settings": "Сбросить настройки ПК",
+  "Selected PC": "Выбранный ПК",
+  "Select a PC first": "Сначала выберите ПК",
+  "Host VRR": "VRR на хосте",
+  "Vibepollo only. Off preserves standard Sunshine requests.": "Только для Vibepollo. Выкл. сохраняет обычные запросы Sunshine.",
+  "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Экспериментальный захват виртуального дисплея. Требует совместимого хоста; VRR телевизора настраивается отдельно.",
+  "Virtual display requires a ready host driver.": "На хосте нужен готовый драйвер виртуального дисплея.",
+  "Saved for this PC. DS4/DS5 emulation is selected on the host.": "Настройки сохраняются для этого ПК. Эмуляция DS4/DS5 выбирается на хосте.",
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100% сохраняет запрошенное разрешение. Меньшие значения могут снизить качество изображения."
 }

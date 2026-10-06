@@ -290,5 +290,21 @@
   "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · कस्टम · 1 FPS",
   "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "पीसी की आवाज़ बंद करें · PS5: ऑडियो",
   "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: गेम/डिस्प्ले अनुकूलित करें",
-  "Could not save client settings": "Error · सेटिंग्स"
+  "Could not save client settings": "Error · सेटिंग्स",
+  "PC settings": "पीसी सेटिंग",
+  "Host extensions": "होस्ट एक्सटेंशन",
+  "Host default": "होस्ट का डिफ़ॉल्ट",
+  "Host display": "होस्ट डिस्प्ले",
+  "Physical display": "भौतिक डिस्प्ले",
+  "Virtual display": "वर्चुअल डिस्प्ले",
+  "Host resolution scale": "रिज़ॉल्यूशन स्केल",
+  "Reset PC settings": "पीसी सेटिंग रीसेट करें",
+  "Selected PC": "पीसी सेटिंग",
+  "Select a PC first": "कंप्यूटर: कोई नहीं",
+  "Host VRR": "VRR · होस्ट सत्र",
+  "Vibepollo only. Off preserves standard Sunshine requests.": "Vibepollo: चालू · Sunshine: बंद",
+  "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Vibepollo · वर्चुअल डिस्प्ले · VRR",
+  "Virtual display requires a ready host driver.": "वर्चुअल डिस्प्ले · Vibepollo",
+  "Saved for this PC. DS4/DS5 emulation is selected on the host.": "पीसी सेटिंग · DS4/DS5: होस्ट सत्र",
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100%: रिज़ॉल्यूशन · 50–100%"
 }

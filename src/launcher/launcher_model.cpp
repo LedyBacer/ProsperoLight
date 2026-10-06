@@ -6,6 +6,7 @@
 
 #include "i18n.hpp"
 #include "launcher/launcher_model.hpp"
+#include "host_preferences.hpp"
 #include "stream_profile.hpp"
 
 #include <algorithm>
@@ -330,6 +331,7 @@ void Model::RemoveHost()
                i18n::tr("The PC list was not saved."));
         return;
     }
+    prosperolight::host_preferences_remove(*host);
     config_ = updated;
     save_pending_ = false;
     if (config_.host_count && config_.selected_host >= config_.host_count)

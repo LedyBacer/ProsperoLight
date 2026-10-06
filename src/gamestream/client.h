@@ -12,6 +12,7 @@
 
 #include "certgen.h"
 #include "mini_xml.h"
+#include "host_launch_options.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -31,6 +32,7 @@ extern "C"
         int server_major_version;
         int server_codec_mode_support;
         bool is_nvidia_software;
+        unsigned host_capabilities;
         char hostname[64];
         char unique_id[48];
         char app_version[32];
@@ -46,7 +48,8 @@ extern "C"
     int gs_unpair(gs_server_t *server);
     int gs_applist(gs_server_t *server, app_entry_t **list);
     int gs_start_app(gs_server_t *server, STREAM_CONFIGURATION *configuration, int app_id,
-                     bool sops, bool local_audio, int gamepad_mask);
+                     bool sops, bool local_audio, int gamepad_mask,
+                     const gs_host_options_t *options);
     int gs_quit_app(gs_server_t *server);
     int gs_refresh_status(gs_server_t *server);
 

@@ -9,6 +9,7 @@
 
 #include "host_quit_preferences.hpp"
 #include "client_preferences.hpp"
+#include "host_preferences.hpp"
 #include "lan_http_report.hpp"
 #include "presentation_preferences.hpp"
 #include "stream_profile.hpp"
@@ -87,6 +88,12 @@ enum FormId
     kCustomFps,
     kOptimizeHost,
     kMuteHost,
+    kHostExtensions,
+    kHostVrr,
+    kHostDisplay,
+    kHostScale,
+    kHostIdentity,
+    kHostReset,
 };
 
 constexpr float kBitrateStep = 10.0f;
@@ -365,7 +372,8 @@ void View::build()
     open_games_.glyph = ui::Button::cross;
     open_games_.style.justify = ui::ButtonJustify::between;
 
-    host_actions_.set_items({{i18n::tr("Change port")}, {i18n::tr("Unpair")}});
+    host_actions_.set_items(
+        {{i18n::tr("Change port")}, {i18n::tr("Unpair")}, {i18n::tr("PC settings")}});
     host_actions_.style.exits.left = true;
     host_actions_.style.exits.right = true;
 
@@ -473,6 +481,7 @@ void View::build()
     form_.add_toggle(kUiSound, i18n::tr("Menu sounds"), true).description =
         i18n::tr("Menu navigation and confirmation sounds.");
     form_.add_header(i18n::tr("Host session"));
+    form_.add_value(kHostIdentity, i18n::tr("Selected PC"), "");
     form_.add_toggle(kMuteHost, i18n::tr("Mute host audio"), true).description = i18n::tr(
         "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.");
     form_.add_toggle(kOptimizeHost, i18n::tr("Optimize game/display settings"), true).description =
@@ -480,6 +489,25 @@ void View::build()
                  "ignore this flag.");
     form_.add_toggle(kHostQuit, i18n::tr("Quit host app after stream"), false).description =
         i18n::tr("Stop the game or app on the PC when leaving the stream.");
+    form_
+        .add_choice(kHostExtensions, i18n::tr("Host extensions"), {i18n::tr("Off"), "Vibepollo"}, 0)
+        .description = i18n::tr("Vibepollo only. Off preserves standard Sunshine requests.");
+    form_
+        .add_choice(kHostVrr, i18n::tr("Host VRR"),
+                    {i18n::tr("Host default"), i18n::tr("Off"), i18n::tr("On")}, 0)
+        .description = i18n::tr(
+        "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.");
+    form_
+        .add_choice(
+            kHostDisplay, i18n::tr("Host display"),
+            {i18n::tr("Host default"), i18n::tr("Physical display"), i18n::tr("Virtual display")},
+            0)
+        .description = i18n::tr("Virtual display requires a ready host driver.");
+    form_.add_slider(kHostScale, i18n::tr("Host resolution scale"), 100, 50, 100, 5).unit = "%";
+    form_.row(kHostScale)->description = i18n::tr(
+        "Full scale keeps the requested resolution. Lower values may reduce picture quality.");
+    form_.add_action(kHostReset, i18n::tr("Reset PC settings")).description =
+        i18n::tr("Saved for this PC. DS4/DS5 emulation is selected on the host.");
     form_.add_header(i18n::tr("Display"));
     form_
         .add_choice(kArea, i18n::tr("Picture size"),
@@ -839,8 +867,22 @@ void View::sync_settings_from_config()
                                                            : 3);
     form_.set_visible(kCustomFps, custom);
     form_.set_slider(kCustomFps, static_cast<float>(config.stream_fps));
-    form_.set_toggle(kMuteHost, prosperolight::client_preferences().mute_host);
-    form_.set_toggle(kOptimizeHost, prosperolight::client_preferences().optimize);
+    const auto *host = model_.selected_host();
+    const auto host_settings = prosperolight::host_preferences(host);
+    form_.row(kHostIdentity)->text =
+        host ? (host->name[0] ? host->name : host->address) : i18n::tr("Select a PC first");
+    form_.set_toggle(kMuteHost, host_settings.mute_host);
+    form_.set_toggle(kOptimizeHost, host_settings.optimize);
+    form_.set_toggle(kHostQuit, host_settings.quit_host);
+    form_.set_choice(kHostExtensions, host_settings.extensions ? 1 : 0);
+    form_.set_choice(kHostVrr, static_cast<int>(host_settings.vrr));
+    form_.set_choice(kHostDisplay, static_cast<int>(host_settings.display));
+    form_.set_slider(kHostScale, static_cast<float>(host_settings.scale));
+    for (int id : {kMuteHost, kOptimizeHost, kHostQuit, kHostExtensions, kHostVrr, kHostDisplay,
+                   kHostScale, kHostReset})
+        form_.row(id)->disabled =
+            !host || ((id == kHostVrr || id == kHostDisplay || id == kHostScale) &&
+                      !host_settings.extensions);
     form_.set_choice(kCodec, static_cast<int>(std::min(config.video_codec, 2u)));
     form_.set_choice(kChroma, config.chroma_sampling == MOONLIGHT_CHROMA_444 ? 1 : 0);
     form_.row(kChroma)->disabled = config.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE;
@@ -854,7 +896,7 @@ void View::sync_settings_from_config()
     form_.set_choice(kPacing, static_cast<int>(moonlight::presentation_mode()));
     form_.set_toggle(kLogging, prosperolight_logs_enabled() != 0);
     form_.set_toggle(kUiSound, prosperolight::ui_sound_enabled());
-    form_.set_toggle(kHostQuit, prosperolight::host_quit_enabled());
+
     const bool native = config.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE;
     form_.row(kPipeline)->disabled = !native;
     form_.row(kCores)->disabled = !native;
@@ -899,13 +941,34 @@ void View::apply_setting(int id)
         break;
     case kMuteHost:
     case kOptimizeHost:
+    case kHostQuit:
+    case kHostExtensions:
+    case kHostVrr:
+    case kHostDisplay:
+    case kHostScale:
+    case kHostReset:
     {
-        auto preferences = prosperolight::client_preferences();
-        if (id == kMuteHost)
-            preferences.mute_host = form_.toggle_value(kMuteHost);
+        const auto *host = model_.selected_host();
+        if (!host)
+            return;
+        auto preferences = prosperolight::host_preferences(host);
+        if (id == kHostReset)
+            preferences = prosperolight::HostPreferences{};
+        else if (id == kMuteHost)
+            preferences.mute_host = form_.toggle_value(id);
+        else if (id == kOptimizeHost)
+            preferences.optimize = form_.toggle_value(id);
+        else if (id == kHostQuit)
+            preferences.quit_host = form_.toggle_value(id);
+        else if (id == kHostExtensions)
+            preferences.extensions = form_.choice_index(id) == 1;
+        else if (id == kHostVrr)
+            preferences.vrr = static_cast<unsigned>(form_.choice_index(id));
+        else if (id == kHostDisplay)
+            preferences.display = static_cast<unsigned>(form_.choice_index(id));
         else
-            preferences.optimize = form_.toggle_value(kOptimizeHost);
-        if (!prosperolight::client_preferences_save(preferences))
+            preferences.scale = static_cast<unsigned>(std::lround(form_.slider_value(id)));
+        if (!prosperolight::host_preferences_save(*host, preferences))
             toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save client settings"),
                          i18n::tr("Try again."));
         sync_settings_from_config();
@@ -937,12 +1000,6 @@ void View::apply_setting(int id)
     case kLogging:
         if (!prosperolight_logs_set_enabled(form_.toggle_value(kLogging)))
             toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save logging"),
-                         i18n::tr("Try again."));
-        sync_settings_from_config();
-        return;
-    case kHostQuit:
-        if (!prosperolight::host_quit_set_enabled(form_.toggle_value(kHostQuit)))
-            toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save host app quit"),
                          i18n::tr("Try again."));
         sync_settings_from_config();
         return;
@@ -1422,6 +1479,12 @@ void View::update_hosts(const InputFrame &input, ui::Feedback &feedback)
                     (host && host->name[0] ? host->name : i18n::tr("this PC")));
                 port_prompt_.open(feedback, port);
             }
+            else if (host_actions_.focus() == 2)
+            {
+                show(2, &feedback);
+                sync_settings_from_config();
+                form_.focus_row(kHostExtensions);
+            }
             else if (model_.backend().paired)
             {
                 ui::DialogContent content;
@@ -1612,7 +1675,8 @@ void View::update_settings(const InputFrame &input, ui::Feedback &feedback)
         return;
     }
     const auto event = form_.handle(input, feedback);
-    if (event == ui::Event::changed)
+    if (event == ui::Event::changed ||
+        (event == ui::Event::activated && form_.changed_id() == kHostReset))
         apply_setting(form_.changed_id());
     if (event == ui::Event::activated && form_.changed_id() == kLanguage)
     {

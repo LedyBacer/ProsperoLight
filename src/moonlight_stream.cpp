@@ -7,6 +7,7 @@
 /* Native game Moonlight/Sunshine Videodec2 zero-copy stream. */
 
 #include "client_preferences.hpp"
+#include "host_preferences.hpp"
 #include "ps5_dualsense.hpp"
 
 #include <limits.h>
@@ -3750,7 +3751,7 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
                                   STREAM_CONFIGURATION *configuration,
                                   const moonlight::ResolvedStreamProfile &profile, int gamepad_mask,
                                   const char *host, uint16_t host_port, const char *app_name,
-                                  int requested_app_id)
+                                  int requested_app_id, prosperolight::HostPreferences &preferences)
 {
     app_entry_t *apps = NULL;
     app_entry_t *app;
@@ -3811,6 +3812,19 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
         gs_error = "Requested Sunshine app was not found";
         return GS_INVALID;
     }
+    {
+        moonlight_config_host_t settings_host{};
+        snprintf(settings_host.address, sizeof(settings_host.address), "%s", server->address);
+        snprintf(settings_host.unique_id, sizeof(settings_host.unique_id), "%s", server->unique_id);
+        settings_host.http_port = server->http_port;
+        preferences = prosperolight::host_preferences(&settings_host);
+        if (preferences.extensions && preferences.display == 2 &&
+            (server->host_capabilities & 3u) != 3u)
+        {
+            gs_error = "Host virtual display is unavailable or its driver is not ready";
+            return GS_FAILED;
+        }
+    }
     if (server->current_game && server->current_game != target_id)
     {
         result = gs_quit_app(server);
@@ -3818,10 +3832,15 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
             return result;
     }
     resume_requested = server->current_game == target_id;
-    gamepad_mask = prosperolight::dualsense::ActiveMask();
-    result =
-        gs_start_app(server, configuration, target_id, prosperolight::client_preferences().optimize,
-                     !prosperolight::client_preferences().mute_host, gamepad_mask);
+    gamepad_mask = prosperolight::dualsense::ActiveMask() & 0x0f;
+    {
+        const gs_host_options_t extension_options{
+            preferences.extensions, static_cast<int>(preferences.vrr) - 1,
+            static_cast<int>(preferences.display) - 1, preferences.scale,
+            static_cast<uint16_t>(gamepad_mask)};
+        result = gs_start_app(server, configuration, target_id, preferences.optimize,
+                              !preferences.mute_host, gamepad_mask, &extension_options);
+    }
     snprintf(notification.message, sizeof(notification.message),
              "Native NVHTTP launch: rc=%08x action=%s target=%s id=%d gamepads=%x rtsp=%s error=%s",
              (uint32_t)result, resume_requested ? "resume" : "launch",
@@ -3892,6 +3911,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     int stream_started = 0;
     int identity_initialized = 0;
     int session_started = 0;
+    prosperolight::HostPreferences session_preferences;
     int controller_result = -1;
     int controller_ready = 0;
     int physical_input_ready = 0;
@@ -4238,7 +4258,7 @@ configure_stream:
     identity_initialized = 1;
     result = prepare_native_session(&client_identity, &gs_server, &stream_config, profile,
                                     controller_ready ? prosperolight::dualsense::ActiveMask() : 0,
-                                    host, host_port, app_name, app_id);
+                                    host, host_port, app_name, app_id, session_preferences);
     if (result != GS_OK)
         goto done;
     session_started = 1;
@@ -4678,7 +4698,7 @@ done:
              (uint32_t)physical_input.mouse_unload_result);
     (void)lan_http_report_text(notification.message);
     ps5_controller_shutdown(&controller);
-    if (session_started && (!controller.requested_stop || prosperolight::host_quit_enabled()))
+    if (session_started && (!controller.requested_stop || session_preferences.quit_host))
     {
         http_set_timeout_ms(2000);
         int quit_result = gs_quit_app(&gs_server);

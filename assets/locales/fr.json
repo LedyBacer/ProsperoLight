@@ -290,5 +290,21 @@
   "30–120 FPS. Custom adjusts one frame at a time.": "30–120 FPS · Personnalisé · 1 FPS",
   "Stream audio to PS5 without playing it on the PC. Host audio routing must support this.": "Couper le son du PC · PS5: Configuration audio",
   "GeForce Experience game settings or Sunshine display policy. Vibepollo may ignore this flag.": "GeForce Experience / Sunshine: Optimiser le jeu/l’affichage",
-  "Could not save client settings": "Error · Paramètres"
+  "Could not save client settings": "Error · Paramètres",
+  "PC settings": "Paramètres du PC",
+  "Host extensions": "Extensions de l’hôte",
+  "Host default": "Par défaut sur l’hôte",
+  "Host display": "Écran de l’hôte",
+  "Physical display": "Écran physique",
+  "Virtual display": "Écran virtuel",
+  "Host resolution scale": "Échelle de résolution",
+  "Reset PC settings": "Réinitialiser les paramètres",
+  "Selected PC": "Paramètres du PC",
+  "Select a PC first": "Ordinateurs: Aucun",
+  "Host VRR": "VRR · Session de l’hôte",
+  "Vibepollo only. Off preserves standard Sunshine requests.": "Vibepollo: Activé · Sunshine: Désactivé",
+  "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Vibepollo · Écran virtuel · VRR",
+  "Virtual display requires a ready host driver.": "Écran virtuel · Vibepollo",
+  "Saved for this PC. DS4/DS5 emulation is selected on the host.": "Paramètres du PC · DS4/DS5: Session de l’hôte",
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100%: Résolution · 50–100%"
 }

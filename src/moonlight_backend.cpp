@@ -87,6 +87,7 @@ int moonlight_backend_refresh(const char *host, uint16_t http_port,
     snapshot->pyrowave_profiles =
         server.server_codec_mode_support &
         (SCM_PYROWAVE | SCM_PYROWAVE_444 | SCM_PYROWAVE_HDR10 | SCM_PYROWAVE_HDR10_444);
+    snapshot->host_capabilities = server.host_capabilities;
     snapshot->main10_supported = (server.server_codec_mode_support & SCM_HEVC_MAIN10) != 0;
     snprintf(snapshot->server_version, sizeof(snapshot->server_version), "%s", server.app_version);
     snprintf(snapshot->name, sizeof(snapshot->name), "%s",
