@@ -16,6 +16,7 @@ class FramePacingPolicy(unittest.TestCase):
 #include "frame_pacing.hpp"
 #include "moonlight_pipeline.hpp"
 #include <cassert>
+#include <cstring>
 int main() {
     moonlight::SourceTimestamp clock;
     const auto before=clock.update(0xfffffff0u,0);
@@ -87,6 +88,21 @@ int main() {
         last=target;
     }
     assert(p.stats.period_us>16000 && p.stats.period_us<17000);
+    // 120fps on a matching 119.88Hz display, ready just after the flip.
+    // VSync already waits for the next vblank. A deadline near that vblank
+    // misses it and the picture stays at half rate.
+    moonlight::FramePacing vsync;
+    vsync.reset(120);
+    const uint64_t anchor=5000000;
+    const uint64_t display_period=UINT64_C(100000000)/11988;
+    const uint64_t ready=anchor+200;
+    const auto early=vsync.target(1,8333,ready,11988,anchor,0,1000);
+    assert(early>=ready);
+    assert(early<anchor+display_period/2);
+    assert(std::strcmp(moonlight::effective_pacing_name(2, false), "Paced")==0);
+    assert(std::strcmp(moonlight::effective_pacing_name(2, true), "Paced+VRR")==0);
+    assert(std::strcmp(moonlight::effective_pacing_name(1, false), "Paced")==0);
+    assert(std::strcmp(moonlight::effective_pacing_name(0, true), "Unpaced")==0);
 }
 ''')
             binary = pathlib.Path(directory) / 'pacing'

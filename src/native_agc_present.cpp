@@ -7,6 +7,7 @@
 /* Foreground native AGC presentation of a Videodec2 AVC8 caller buffer. */
 
 #include "native_agc_present.hpp"
+#include "frame_pacing.hpp"
 #include "app_storage.hpp"
 #include "connecting_plate.hpp"
 #include "lan_http_report.hpp"
@@ -397,13 +398,9 @@ static void refresh_hud_surface(uint8_t *surface, const native_agc_metrics_t *me
     hud_line(luma, 0, text_luma, line);
     snprintf(line, sizeof(line), "Output %ux%u %u.%02u Hz / %s / VSync %s / reserve %llu us%s",
              output_width, output_height, output_refresh_x100 / 100u, output_refresh_x100 % 100u,
-             metrics->pacing_mode == 2 ? "Paced+VRR"
-             : metrics->pacing_mode    ? "Paced"
-                                       : "Unpaced",
+             moonlight::effective_pacing_name(metrics->pacing_mode, metrics->vrr_api_active != 0),
              metrics->vsync_enabled ? "on" : "off", (unsigned long long)metrics->pacing_reserve_us,
-             metrics->pacing_mode == 2
-                 ? (metrics->vrr_api_active ? " / VRR API ok" : " / fixed fallback")
-                 : "");
+             metrics->pacing_mode == 2 && !metrics->vrr_api_active ? " / fixed fallback" : "");
     hud_line(luma, 1, text_luma, line);
     if (metrics->pipeline_depth > 1u)
         snprintf(line, sizeof(line), "Decoder: Videodec2 adaptive x%u / %u cores (mask 0x%llx)",

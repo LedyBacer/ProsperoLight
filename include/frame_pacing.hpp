@@ -58,6 +58,7 @@ class FramePacing
         *this = FramePacing{};
         period_q16_ = (UINT64_C(1000000) << 16) / std::max(1u, fps);
         period_ = period_q16_ >> 16;
+        nominal_period_ = period_;
         stats.period_us = period_;
     }
 
@@ -165,22 +166,33 @@ class FramePacing
         // A bounded interval guard prevents a late frame followed by a rush.
         // If fixed display output is slower, its own interval is the floor.
         uint64_t minimum = period_ * 98 / 100;
+        bool display_matches = false;
         if (fixed_refresh_x100)
         {
             const uint64_t display_period = UINT64_C(100000000) / fixed_refresh_x100;
             const uint64_t divisor =
-                std::max<uint64_t>(1, (period_ + display_period / 2) / display_period);
+                std::max<uint64_t>(1, (nominal_period_ + display_period / 2) / display_period);
             const uint64_t matched = display_period * divisor;
-            const uint64_t error = matched > period_ ? matched - period_ : period_ - matched;
+            const uint64_t error =
+                matched > nominal_period_ ? matched - nominal_period_ : nominal_period_ - matched;
             // Divisible rates keep their source interval guard. Non-divisible
             // rates need alternating display intervals (75/90 on 120 Hz).
-            minimum = (error <= period_ / 100 ? matched : display_period) * 98 / 100;
+            display_matches = error <= nominal_period_ / 100;
+            minimum = (display_matches ? matched : display_period) * 98 / 100;
         }
         if (display_ceiling_x100)
             minimum = std::max(minimum, UINT64_C(100000000) / display_ceiling_x100);
         if (submitted_)
             deadline = std::max(deadline, submitted_ + minimum);
-        if (fixed_refresh_x100 && flip_anchor_us)
+        if (fixed_refresh_x100 && flip_anchor_us && display_matches)
+        {
+            // VSync latches at the next vblank. Waiting until just before it
+            // misses that vblank and the output stays at half rate.
+            deadline = ready_us;
+            if (submitted_)
+                deadline = std::max(deadline, submitted_ + minimum);
+        }
+        else if (fixed_refresh_x100 && flip_anchor_us)
         {
             const uint64_t display_period = UINT64_C(100000000) / fixed_refresh_x100;
             const uint64_t lead = std::min<uint64_t>(preparation_lead_us, display_period / 4);
@@ -229,10 +241,22 @@ class FramePacing
 
   private:
     uint64_t period_q16_ = (UINT64_C(1000000) << 16) / 60, fractional_{};
-    uint64_t period_ = 16666, slot_{}, submitted_{}, last_source_{}, cadence_source_{};
+    uint64_t period_ = 16666, nominal_period_ = 16666, slot_{}, submitted_{}, last_source_{},
+             cadence_source_{};
     uint64_t reserve_ = 1500, candidate_{}, wake_lead_ = 100;
     unsigned candidate_count_{}, clean_{};
     int32_t last_frame_{}, cadence_frame_{};
     bool initialized_{};
 };
+
+// A rejected VRR request is fixed-refresh pacing. The selected mode stays
+// Paced+VRR; the active name does not.
+inline const char *effective_pacing_name(unsigned mode, bool vrr_active)
+{
+    if (mode == 2u && vrr_active)
+        return "Paced+VRR";
+    if (mode != 0u)
+        return "Paced";
+    return "Unpaced";
+}
 } // namespace moonlight
