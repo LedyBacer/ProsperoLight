@@ -306,5 +306,6 @@
   "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Vibepollo · மெய்நிகர் திரை · VRR",
   "Virtual display requires a ready host driver.": "மெய்நிகர் திரை · Vibepollo",
   "Saved for this PC. DS4/DS5 emulation is selected on the host.": "கணினி அமைப்புகள் · DS4/DS5: ஹோஸ்ட் அமர்வு",
-  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100%: தெளிவுத்திறன் · 50–100%"
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "முழு அளவு கோரிய தெளிவுத்திறனை வைத்திருக்கும். குறைந்த மதிப்புகள் படத்தின் தரத்தைக் குறைக்கலாம்.",
+  "Thanks to ProsperoLight contributors: Nikita Dybov, Kris Escobar.": "ProsperoLight பங்களிப்பாளர்களுக்கு நன்றி: Nikita Dybov, Kris Escobar."
 }

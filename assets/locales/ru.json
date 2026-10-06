@@ -306,5 +306,6 @@
   "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Экспериментальный захват виртуального дисплея. Требует совместимого хоста; VRR телевизора настраивается отдельно.",
   "Virtual display requires a ready host driver.": "На хосте нужен готовый драйвер виртуального дисплея.",
   "Saved for this PC. DS4/DS5 emulation is selected on the host.": "Настройки сохраняются для этого ПК. Эмуляция DS4/DS5 выбирается на хосте.",
-  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100% сохраняет запрошенное разрешение. Меньшие значения могут снизить качество изображения."
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "Полный масштаб сохраняет запрошенное разрешение. Уменьшение масштаба может снизить качество изображения.",
+  "Thanks to ProsperoLight contributors: Nikita Dybov, Kris Escobar.": "Спасибо участникам ProsperoLight: Nikita Dybov, Kris Escobar."
 }

@@ -306,5 +306,6 @@
   "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.",
   "Virtual display requires a ready host driver.": "Virtual display requires a ready host driver.",
   "Saved for this PC. DS4/DS5 emulation is selected on the host.": "Saved for this PC. DS4/DS5 emulation is selected on the host.",
-  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "Full scale keeps the requested resolution. Lower values may reduce picture quality."
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "Full scale keeps the requested resolution. Lower values may reduce picture quality.",
+  "Thanks to ProsperoLight contributors: Nikita Dybov, Kris Escobar.": "Thanks to ProsperoLight contributors: Nikita Dybov, Kris Escobar."
 }

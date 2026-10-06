@@ -16,10 +16,22 @@ class TextLayoutTests(unittest.TestCase):
         self.assertIsNotNone(compiler)
         source = r'''
 #include "ui/text_lane.hpp"
+#include "ui/flow_layout.hpp"
 #include <cassert>
 #include <cmath>
 int main() {
  using hui::ui::text_lane_offset;
+ const auto items=hui::ui::flow_layout({10,20,350,0},{120,140,160,90,200},64,12);
+ assert(items.size()==5);
+ assert(items[0].x==10 && items[1].x==142 && items[2].x==10);
+ assert(items[2].y==96 && items[4].y==172);
+ for (unsigned i=0;i<items.size();++i) {
+  assert(items[i].x>=10 && items[i].x+items[i].w<=360);
+  for(unsigned j=0;j<i;++j) {
+   const auto a=items[i],b=items[j];
+   assert(a.x>=b.x+b.w || b.x>=a.x+a.w || a.y>=b.y+b.h || b.y>=a.y+a.h);
+  }
+ }
  assert(text_lane_offset(100,90,100)==0);
  assert(text_lane_offset(0,220,100)==0);
  assert(text_lane_offset(1.9,220,100)==0);

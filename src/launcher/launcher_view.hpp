@@ -151,6 +151,7 @@ class View
     void restyle();
     void show(int screen, hui::ui::Feedback *feedback);
     void sync();
+    void layout_actions();
     void sync_hosts();
     void sync_host_panel();
     void sync_games();
@@ -197,6 +198,8 @@ class View
 
     Model &model_;
     const hui::ui::Fonts &fonts_;
+    hui::gfx::Rect host_panel_bounds_{816.0f, 262.0f, 1008.0f, 544.0f};
+    std::vector<hui::gfx::Rect> host_action_rects_;
     hui::ui::Theme theme_;
     std::string version_;
     unsigned seen_revision_ = 0;

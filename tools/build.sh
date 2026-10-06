@@ -436,11 +436,17 @@ fi
 if [[ $format == ffpfsc || $format == all ]]; then
     mkpfs=$(bash "$root/tools/setup-packaging-dependencies.sh" ffpfsc)
     rm -f -- "$dist/$title_id.ffpfsc"
-    "$mkpfs" pack folder --no-adjust-output-file-extension \
-        --version PS5 --verify "$app" "$dist/$title_id.ffpfsc"
-    # Raw exFAT avoids the PFSC mounting corruption observed on firmware 13.60.
+    # Build and verify the inner volume first; pack-file honours the selected
+    # compression backend (the streaming pack-folder path does not).
     "$root/.deps/MkPFS/.venv-linux/bin/python" "$root/tools/pack-exfat.py" \
         "$app" "$dist/$title_id.exfat"
+    "$mkpfs" pack file --no-adjust-output-file-extension --no-rename-inner-image \
+        --version PS5 --inode-bits 32 --block-size 65536 \
+        --compression-backend zlib --compression-level 6 --verify \
+        "$dist/$title_id.exfat" "$dist/$title_id.ffpfsc"
+    "$root/.deps/MkPFS/.venv-linux/bin/python" "$root/tools/verify-ffpfsc.py" \
+        "$mkpfs" "$dist/$title_id.ffpfsc" "$dist/$title_id.exfat"
+
 fi
 
 printf 'Build complete.\nApp folder: %s\n' "$app"

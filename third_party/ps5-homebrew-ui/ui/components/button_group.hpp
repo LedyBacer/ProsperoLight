@@ -104,6 +104,7 @@ class ButtonGroup
         return static_cast<int>(items_.size());
     }
     void set_bounds(const gfx::Rect &bounds);
+    void set_item_rects(std::vector<gfx::Rect> rects);
     const gfx::Rect &bounds() const
     {
         return bounds_;
@@ -144,6 +145,7 @@ class ButtonGroup
     void retarget(bool snap);
 
     std::vector<GroupItem> items_;
+    std::vector<gfx::Rect> item_rects_;
     std::vector<tween::Spring> chosen_; // how selected each button looks, 0..1
     gfx::Rect bounds_{0.0f, 0.0f, 480.0f, 64.0f};
     int focus_ = 0;

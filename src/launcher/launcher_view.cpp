@@ -14,6 +14,7 @@
 #include "presentation_preferences.hpp"
 #include "stream_profile.hpp"
 #include "ui/widgets.hpp"
+#include "ui/flow_layout.hpp"
 #include "ui_sound_preferences.hpp"
 
 #include <algorithm>
@@ -395,13 +396,6 @@ void View::build()
     searching_.style.kind = ui::SpinnerKind::arc;
     searching_.set_bounds({kMargin, 992.0f, 34.0f, 34.0f});
 
-    const Rect inside = host_inside();
-    const float row = inside.y + inside.h - 64.0f;
-    host_details_.set_bounds({inside.x, inside.y + 78.0f, inside.w, 300.0f});
-    open_games_.set_bounds({inside.x, row, 252.0f, 64.0f});
-    host_actions_.set_bounds({inside.x + 264.0f, row, 430.0f, 64.0f});
-    remove_.set_bounds({inside.x + inside.w - 226.0f, row, 226.0f, 64.0f});
-
     // ---- Games ----
     apps_.style.columns = kColumns;
     apps_.style.gap_x = 26.0f;
@@ -697,9 +691,47 @@ void View::restyle()
     apply_ambient(true);
 }
 
+void View::layout_actions()
+{
+    gfx::DrawList scratch;
+    const ui::Painter paint(scratch, fonts_, theme_, 0);
+    const auto m = ui::button_metrics(host_actions_.style.size, host_actions_.style.height,
+                                      host_actions_.style.text_size, host_actions_.style.padding);
+    std::vector<float> widths{open_games_.preferred_width(fonts_)};
+    for (const auto &item : host_actions_.items())
+        widths.push_back(paint.label_width(item.label, m.text_size) + 2.0f * m.padding);
+    const auto rm = ui::button_metrics(remove_.style.size, remove_.style.height,
+                                       remove_.style.text_size, remove_.style.padding);
+    const float glyph_size =
+        remove_.style.glyph_size > 0.0f ? remove_.style.glyph_size : rm.text_size * 1.3f;
+    widths.push_back(2.0f * rm.padding +
+                     std::max(paint.label_width(remove_.label, rm.text_size),
+                              paint.label_width(remove_.hint, rm.text_size)) +
+                     ui::button_width(remove_.style.glyph, glyph_size) + remove_.style.gap);
+    host_panel_bounds_ = kHostPanel;
+    const Rect inside = host_inside();
+    const float row = inside.y + inside.h - 64.0f;
+    host_action_rects_ = ui::flow_layout({inside.x, row, inside.w, 0.0f}, widths, 64.0f, 12.0f);
+    host_panel_bounds_.h += host_action_rects_.back().y - row;
+    host_details_.set_bounds({inside.x, inside.y + 78.0f, inside.w, 300.0f});
+    open_games_.set_bounds(host_action_rects_[0]);
+    host_actions_.set_item_rects(
+        {host_action_rects_[1], host_action_rects_[2], host_action_rects_[3]});
+    remove_.set_bounds(host_action_rects_[4]);
+
+    const auto games = ui::flow_layout(
+        {kMargin, 374.0f, kRight - kMargin, 0.0f},
+        {start_.preferred_width(fonts_), stop_.preferred_width(fonts_)}, 72.0f, 20.0f);
+    start_.set_bounds(games[0]);
+    stop_.set_bounds(games[1]);
+    const float offset = games.back().y - 374.0f;
+    shelf_.set_bounds({kMargin, 494.0f + offset, kRight - kMargin, 40.0f});
+    apps_.set_bounds({kMargin - 14.0f, 528.0f + offset, kRight - kMargin + 28.0f, 426.0f - offset});
+}
+
 Rect View::host_inside() const
 {
-    return host_panel_.content_rect(kHostPanel).inset(14.0f);
+    return host_panel_.content_rect(host_panel_bounds_).inset(14.0f);
 }
 
 Rect View::profile_inside() const
@@ -800,6 +832,7 @@ void View::sync_host_panel()
     host_actions_.item(1).label =
         status.online && status.paired ? i18n::tr("Unpair") : i18n::tr("Pair");
     host_actions_.item(1).disabled = !status.online;
+    layout_actions();
     shown_host_ = static_cast<int>(index);
 }
 
@@ -851,6 +884,7 @@ void View::sync_games()
                          backend.apps[model_.selected_app()].id == backend.current_app_id;
     start_.label = running ? i18n::tr("Resume stream") : i18n::tr("Start stream");
     stop_.set_disabled(backend.current_app_id == 0 || model_.busy() == Busy::stopping);
+    layout_actions();
 }
 
 void View::sync_settings_from_config()
@@ -1380,6 +1414,8 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     }
     request_artwork();
 
+    layout_actions();
+
     // ---- animation ----
     tabs_.update(dt);
     status_.update(dt);
@@ -1430,6 +1466,36 @@ void View::update_hosts(const InputFrame &input, ui::Feedback &feedback)
     {
         host_prompt_.open(feedback);
         return;
+    }
+    if (host_zone_ != 0 && (input.nav == Direction::up || input.nav == Direction::down) &&
+        host_action_rects_.size() == 5)
+    {
+        const int current = host_zone_ == 1 ? 0 : host_zone_ == 3 ? 4 : host_actions_.focus() + 1;
+        const Rect from = host_action_rects_[current];
+        int target = -1;
+        float best = 1e9f;
+        for (int i = 0; i < 5; ++i)
+        {
+            const Rect r = host_action_rects_[i];
+            const float dy = r.cy() - from.cy();
+            if ((input.nav == Direction::up && dy < -1.0f) ||
+                (input.nav == Direction::down && dy > 1.0f))
+            {
+                const float score = std::abs(dy) * 1000.0f + std::abs(r.cx() - from.cx());
+                if (score < best)
+                {
+                    best = score;
+                    target = i;
+                }
+            }
+        }
+        if (target >= 0)
+        {
+            if (target > 0 && target < 4)
+                host_actions_.set_focus(target - 1, false);
+            set_host_zone(target == 0 ? 1 : target == 4 ? 3 : 2, feedback);
+            return;
+        }
     }
     switch (host_zone_)
     {
@@ -1930,7 +1996,7 @@ void View::draw_hosts(ui::Canvas &canvas, ui::Painter &paint) const
                24.0f, paint.page_text_muted());
     hosts_.draw(canvas);
 
-    host_panel_.draw(canvas, kHostPanel);
+    host_panel_.draw(canvas, host_panel_bounds_);
     const Rect inside = host_inside();
     if (!on_host())
     {
@@ -2211,7 +2277,10 @@ void View::draw_about(ui::Canvas &canvas, ui::Painter &paint) const
     ui::paragraph(list, regular,
                   i18n::tr("ProsperoLight is an unofficial PS5 client brought to you by "
                            "BlackBearReloaded."),
-                  left.x, left.y + 500.0f, 24.0f, left.w, 34.0f, t.text, 2);
+                  left.x, left.y + 496.0f, 22.0f, left.w, 30.0f, t.text, 2);
+    ui::paragraph(list, regular,
+                  i18n::tr("Thanks to ProsperoLight contributors: Nikita Dybov, Kris Escobar."),
+                  left.x, left.y + 562.0f, 21.0f, left.w, 28.0f, t.text, 2);
     paint.body(i18n::tr("Menu sound effects made with ElevenLabs."), left.x, bottom, 20.0f,
                t.text_muted);
     if (!version_.empty())

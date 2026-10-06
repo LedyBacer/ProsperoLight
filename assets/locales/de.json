@@ -306,5 +306,6 @@
   "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Vibepollo · Virtueller Bildschirm · VRR",
   "Virtual display requires a ready host driver.": "Virtueller Bildschirm · Vibepollo",
   "Saved for this PC. DS4/DS5 emulation is selected on the host.": "PC-Einstellungen · DS4/DS5: Host-Sitzung",
-  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100%: Auflösung · 50–100%"
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "Die volle Skalierung erhält die gewünschte Auflösung. Kleinere Werte können die Bildqualität verringern.",
+  "Thanks to ProsperoLight contributors: Nikita Dybov, Kris Escobar.": "Vielen Dank an die Mitwirkenden von ProsperoLight: Nikita Dybov, Kris Escobar."
 }

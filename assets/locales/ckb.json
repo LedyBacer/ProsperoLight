@@ -306,5 +306,6 @@
   "Experimental virtual-display capture. Requires a compatible host; TV VRR is separate.": "Vibepollo · پیشاندەری مەجازی · VRR",
   "Virtual display requires a ready host driver.": "پیشاندەری مەجازی · Vibepollo",
   "Saved for this PC. DS4/DS5 emulation is selected on the host.": "ڕێکخستنی کۆمپیوتەر · DS4/DS5: دانیشتنی خانەخوێ",
-  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "100%: ڕوونی · 50–100%"
+  "Full scale keeps the requested resolution. Lower values may reduce picture quality.": "پێوانەی تەواو وردیی داواکراو دەپارێزێت. بەهای کەمتر لەوانەیە کوالێتی وێنە کەم بکاتەوە.",
+  "Thanks to ProsperoLight contributors: Nikita Dybov, Kris Escobar.": "سوپاس بۆ بەشداربووانی ProsperoLight: Nikita Dybov, Kris Escobar."
 }
