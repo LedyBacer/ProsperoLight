@@ -123,8 +123,7 @@ static_assert(PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION == 0 ||
 #ifndef PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB
 #define PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB 0
 #endif
-static_assert(PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB == 0 ||
-              PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB == 1);
+static_assert(PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB == 0 || PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB == 1);
 static_assert(FRAME_SLOT_COUNT >= moonlight::kMaxDecoderDepth + 4u &&
                   INPUT_SLOT_COUNT >= moonlight::kMaxDecoderDepth + 2u &&
                   SUBMISSION_QUEUE_CAPACITY > moonlight::kMaxDecoderDepth &&
