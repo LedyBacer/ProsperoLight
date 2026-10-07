@@ -85,15 +85,15 @@ jobs:
       - name: Verify generated runtime is unchanged
         run: cd runtime && sha256sum -c libc.prx.sha256
 
-      - name: Build compressed release image
+      - name: Build the release folder and raw exFAT image
         run: |
           # Performance betas ship with the measured flag set.
           case "$CONTENT_VERSION" in
             01.000.062|01.000.070|01.000.080|01.000.090)
-              make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8
+              make exfat FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8
               ;;
             *)
-              make ffpfsc
+              make exfat
               ;;
           esac
 
@@ -103,7 +103,7 @@ jobs:
           python3 -m zipfile -c "$TITLE_ID.zip" "$TITLE_ID"
           # Every entry stored as 0777: the console only starts an app whose files are open to all.
           python3 ../tools/zip-open-modes.py "$TITLE_ID.zip"
-          sha256sum "$TITLE_ID.exfat" "$TITLE_ID.ffpfsc" "$TITLE_ID.zip" > SHA256SUMS
+          sha256sum "$TITLE_ID.exfat" "$TITLE_ID.zip" > SHA256SUMS
 
       - name: Upload build provenance
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -119,7 +119,6 @@ jobs:
           name: prosperolight-release-${{ github.sha }}
           path: |
             dist/${{ env.TITLE_ID }}.exfat
-            dist/${{ env.TITLE_ID }}.ffpfsc
             dist/${{ env.TITLE_ID }}.zip
             dist/SHA256SUMS
           if-no-files-found: error
@@ -158,20 +157,18 @@ jobs:
           set -euo pipefail
           cd release
           mapfile -d '' files < <(find . -type f -print0)
-          if (( ${#files[@]} != 4 )); then
-            echo "Expected one raw exFAT image, one FFPFSC image, one app-folder ZIP, and SHA256SUMS." >&2
+          if (( ${#files[@]} != 3 )); then
+            echo "Expected one raw exFAT image, one app-folder ZIP, and SHA256SUMS." >&2
             exit 1
           fi
-          mapfile -d '' images < <(find . -type f -name 'PPSA*.ffpfsc' -print0)
           mapfile -d '' raw_images < <(find . -type f -name 'PPSA*.exfat' -print0)
           mapfile -d '' archives < <(find . -type f -name 'PPSA*.zip' -print0)
           mapfile -d '' checksums < <(find . -type f -name 'SHA256SUMS' -print0)
-          if (( ${#images[@]} != 1 || ${#raw_images[@]} != 1 || ${#archives[@]} != 1 || ${#checksums[@]} != 1 )); then
-            echo "Release files must be one raw exFAT image, one FFPFSC image, one app-folder ZIP, and SHA256SUMS." >&2
+          if (( ${#raw_images[@]} != 1 || ${#archives[@]} != 1 || ${#checksums[@]} != 1 )); then
+            echo "Release files must be one raw exFAT image, one app-folder ZIP, and SHA256SUMS." >&2
             exit 1
           fi
           (cd "$(dirname "${checksums[0]}")" && sha256sum -c "$(basename "${checksums[0]}")")
-          echo "image=${images[0]#./}" >> "$GITHUB_OUTPUT"
           echo "raw_image=${raw_images[0]#./}" >> "$GITHUB_OUTPUT"
           echo "archive=${archives[0]#./}" >> "$GITHUB_OUTPUT"
           echo "checksum=${checksums[0]#./}" >> "$GITHUB_OUTPUT"
@@ -190,16 +187,14 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          IMAGE: ${{ steps.package.outputs.image }}
           RAW_IMAGE: ${{ steps.package.outputs.raw_image }}
           ARCHIVE: ${{ steps.package.outputs.archive }}
           CHECKSUM: ${{ steps.package.outputs.checksum }}
         shell: bash
         run: |
           set -euo pipefail
-          assets=("release/$RAW_IMAGE" "release/$IMAGE" "release/$ARCHIVE" "release/$CHECKSUM")
+          assets=("release/$RAW_IMAGE" "release/$ARCHIVE" "release/$CHECKSUM")
           raw_image_name="${RAW_IMAGE##*/}"
-          image_name="${IMAGE##*/}"
           archive_name="${ARCHIVE##*/}"
           checksum_name="${CHECKSUM##*/}"
           release_flags=()
@@ -210,7 +205,7 @@ jobs:
           esac
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             while IFS= read -r old_asset; do
-              if [[ $old_asset != "$raw_image_name" && $old_asset != "$image_name" && $old_asset != "$archive_name" && $old_asset != "$checksum_name" ]]; then
+              if [[ $old_asset != "$raw_image_name" && $old_asset != "$archive_name" && $old_asset != "$checksum_name" ]]; then
                 gh release delete-asset "$GITHUB_REF_NAME" "$old_asset" --yes --repo "$GITHUB_REPOSITORY"
               fi
             done < <(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')

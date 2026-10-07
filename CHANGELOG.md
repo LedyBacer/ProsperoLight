@@ -44,8 +44,9 @@ Everything in beta **01.000.080** is included.
 - A matching V-Sync frame is shown as soon as it is ready.
 - Every file in the release ZIP is stored open to all (0777), as the console expects of an
   app; a tool that keeps a ZIP's permissions no longer leaves an app that cannot start.
-- Box art is decoded by libpng, and a raw exFAT installation image is built beside the
-  compressed one.
+- Box art is decoded by libpng.
+- Releases carry the app folder as a ZIP and a raw exFAT image; the compressed `.ffpfsc` image is no longer published, to prevent compatibility issues with
+  the in-app update worker and ProsperoStore, which install from the ZIP.
 
 ### Known
 
@@ -55,9 +56,8 @@ Everything in beta **01.000.080** is included.
 ### Installation / update
 
 Title ID remains `PPSA99002`; saved PCs, settings and pairing are kept. Extract
-`PPSA99002.zip` and copy its `PPSA99002/` folder to `/data/homebrew`, or use one of the
-images (`PPSA99002.exfat`, `PPSA99002.ffpfsc`). Keep only one format installed for the
-title. Close the app before replacing its files, then restart ShadowMountPlus or the
+`PPSA99002.zip` and copy its `PPSA99002/` folder to `/data/homebrew`, or use the
+raw image `PPSA99002.exfat`. Keep only one format installed for the title. Close the app before replacing its files, then restart ShadowMountPlus or the
 console. `SHA256SUMS` covers every download.
 
 ### Thanks

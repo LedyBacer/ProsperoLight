@@ -323,6 +323,11 @@ ffpfsc: $(RUNTIME) $(STREAM_ARCHIVES)
 	@printf '%s\n' '==> [ffpfsc] Building the app folder and compressed image'
 	@bash tools/build.sh Ffpfsc
 
+exfat: $(RUNTIME) $(STREAM_ARCHIVES)
+	@bash tools/build-stream-deps.sh --ensure
+	@printf '%s\n' '==> [exfat] Building the app folder and the raw exFAT image'
+	@bash tools/build.sh Exfat
+
 packages: $(RUNTIME) $(STREAM_ARCHIVES)
 	@bash tools/build-stream-deps.sh --ensure
 	@printf '%s\n' '==> [packages] Building the app folder and both package formats'
@@ -385,6 +390,7 @@ help:
 	  'make lint            Run format, tidy, metadata, and shell checks' \
 	  'make check           Run lint and build the skeleton app' \
 	  'make ffpkg           Build the folder and UFS2 .ffpkg image' \
+	  'make exfat           Build the folder and the raw exFAT image (what releases carry)' \
 	  'make ffpfsc          Build the folder and compressed .ffpfsc image' \
 	  'make packages        Build folder, .ffpkg, and .ffpfsc outputs' \
 	  'make deploy PS5_HOST=<address>  Build and FTP-deploy the app folder' \
@@ -404,4 +410,4 @@ controller-deps: $(if $(wildcard tools/pyrowave/apply-transport.sh),transport-de
 $(HOST_UNIT_TEST) test-integration test-stream-performance test-performance-guards: | controller-deps
 
 # Every package carries the helper that installs the next release.
-app ffpkg ffpfsc packages: self-update-helper
+app ffpkg ffpfsc exfat packages: self-update-helper

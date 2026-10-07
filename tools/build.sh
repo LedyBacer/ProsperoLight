@@ -11,8 +11,8 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/tools/native-toolchain.sh"
 format=${1:-Folder}
 format=${format,,}
-case "$format" in folder|ffpkg|ffpfsc|all) ;; *)
-    echo "usage: tools/build.sh [Folder|Ffpkg|Ffpfsc|All]" >&2
+case "$format" in folder|ffpkg|ffpfsc|exfat|all) ;; *)
+    echo "usage: tools/build.sh [Folder|Ffpkg|Ffpfsc|Exfat|All]" >&2
     exit 2
 esac
 
@@ -438,7 +438,11 @@ if [[ $format == ffpfsc || $format == all ]]; then
     rm -f -- "$dist/$title_id.ffpfsc"
     "$mkpfs" pack folder --no-adjust-output-file-extension \
         --version PS5 --verify "$app" "$dist/$title_id.ffpfsc"
-    # Raw exFAT avoids the PFSC mounting corruption observed on firmware 13.60.
+fi
+if [[ $format == exfat || $format == ffpfsc || $format == all ]]; then
+    # Raw exFAT avoids the PFSC mounting corruption observed on firmware 13.60. It is the
+    # image releases carry; its packer runs in the MkPFS Python environment.
+    bash "$root/tools/setup-packaging-dependencies.sh" ffpfsc >/dev/null
     "$root/.deps/MkPFS/.venv-linux/bin/python" "$root/tools/pack-exfat.py" \
         "$app" "$dist/$title_id.exfat"
 fi
@@ -446,3 +450,4 @@ fi
 printf 'Build complete.\nApp folder: %s\n' "$app"
 [[ $format != ffpkg && $format != all ]] || printf 'FFPKG:     %s\n' "$dist/$title_id.ffpkg"
 [[ $format != ffpfsc && $format != all ]] || printf 'FFPFSC:    %s\n' "$dist/$title_id.ffpfsc"
+[[ $format != exfat && $format != ffpfsc && $format != all ]] || printf 'exFAT:     %s\n' "$dist/$title_id.exfat"

@@ -271,8 +271,8 @@ See [Getting started](docs/GETTING_STARTED.md) and
 ## Build
 
 ```bash
-# Production release image; also assembles the complete title folder.
-make ffpfsc
+# Release image (raw exFAT); also assembles the complete title folder.
+make exfat
 
 # Faster folder-only development build.
 make
@@ -283,7 +283,7 @@ Outputs are written to:
 ```text
 dist/PPSA99002/           complete title folder
 dist/PPSA99002.exfat      raw installation image
-dist/PPSA99002.ffpfsc     compressed installation image
+dist/PPSA99002.ffpfsc     compressed image (`make ffpfsc` only; not released)
 ```
 
 `PPSA99002.exfat` holds the same files as the compressed image; the build reads
@@ -298,7 +298,7 @@ make test       # C++ unit/runtime, presentation ownership, report, and tooling 
 make test-stream-performance # Host-only scalar/SIMD FEC and Opus compatibility
 make lint       # formatting, static analysis, metadata, asset, and shell checks
 make check      # lint + every host test + complete folder build
-make ffpfsc     # production folder + compressed image
+make exfat      # production folder + raw exFAT image
 ```
 
 An optional `make ffpkg` target remains available for local development. The
@@ -316,14 +316,16 @@ The [Build workflow](.github/workflows/tooling.yml) runs on every push to
 4. runs lint, GoogleTest, runtime-allocation, presentation/report guards, Python
    integration checks, and host-only scalar/SIMD FEC and Opus comparisons;
 5. independently reproduces and verifies `runtime/libc.prx`;
-6. builds `PPSA99002.ffpfsc` and archives the complete app folder as
-   `PPSA99002.zip`; and
+6. builds the raw `PPSA99002.exfat` image and archives the complete app folder as
+   `PPSA99002.zip`, every entry stored as 0777; and
 7. generates `SHA256SUMS` for both release formats and uploads all three files
    as the Actions artifact.
 
 A tag matching the exact `contentVersion` verifies that build-time checksum
-again, then publishes the `.ffpfsc` image, app-folder `.zip`, and `SHA256SUMS`.
-`.ffpkg` builds are never attached to a release.
+again, then publishes the raw `.exfat` image, app-folder `.zip`, and `SHA256SUMS`.
+The compressed `.ffpfsc` image is no longer built or published by the automation, to
+prevent compatibility issues with the in-app update worker and ProsperoStore, which
+install from the ZIP. `.ffpkg` builds are never attached to a release.
 
 ## Update an installed copy
 
@@ -355,10 +357,10 @@ replace itself, and the dialog says so.
 
 ### By hand
 
-1. Download either `PPSA99002.ffpfsc` or `PPSA99002.zip` from the latest GitHub
+1. Download either `PPSA99002.exfat` or `PPSA99002.zip` from the latest GitHub
    release and verify it with `SHA256SUMS`.
 2. Fully close ProsperoLight.
-3. For the image form, replace the existing `PPSA99002.ffpfsc` in the directory
+3. For the image form, replace the existing `PPSA99002.exfat` in the directory
    scanned by ShadowMountPlus. For the folder form, extract `PPSA99002.zip` and
    upload its complete `PPSA99002` directory to `/data/homebrew/`, producing
    `/data/homebrew/PPSA99002/eboot.bin`. Do not upload the ZIP itself.

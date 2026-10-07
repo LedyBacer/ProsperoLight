@@ -22,7 +22,7 @@ class PerformanceOptions(unittest.TestCase):
         self.assertEqual(betas[0], betas[1])
         self.assertIn(version, betas[0].split("|"))
         self.assertEqual(workflow.count('"${release_flags[@]}"'), 2)
-        self.assertIn('make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8', workflow)
+        self.assertIn('make exfat FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8', workflow)
 
     def test_compile_time_bounds(self):
         cases = {
