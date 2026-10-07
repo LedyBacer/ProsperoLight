@@ -1,25 +1,69 @@
 # Changelog
 
-## Unreleased
+## 01.000.090
 
-- Replaced the bundled sandbox elevation helper with the cooperative upstream
-  PS5-Lapy-JB-Daemon owned-root flow. The app package no longer contains
-  `sandbox-elevator.elf` or app-local kernel credential/file-descriptor writes.
-- PyroWave: a GPU wavelet codec decoded with Vulkan, chosen in Settings with 4:2:0 or
+### Beta: updates from the app, 31 languages, PyroWave, more of the DualSense
+
+Everything in beta **01.000.080** is included.
+
+### New
+
+- **Updates from the app.** When homebrew.page lists a newer release, a dialog offers it.
+  **Update now** downloads, checks and installs it, and ProsperoLight closes while its files
+  are replaced; **What's new** shows the release notes first. This is the first release that
+  can do it: coming from 01.000.080, install this one by hand once.
+- **31 languages.** The launcher follows the console's language, or the one chosen in
+  Settings. Many texts were adapted from Moonlight Qt and the rest were written for
+  ProsperoLight; they have not been reviewed by native speakers, so corrections are welcome.
+  Long texts scroll slowly instead of being cut.
+- **PyroWave.** A GPU wavelet codec decoded with Vulkan, chosen in Settings with 4:2:0 or
   4:4:4 chroma and SDR or HDR10. It needs a Vibepollo/Vibeshine host that offers it and a
-  wired network; the bitrate slider reaches 1000 Mbps while it is selected.
-- More of the DualSense reaches the game: adaptive triggers, light bar, motion, touchpad
+  wired network; the bitrate slider reaches 1000 Mbps while it is selected. It was
+  contributed and tested by its author; we could not test it on our own host.
+- **More of the DualSense reaches the game:** adaptive triggers, light bar, motion, touchpad
   contacts, and haptics from hosts that send them.
-- Frame pacing in Settings: Unpaced (the default, as before), Paced and Paced+VRR.
-- Two more stream shortcuts: Touchpad + L3 and Touchpad + R3 send the host's Back and
-  Guide buttons.
-- New switches in Settings: menu sounds, quit the host app after a stream, diagnostic logs.
-- Updates from the app: when homebrew.page lists a newer release, a dialog offers it and
-  **Update now** downloads, checks and installs it; ProsperoLight closes while its files
-  are replaced. **What's new** shows the release notes first. The ten-second notice remains
-  for releases it cannot install itself.
+- **Frame rate:** 30, 60, 90 and 120 FPS, or **Custom** for any rate from 30 to 120.
+- **Frame pacing:** Unpaced (the default, as before), Paced and Paced+VRR.
+- **Settings for each PC:** mute the PC's speakers, let the host optimise the game, quit the
+  host app after the stream, and optional Vibepollo requests (VRR, virtual display, scale).
+- **More switches in Settings:** menu sounds, diagnostic logs, and a six-picture decoder
+  slot for hosts that need it (off by default).
+- Two more stream shortcuts: Touchpad + L3 and Touchpad + R3 send the host's Back and Guide
+  buttons.
+
+### Changed
+
+- **Starting a stream.** The launcher fades to black and the stream shows one connecting
+  screen. The television often changes its mode at that moment, and the change used to cut
+  the connecting screen in two.
+- **Access to `/data/prosperolight`** now comes from the upstream PS5-Lapy-JB-Daemon helper,
+  started for this app only, and works on more firmware versions. The app no longer carries
+  its own elevation code.
+- Fixed a slow drift between the host's frame cadence and the console's, stalls while
+  PyroWave pictures were processed, and the connecting artwork at 4K.
+- A matching V-Sync frame is shown as soon as it is ready.
+- Every file in the release ZIP is stored open to all (0777), as the console expects of an
+  app; a tool that keeps a ZIP's permissions no longer leaves an app that cannot start.
 - Box art is decoded by libpng, and a raw exFAT installation image is built beside the
   compressed one.
+
+### Known
+
+- On one test console the system crashed once when the app was closed after several
+  120 FPS streams. It did not happen again; please report it if you see it.
+
+### Installation / update
+
+Title ID remains `PPSA99002`; saved PCs, settings and pairing are kept. Extract
+`PPSA99002.zip` and copy its `PPSA99002/` folder to `/data/homebrew`, or use one of the
+images (`PPSA99002.exfat`, `PPSA99002.ffpfsc`). Keep only one format installed for the
+title. Close the app before replacing its files, then restart ShadowMountPlus or the
+console. `SHA256SUMS` covers every download.
+
+### Thanks
+
+LedyBacer (PyroWave, DualSense, pacing, languages, per-PC settings), KrisEnigma (V-Sync
+frame matching, the six-picture slot) and everyone who reported results.
 
 ## 01.000.080
 

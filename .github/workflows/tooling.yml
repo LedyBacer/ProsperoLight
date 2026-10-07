@@ -89,7 +89,7 @@ jobs:
         run: |
           # Performance betas ship with the measured flag set.
           case "$CONTENT_VERSION" in
-            01.000.062|01.000.070|01.000.080)
+            01.000.062|01.000.070|01.000.080|01.000.090)
               make ffpfsc FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8
               ;;
             *)
@@ -101,6 +101,8 @@ jobs:
         run: |
           cd dist
           python3 -m zipfile -c "$TITLE_ID.zip" "$TITLE_ID"
+          # Every entry stored as 0777: the console only starts an app whose files are open to all.
+          python3 ../tools/zip-open-modes.py "$TITLE_ID.zip"
           sha256sum "$TITLE_ID.exfat" "$TITLE_ID.ffpfsc" "$TITLE_ID.zip" > SHA256SUMS
 
       - name: Upload build provenance
@@ -202,7 +204,7 @@ jobs:
           checksum_name="${CHECKSUM##*/}"
           release_flags=()
           case "$GITHUB_REF_NAME" in
-            01.000.062|01.000.070|01.000.080)
+            01.000.062|01.000.070|01.000.080|01.000.090)
               release_flags=(--prerelease --latest=false)
               ;;
           esac

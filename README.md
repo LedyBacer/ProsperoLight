@@ -4,13 +4,10 @@
 
 <h1 align="center">ProsperoLight</h1>
 
-> **Beta: [01.000.080](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.080).**
-> A new launcher drawn by the GPU, up to four controllers, a Sunshine port per PC, and settings
-> and pairing kept in `/data/prosperolight`. The streaming engine is the one of the 01.000.070
-> performance beta; the PS5 decoder still limits how much bitrate is usable: see
-> [Bitrate limits](#bitrate-limits).
-> The source on `main` is ahead of that release: PyroWave, more DualSense features and frame
-> pacing arrive with the next one.
+> **Beta: [01.000.090](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.090).**
+> Updates from inside the app, 31 languages, the PyroWave codec, more DualSense features,
+> frame pacing, a custom frame rate and settings for each PC. The PS5 decoder still limits
+> how much bitrate is usable with H.264 and HEVC: see [Bitrate limits](#bitrate-limits).
 > [01.000.060 remains stable](https://github.com/blackbearreloaded/ProsperoLight/releases/tag/01.000.060).
 > Please report results and regressions through [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues), using the checklist in the beta release notes.
 
@@ -172,7 +169,7 @@ tooling are maintained in this repository.
 | Shell title | `ProsperoLight` |
 | Title ID | `PPSA99002` |
 | Category | Game |
-| Beta / stable | `01.000.080` / `01.000.060` |
+| Beta / stable | `01.000.090` / `01.000.060` |
 | Version source | [`sce_sys/param.json`](sce_sys/param.json) |
 | Writable data | `/data/prosperolight` (`/download0` if elevation is unavailable) |
 
