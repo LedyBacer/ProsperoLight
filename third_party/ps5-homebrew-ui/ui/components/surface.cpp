@@ -332,6 +332,7 @@ void SectionHeader::draw(Canvas &canvas, const Rect &bounds) const
     badge.style.fill = style.count_fill;
     badge.style.height = style.count_height;
     badge.style.text_size = style.count_size;
+    badge.style.max_count = style.count_max;
     badge.style.hide_zero = false;
     badge.style.align = gfx::Align::left;
     if (!style.on_panel)

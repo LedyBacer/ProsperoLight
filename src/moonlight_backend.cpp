@@ -63,7 +63,7 @@ int moonlight_backend_refresh(const char *host, uint16_t http_port,
     if (!snapshot || !host || !host[0])
         return GS_INVALID;
 
-    memset(snapshot, 0, sizeof(*snapshot));
+    *snapshot = {};
     memset(&identity, 0, sizeof(identity));
     memset(&server, 0, sizeof(server));
     snprintf(snapshot->host, sizeof(snapshot->host), "%s", host);
@@ -99,14 +99,16 @@ int moonlight_backend_refresh(const char *host, uint16_t http_port,
     result = gs_applist(&server, &apps);
     if (result != GS_OK)
         goto done;
-    for (app = apps; app && snapshot->app_count < MOONLIGHT_BACKEND_MAX_APPS; app = app->next)
+    for (app = apps; app; app = app->next)
     {
-        moonlight_backend_app_t *output = &snapshot->apps[snapshot->app_count++];
-        output->id = app->id;
-        output->hdr_supported = app->hdr_supported ? 1u : 0u;
-        output->app_collector_game = app->app_collector_game ? 1u : 0u;
-        snprintf(output->name, sizeof(output->name), "%s", app->name ? app->name : "Unnamed app");
+        moonlight_backend_app_t output = {};
+        output.id = app->id;
+        output.hdr_supported = app->hdr_supported ? 1u : 0u;
+        output.app_collector_game = app->app_collector_game ? 1u : 0u;
+        snprintf(output.name, sizeof(output.name), "%s", app->name ? app->name : "Unnamed app");
+        snapshot->apps.push_back(output);
     }
+    snapshot->app_count = static_cast<uint32_t>(snapshot->apps.size());
 
 done:
     snapshot->result = result;
@@ -174,7 +176,7 @@ int moonlight_backend_pair_start(const char *host, uint16_t http_port)
     if (state == MOONLIGHT_BACKEND_PAIR_PREPARING || state == MOONLIGHT_BACKEND_PAIR_WAITING)
         return GS_WRONG_STATE;
 
-    memset(&pairing_job, 0, sizeof(pairing_job));
+    pairing_job = {};
     snprintf(pairing_job.host, sizeof(pairing_job.host), "%s", host);
     pairing_job.http_port = http_port;
     snprintf(pairing_job.snapshot.host, sizeof(pairing_job.snapshot.host), "%s", host);
@@ -209,7 +211,7 @@ moonlight_backend_pair_state_t moonlight_backend_pair_poll(moonlight_backend_sna
     }
     if (snapshot &&
         (state == MOONLIGHT_BACKEND_PAIR_SUCCEEDED || state == MOONLIGHT_BACKEND_PAIR_FAILED))
-        memcpy(snapshot, &pairing_job.snapshot, sizeof(*snapshot));
+        *snapshot = pairing_job.snapshot;
     return state;
 }
 
@@ -225,7 +227,7 @@ static int run_paired_action(const char *host, uint16_t http_port,
     if (!snapshot || !host || !host[0] || !action)
         return GS_INVALID;
 
-    memset(snapshot, 0, sizeof(*snapshot));
+    *snapshot = {};
     memset(&identity, 0, sizeof(identity));
     memset(&server, 0, sizeof(server));
     snprintf(snapshot->host, sizeof(snapshot->host), "%s", host);

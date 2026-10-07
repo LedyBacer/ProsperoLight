@@ -195,6 +195,7 @@ struct SectionHeaderStyle : ComponentStyle
     BadgeFill count_fill = BadgeFill::tinted;
     float count_height = 28.0f;
     float count_size = 17.0f;
+    int count_max = 99;     // counts above this value show a plus suffix
     bool hide_zero = false; // a count of 0 hides the badge (a negative one always does)
     // ---- action ----
     float hint_size = 20.0f;  // the action's words

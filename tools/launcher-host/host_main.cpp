@@ -488,6 +488,23 @@ int main(int argc, char **argv)
                             pixels.data() + static_cast<std::size_t>(height - 1 - y) * row, row);
             plate_bar = view.connecting_bar();
         }
+        if (std::strcmp(prefix, "large-library") == 0)
+        {
+            expect(model.backend().app_count == 200 && model.backend().apps.size() == 200,
+                   "the launcher keeps all 200 host applications");
+            hui::InputFrame navigate = idle;
+            navigate.nav = Direction::down;
+            for (int i = 0; i < 28; ++i)
+                step_frame(navigate);
+            navigate.nav = Direction::right;
+            for (int i = 0; i < 3; ++i)
+                step_frame(navigate);
+            for (int i = 0; i < 60; ++i)
+                step_frame(idle);
+            expect(model.selected_app() == 199 && model.backend().apps[199].id == 200,
+                   "the last app beyond the former 64-entry limit can be selected");
+            render("last-app");
+        }
         model.Shutdown();
         return started;
     };
@@ -667,8 +684,7 @@ int main(int argc, char **argv)
                plate.size() == static_cast<std::size_t>(width) * height * 4,
            "the connecting screen is handed over as a full-resolution 4K picture");
     // The launcher goes dark and the stream shows the whole connecting screen.
-    expect(plate_bar.progress < 0.01f,
-           "the stream gets the connecting bar from empty");
+    expect(plate_bar.progress < 0.01f, "the stream gets the connecting bar from empty");
     if (failures == 0)
     {
         connecting::Bar bar;
@@ -950,6 +966,12 @@ int main(int argc, char **argv)
 
     // ---- About: one step back from the first tab ----
     session("about", {{30, previous}, {60, 0, Direction::none, "page"}, {10, back}, {30, 0}}, "");
+
+    // ---- a library larger than the former 64-entry snapshot ----
+    fake::world()[0].apps.clear();
+    for (int i = 1; i <= 200; ++i)
+        fake::world()[0].apps.push_back({i, "Library Game " + std::to_string(i)});
+    session("large-library", {{30, next}, {100, 0}}, "");
 
     // ---- a PC that stops answering, and one without apps ----
     fake::world()[0].online = false;

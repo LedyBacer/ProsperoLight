@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <climits>
 #include <cstdio>
 #include <cstring>
 #include <string_view>
@@ -424,6 +425,7 @@ void View::build()
     stop_.set_bounds({kMargin + 350.0f, 374.0f, 250.0f, 72.0f});
     shelf_.title = i18n::tr("Apps on this PC");
     shelf_.style.rule = ui::SectionRule::trailing;
+    shelf_.style.count_max = INT_MAX;
     shelf_.set_bounds({kMargin, 494.0f, kRight - kMargin, 40.0f});
     no_apps_.style.max_text_width = 640.0f;
     no_apps_.style.title_size = 36.0f;

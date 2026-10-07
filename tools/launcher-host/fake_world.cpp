@@ -45,7 +45,7 @@ Pc *find(const char *host, std::uint16_t port)
 
 int describe(const char *host, std::uint16_t port, moonlight_backend_snapshot_t *snapshot)
 {
-    std::memset(snapshot, 0, sizeof(*snapshot));
+    *snapshot = {};
     std::snprintf(snapshot->host, sizeof(snapshot->host), "%s", host);
     snapshot->http_port = port;
     const Pc *pc = find(host, port);
@@ -69,9 +69,9 @@ int describe(const char *host, std::uint16_t port, moonlight_backend_snapshot_t 
     {
         for (const App &app : pc->apps)
         {
-            if (snapshot->app_count == MOONLIGHT_BACKEND_MAX_APPS)
-                break;
-            moonlight_backend_app_t &out = snapshot->apps[snapshot->app_count++];
+            snapshot->apps.emplace_back();
+            moonlight_backend_app_t &out = snapshot->apps.back();
+            ++snapshot->app_count;
             out.id = app.id;
             std::snprintf(out.name, sizeof(out.name), "%s", app.name.c_str());
         }

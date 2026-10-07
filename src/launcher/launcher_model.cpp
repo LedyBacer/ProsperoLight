@@ -177,7 +177,7 @@ bool Model::IsSelected(const char *host, std::uint16_t port) const
 // The selected PC changed: forget what the last one said.
 void Model::ResetSelected()
 {
-    std::memset(&backend_, 0, sizeof(backend_));
+    backend_ = {};
     backend_valid_ = false;
     health_ = {};
     health_due_ms_ = 0;
@@ -819,7 +819,7 @@ bool Model::ApplySelected(const Job &job, const JobResult &result)
     if (success || !health_.Reconnecting())
         changed = Remember(job.host, job.port, backend_, backend_.online != 0) || changed;
     return changed || !was_valid || was_reconnecting != health_.Reconnecting() ||
-           std::memcmp(&before, &backend_, sizeof(backend_)) != 0;
+           !(before == backend_);
 }
 
 void Model::Apply(const Job &job, JobResult &result)

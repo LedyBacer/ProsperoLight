@@ -10,12 +10,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <cstring>
+#include <tuple>
+#include <vector>
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-#define MOONLIGHT_BACKEND_MAX_APPS 64
 #define MOONLIGHT_BACKEND_PAIR_TIMEOUT_SECONDS 120
 
     typedef enum moonlight_backend_pair_state
@@ -33,6 +36,13 @@ extern "C"
         uint32_t hdr_supported;
         uint32_t app_collector_game;
         char name[64];
+
+        bool operator==(const moonlight_backend_app &other) const
+        {
+            return id == other.id && hdr_supported == other.hdr_supported &&
+                   app_collector_game == other.app_collector_game &&
+                   std::strcmp(name, other.name) == 0;
+        }
     } moonlight_backend_app_t;
 
     typedef struct moonlight_backend_snapshot
@@ -53,7 +63,24 @@ extern "C"
         char unique_id[48];
         char server_version[32];
         char error[128];
-        moonlight_backend_app_t apps[MOONLIGHT_BACKEND_MAX_APPS];
+        // The host's library can contain hundreds of titles. Store the whole
+        // parsed list; copying a snapshot owns its entries independently.
+        std::vector<moonlight_backend_app_t> apps;
+
+        bool operator==(const moonlight_backend_snapshot &other) const
+        {
+            return std::tie(result, online, paired, https_port, http_port, current_app_id,
+                            hevc_supported, main10_supported, pyrowave_profiles, host_capabilities,
+                            app_count) == std::tie(other.result, other.online, other.paired,
+                                                   other.https_port, other.http_port,
+                                                   other.current_app_id, other.hevc_supported,
+                                                   other.main10_supported, other.pyrowave_profiles,
+                                                   other.host_capabilities, other.app_count) &&
+                   std::strcmp(host, other.host) == 0 && std::strcmp(name, other.name) == 0 &&
+                   std::strcmp(unique_id, other.unique_id) == 0 &&
+                   std::strcmp(server_version, other.server_version) == 0 &&
+                   std::strcmp(error, other.error) == 0 && apps == other.apps;
+        }
     } moonlight_backend_snapshot_t;
 
     /* http_port is the PC's Sunshine port; 0 selects the default. */
