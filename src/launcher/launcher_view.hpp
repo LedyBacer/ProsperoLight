@@ -284,6 +284,8 @@ class View
     hui::ui::LoadingScreen loader_;
     float load_progress_ = 0.0f;
     bool launching_ = false;
+    // Seconds since Start: the launcher fades to black, then hands over.
+    float launch_age_ = 0.0f;
     bool plate_ = false;
     bool start_stream_ = false;
     hui::ui::ToastStack toasts_;

@@ -666,8 +666,9 @@ int main(int argc, char **argv)
     expect(width == connecting::kWidth && height == connecting::kHeight &&
                plate.size() == static_cast<std::size_t>(width) * height * 4,
            "the connecting screen is handed over as a full-resolution 4K picture");
-    expect(plate_bar.progress > 0.29f && plate_bar.progress < 0.31f,
-           "the launcher's bar stops at 30%, where the stream takes over");
+    // The launcher goes dark and the stream shows the whole connecting screen.
+    expect(plate_bar.progress < 0.01f,
+           "the stream gets the connecting bar from empty");
     if (failures == 0)
     {
         connecting::Bar bar;

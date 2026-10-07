@@ -46,10 +46,11 @@ constexpr Rect kPairPanel{960.0f - 440.0f, 250.0f, 880.0f, 560.0f};
 constexpr Rect kUpdatePanel{960.0f - 440.0f, 230.0f, 880.0f, 600.0f};
 constexpr Rect kNotesPanel{960.0f - 560.0f, 120.0f, 1120.0f, 840.0f};
 constexpr int kColumns = 7;
-// How long the connecting screen stays before the stream takes the display,
-// and how far its bar gets meanwhile. The stream carries the bar on from there.
-constexpr float kLaunchSeconds = 1.0f;
-constexpr float kHandoverProgress = 0.3f;
+// The stream opens the television's output for itself, often in another mode:
+// the launcher fades to black first, and the stream shows the connecting
+// screen once, from an empty bar.
+constexpr float kLaunchFadeSeconds = 0.3f;
+constexpr float kLaunchSeconds = 0.6f;
 constexpr Rect kConnectBar{kMargin, 974.0f, kRight - kMargin, 10.0f};
 
 // Measured on the console for 4K HEVC: smooth up to / freezes above, in Mbps.
@@ -1320,9 +1321,8 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     }
     else if (launching_)
     {
-        load_progress_ =
-            std::min(load_progress_ + dt / kLaunchSeconds * kHandoverProgress, kHandoverProgress);
-        if (load_progress_ >= kHandoverProgress)
+        launch_age_ += dt;
+        if (launch_age_ >= kLaunchSeconds)
             start_stream_ = true;
     }
     else if (host_prompt_.is_open())
@@ -1714,6 +1714,7 @@ void View::launch(ui::Feedback &feedback)
     loader_.show(feedback);
     feedback.play(audio::Cue::launch);
     launching_ = true;
+    launch_age_ = 0.0f;
 }
 
 void View::update_settings(const InputFrame &input, ui::Feedback &feedback)
@@ -1815,6 +1816,13 @@ void View::draw(Frame &frame) const
     draw_update_notes(above);
     update_dialog_.draw(above);
     language_.draw_popover(above);
+    if (launching_ && !plate_)
+    {
+        list.rounded_rect(
+            {0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f,
+            Color::rgb(0x000000).with_alpha(std::min(launch_age_ / kLaunchFadeSeconds, 1.0f)));
+        return;
+    }
     loader_.draw(above);
     draw_loader_tip(above);
     draw_connect_bar(above);
