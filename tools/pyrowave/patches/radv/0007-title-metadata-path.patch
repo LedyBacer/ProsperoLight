@@ -1,0 +1,62 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -44,6 +44,7 @@
+ #include "wsi_common_entrypoints.h"
+ #include "wsi_common_private.h"
+ #include "ps5_videoout_formats.h"
++#include "ps5_title_metadata.h"
+ 
+ #if defined(__PROSPERO__)
+ #include <immintrin.h>
+@@ -263,24 +264,13 @@
+ 
+ /* --- VideoOut ------------------------------------------------------------ */
+ 
++/* Copied from the application before device/output initialization. */
++static char videoout_metadata_path[256] = "/app0/sce_sys/param.json";
++
+ static bool
+ videoout_title_declares_high_frame_rate(void)
+ {
+-   FILE *const file = fopen("/app0/sce_sys/param.json", "rb");
+-   if (file == NULL)
+-      return false;
+-   char text[16384];
+-   const size_t length = fread(text, 1, sizeof(text) - 1, file);
+-   fclose(file);
+-   text[length] = '\0';
+-   const char *at = strstr(text, "\"attribute3\"");
+-   if (at == NULL || (at = strchr(at, ':')) == NULL)
+-      return false;
+-   const unsigned long value = strtoul(at + 1, NULL, 0);
+-   const bool declared = ps5_videoout_declares_hfr(value);
+-   fprintf(stderr, "wsi/videoout: title attribute3=%#lx hfr=%u vrr_declared=%u\n", value,
+-           declared, (value & PS5_VIDEOOUT_ATTRIBUTE_VRR_MASK) != 0);
+-   return declared;
++   return ps5_title_declares_hfr(videoout_metadata_path) != 0;
+ }
+ 
+ /* The refresh period: the median of a few intervals between vblank waits,
+@@ -1269,8 +1259,8 @@
+ /* Application selects scanout semantics before creating a display surface.
+  * Uses the same verified VideoOut format and HSYNC flip mode as VideoDec2.
+  */
+-int wsi_ps5_configure_output(int hdr, int vsync, int high_refresh);
+-int wsi_ps5_configure_output(int hdr, int vsync, int high_refresh)
++int wsi_ps5_configure_output(int hdr, int vsync, int high_refresh, const char *metadata_path);
++int wsi_ps5_configure_output(int hdr, int vsync, int high_refresh, const char *metadata_path)
+ {
+    call_once(&videoout_once, videoout_output_init_once);
+    struct wsi_videoout_output *out = &videoout_output;
+@@ -1279,6 +1269,11 @@
+       mtx_unlock(&out->lock);
+       return -1;
+    }
++   if (!metadata_path || !metadata_path[0] || strlen(metadata_path) >= sizeof(videoout_metadata_path)) {
++      mtx_unlock(&out->lock);
++      return -1;
++   }
++   memcpy(videoout_metadata_path, metadata_path, strlen(metadata_path) + 1);
+    out->hdr = hdr != 0;
+    out->prefer_high_refresh = high_refresh != 0;
+    out->prefer_vrr = (high_refresh & 2) != 0;

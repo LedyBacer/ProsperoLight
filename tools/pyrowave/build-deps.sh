@@ -21,11 +21,12 @@ prepare_pyrowave_build() {
     # applying overlapping patches, so rebuilds remain idempotent.
     git -C "$deps/PS5_Mesa" show "$(cat "$staged/.revision"):src/vulkan/wsi/wsi_common_videoout.c" > "$staged/src/vulkan/wsi/wsi_common_videoout.c"
     cp "$root/include/ps5_videoout_formats.h" "$staged/src/vulkan/wsi/ps5_videoout_formats.h"
+    cp "$root/include/ps5_title_metadata.h" "$staged/src/vulkan/wsi/ps5_title_metadata.h"
     for patch in "$root/tools/pyrowave/patches/radv/"*.patch; do
         git -C "$staged" apply "$patch"
     done
     local hash stamp
-    hash=$(sha256sum "$root/tools/pyrowave/patches/radv/"*.patch "$root/include/ps5_videoout_formats.h" | sha256sum | cut -d' ' -f1)
+    hash=$(sha256sum "$root/tools/pyrowave/patches/radv/"*.patch "$root/include/ps5_videoout_formats.h" "$root/include/ps5_title_metadata.h" | sha256sum | cut -d' ' -f1)
     stamp="$PS5_VULKAN_ROOT/.deps/native/radv-release/.pyrowave-wsi-patch-hash"
     if [[ ! -f $stamp || $(cat "$stamp") != "$hash" ]]; then
         rm -f "$PS5_VULKAN_ROOT/.deps/native/radv-release/PROVENANCE.txt"

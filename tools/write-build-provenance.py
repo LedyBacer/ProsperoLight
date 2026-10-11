@@ -68,6 +68,7 @@ def main():
         receipt["pyrowave"] = {"pins": pins, "bitstream": "186f0393",
             "archives": [{"name": p.name, "sha256": digest(p)} for p in archives],
             "wsi_patches": {p.name: digest(p) for p in sorted((ROOT / "tools/pyrowave/patches/radv").glob("*.patch"))},
+            "title_metadata_header_sha256": digest(ROOT / "include/ps5_title_metadata.h"),
             "shared_scanout_header_sha256": digest(ROOT / "include/ps5_videoout_formats.h")}
     gl = ROOT / ".deps/ps5-opengl/current"
     receipt["opengl"] = {"manifest_sha256": digest(gl / "manifest.sha256"),

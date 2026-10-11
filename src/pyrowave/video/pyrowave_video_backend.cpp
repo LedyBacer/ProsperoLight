@@ -1,8 +1,10 @@
 #include "presentation_preferences.hpp"
+#include "app_storage.hpp"
 // SPDX-License-Identifier: MIT
 #include "pyrowave_video_backend.hpp"
 #include <ctime>
-extern "C" int wsi_ps5_configure_output(int hdr, int vsync, int high_refresh);
+extern "C" int wsi_ps5_configure_output(int hdr, int vsync, int high_refresh,
+                                        const char *metadata_path);
 static double clock_ms()
 {
     timespec t = {};
@@ -19,7 +21,8 @@ void PyroWaveVideoBackend::initialize(unsigned width, unsigned height, unsigned 
     vsync = vsync || request_vrr;
     refresh_ = 0;
     requested_ = 0;
-    if (wsi_ps5_configure_output(hdr, vsync, output_flags) != 0)
+    const std::string metadata_path = std::string(storage::paths().app) + "/sce_sys/param.json";
+    if (wsi_ps5_configure_output(hdr, vsync, output_flags, metadata_path.c_str()) != 0)
         fail("VideoOut still owned by previous session");
     if (!decoder_.initialize(c_, width, height, chroma444))
         fail("decoder initialize");
