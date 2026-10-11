@@ -45,6 +45,42 @@ The launcher stays open with a notice, and nothing is streamed, when:
 A stream that fails or is cut off opens the launcher with the reason, with or without
 `--exit-after-stream`.
 
+## What a forwarder tool can read
+
+So that a tool can offer a choice instead of asking for names, ProsperoLight keeps the saved
+PCs, their apps and box art under `/data/prosperolight/forwarder`:
+
+| Path | Contents |
+| --- | --- |
+| `pcs/<key>.json` | One paired PC and the apps it lists. |
+| `posters/<key>/<id>.png` | One app's box art, as Sunshine sent it (usually 600x800). |
+
+`<key>` is the PC's address and port, as in `192.168.1.50_47989`. A PC's file looks like this:
+
+```json
+{
+  "format": "prosperolight-forwarder-catalog/1",
+  "key": "192.168.1.50_47989",
+  "name": "Gaming-PC",
+  "address": "192.168.1.50",
+  "port": 47989,
+  "apps": [
+    {"id": 1298491830, "name": "Desktop"},
+    {"id": 7, "name": "Steam Big Picture"}
+  ]
+}
+```
+
+- A PC's file is written when its app list arrives or changes while ProsperoLight is open,
+  and deleted when the PC is removed. A PC that was never paired has no file.
+- Box art is saved as it is fetched: for the apps on screen first, then for the rest of the
+  selected PC's list. An app may have no file yet.
+- Files are replaced whole, so a reader never sees half of one.
+- `name` and `address` are what `--pc` takes; an app's `name` or `id` is what `--app` takes.
+- The list exists only when ProsperoLight has its `/data/prosperolight` folder.
+
+The code is in [`include/forwarder_catalog.hpp`](../include/forwarder_catalog.hpp).
+
 ## Limits
 
 - Arguments reach a new ProsperoLight only. If ProsperoLight is already running, the

@@ -258,7 +258,8 @@ class Model
         std::uint16_t port = 0;
         std::uint16_t https_port = 0;
         int app_id = 0;
-        bool announce = false; // tell the player when the PC does not answer
+        bool announce = false;     // tell the player when the PC does not answer
+        bool catalog_only = false; // box art for the forwarder catalog: saved, not shown
     };
     struct JobResult
     {
@@ -293,6 +294,9 @@ class Model
                   bool online);
     bool Upsert(const char *host, std::uint16_t port, const moonlight_backend_snapshot_t &state);
     void Notify(NoticeKind kind, std::string title, std::string body = {}, float seconds = 0.0f);
+    // Writes the PC's app list where forwarder tools read it.
+    void PublishCatalog(const char *host, std::uint16_t port,
+                        const moonlight_backend_snapshot_t &state);
     void Save();
 
     moonlight_config_t config_{};
@@ -317,6 +321,9 @@ class Model
     std::deque<int> artwork_wanted_;
     std::vector<int> artwork_asked_;
     std::deque<ArtworkImage> artwork_ready_;
+    // Box art the forwarder catalog lacks, fetched when nothing else waits.
+    std::deque<int> catalog_wanted_;
+    std::vector<int> catalog_asked_;
     ArtworkDecoder artwork_decoder_ = nullptr;
     WorkerStart worker_start_ = nullptr;
     UpdateCheck update_check_ = nullptr;

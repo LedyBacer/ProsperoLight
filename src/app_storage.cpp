@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "forwarder_catalog.hpp"
 #include "app_storage.hpp"
 #include "lan_http_report.hpp"
 
@@ -273,6 +274,10 @@ void storage::Initialize()
         }
     open_log(paths.logs);
     prosperolight_debug_start(paths.logs);
+
+    // What forwarder tools read: the saved PCs, their apps and box art.
+    if (data_ready)
+        prosperolight::forwarder_catalog::set_root((std::string(kDataDir) + "/forwarder").c_str());
 
     // The OpenGL runtime keeps the shaders it compiled, so later launches, and
     // the first visit to each screen, skip that work.

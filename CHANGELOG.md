@@ -7,6 +7,8 @@
 - **Home-screen forwarders.** A forwarder tile can open ProsperoLight with `--pc`, `--app` and
   `--exit-after-stream`, and the stream starts by itself. See
   [docs/FORWARDER.md](docs/FORWARDER.md).
+- **A list for forwarder tools.** The saved PCs, their apps and box art are kept under
+  `/data/prosperolight/forwarder`, so a forwarder tool can offer them to pick from.
 
 ## 01.000.095
 

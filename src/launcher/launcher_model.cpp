@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "forwarder_catalog.hpp"
 #include "i18n.hpp"
 #include "launcher/launcher_model.hpp"
 #include "host_preferences.hpp"
@@ -49,6 +50,7 @@ void Model::Initialize(std::uint64_t now_ms)
     i18n::initialize(std::string(storage::paths().app) + "/assets/locales");
     now_ms_ = now_ms;
     (void)moonlight_config_load(&config_);
+    prosperolight::forwarder_catalog::prune(config_);
     ResetSelected();
     if (selected_host())
     {
@@ -190,6 +192,8 @@ void Model::ResetSelected()
     artwork_wanted_.clear();
     artwork_asked_.clear();
     artwork_ready_.clear();
+    catalog_wanted_.clear();
+    catalog_asked_.clear();
     if (const moonlight_config_host_t *host = selected_host())
     {
         Copy(backend_.host, sizeof(backend_.host), host->address);
@@ -337,6 +341,7 @@ void Model::RemoveHost()
         return;
     }
     prosperolight::host_preferences_remove(*host);
+    prosperolight::forwarder_catalog::remove_pc(host->address, moonlight_config_host_port(host));
     config_ = updated;
     save_pending_ = false;
     if (config_.host_count && config_.selected_host >= config_.host_count)
@@ -562,7 +567,11 @@ void Model::Run(const Job &job, JobResult *result)
         result->result = moonlight_backend_fetch_app_artwork(job.host, job.https_port, job.app_id);
         std::size_t size = 0;
         const unsigned char *png = moonlight_backend_find_app_artwork(job.app_id, &size);
-        if (png && size && artwork_decoder_ && artwork_decoder_(png, size, &result->image))
+        if (png && size)
+            (void)prosperolight::forwarder_catalog::save_poster(job.host, job.port, job.app_id, png,
+                                                                size);
+        if (png && size && !job.catalog_only && artwork_decoder_ &&
+            artwork_decoder_(png, size, &result->image))
             result->image.app_id = job.app_id;
         else
             result->image = {};
@@ -601,6 +610,16 @@ bool Model::StartNext()
         next.https_port = backend_.https_port;
         next.app_id = artwork_wanted_.front();
         artwork_wanted_.pop_front();
+    }
+    else if (!catalog_wanted_.empty() && selected_host() && backend_.online && backend_.paired)
+    {
+        next.kind = JobKind::artwork;
+        next.catalog_only = true;
+        Copy(next.host, sizeof(next.host), selected_host()->address);
+        next.port = moonlight_config_host_port(selected_host());
+        next.https_port = backend_.https_port;
+        next.app_id = catalog_wanted_.front();
+        catalog_wanted_.pop_front();
     }
     else if (update_check_ && !update_checked_)
     {
@@ -839,6 +858,21 @@ bool Model::ApplySelected(const Job &job, const JobResult &result)
     {
         backend_ = result.snapshot;
         changed = Upsert(job.host, job.port, backend_);
+        if (success)
+        {
+            PublishCatalog(job.host, job.port, backend_);
+            // Each app's box art once per visit to this PC, when the catalog lacks it.
+            if (prosperolight::forwarder_catalog::enabled() && backend_.paired)
+                for (const moonlight_backend_app_t &app : backend_.apps)
+                    if (std::find(catalog_asked_.begin(), catalog_asked_.end(), app.id) ==
+                        catalog_asked_.end())
+                    {
+                        catalog_asked_.push_back(app.id);
+                        if (!prosperolight::forwarder_catalog::has_poster(job.host, job.port,
+                                                                          app.id))
+                            catalog_wanted_.push_back(app.id);
+                    }
+        }
     }
     else
     {
@@ -858,6 +892,21 @@ bool Model::ApplySelected(const Job &job, const JobResult &result)
            !(before == backend_);
 }
 
+void Model::PublishCatalog(const char *host, std::uint16_t port,
+                           const moonlight_backend_snapshot_t &state)
+{
+    // An unpaired PC answers without its apps: what was written before stays.
+    if (!state.online || !state.paired)
+        return;
+    const char *name = state.name;
+    for (std::uint32_t i = 0; i < config_.host_count; ++i)
+        if (std::strcmp(config_.hosts[i].address, host) == 0 &&
+            moonlight_config_host_port(&config_.hosts[i]) == port && config_.hosts[i].name[0])
+            name = config_.hosts[i].name;
+    if (prosperolight::forwarder_catalog::publish_pc(name, host, port, state.apps))
+        prosperolight_debug_line("catalog", "pc=%s:%u apps=%zu", host, port, state.apps.size());
+}
+
 void Model::Apply(const Job &job, JobResult &result)
 {
     switch (job.kind)
@@ -870,7 +919,10 @@ void Model::Apply(const Job &job, JobResult &result)
         const bool online = result.result == 0 && result.snapshot.online;
         bool changed = Remember(job.host, job.port, result.snapshot, online);
         if (online)
+        {
             changed = Upsert(job.host, job.port, result.snapshot) || changed;
+            PublishCatalog(job.host, job.port, result.snapshot);
+        }
         if (changed)
             ++revision_;
         return;

@@ -16,6 +16,8 @@
 //   logs/      prosperolight-launcher.log, the previous launch's log, and the
 //              last stream's performance report; crash-last.txt after a crash
 //   cache/     the shaders the launcher compiled, so the next launch is faster
+//   forwarder/ the saved PCs, their apps and box art, for forwarder tools
+//              (include/forwarder_catalog.hpp)
 // and the app's own files are read from the folder it was installed in.
 // Without it (no compatible upstream Lapy service, or the request was refused) the
 // sandbox paths stay: /app0 and /download0, as in every earlier version.

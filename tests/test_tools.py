@@ -1007,7 +1007,7 @@ class ToolTests(unittest.TestCase):
         # Every request to a PC carries that PC's port, and an answer from
         # another endpoint than the selected one never becomes its state.
         self.assertEqual(app.count("job.port = moonlight_config_host_port("), 4)
-        self.assertEqual(app.count("next.port = moonlight_config_host_port("), 2)
+        self.assertEqual(app.count("next.port = moonlight_config_host_port("), 3)
         self.assertIn("moonlight_backend_refresh(job.host, job.port, &result->snapshot)", app)
         self.assertIn("if (!IsSelected(job.host, job.port))", app)
 
