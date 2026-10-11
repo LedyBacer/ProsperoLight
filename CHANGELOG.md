@@ -5,7 +5,7 @@
 - **Stop app tells the truth.** When the PC accepts the stop but keeps the app running, the
   launcher says so instead of "App stopped", and starting another app explains why it cannot.
 - **Home-screen forwarders.** A forwarder tile can open ProsperoLight with `--pc`, `--app` and
-  `--exit-after-stream`, and the stream starts by itself. See
+  `--exit-after-stream`, and the stream starts by itself, straight from the connecting screen. See
   [docs/FORWARDER.md](docs/FORWARDER.md).
 - **A list for forwarder tools.** The saved PCs, their apps and box art are kept under
   `/data/prosperolight/forwarder`, so a forwarder tool can offer them to pick from.

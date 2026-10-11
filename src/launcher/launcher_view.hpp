@@ -124,6 +124,15 @@ class View
 
     // True once, when the stream should start.
     bool take_start_stream();
+    // A forwarded launch shows the connecting screen from the first frame, with no
+    // sound and nothing of the launcher under it, until the stream takes over.
+    void begin_forwarded(const std::string &app, const std::string &pc);
+    // It did not start: the launcher appears, as it is.
+    void end_forwarded();
+    bool forwarding() const
+    {
+        return forwarding_;
+    }
     // Starts the selected app of the selected PC, as Start does: for a forwarded launch.
     void start_selected(hui::ui::Feedback &feedback);
     // Installing a newer release (launcher_model.hpp): the actions that do it,
@@ -304,6 +313,7 @@ class View
     // Seconds since Start: the launcher fades to black, then hands over.
     float launch_age_ = 0.0f;
     bool plate_ = false;
+    bool forwarding_ = false;
     bool start_stream_ = false;
     hui::ui::ToastStack toasts_;
     std::string pending_error_;

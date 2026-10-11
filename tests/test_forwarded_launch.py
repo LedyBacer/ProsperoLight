@@ -106,6 +106,20 @@ class ForwardedLaunchTests(unittest.TestCase):
         self.assertIn("if (first_start)", launcher.split("ForwardedStart forwarded;")[1][:400])
         self.assertIn("prosperolight::pending_forwarded_launch() = {};", launcher)
 
+    def test_it_goes_straight_to_the_connecting_screen(self):
+        launcher = (ROOT / "src/launcher/launcher_ps5.cpp").read_text()
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text()
+        self.assertIn("view.begin_forwarded(forwarded.launch().app, forwarded.launch().pc);", launcher)
+        self.assertIn("view.end_forwarded();", launcher)
+        # Nothing is pressed on screens that are out of sight.
+        self.assertIn("if (view.forwarding())", launcher)
+        begin = view.split("void View::begin_forwarded(")[1].split("\n}\n")[0]
+        self.assertIn("welcomed_ = true;", begin)
+        self.assertIn("loader_.show(silent);", begin)
+        # No second fade and no launch sound when the connecting screen is already up.
+        self.assertIn("if (forwarding_ && launching_)\n        launch_age_ = kLaunchSeconds;", view)
+        self.assertIn("if (launching_ && !plate_ && !forwarding_)", view)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -337,6 +337,8 @@ int main(int argc, char **argv)
         launcher::ForwardedStart forwarded;
         forwarded.Begin(std::move(prosperolight::pending_forwarded_launch()), now_ms);
         prosperolight::pending_forwarded_launch() = {};
+        if (forwarded.active())
+            view.begin_forwarded(forwarded.launch().app, forwarded.launch().pc);
         forwarded_app.clear();
         forwarded_reason.clear();
         launcher::UpdateActions actions;
@@ -430,6 +432,7 @@ int main(int argc, char **argv)
                 else if (step == launcher::ForwardedStart::Step::failed)
                 {
                     forwarded_reason = reason;
+                    view.end_forwarded();
                     model.ShowNotice(launcher::NoticeKind::error, i18n::tr("The stream was not started"),
                                      reason, 8.0f);
                 }

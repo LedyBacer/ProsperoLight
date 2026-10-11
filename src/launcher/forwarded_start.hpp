@@ -39,6 +39,17 @@ class ForwardedStart
         deadline_ms_ = now_ms + kPatienceMs;
     }
 
+    // Still on its way to a stream: the launcher keeps its screens out of sight.
+    bool active() const
+    {
+        return active_;
+    }
+    // What was asked for, as it was typed: the names to show until the PC answers.
+    const prosperolight::ForwardedLaunch &launch() const
+    {
+        return launch_;
+    }
+
     bool exit_after_stream() const
     {
         return launch_.exit_after_stream;

@@ -570,6 +570,8 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                 forwarded.Begin(std::move(prosperolight::pending_forwarded_launch()),
                                 static_cast<std::uint64_t>(sys::monotonic_us() / 1000));
                 prosperolight::pending_forwarded_launch() = {};
+                if (forwarded.active())
+                    view.begin_forwarded(forwarded.launch().app, forwarded.launch().pc);
             }
             view.set_players(SignedInUsers());
             view.set_update_actions(
@@ -608,8 +610,14 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                     mark = at;
                 };
                 const std::size_t count = pad.read(samples);
-                const InputFrame input = tracker.update(std::span<const PadSample>(samples, count),
-                                                        static_cast<std::uint64_t>(now));
+                InputFrame input = tracker.update(std::span<const PadSample>(samples, count),
+                                                  static_cast<std::uint64_t>(now));
+                // The launcher's screens are out of sight: nothing is pressed on them.
+                if (view.forwarding())
+                {
+                    input = {};
+                    input.connected = true;
+                }
 
                 const bool exit_was_available = view.can_hold_to_exit();
                 model.Poll(static_cast<std::uint64_t>(now / 1000));
@@ -772,6 +780,7 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                     else if (step == ForwardedStart::Step::failed)
                     {
                         PL_LOG("[PL] launcher: forwarded launch failed: %s", reason.c_str());
+                        view.end_forwarded();
                         model.ShowNotice(NoticeKind::error, i18n::tr("The stream was not started"),
                                          reason, 8.0f);
                     }

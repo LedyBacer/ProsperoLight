@@ -1391,7 +1391,8 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
     else if (launching_)
     {
         launch_age_ += dt;
-        if (launch_age_ >= kLaunchSeconds)
+        // A forwarded launch hands over the connecting screen itself: only once it is fully there.
+        if (launch_age_ >= kLaunchSeconds && (!forwarding_ || loader_.opacity() > 0.99f))
             start_stream_ = true;
     }
     else if (host_prompt_.is_open())
@@ -1766,11 +1767,36 @@ void View::update_games(const InputFrame &input, ui::Feedback &feedback)
     }
 }
 
+void View::begin_forwarded(const std::string &app, const std::string &pc)
+{
+    forwarding_ = true;
+    welcomed_ = true; // no welcome sound: the app is only passing through
+    loader_.title = app;
+    loader_.subtitle = pc;
+    load_progress_ = 0.0f;
+    ui::Feedback silent;
+    loader_.show(silent);
+}
+
+void View::end_forwarded()
+{
+    if (!forwarding_)
+        return;
+    forwarding_ = false;
+    if (!launching_)
+        loader_.hide();
+}
+
 void View::start_selected(ui::Feedback &feedback)
 {
     // The Games page is where the player lands when the stream ends.
     show(1, nullptr);
     launch(feedback);
+    // The connecting screen is already up: no fade to black before the stream.
+    if (forwarding_ && launching_)
+        launch_age_ = kLaunchSeconds;
+    else
+        end_forwarded();
 }
 
 void View::launch(ui::Feedback &feedback)
@@ -1787,8 +1813,11 @@ void View::launch(ui::Feedback &feedback)
     loader_.title = backend.apps[model_.selected_app()].name;
     loader_.subtitle = text;
     load_progress_ = 0.0f;
-    loader_.show(feedback);
-    feedback.play(audio::Cue::launch);
+    if (!forwarding_)
+    {
+        loader_.show(feedback);
+        feedback.play(audio::Cue::launch);
+    }
     launching_ = true;
     {
         const auto host_settings = prosperolight::host_preferences(model_.selected_host());
@@ -1909,7 +1938,10 @@ void View::draw(Frame &frame) const
     draw_update_notes(above);
     update_dialog_.draw(above);
     language_.draw_popover(above);
-    if (launching_ && !plate_)
+    // A forwarded launch: black under the connecting screen, never the launcher.
+    if (forwarding_ && !plate_)
+        list.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, Color::rgb(0x000000));
+    if (launching_ && !plate_ && !forwarding_)
     {
         list.rounded_rect(
             {0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f,

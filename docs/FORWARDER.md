@@ -26,15 +26,16 @@ read. Either works.
 
 ## What happens
 
-1. ProsperoLight opens its launcher, selects the PC and waits for it to answer, for up to
-   fifteen seconds.
+1. ProsperoLight shows its connecting screen at once, with the app's name: no opening
+   animation, no sound and none of the launcher's pages. Behind it, it selects the PC and
+   waits for it to answer, for up to fifteen seconds.
 2. It selects the app and starts the stream exactly as a press on Start does, with the
    settings saved in ProsperoLight (resolution, frame rate, codec, bitrate, and the
    settings kept for that PC).
 3. Leaving the stream (Touchpad + L1) opens the Games page, or, with
    `--exit-after-stream`, closes ProsperoLight.
 
-The launcher stays open with a notice, and nothing is streamed, when:
+The launcher appears with a notice, and nothing is streamed, when:
 
 - the PC is not one of the saved ones;
 - the PC does not answer in time;
