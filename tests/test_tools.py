@@ -903,8 +903,8 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(workflow.count("--notes-file release-notes.md"), 1)
         self.assertNotIn(".ffpkg", workflow)
 
-    def test_readme_bitrate_limits_match_the_measured_model(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    def test_performance_guide_bitrate_limits_match_the_measured_model(self):
+        readme = (ROOT / "docs/PERFORMANCE_GUIDE.md").read_text(encoding="utf-8")
         result = subprocess.run(
             [sys.executable, str(ROOT / "tools/plot-bitrate-limits.py"), "--check"],
             capture_output=True, text=True,
@@ -914,10 +914,10 @@ class ToolTests(unittest.TestCase):
         self.assertIn(" 90 FPS: smooth up to 115 Mbps, limit 145 Mbps (measured", result.stdout)
         self.assertIn(" 60 FPS: smooth up to 115 Mbps, limit 190 Mbps (extrapolated", result.stdout)
         self.assertIn("> [!WARNING]", readme)
-        self.assertIn("](docs/images/bitrate-limits.svg)", readme)
-        self.assertIn("| 120 FPS | 80 Mbps | 100 Mbps | **80 Mbps** or lower |", readme)
-        self.assertIn("| 90 FPS | 115 Mbps | 145 Mbps | **100 Mbps** or lower |", readme)
-        self.assertIn("| 60 FPS | 115 Mbps | about 190 Mbps (extrapolated) |", readme)
+        self.assertIn("](images/bitrate-limits.svg)", readme)
+        self.assertIn("| **120 FPS** | 80 Mbps | 100 Mbps | **80 Mbps or less** |", readme)
+        self.assertIn("| **90 FPS** | 115 Mbps | 145 Mbps | **100 Mbps or less** |", readme)
+        self.assertIn("| **60 FPS** | 115 Mbps | ~190 Mbps *(extrapolated)* |", readme)
 
     def test_readme_tracks_identity_and_stream_shortcuts(self):
         configured = json.loads(
@@ -925,10 +925,11 @@ class ToolTests(unittest.TestCase):
         )
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(configured["titleId"], readme)
-        self.assertIn(configured["contentVersion"], readme)
+        self.assertIn("docs/USER_GUIDE.md", readme)
+        guide = (ROOT / "docs/USER_GUIDE.md").read_text(encoding="utf-8")
         for button, label in (("L1", "l1"), ("R1", "r1"), ("Square", "square"),
                               ("Triangle", "triangle")):
-            self.assertIn(f"| ![Touchpad][touchpad] + ![{button}][{label}] |", readme)
+            self.assertIn(f"| **Touchpad + {button}** |", guide)
 
     def test_stream_shortcuts_are_named_after_the_touchpad(self):
         # The button was once written "Select"; the changelog keeps one note of it.
@@ -950,15 +951,11 @@ class ToolTests(unittest.TestCase):
             capture_output=True, text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        references = dict(re.findall(r"^\[(\w+)\]: (docs/images/buttons/\w+\.svg) ", readme, re.M))
-        self.assertEqual(len(references), 12)
-        for label, path in references.items():
-            self.assertTrue((ROOT / path).is_file(), path)
-            self.assertIn(f"][{label}]", readme)
-        controls = readme[readme.index("## Controls"):]
-        controls = controls[: controls.index("[cross]:")]
-        for name in ("Cross", "Circle", "Square", "Triangle", "Options", "L1", "R1", "D-pad"):
-            self.assertIsNone(re.search(rf"(?<!\[){name}(?!\])", controls), name)
+        # README now links to the user guide; generated SVG assets and actual
+        # launcher button glyphs remain independently checked.
+        self.assertIn("docs/USER_GUIDE.md", readme)
+        icons = list((ROOT / "docs/images/buttons").glob("*.svg"))
+        self.assertEqual(len(icons), 12)
 
         # The launcher draws the buttons' glyphs and names none of them in text.
         view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
