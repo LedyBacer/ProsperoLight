@@ -59,6 +59,7 @@ The **touchpad button** is a click: press the touchpad down while using the seco
 | D-pad / left stick | Navigate PCs, games and settings |
 | Cross | Select, pair, launch or confirm |
 | Circle | Back / PCs |
+| Hold Circle for 2 seconds on the PCs page | Close ProsperoLight; release to cancel |
 | Square | Stop the running host application |
 | Triangle | Rediscover Sunshine hosts |
 | L1 / R1 | Switch launcher pages |
@@ -76,7 +77,7 @@ The **touchpad button** is a click: press the touchpad down while using the seco
 | **Touchpad + R3** | Send Guide to host |
 | USB keyboard/mouse | Forward supported keys, clicks and scrolling to the host |
 
-In mouse mode, either stick moves the pointer; Cross/Circle/Square map to left/right/middle click, L1/R1 to side buttons, and D-pad to scrolling. In the on-screen keyboard, D-pad navigates, Cross types, Triangle toggles Shift, Square deletes, Options enters, and Circle closes it. The virtual keyboard supports standard printable US-ASCII characters; it is not a general Unicode input method.
+In mouse mode, either stick moves the pointer; Cross/Circle/Square map to left/right/middle click, L1/R1 to side buttons, and D-pad to scrolling. In the on-screen keyboard, D-pad navigates, Cross types, Triangle toggles Shift, Square deletes, Options enters, and Circle closes it. The **ESC** key sends Escape to the host. The virtual keyboard supports standard printable US-ASCII characters; it is not a general Unicode input method.
 
 See [DualSense support](DUALSENSE.md) for available motion, touch, light bar, rumble and adaptive-trigger forwarding and its host-side limitations.
 
@@ -121,3 +122,13 @@ When elevated storage access is unavailable, the app uses its own title storage 
 > **Privacy:** diagnostic traces may contain local IP addresses, PC names and application titles. Review them before posting. Do not publish the pairing private key (`pairing/key.pem`) or raw saved-data archives.
 
 See [Troubleshooting](TROUBLESHOOTING.md) for individual failure modes and how to collect additional performance evidence. Developers can consult [Validation](VALIDATION.md) and [frame pacing measurements](frame-pacing-measurements.md).
+
+### Live frame interval graph
+
+H.264/HEVC and PyroWave use the same statistics panel and keyboard layout. The
+statistics panel includes the latest 180 intervals between new-frame CPU
+submissions, with a 0–50 ms scale. Repeated frames do not count as new pictures.
+Sampling and graph drawing stop when the panel is hidden or the keyboard is open.
+This graph measures submission cadence, not physical HDMI timing or input latency.
+The PyroWave Output frequency is derived from software VideoOut counters, falling
+back to the selected mode when counters are unavailable; it is not a TV measurement.
