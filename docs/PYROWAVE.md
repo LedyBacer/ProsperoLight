@@ -23,7 +23,7 @@ preference is retained while another codec is selected.
 | PyroWave | 420 / 444 | 8 | SDR | RADV |
 | PyroWave | 420 / 444 | 10 | HDR10 | RADV |
 
-Resolution and FPS use the existing 1080p/1440p/2160p and 60/90/120 settings.
+Resolution uses 1080p/1440p/2160p; FPS offers 30/60/90/120 and Custom (30–120).
 `ResolvedStreamProfile` separates Moonlight profile selection from the unchanged
 nine-entry VideoDec2 configuration table. No PyroWave VideoDec2 mode is fabricated.
 
@@ -77,7 +77,11 @@ windows, using the native presenter's 48-byte VideoOut status ABI.
 The platform continues using its HDR calibration/output semantics as HEVC does;
 no separate dynamic-metadata output implementation is introduced.
 
-60 FPS requests the normal output mode; 90/120 request high refresh. V-Sync Off
+Fixed output requests the normal mode at FPS ≤60 and high refresh above 60.
+Paced+VRR requests HFR-capable variable output at every FPS and forces VSync;
+its source-dependent repeat policy is shared with native H.264/HEVC. See
+[frame pacing configuration](CONFIGURATION.md#custom-fps-and-low-rate-vrr-compensation).
+Outside that mode, V-Sync Off
 uses the same HSYNC mode as the native presenter, with an explicit VSYNC fallback
 if the platform refuses HSYNC. TV safe scales the image within the existing inset.
 Touchpad+R1 toggles GPU statistics; touchpad+L1 disconnects. Touchpad+Triangle
@@ -91,7 +95,7 @@ swapchain, device and instance are destroyed; an explicit WSI handoff then stops
 the flip thread, unregisters buffers, restores output mode, closes VideoOut and
 releases direct memory before the launcher reacquires the display.
 
-Logs: `prosperolight-launcher.log` (under `/data/prosperolight/logs`, or `/download0` in
+Logs: `debug-trace.txt` (under `/data/prosperolight/logs`, or `/download0` in
 the sandbox) carries the session, VideoDec2/AGC and PyroWave lines, tagged `[session]`.
 Stream-start and ANNOUNCE logs show
 profile, format, resolution, FPS, bitrate, chroma, depth, range, backend and

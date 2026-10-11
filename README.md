@@ -449,10 +449,11 @@ Use wired Ethernet and a high bitrate for PyroWave. On one PS5 13.60 setup,
 500-600 Mbps was stable, while 700-800 Mbps sometimes had network loss.
 These observations are not a quality or latency guarantee for other hosts.
 
-Settings offer **Unpaced**, **Paced**, and **Paced+VRR**, alongside independent
-V-Sync. Unpaced is the default and presents frames as 01.000.080 did. With the paced
-modes both video backends use the shared source-clock pacing policy; physical
-presentation measurements depend on the backend. See
+Settings offer **Unpaced**, **Paced**, and **Paced+VRR**, and a saved
+V-Sync preference (forced On in Paced+VRR, with the saved preference restored on mode changes).
+Unpaced is the default and adds no cadence timer. Paced uses fixed-output source
+pacing; active Paced+VRR uses the shared source-timeline and adaptive repeat policy
+for both video backends. Physical presentation measurements depend on the backend. See
 [configuration](docs/CONFIGURATION.md#frame-pacing-and-vsync) and
 [interval traces and graphs](docs/frame-pacing-measurements.md).
 
@@ -463,7 +464,7 @@ Native high-definition waveform playback and controller speaker audio are
 not implemented; see [controller support](docs/DUALSENSE.md).
 
 Diagnostic logs can be turned off in Settings: the stream's reports stop at
-once, the rest of the log from the next start. Output traces keep the latest
+once, including the detailed trace; raw console output stops from the next start. Output traces keep the latest
 capture per backend and pacing mode. Menu sounds have a switch of their own.
 
 Settings, under Host session, has **Quit host app after stream**: it stops the
@@ -514,16 +515,16 @@ yet. `python3 tools/plot-bitrate-limits.py` redraws the chart from the model;
 ## Reporting a problem
 
 When something does not work (a PC that will not pair, a stream that will not start,
-stutter, a black picture, no sound), a **Debug log** tells us what happened:
+stutter, a black picture, no sound), the **Diagnostic logs** capture tells us what happened:
 
-1. Open **Settings**, go to **Diagnostics** and turn **Debug log** on. It is off by default.
+1. Open **Settings**, go to **Diagnostics** and turn **Diagnostic logs** on.
 2. Repeat the problem. For a stream problem, let the stream run for half a minute if it can.
 3. Copy `debug-trace.txt` from the logs folder (`/data/prosperolight/logs`, or
    `/download0` inside the app's sandbox when filesystem access was not granted; the
    About page shows which) with an FTP client, and attach it to a
    [GitHub issue](https://github.com/blackbearreloaded/ProsperoLight/issues) with a
    sentence on what you did and what you saw. `debug-trace.prev.txt` is the run before.
-4. Turn **Debug log** off again.
+4. Turn **Diagnostic logs** off again.
 
 Every line carries the seconds since the app started and a tag:
 
@@ -538,8 +539,11 @@ Every line carries the seconds since the app started and a tag:
 
 The file holds the names and local addresses of your PCs and the names of their apps.
 It never holds the pairing key, the certificate or a PIN. It stops growing at 16 MB and
-keeps its beginning. The existing **Diagnostic logs** switch is separate: it controls the
-launcher log and the performance files written after a stream.
+keeps its beginning. The single **Diagnostic logs** switch controls this trace and the CSV/JSON performance
+files written after a stream. Stream and launcher messages are written once to
+`debug-trace.txt`; raw console output is retained separately as a fallback.
+The existing diagnostic-log preference is preserved; the former separate Debug log
+preference is no longer used.
 
 ## Files on the console
 
