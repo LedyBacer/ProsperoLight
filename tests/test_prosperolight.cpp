@@ -837,8 +837,8 @@ TEST(Configuration, MigratesVersionSixAndGivesSavedPcsTheDefaultPort)
     EXPECT_EQ(config.stream_fps, MOONLIGHT_STREAM_FPS_120);
     EXPECT_EQ(config.audio_configuration, MOONLIGHT_AUDIO_51_SURROUND);
     EXPECT_EQ(config.vsync_enabled, 0U);
-    EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_ADAPTIVE);
-    EXPECT_EQ(config.decoder_cores, 5U);
+    EXPECT_EQ(config.decoder_pipeline, MOONLIGHT_DECODER_PIPELINE_CLASSIC);
+    EXPECT_EQ(config.decoder_cores, MOONLIGHT_DECODER_CORES_DEFAULT);
     EXPECT_STREQ(config.hosts[0].address, "192.168.4.20");
     EXPECT_STREQ(config.hosts[0].name, "Gaming-PC");
     EXPECT_EQ(config.hosts[0].manual, 0U);
