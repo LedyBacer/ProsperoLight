@@ -34,7 +34,7 @@ this repository. No Sony SDK file is included.
 
 ## Lapy elevation helper
 
-The build pins revision `c3bdfe3a399366d8eacfc580f20b19fd03b16ca3` of
+The build pins revision `57fcc19b7f57e46c823d6f2a6c6233ebf3288079` of
 [BlackBearReloaded's PS5-Lapy-JB-Daemon](https://github.com/blackbearreloaded/PS5-Lapy-JB-Daemon),
 which incorporates work from mpereiraesaa and ArkSama's project. Its exact-title
 one-shot helper is MIT licensed, verified against its build manifest, and ships

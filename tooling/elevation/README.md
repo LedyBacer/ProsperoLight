@@ -1,9 +1,10 @@
 # Filesystem elevation with upstream Lapy
 
 ProsperoLight packages an exact-title one-shot helper built from pinned revision
-`c3bdfe3a399366d8eacfc580f20b19fd03b16ca3` of
+`57fcc19b7f57e46c823d6f2a6c6233ebf3288079` of
 [BlackBearReloaded's PS5-Lapy-JB-Daemon](https://github.com/blackbearreloaded/PS5-Lapy-JB-Daemon).
-That revision includes the donor-release fix and 32-byte credential attributes;
+That revision includes the donor-release fix, 32-byte credential attributes and
+the guarded target lifetime;
 the helper builds with payload SDK v0.42 for firmware 13.40 through 13.60.
 
 At single-threaded startup the client first proves whether `/data` access is

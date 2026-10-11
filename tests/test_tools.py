@@ -300,7 +300,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn('python3 -B "$root/tools/build-lapy-helper.py"', build)
         self.assertIn('cp "$root/build/lapy-owned-helper/lapy.elf" "$app/lapy.elf"', build)
         dependencies = (ROOT / "tools/setup-native-dependencies.sh").read_text(encoding="utf-8")
-        self.assertIn('lapy_commit="c3bdfe3a399366d8eacfc580f20b19fd03b16ca3"', dependencies)
+        self.assertIn('lapy_commit="57fcc19b7f57e46c823d6f2a6c6233ebf3288079"', dependencies)
         self.assertIn("lapy-ps5-payload-sdk-v0.42", dependencies)
         self.assertNotIn("sandbox-elevator.elf", build)
         self.assertNotIn("validate-helper.py", build)
