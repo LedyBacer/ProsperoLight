@@ -524,6 +524,7 @@ void View::build()
         .add_choice(kVrrTiming, i18n::tr("VRR timing"),
                     {i18n::tr("Low Latency"), i18n::tr("Balanced"), i18n::tr("Smooth")}, 1)
         .description = i18n::tr("VRR only: latency or smoothness.");
+#if MOONLIGHT_EXPERIMENTAL_DECODER_CONTROLS
     form_.add_header(i18n::tr("Decoder"));
     form_
         .add_choice(kPipeline, i18n::tr("Pipeline"),
@@ -534,6 +535,7 @@ void View::build()
         .add_stepper(kCores, i18n::tr("CPU cores"), MOONLIGHT_DECODER_CORES_DEFAULT,
                      MOONLIGHT_DECODER_CORES_MIN, MOONLIGHT_DECODER_CORES_MAX)
         .description = i18n::tr("Cores reserved for decoding; the stream uses the rest.");
+#endif
     form_.add_header(i18n::tr("Diagnostics"));
     form_.add_toggle(kLogging, i18n::tr("Diagnostic logs"), true).description =
         i18n::tr("Bounded logs and output interval traces saved after the stream.");
@@ -944,15 +946,19 @@ void View::sync_settings_from_config()
     form_.set_toggle(kLogging, prosperolight_logs_enabled() != 0);
     form_.set_toggle(kUiSound, prosperolight::ui_sound_enabled());
 
+#if MOONLIGHT_EXPERIMENTAL_DECODER_CONTROLS
     const bool native = config.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE;
     form_.row(kPipeline)->disabled = !native;
     form_.row(kCores)->disabled = !native;
+#endif
     form_.set_choice(kAudio, config.audio_configuration == MOONLIGHT_AUDIO_51_SURROUND ? 1 : 0);
     form_.set_choice(kArea, config.display_area == MOONLIGHT_DISPLAY_AREA_FULL ? 1 : 0);
     form_.set_toggle(kVsync, config.vsync_enabled != 0);
+#if MOONLIGHT_EXPERIMENTAL_DECODER_CONTROLS
     form_.set_choice(kPipeline,
                      config.decoder_pipeline == MOONLIGHT_DECODER_PIPELINE_ADAPTIVE ? 1 : 0);
     form_.set_stepper(kCores, static_cast<int>(config.decoder_cores));
+#endif
 }
 
 void View::apply_setting(int id)
@@ -1074,6 +1080,7 @@ void View::apply_setting(int id)
     case kVsync:
         config.vsync_enabled = form_.toggle_value(kVsync) ? 1u : 0u;
         break;
+#if MOONLIGHT_EXPERIMENTAL_DECODER_CONTROLS
     case kPipeline:
         config.decoder_pipeline = form_.choice_index(kPipeline) == 1
                                       ? MOONLIGHT_DECODER_PIPELINE_ADAPTIVE
@@ -1082,6 +1089,7 @@ void View::apply_setting(int id)
     case kCores:
         config.decoder_cores = static_cast<std::uint32_t>(form_.stepper_value(kCores));
         break;
+#endif
     default:
         return;
     }

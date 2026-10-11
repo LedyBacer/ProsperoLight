@@ -1,0 +1,13 @@
+id,codec,resolution,fps,bitrate_mbps,decoder,cores,pacing,vsync,ps5_vrr,hdr,duration_s,purpose
+H1,HEVC,3840x2160,120,80,classic,3,Unpaced,1,0,0,90,baseline
+H2,HEVC,3840x2160,120,80,classic,4,Unpaced,1,0,0,90,cores
+H3,HEVC,3840x2160,120,80,adaptive,4,Unpaced,1,0,0,90,pipeline
+H4,HEVC,3840x2160,120,80,adaptive,3,Unpaced,1,0,0,90,pipeline
+H5,HEVC,3840x2160,120,80,classic,5,Unpaced,1,0,0,90,cores
+H6,HEVC,3840x2160,120,80,adaptive,5,Unpaced,1,0,0,90,pipeline
+H7,HEVC,3840x2160,120,80,classic,3,Unpaced,1,0,0,90,baseline repeat
+A1,H.264,3840x2160,120,20,classic,3,Unpaced,1,0,0,90,overload baseline
+A2,H.264,3840x2160,120,20,adaptive,3,Unpaced,1,0,0,90,overload pipeline
+A3,H.264,3840x2160,120,20,classic,3,Unpaced,1,0,0,90,baseline repeat
+C1,HEVC,3840x2160,60,80,classic,3,Unpaced,1,0,0,90,optional light pixel rate
+C2,H.264,1920x1080,120,20,classic,3,Unpaced,1,0,0,90,optional lower resolution

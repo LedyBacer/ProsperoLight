@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- ps5-native-app-boilerplate - Reproducible native decoder load test.
+Copyright (C) 2026 BlackBearReloaded
+SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="ru"><meta charset="utf-8"><title>ProsperoLight: Decoder benchmark</title>
+<style>
+body{margin:0;background:#102030;color:white;font:18px system-ui}main{max-width:1100px;margin:auto;padding:24px}select,button{font:inherit;padding:10px}button{margin:12px 8px 0 0}p{line-height:1.5}pre{white-space:pre-wrap}canvas{display:none;width:100vw;height:100vh}body.running main{display:none}body.running canvas{display:block;cursor:none}a{color:#91d4ff}table{border-collapse:collapse}td,th{padding:6px 12px;border:1px solid #607080}
+</style>
+<main><h1>Classic / Adaptive / CPU cores</h1>
+<p>Значения ниже — подписи, они <strong>не меняют настройки PS5</strong>. Перед каждым прогоном завершите предыдущий стрим, измените настройки в ProsperoLight и снова подключитесь к Desktop. На ПК: транслируемый экран 4K, 120 Гц, браузер на переднем плане.</p>
+<p>Постоянно: SDR, Unpaced, VSync On, VRR PS5 Off, Host VRR Off, Diagnostic logs On. Статистическую панель и клавиатуру PS5 закройте. Настройки кодирования хоста между прогонами не меняйте.</p>
+<label>Прогон <select id="trial"></select></label>
+<p id="settings"></p>
+<p>90 секунд: 10 разогрев → 20 простой движущийся узор → 40 сложный шум/движение → 20 восстановление. Seed и последовательность одинаковы. Шум создаёт перегрузку кодирования и декодирования, но сам по себе не гарантирует перегрузку PS5. Измеряем также FPS браузера, реальные размеры кадров и входящий FPS.</p>
+<p>«Подготовить» создаст сцены заранее. «Начать» свяжет отчёт с новой сессией PS5. После конца теста: <strong>Тачпад + L1 на PS5</strong>, чтобы записались логи. Сервер сам заберёт JSON и CSV; дождитесь сообщения «Логи сохранены», затем переходите к следующей строке.</p>
+<button id="prepare">Подготовить сцены</button><button id="start" disabled>Начать 90 секунд</button><button id="download" disabled>Скачать отчёт, если сервер недоступен</button>
+<pre id="status"></pre>
+<h2>Основные 10 прогонов (~15 минут + переподключения)</h2>
+<table><thead><tr><th>ID</th><th>Кодек</th><th>Режим</th><th>Ядра</th><th>Разрешение / FPS / Mbps</th></tr></thead><tbody id="matrix"></tbody></table>
+<p>Если разница не превышает разброс повторных Classic 3: результат «эффект не обнаружен», а не «опция точно ничего не делает». Если преимущество заметно — повторите лучшую конфигурацию и Classic 3 в обратном порядке. C1/C2 — дополнительные контрольные строки.</p>
+<p><a href="/">Тест плавности</a> · <a href="decoder-matrix.csv">Матрица CSV</a> · <a href="DECODER-README-RU.md">Методика</a></p>
+</main><canvas id="scene"></canvas><script src="decoder.js?v=20261011-2"></script></html>

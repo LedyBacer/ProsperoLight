@@ -139,7 +139,10 @@ artifact="$root/dist/$title_id"
     echo "deployment folder is missing eboot.bin or sce_sys/param.json" >&2
     exit 2
 }
-mapfile -d '' files < <(
+files=()
+while IFS= read -r -d '' file; do
+    files+=("$file")
+done < <(
     find "$artifact" -type f \
         ! -path "$artifact/eboot.bin" \
         ! -path "$artifact/sce_sys/param.json" \

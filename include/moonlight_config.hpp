@@ -41,6 +41,8 @@ extern "C"
 #define MOONLIGHT_DECODER_PIPELINE_ADAPTIVE 1U
 #define MOONLIGHT_DECODER_CORES_MIN 3U
 #define MOONLIGHT_DECODER_CORES_DEFAULT 3U
+// Retain experimental decoder controls for future investigation, hidden in release UI.
+#define MOONLIGHT_EXPERIMENTAL_DECODER_CONTROLS 0
 #define MOONLIGHT_DECODER_CORES_MAX 5U
 
     typedef struct moonlight_config_host

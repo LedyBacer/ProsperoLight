@@ -469,11 +469,17 @@ bool moonlight_config_load(moonlight_config_t *config)
         config->audio_configuration = MOONLIGHT_AUDIO_STEREO;
     if (config->vsync_enabled > 1U)
         config->vsync_enabled = 1;
+#if MOONLIGHT_EXPERIMENTAL_DECODER_CONTROLS
     if (config->decoder_pipeline > MOONLIGHT_DECODER_PIPELINE_ADAPTIVE)
         config->decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_CLASSIC;
     if (config->decoder_cores < MOONLIGHT_DECODER_CORES_MIN ||
         config->decoder_cores > MOONLIGHT_DECODER_CORES_MAX)
         config->decoder_cores = MOONLIGHT_DECODER_CORES_DEFAULT;
+#else
+    // Normalize saved experimental settings as well as newly created profiles.
+    config->decoder_pipeline = MOONLIGHT_DECODER_PIPELINE_CLASSIC;
+    config->decoder_cores = MOONLIGHT_DECODER_CORES_DEFAULT;
+#endif
     if (config->chroma_sampling > MOONLIGHT_CHROMA_444)
         config->chroma_sampling = MOONLIGHT_CHROMA_420;
     if (config->hdr_enabled && config->video_codec == MOONLIGHT_VIDEO_CODEC_H264)
