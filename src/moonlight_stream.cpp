@@ -4044,6 +4044,14 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
         result = gs_quit_app(server);
         if (result != GS_OK)
             return result;
+        // Starting another app while the PC still holds the first one is refused with no
+        // reason given: ask what it runs now and say so here.
+        if (gs_refresh_status(server) == GS_OK && server->current_game != 0)
+        {
+            gs_error = "The PC kept its running app; close it on the PC or restart Sunshine";
+            return GS_FAILED;
+        }
+        server->current_game = 0;
     }
     resume_requested = server->current_game == target_id;
     gamepad_mask = prosperolight::dualsense::ActiveMask() & 0x0f;

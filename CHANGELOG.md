@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Stop app tells the truth.** When the PC accepts the stop but keeps the app running, the
+  launcher says so instead of "App stopped", and starting another app explains why it cannot.
+
 ## 01.000.095
 
 ### Stable: improved frame pacing and unified stream overlays

@@ -779,6 +779,14 @@ int main(int argc, char **argv)
     }
     expect(fake::world()[0].current_app == 0, "Square stops the running app");
 
+    // ---- a PC that accepts the stop and keeps the app: the launcher says so ----
+    fake::world()[0].current_app = fake::world()[0].apps[0].id;
+    fake::world()[0].keeps_app = true;
+    session("games", {{30, next}, {90, 0}, {20, square}, {60, 0, Direction::none, "stop-kept"}}, "");
+    expect(fake::world()[0].current_app != 0, "a stop the PC ignores leaves the app shown as running");
+    fake::world()[0].keeps_app = false;
+    fake::world()[0].current_app = 0;
+
     // ---- back from a stream that failed ----
     session("games", {{80, 0, Direction::none, "stream-error"}}, "Sunshine closed the connection");
 

@@ -925,6 +925,11 @@ void Model::Apply(const Job &job, JobResult &result)
                    health_.Reconnecting() ? i18n::tr("Could not confirm the stop")
                                           : i18n::tr("The app did not stop"),
                    backend_.error[0] ? backend_.error : i18n::tr("Sunshine rejected the request."));
+        // The PC can accept the request and keep the app (Sunshine holds on to one whose
+        // start it has deferred): what it reports afterwards decides, not its answer.
+        else if (backend_.online && backend_.current_app_id != 0)
+            Notify(NoticeKind::warning, i18n::tr("The PC kept the app running"),
+                   i18n::tr("Close it on the PC, or restart Sunshine there."), 8.0f);
         else if (was_running)
             Notify(NoticeKind::success, i18n::tr("App stopped"));
     }

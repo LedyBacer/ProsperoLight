@@ -34,6 +34,7 @@ struct Pc
     bool main10 = true;
     std::uint32_t pyrowave_profiles = 0;
     int current_app = 0;
+    bool keeps_app = false; // answers a stop with "done" and keeps the app running
     std::vector<App> apps;
 };
 

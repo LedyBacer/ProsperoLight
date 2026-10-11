@@ -160,7 +160,7 @@ int moonlight_backend_stop_app(const char *host, uint16_t http_port,
 {
     usleep(2000);
     std::lock_guard<std::mutex> lock(guard);
-    if (Pc *pc = find(host, http_port))
+    if (Pc *pc = find(host, http_port); pc && !pc->keeps_app)
         pc->current_app = 0;
     return describe(host, http_port, snapshot);
 }
