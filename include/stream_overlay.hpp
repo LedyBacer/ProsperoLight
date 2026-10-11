@@ -208,7 +208,10 @@ inline void refresh_hud_surface(uint8_t *surface, const native_agc_metrics_t *me
              metrics->host_max_tenths_ms / 10u, metrics->host_max_tenths_ms % 10u,
              metrics->host_average_tenths_ms / 10u, metrics->host_average_tenths_ms % 10u);
     hud_line(luma, 8, text_luma, line);
-    snprintf(line, sizeof(line), "Queue: %u frames now / avg %llu.%02llu ms / max %llu.%02llu ms",
+    snprintf(line, sizeof(line),
+             metrics->video_codec == 2
+                 ? "Queue: %u frames now / delay: N/A"
+                 : "Queue: %u frames now / avg %llu.%02llu ms / max %llu.%02llu ms",
              metrics->pending_frames, (unsigned long long)(metrics->queue_delay_average_us / 1000u),
              (unsigned long long)((metrics->queue_delay_average_us % 1000u) / 10u),
              (unsigned long long)(metrics->queue_delay_max_us / 1000u),

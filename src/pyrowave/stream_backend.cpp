@@ -369,6 +369,7 @@ void *worker(void *)
     uint64_t samples = 0, unique_presented = 0, prior_unique_presented = 0;
     native_agc_metrics_t initial_hud{};
     initial_hud.video_codec = 2;
+    initial_hud.output_refresh_x100 = refresh;
     initial_hud.stream_width = s.width;
     initial_hud.stream_height = s.height;
     initial_hud.pacing_mode = mode;
@@ -776,6 +777,7 @@ void *worker(void *)
                          (unsigned long long)counters.failed);
                 native_agc_metrics_t hud{};
                 hud.video_codec = 2;
+                hud.output_refresh_x100 = refresh;
                 hud.incoming_fps_x100 = uint32_t((s.incoming.load() - incoming) * 100 / seconds);
                 hud.decoded_fps_x100 = uint32_t((s.decoded.load() - decoded) * 100 / seconds);
                 // Unique frames, unlike the separate shown/scanout repeat counter.

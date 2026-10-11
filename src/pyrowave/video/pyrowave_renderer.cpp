@@ -238,9 +238,9 @@ void PyroWaveRenderer::update_hud(const native_agc_metrics_t *metrics, bool enab
         stream_overlay::refresh_keyboard_surface(surface, selected, shifted,
                                                  conversion.blue_extent[3] > .5f);
     else if (enabled)
-        stream_overlay::refresh_hud_surface(surface, &hud_metrics_, hud_metrics_.stream_width,
-                                            hud_metrics_.stream_height, 3840, 2160, 11988,
-                                            conversion.blue_extent[3] > .5f);
+        stream_overlay::refresh_hud_surface(
+            surface, &hud_metrics_, hud_metrics_.stream_width, hud_metrics_.stream_height, 3840,
+            2160, hud_metrics_.output_refresh_x100, conversion.blue_extent[3] > .5f);
     overlay_kind_ = kind;
     last_key_ = selected;
     last_shift_ = shifted;
