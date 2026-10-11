@@ -16,9 +16,9 @@ extern "C"
     int prosperolight_logs_set_enabled(int enabled);
     void prosperolight_log_append(const char *path, const char *message);
 
-    // The Debug log: a time-stamped trace of what the app does, written to
-    // debug-trace.txt in the logs folder while its Settings switch is on. Off by
-    // default. A line costs a copy into memory; a writer thread pays for the file.
+    // Detailed trace controlled by the single Diagnostic logs setting. The
+    // debug enabled/set entry points are compatibility aliases for that setting.
+    // A line costs a memory copy; a writer thread pays for the file.
     int prosperolight_debug_enabled(void);
     int prosperolight_debug_set_enabled(int enabled);
     void prosperolight_debug_line(const char *tag, const char *format, ...)

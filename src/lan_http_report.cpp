@@ -9,7 +9,6 @@
 #include "lan_http_report.hpp"
 #include "app_storage.hpp"
 
-#include <atomic>
 #include <chrono>
 #include <fcntl.h>
 #include <mutex>
@@ -84,18 +83,12 @@ constexpr size_t kDebugPendingLimit = 512u * 1024u;
 constexpr long long kDebugFileLimit = 16ll * 1024 * 1024;
 const auto debug_origin = std::chrono::steady_clock::now();
 std::mutex debug_mutex;
-std::atomic<int> debug_state{-1}; // -1: the setting has not been read yet
-std::string debug_pending;        // lines waiting for the writer
+std::string debug_pending; // lines waiting for the writer
 unsigned long long debug_dropped = 0;
 std::string debug_folder;
 int debug_file = -1;
 long long debug_written = 0;
 bool debug_full = false;
-
-std::string debug_settings()
-{
-    return storage::setting_file("prosperolight-debug.bin");
-}
 
 double debug_seconds()
 {
@@ -164,55 +157,22 @@ void *debug_writer(void *)
     for (;;)
     {
         usleep(250000);
-        if (debug_state.load(std::memory_order_relaxed) == 1)
+        if (prosperolight_logs_enabled() != 0)
             prosperolight_debug_flush();
     }
     return nullptr;
 }
 } // namespace
 
+// Compatibility entry points share the single persistent diagnostics setting.
 int prosperolight_debug_enabled(void)
 {
-    int state = debug_state.load(std::memory_order_relaxed);
-    if (state >= 0)
-        return state;
-    std::lock_guard<std::mutex> guard(debug_mutex);
-    state = 0;
-    if (FILE *file = fopen(debug_settings().c_str(), "rb"))
-    {
-        unsigned char data[5]{};
-        if (fread(data, 1, sizeof(data), file) == sizeof(data) && memcmp(data, "PLD\1", 4) == 0)
-            state = data[4] == 1;
-        fclose(file);
-    }
-    debug_state.store(state, std::memory_order_relaxed);
-    return state;
+    return prosperolight_logs_enabled();
 }
 
 int prosperolight_debug_set_enabled(int enabled)
 {
-    const auto destination = debug_settings();
-    const auto temporary = destination + ".tmp";
-    FILE *file = fopen(temporary.c_str(), "wb");
-    if (!file)
-        return 0;
-    const unsigned char data[] = {'P', 'L', 'D', 1, static_cast<unsigned char>(enabled != 0)};
-    const bool written = fwrite(data, 1, sizeof(data), file) == sizeof(data);
-    const int closed = fclose(file);
-    if (!written || closed || rename(temporary.c_str(), destination.c_str()) != 0)
-    {
-        remove(temporary.c_str());
-        return 0;
-    }
-    if (!enabled)
-    {
-        prosperolight_debug_line("trace", "switched off in Settings");
-        prosperolight_debug_flush();
-    }
-    debug_state.store(enabled != 0, std::memory_order_relaxed);
-    if (enabled)
-        prosperolight_debug_line("trace", "switched on in Settings");
-    return 1;
+    return prosperolight_logs_set_enabled(enabled);
 }
 
 void prosperolight_debug_line(const char *tag, const char *format, ...)
@@ -273,30 +233,13 @@ void prosperolight_log_append(const char *path, const char *message)
 {
     if (!path || !message)
         return;
-    // The stream's reports reach the Debug log whatever the Diagnostic logs switch says.
-    {
-        const char *report = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
-        if (strncmp(report, "prosperolight-", 14) == 0)
-            report += 14;
-        char tag[24];
-        snprintf(tag, sizeof(tag), "%.*s", static_cast<int>(strcspn(report, ".")), report);
-        prosperolight_debug_line(tag, "%s", message);
-    }
-    {
-        std::lock_guard<std::mutex> guard(log_mutex);
-        load_logs();
-        if (!logs_enabled)
-            return;
-    }
-    // A write to a file under /data takes tens of milliseconds, and these
-    // lines come from the receive, decode and present threads. They go into
-    // the buffered launcher log, tagged with the name of the report they
-    // belong to; the storage flusher thread pays for the write.
-    const char *name = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
-    if (strncmp(name, "prosperolight-", 14) == 0)
-        name += 14;
-    printf("[%.*s] %.*s\n", static_cast<int>(strcspn(name, ".")), name,
-           static_cast<int>(strnlen(message, 4096)), message);
+    // One text destination; CSV/JSON reports remain separate structured captures.
+    const char *report = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
+    if (strncmp(report, "prosperolight-", 14) == 0)
+        report += 14;
+    char tag[24];
+    snprintf(tag, sizeof(tag), "%.*s", static_cast<int>(strcspn(report, ".")), report);
+    prosperolight_debug_line(tag, "%s", message);
 }
 
 #ifndef PROSPEROLIGHT_LAN_TELEMETRY

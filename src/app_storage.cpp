@@ -198,7 +198,6 @@ void open_log(const char *folder)
 
 void say(const char *line)
 {
-    std::fputs(line, stdout);
     prosperolight_debug_line("app", "%s", line);
     (void)sceKernelDebugOutText(0, line);
 }

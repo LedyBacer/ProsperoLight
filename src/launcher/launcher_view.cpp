@@ -89,7 +89,6 @@ enum FormId
     kPacing,
     kVrrTiming,
     kLogging,
-    kDebugLog,
     kUiSound,
     kHostQuit,
     kLanguage,
@@ -538,8 +537,6 @@ void View::build()
     form_.add_header(i18n::tr("Diagnostics"));
     form_.add_toggle(kLogging, i18n::tr("Diagnostic logs"), true).description =
         i18n::tr("Bounded logs and output interval traces saved after the stream.");
-    form_.add_toggle(kDebugLog, i18n::tr("Debug log"), false).description =
-        std::string(i18n::tr("Diagnostic logs")) + ": debug-trace.txt";
     form_.style.row_height = 66.0f;
     form_.style.header_height = 54.0f;
     form_.style.label_size = 26.0f;
@@ -945,7 +942,6 @@ void View::sync_settings_from_config()
     form_.set_choice(kVrrTiming, static_cast<int>(moonlight::vrr_profile()));
     form_.row(kVrrTiming)->disabled = moonlight::presentation_mode() != 2;
     form_.set_toggle(kLogging, prosperolight_logs_enabled() != 0);
-    form_.set_toggle(kDebugLog, prosperolight_debug_enabled() == 1);
     form_.set_toggle(kUiSound, prosperolight::ui_sound_enabled());
 
     const bool native = config.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE;
@@ -1053,15 +1049,6 @@ void View::apply_setting(int id)
         if (!moonlight::save_vrr_profile(static_cast<unsigned>(form_.choice_index(kVrrTiming))))
             toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save VRR timing"),
                          i18n::tr("Try again."));
-        sync_settings_from_config();
-        return;
-    case kDebugLog:
-        if (!prosperolight_debug_set_enabled(form_.toggle_value(kDebugLog)))
-            toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save logging"),
-                         i18n::tr("Try again."));
-        else if (form_.toggle_value(kDebugLog))
-            toasts_.push(ui::StatusKind::info, i18n::tr("Debug log"),
-                         std::string(i18n::tr("Diagnostic logs")) + ": debug-trace.txt");
         sync_settings_from_config();
         return;
     case kLogging:

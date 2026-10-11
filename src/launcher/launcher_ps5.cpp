@@ -93,12 +93,11 @@ namespace
 
 using namespace hui;
 
-// Every launcher line goes to the console's log and, while it is on, to the Debug log.
+// Launcher messages have one persistent destination: the shared diagnostics trace.
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage): forwards a printf format with its arguments
 #define PL_LOG(...)                                                                                \
     do                                                                                             \
     {                                                                                              \
-        sys::log(__VA_ARGS__);                                                                     \
         prosperolight_debug_line("launcher", __VA_ARGS__);                                         \
     } while (0)
 

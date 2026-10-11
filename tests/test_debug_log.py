@@ -1,4 +1,4 @@
-# ps5-native-app-boilerplate - The Debug log: off by default, timed lines, bounded, kept apart.
+# ps5-native-app-boilerplate - Unified diagnostics: timed lines, bounded storage, one setting.
 # Copyright (C) 2026 BlackBearReloaded
 # SPDX-License-Identifier: GPL-3.0-or-later
 import re
@@ -23,7 +23,8 @@ int main(int, char **argv)
     std::snprintf(storage::g_paths.config, sizeof(storage::g_paths.config), "%s/config/settings.bin",
                   folder.c_str());
     const std::string logs = folder + "/logs";
-    // Off until someone turns it on: nothing is kept and no file appears.
+    // One switch silences both the detailed trace and structured reports.
+    assert(prosperolight_logs_set_enabled(0) == 1);
     assert(prosperolight_debug_enabled() == 0);
     prosperolight_debug_start(logs.c_str());
     prosperolight_debug_line("launcher", "never written %d", 1);
@@ -31,8 +32,7 @@ int main(int, char **argv)
     assert(argv[2][0] == 'a' || access((logs + "/debug-trace.txt").c_str(), F_OK) != 0);
     assert(prosperolight_debug_set_enabled(1) == 1 && prosperolight_debug_enabled() == 1);
     prosperolight_debug_line("launcher", "first frame after %d ms\n", 483);
-    // A stream report reaches the trace even with Diagnostic logs off.
-    assert(prosperolight_logs_set_enabled(0) == 1);
+    assert(prosperolight_logs_enabled() == 1);
     prosperolight_log_append("prosperolight-session.log", "Moonlight connection started");
     assert(lan_http_report_text("Stream profile: codec=1") == 0);
     prosperolight_debug_flush();
@@ -50,7 +50,8 @@ int main(int, char **argv)
         prosperolight_debug_line("fill", "after the limit");
         prosperolight_debug_flush();
     }
-    assert(prosperolight_debug_set_enabled(0) == 1 && prosperolight_debug_enabled() == 0);
+    assert(prosperolight_debug_set_enabled(0) == 1 && prosperolight_logs_enabled() == 0);
+    prosperolight_log_append("prosperolight-session.log", "disabled stream report");
     prosperolight_debug_line("launcher", "after switching off");
     prosperolight_debug_flush();
     return 0;
@@ -79,15 +80,15 @@ class DebugLogTests(unittest.TestCase):
             for line in lines:
                 self.assertRegex(line, r"^\[ +\d+\.\d{3}\] \[[a-z-]+\] ")
             text = "\n".join(lines)
-            self.assertIn("[trace] switched on in Settings", text)
             self.assertIn("[launcher] first frame after 483 ms", text)
             self.assertIn("[session] Moonlight connection started", text)
             self.assertIn("[session] Stream profile: codec=1", text)
-            self.assertIn("[trace] switched off in Settings", text)
             self.assertNotIn("never written", text)
             self.assertNotIn("after switching off", text)
+            self.assertNotIn("disabled stream report", text)
+            self.assertEqual(text.count("Moonlight connection started"), 1)
             # The setting survives a restart; a second run keeps the first as the previous trace.
-            self.assertEqual((folder / "config/prosperolight-debug.bin").read_bytes(), b"PLD\x01\x00")
+            self.assertEqual((folder / "config/prosperolight-logging.bin").read_bytes(), b"PLL\x01\x00")
             subprocess.run([str(folder / "check"), str(folder), "again"], check=True)
             self.assertIn("first frame", (folder / "logs/debug-trace.prev.txt").read_text())
 
@@ -113,10 +114,10 @@ class DebugLogTests(unittest.TestCase):
         self.assertIn('prosperolight_debug_line("notice"', squeezed["src/launcher/launcher_model.cpp"])
         self.assertIn('"job",', squeezed["src/launcher/launcher_model.cpp"])
         self.assertIn('"launch",', squeezed["src/launcher/launcher_view.cpp"])
-        self.assertIn('form_.add_toggle(kDebugLog, i18n::tr("Debug log"), false)',
+        self.assertIn('form_.add_toggle(kLogging, i18n::tr("Diagnostic logs"), true)',
                       squeezed["src/launcher/launcher_view.cpp"])
         # Every launcher line goes through the one macro that also feeds the trace.
-        self.assertEqual(squeezed["src/launcher/launcher_ps5.cpp"].count("sys::log("), 1)
+        self.assertEqual(squeezed["src/launcher/launcher_ps5.cpp"].count("sys::log("), 0)
         self.assertIn("prosperolight_debug_start(paths.logs);", squeezed["src/app_storage.cpp"])
         self.assertIn('prosperolight_debug_line("main"', squeezed["src/main.cpp"])
         # Nothing that identifies the pairing is written: no key, certificate or PIN.

@@ -134,7 +134,6 @@ void Log(const char *text)
 {
     prosperolight_debug_line("main", "%s", text);
     prosperolight_debug_flush();
-    std::printf("%s\n", text);
     char line[200];
     std::snprintf(line, sizeof(line), "%s\n", text);
     (void)sceKernelDebugOutText(0, line);
