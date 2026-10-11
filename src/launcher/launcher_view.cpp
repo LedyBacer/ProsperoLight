@@ -1938,8 +1938,9 @@ void View::draw(Frame &frame) const
     draw_update_notes(above);
     update_dialog_.draw(above);
     language_.draw_popover(above);
-    // A forwarded launch: black under the connecting screen, never the launcher.
-    if (forwarding_ && !plate_)
+    // A forwarded launch: black under the connecting screen, never the launcher. The picture
+    // the stream keeps showing is taken the same way, or its pages would show through it.
+    if (forwarding_)
         list.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, Color::rgb(0x000000));
     if (launching_ && !plate_ && !forwarding_)
     {
