@@ -15,6 +15,7 @@
 #include "native_modules.hpp"
 #include "presentation_preferences.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -252,12 +253,25 @@ void RunVideoOutputSelfTest()
 
 int main(int argc, char **argv)
 {
+    // Where the time before the first frame goes, for the diagnostic log.
+    const auto entered = std::chrono::steady_clock::now();
+    const auto since_entry = [entered]
+    {
+        return static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::steady_clock::now() - entered)
+                                          .count());
+    };
     // Resolve process-owned system modules before storage grants filesystem access.
     prosperolight::native_modules::PrepareBeforeStorage();
+    const long long modules_ms = since_entry();
     int decoder_warmup[4] = {-1, -1, -1, -1};
     if (prosperolight::native_modules::Result(prosperolight::native_modules::video_decoder) == 0)
         moonlight_native_decoder_warmup(decoder_warmup);
+    const long long warmup_ms = since_entry();
     storage::Initialize();
+    prosperolight_debug_line(
+        "main", "start-up: system modules %lld ms, decoder warm-up %lld ms, storage %lld ms",
+        modules_ms, warmup_ms - modules_ms, since_entry() - warmup_ms);
     prosperolight::native_modules::LogResults();
     std::printf("[PL] decoder libraries: before-storage core=%08x h264=%08x hevc=%08x hdr=%08x\n",
                 static_cast<unsigned>(decoder_warmup[0]), static_cast<unsigned>(decoder_warmup[1]),
