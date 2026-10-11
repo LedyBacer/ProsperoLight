@@ -107,6 +107,7 @@
   "HDR10 through HEVC Main10 or 10-bit PyroWave, when advertised by the PC.": "HDR10: HEVC Main10 / PyroWave 10-bit (Компютри)",
   "Higher is not always better: the decoder sets the limit.": "Висок битрейт → Натоварване на декодера",
   "Hold": "Задръжте",
+  "Hold to close app": "Задръжте за изход",
   "Hold to remove": "Задръжте → Премахване",
   "Host Back": "Назад на хоста",
   "Host Guide": "Guide на хоста",

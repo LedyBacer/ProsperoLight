@@ -5,6 +5,7 @@
 #
 # Exercises identity initialization and deployment resolution without a console.
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ToolTests(unittest.TestCase):
+    def test_pyrowave_embedded_shader_matches_sources(self):
+        # The shipped header is compiled into the PS5 binary; a stale shader can
+        # silently interpret an updated CPU overlay buffer with the old layout.
+        folder = ROOT / "src/pyrowave/video"
+        digest = hashlib.sha256(b"".join((folder / ("yuv." + stage)).read_bytes()
+                                         for stage in ("vert", "frag"))).hexdigest()
+        header = (folder / "yuv_spirv.hpp").read_text()
+        self.assertIn("// Shader sources SHA256: " + digest, header,
+                      "Regenerate with python3 tools/pyrowave/compile-shaders.py")
+
     def assertCodeContains(self, expected, source):
         # Label localization and formatter line breaks do not alter widget
         # contracts; retain checks of IDs, options, handlers and calls.

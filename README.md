@@ -113,7 +113,7 @@ Contributions and testing across different TVs, firmwares and network setups are
 
 ## Stream overlays and app exit
 
-Hold **Circle** in the launcher for two seconds to close ProsperoLight. A progress
+Hold **Circle** on the PCs home screen for two seconds to close ProsperoLight. A progress
 bar shows the hold; releasing Circle cancels it. During streaming Circle remains
 a host-game button. H.264/HEVC and PyroWave share the same statistics and keyboard overlay, including an
 **ESC** keyboard key and a graph of the latest 180 unique-frame CPU submission

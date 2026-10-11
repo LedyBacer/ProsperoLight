@@ -107,6 +107,7 @@
   "HDR10 through HEVC Main10 or 10-bit PyroWave, when advertised by the PC.": "HDR10: HEVC Main10 / PyroWave 10-bit (컴퓨터)",
   "Higher is not always better: the decoder sets the limit.": "높은 비트레이트 → 디코더 부하",
   "Hold": "길게 누르기",
+  "Hold to close app": "길게 눌러 종료",
   "Hold to remove": "길게 누르기 → 제거",
   "Host Back": "호스트 뒤로",
   "Host Guide": "호스트 Guide",

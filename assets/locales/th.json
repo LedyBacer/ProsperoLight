@@ -107,6 +107,7 @@
   "HDR10 through HEVC Main10 or 10-bit PyroWave, when advertised by the PC.": "HDR10: HEVC Main10 / PyroWave 10-bit (คอมพิวเตอร์)",
   "Higher is not always better: the decoder sets the limit.": "บิตเรตสูง → ภาระตัวถอดรหัส",
   "Hold": "กดค้าง",
+  "Hold to close app": "กดค้างเพื่อออก",
   "Hold to remove": "กดค้าง → ลบ",
   "Host Back": "ย้อนกลับบนโฮสต์",
   "Host Guide": "Guide บนโฮสต์",

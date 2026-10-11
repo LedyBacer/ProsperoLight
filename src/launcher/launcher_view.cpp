@@ -1904,10 +1904,10 @@ void View::draw(Frame &frame) const
     loader_.draw(above);
     draw_loader_tip(above);
     draw_connect_bar(above);
-    if (exit_progress_ > 0.0f)
+    if (can_hold_to_exit() && exit_progress_ > 0.0f)
     {
         list.rounded_rect({640, 930, 640, 100}, 16, Color::rgb(0x09172c));
-        paint.label(std::string("O - ") + i18n::tr("Close"), 664, 966, 24, theme.text);
+        paint.label(i18n::tr("Hold to close app"), 664, 966, 24, theme.text);
         list.rounded_rect({664, 988, 592, 14}, 7, theme.text_muted.with_alpha(.25f));
         list.rounded_rect({664, 988, 592 * exit_progress_, 14}, 7, theme.primary);
     }
@@ -1938,6 +1938,12 @@ void View::draw_header(ui::Canvas &canvas, ui::Painter &paint) const
 
     profile_.draw(canvas);
     status_.draw(canvas);
+}
+
+bool View::can_hold_to_exit() const
+{
+    return screen_ == 0 && update_ui_ == UpdateUi::hidden && !launching_ && !model_.pairing() &&
+           !host_prompt_.is_open() && !port_prompt_.is_open() && !unpair_dialog_.is_open();
 }
 
 void View::draw_footer(ui::Canvas &canvas, ui::Painter &paint) const
@@ -1999,6 +2005,8 @@ void View::draw_footer(ui::Canvas &canvas, ui::Painter &paint) const
                                              : status.online                  ? i18n::tr("Pair")
                                                              : i18n::tr("Try again")};
         hints[count++] = {ui::Button::triangle, i18n::tr("Search again")};
+        if (can_hold_to_exit())
+            hints[count++] = {ui::Button::circle, i18n::tr("Hold to close app")};
     }
     else if (screen_ == 1)
     {

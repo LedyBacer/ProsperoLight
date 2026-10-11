@@ -348,12 +348,13 @@ void *worker(void *)
     moonlight::FramePacing pacer;
     moonlight::SourceTimestamp source_clock;
     const unsigned mode = moonlight::presentation_mode();
-    const uint32_t refresh = static_cast<uint32_t>(s.backend->refresh_hz() * 100 + 0.5);
+    const uint32_t selected_refresh_x100 =
+        static_cast<uint32_t>(s.backend->refresh_hz() * 100 + 0.5);
     pacer.reset(s.fps);
     const bool paced = mode != 0;
     moonlight::VrrRepeatPolicy vrr_repeats;
     vrr_repeats.reset(s.fps);
-    vrr_repeats.configure(moonlight::vrr_profile(), refresh);
+    vrr_repeats.configure(moonlight::vrr_profile(), selected_refresh_x100);
     moonlight::VrrPreparationLead preparation_lead;
     moonlight::Ps5ReadinessEstimator readiness;
     unsigned cadence_rate = s.fps, cadence_copies = vrr_repeats.repeat_factor();
@@ -362,14 +363,14 @@ void *worker(void *)
     uint64_t repeat_argument = 0;
     log_line("PyroWave pacing: mode=%u requested_fps=%u selected_refresh_x100=%u "
              "source_clock=1 variable_output=%u flip_poll_us=%u",
-             mode, s.fps, refresh, ps5_vrr_output_active() ? 1u : 0u,
+             mode, s.fps, selected_refresh_x100, ps5_vrr_output_active() ? 1u : 0u,
              unsigned(PROSPEROLIGHT_FLIP_POLL_US));
     uint64_t last = now_us(), incoming = 0, decoded = 0, shown = 0, bytes = 0;
     double decode_ms = 0, render_ms = 0;
     uint64_t samples = 0, unique_presented = 0, prior_unique_presented = 0;
     native_agc_metrics_t initial_hud{};
     initial_hud.video_codec = 2;
-    initial_hud.output_refresh_x100 = refresh;
+    initial_hud.output_refresh_x100 = selected_refresh_x100;
     initial_hud.stream_width = s.width;
     initial_hud.stream_height = s.height;
     initial_hud.pacing_mode = mode;
@@ -462,7 +463,7 @@ void *worker(void *)
                         continue;
                     }
                     const uint64_t idle_delay = moonlight::idle_scanout_delay_us(
-                        s.fps, refresh, ps5_vrr_output_active(), repeating);
+                        s.fps, selected_refresh_x100, ps5_vrr_output_active(), repeating);
                     const uint64_t repeat_deadline = repeat_retry.deadline(
                         ps5_vrr_output_active() ? vrr_repeats.idle_deadline()
                                                 : last_scanout_us + idle_delay);
@@ -489,7 +490,7 @@ void *worker(void *)
                     // Re-render retained decoded planes, never re-decode the
                     // compressed frame or acquire a decoder/network slot.
                     Frame retained{};
-                    PacingWait repeat_wait{&s, &pacer, &retained, mode, refresh};
+                    PacingWait repeat_wait{&s, &pacer, &retained, mode, selected_refresh_x100};
                     repeat_wait.observe_output = record_poll;
                     repeat_wait.observation_context =
                         const_cast<void *>(static_cast<const void *>(&record_output));
@@ -640,7 +641,7 @@ void *worker(void *)
                          cadence_rate, cadence_copies, vrr_repeats.target_refresh_x100(),
                          (unsigned long long)vrr_repeats.interval());
             }
-            PacingWait wait{&s, &pacer, &frame, mode, refresh};
+            PacingWait wait{&s, &pacer, &frame, mode, selected_refresh_x100};
             wait.observe_output = record_poll;
             wait.observation_context =
                 const_cast<void *>(static_cast<const void *>(&record_output));
@@ -733,17 +734,17 @@ void *worker(void *)
                     high = s.high_water;
                 }
                 const double seconds = elapsed / 1e6;
-                const double refresh =
+                const double observed_refresh_hz =
                     counters.vblank_available ? (counters.vblanks - vblanks) / seconds : 0;
                 if (!refresh_reported && ++windows >= 3)
                 {
-                    log_line("PyroWave VideoOut actual %.3f Hz; selected %.3f Hz", refresh,
-                             s.backend->refresh_hz());
-                    if (s.fps > 100 && refresh < 100 && !ps5_vrr_output_active())
+                    log_line("PyroWave VideoOut actual %.3f Hz; selected %.3f Hz",
+                             observed_refresh_hz, s.backend->refresh_hz());
+                    if (s.fps > 100 && observed_refresh_hz < 100 && !ps5_vrr_output_active())
                         log_line("PyroWave 120 Hz verification pending: short live window "
                                  "%.3f Hz; "
                                  "continuing stream",
-                                 refresh);
+                                 observed_refresh_hz);
                     refresh_reported = true;
                 }
                 if (s.hdr && windows >= 3 && ps5_hdr_output_active() != 1)
@@ -769,7 +770,7 @@ void *worker(void *)
                          "rejected=%llu lost_packets=%llu flip_errors=%llu",
                          (s.incoming.load() - incoming) / seconds,
                          (s.decoded.load() - decoded) / seconds, (s.shown.load() - shown) / seconds,
-                         refresh, (s.bytes.load() - bytes) * 8.0 / elapsed,
+                         observed_refresh_hz, (s.bytes.load() - bytes) * 8.0 / elapsed,
                          samples ? decode_ms / samples : 0, samples ? render_ms / samples : 0,
                          depth, high, (unsigned long long)s.stale.load(),
                          (unsigned long long)s.partial.load(),
@@ -777,7 +778,10 @@ void *worker(void *)
                          (unsigned long long)counters.failed);
                 native_agc_metrics_t hud{};
                 hud.video_codec = 2;
-                hud.output_refresh_x100 = refresh;
+                // Software VideoOut counters report Hz; the shared HUD expects Hz x100.
+                hud.output_refresh_x100 = counters.vblank_available
+                                              ? uint32_t(observed_refresh_hz * 100.0 + 0.5)
+                                              : selected_refresh_x100;
                 hud.incoming_fps_x100 = uint32_t((s.incoming.load() - incoming) * 100 / seconds);
                 hud.decoded_fps_x100 = uint32_t((s.decoded.load() - decoded) * 100 / seconds);
                 // Unique frames, unlike the separate shown/scanout repeat counter.

@@ -107,6 +107,7 @@
   "HDR10 through HEVC Main10 or 10-bit PyroWave, when advertised by the PC.": "HDR10: HEVC Main10 / PyroWave 10-bit (Bilgisayarlar)",
   "Higher is not always better: the decoder sets the limit.": "Yüksek bit hızı → Kod çözücü yükü",
   "Hold": "Basılı tut",
+  "Hold to close app": "Çıkmak için basılı tut",
   "Hold to remove": "Basılı tut → Kaldır",
   "Host Back": "Ana bilgisayarda Geri",
   "Host Guide": "Ana bilgisayarda Guide",

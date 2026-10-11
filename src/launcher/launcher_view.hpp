@@ -59,6 +59,8 @@ struct Palette
 class View
 {
   public:
+    bool can_hold_to_exit() const;
+
     void set_exit_progress(float progress)
     {
         exit_progress_ = progress;

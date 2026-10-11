@@ -601,16 +601,7 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                 const InputFrame input = tracker.update(std::span<const PadSample>(samples, count),
                                                         static_cast<std::uint64_t>(now));
 
-                if (input.connected && !input.focus_lost && input.is_held(hui::Action::back))
-                {
-                    if (!close_started)
-                        close_started = now;
-                }
-                else
-                    close_started = 0;
-                const float close_progress =
-                    close_started ? std::min(1.0f, float(now - close_started) / 2000000.0f) : 0.0f;
-                view.set_exit_progress(close_progress);
+                const bool exit_was_available = view.can_hold_to_exit();
                 model.Poll(static_cast<std::uint64_t>(now / 1000));
                 lap(parts[0]);
                 ArtworkImage image;
@@ -635,6 +626,19 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
 
                 feedback.clear();
                 view.update(input, dt, feedback);
+                // Back from another page/dialog must be released before it can close the app.
+                if (exit_was_available && view.can_hold_to_exit() && input.connected &&
+                    !input.focus_lost && input.is_held(hui::Action::back))
+                {
+                    if (!close_started && input.is_pressed(hui::Action::back))
+                        close_started = now;
+                }
+                else
+                    close_started = 0;
+                const float close_progress =
+                    close_started ? std::min(1.0f, float(now - close_started) / 2000000.0f) : 0.0f;
+                view.set_exit_progress(close_progress);
+
                 if (prosperolight::ui_sound_enabled())
                     for (const audio::CueEvent &event : feedback.cues)
                         sounds.play(mixer,
