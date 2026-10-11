@@ -183,6 +183,11 @@ class Model
 
     // ---- requests ----
     void SelectHost(unsigned index);
+    // A notice from outside the model: why a forwarded launch did not start.
+    void ShowNotice(NoticeKind kind, std::string title, std::string body = {}, float seconds = 0.0f)
+    {
+        Notify(kind, std::move(title), std::move(body), seconds);
+    }
     void Refresh(bool discover);
     void StartPairing();
     void Unpair();

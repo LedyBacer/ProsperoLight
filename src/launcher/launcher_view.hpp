@@ -124,6 +124,8 @@ class View
 
     // True once, when the stream should start.
     bool take_start_stream();
+    // Starts the selected app of the selected PC, as Start does: for a forwarded launch.
+    void start_selected(hui::ui::Feedback &feedback);
     // Installing a newer release (launcher_model.hpp): the actions that do it,
     // and, once, that the app must close now so the helper can replace its files.
     void set_update_actions(const UpdateActions &actions)

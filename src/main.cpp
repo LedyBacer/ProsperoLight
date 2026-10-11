@@ -7,6 +7,7 @@
 #include "app_storage.hpp"
 #include "lan_http_report.hpp"
 #include "crash_report.hpp"
+#include "forwarded_launch.hpp"
 #include "connecting_plate.hpp"
 #include "launcher/launcher.hpp"
 #include "moonlight_stream.hpp"
@@ -249,7 +250,7 @@ void RunVideoOutputSelfTest()
 
 } // namespace
 
-int main()
+int main(int argc, char **argv)
 {
     // Resolve process-owned system modules before storage grants filesystem access.
     prosperolight::native_modules::PrepareBeforeStorage();
@@ -263,6 +264,13 @@ int main()
                 static_cast<unsigned>(decoder_warmup[2]), static_cast<unsigned>(decoder_warmup[3]));
     // From here a fault leaves a report beside the log.
     crash::Install(storage::paths().logs, storage::log_descriptor());
+    // A home-screen forwarder names the stream to start (docs/FORWARDER.md).
+    prosperolight::pending_forwarded_launch() = prosperolight::parse_forwarded_launch(argc, argv);
+    if (prosperolight::pending_forwarded_launch().requested())
+        std::printf("[PL] main: forwarded launch pc=\"%s\" app=\"%s\" exit_after_stream=%d\n",
+                    prosperolight::pending_forwarded_launch().pc.c_str(),
+                    prosperolight::pending_forwarded_launch().app.c_str(),
+                    prosperolight::pending_forwarded_launch().exit_after_stream ? 1 : 0);
 #if PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS != 0
     RunVideoOutputSelfTest();
 #endif
@@ -361,5 +369,14 @@ int main()
                       streams, stream_result, metrics.presented_frames, settle_ms);
         Log(line);
         sceKernelUsleep(settle_ms * 1000u);
+        // A forwarder asked to return to the home screen once its stream is over. A
+        // stream that failed opens the launcher instead, which says why.
+        if (selection.exit_after_stream && stream_result == 0)
+        {
+            Log("[PL] main: closing after the forwarded stream");
+            prosperolight_release_splash();
+            (void)sceSystemServiceLoadExec("exit", nullptr);
+            KeepProcessAlive();
+        }
     }
 }

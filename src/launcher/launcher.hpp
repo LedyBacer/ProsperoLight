@@ -39,6 +39,8 @@ struct Selection
     float connecting_bar[4] = {}; // x, y, width, height, in pixels of the picture
     std::uint8_t connecting_fill[3] = {};
     float connecting_progress = 0.0f;
+    // A forwarder started this stream and wants the app closed when it ends.
+    bool exit_after_stream = false;
 };
 
 enum class Result

@@ -1766,6 +1766,13 @@ void View::update_games(const InputFrame &input, ui::Feedback &feedback)
     }
 }
 
+void View::start_selected(ui::Feedback &feedback)
+{
+    // The Games page is where the player lands when the stream ends.
+    show(1, nullptr);
+    launch(feedback);
+}
+
 void View::launch(ui::Feedback &feedback)
 {
     if (!model_.RequestStream())

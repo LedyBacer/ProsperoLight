@@ -21,6 +21,7 @@
 #include "i18n.hpp"
 #include "client_preferences.hpp"
 #include "host_preferences.hpp"
+#include "launcher/forwarded_start.hpp"
 #include "launcher/launcher_model.hpp"
 #include "launcher/launcher_view.hpp"
 
@@ -288,6 +289,9 @@ int main(int argc, char **argv)
 
     // Runs one launcher from start-up until its script ends; returns whether
     // it asked for a stream.
+    // What the last session's forwarded launch came to (docs/FORWARDER.md).
+    std::string forwarded_app;
+    std::string forwarded_reason;
     const auto session = [&](const char *prefix, const std::vector<Step> &script,
                              const char *stream_error,
                              const moonlight_config_t *initial = nullptr) -> bool
@@ -330,6 +334,11 @@ int main(int argc, char **argv)
         view.set_storage({true, "/data/prosperolight/config", "/data/prosperolight/pairing",
                           "/data/prosperolight/logs"});
         view.show_stream_error(stream_error);
+        launcher::ForwardedStart forwarded;
+        forwarded.Begin(std::move(prosperolight::pending_forwarded_launch()), now_ms);
+        prosperolight::pending_forwarded_launch() = {};
+        forwarded_app.clear();
+        forwarded_reason.clear();
         launcher::UpdateActions actions;
         actions.begin = []
         {
@@ -410,6 +419,21 @@ int main(int argc, char **argv)
             }
             hui::ui::Feedback feedback;
             view.update(input, 1.0f / 60.0f, feedback);
+            {
+                std::string reason;
+                const launcher::ForwardedStart::Step step = forwarded.Advance(model, now_ms, &reason);
+                if (step == launcher::ForwardedStart::Step::start)
+                {
+                    forwarded_app = model.backend().apps[model.selected_app()].name;
+                    view.start_selected(feedback);
+                }
+                else if (step == launcher::ForwardedStart::Step::failed)
+                {
+                    forwarded_reason = reason;
+                    model.ShowNotice(launcher::NoticeKind::error, i18n::tr("The stream was not started"),
+                                     reason, 8.0f);
+                }
+            }
             for (const hui::audio::CueEvent &event : feedback.cues)
             {
                 ++cue_count;
@@ -786,6 +810,44 @@ int main(int argc, char **argv)
     expect(fake::world()[0].current_app != 0, "a stop the PC ignores leaves the app shown as running");
     fake::world()[0].keeps_app = false;
     fake::world()[0].current_app = 0;
+    // ---- a home-screen forwarder names the stream ----
+    {
+        prosperolight::pending_forwarded_launch() = {"gaming-pc", "paper kites", true};
+        expect(session("forwarded", {{160, 0, Direction::none, "connecting"}, {60, 0}}, "") &&
+                   forwarded_app == "Paper Kites",
+               "a forwarder starts the named app of the named PC, whatever the letter case");
+        prosperolight::pending_forwarded_launch() = {"192.168.4.20", "4", false};
+        expect(session("forwarded", {{220, 0}}, "") && forwarded_app == "Glass Orchard",
+               "a forwarder may name the PC by address and the app by its number");
+        prosperolight::pending_forwarded_launch() = {"", "Night Ferry", false};
+        expect(session("forwarded", {{220, 0}}, "") && forwarded_app == "Night Ferry",
+               "without a PC the forwarder means the one last selected");
+        prosperolight::pending_forwarded_launch() = {"Gaming-PC", "No Such Game", false};
+        expect(!session("forwarded", {{160, 0, Direction::none, "app-missing"}}, "") &&
+                   forwarded_reason.find("No Such Game") != std::string::npos,
+               "an app the PC does not have opens the launcher and says so");
+        prosperolight::pending_forwarded_launch() = {"Attic-PC", "Desktop", false};
+        expect(!session("forwarded", {{60, 0}}, "") &&
+                   forwarded_reason.find("Attic-PC") != std::string::npos,
+               "a PC that is not saved is named in the notice");
+        // The second PC was paired by an earlier part of this run: as if it had been unpaired since.
+        const bool office_paired = fake::world()[1].paired;
+        fake::world()[1].paired = false;
+        prosperolight::pending_forwarded_launch() = {"Office-PC", "Desktop", false};
+        expect(!session("forwarded", {{220, 0, Direction::none, "not-paired"}}, "") &&
+                   forwarded_reason.find("not paired") != std::string::npos,
+               "a PC that is not paired is not streamed from");
+        fake::world()[1].paired = office_paired;
+        prosperolight::pending_forwarded_launch() = {"Living-Room", "Desktop", false};
+        expect(!session("forwarded", {{1000, 0}}, "") &&
+                   forwarded_reason.find("did not answer") != std::string::npos,
+               "a PC that stays silent is given up on after fifteen seconds");
+        // The forwarders selected other PCs: back to the first for what follows.
+        moonlight_config_t saved;
+        (void)moonlight_config_load(&saved);
+        saved.selected_host = 0;
+        (void)moonlight_config_save(&saved);
+    }
 
     // ---- back from a stream that failed ----
     session("games", {{80, 0, Direction::none, "stream-error"}}, "Sunshine closed the connection");
