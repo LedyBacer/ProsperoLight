@@ -23,9 +23,13 @@ class PyroWaveVideoBackend
     VideoFrameTiming present(void (*before_present)(void *) = nullptr, void *context = nullptr,
                              bool wait_for_prepared = true, bool repeat = false,
                              bool (*admit_repeat)(void *) = nullptr);
-    void update_hud(const char *text, bool enabled)
+    void update_hud(const native_agc_metrics_t *metrics, bool enabled)
     {
-        renderer_.update_hud(text, enabled);
+        renderer_.update_hud(metrics, enabled);
+    }
+    bool hud_visible() const
+    {
+        return renderer_.hud_visible();
     }
     void shutdown();
     ~PyroWaveVideoBackend()

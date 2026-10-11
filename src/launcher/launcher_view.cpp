@@ -1904,6 +1904,13 @@ void View::draw(Frame &frame) const
     loader_.draw(above);
     draw_loader_tip(above);
     draw_connect_bar(above);
+    if (exit_progress_ > 0.0f)
+    {
+        list.rounded_rect({640, 930, 640, 100}, 16, Color::rgb(0x09172c));
+        paint.label(std::string("O - ") + i18n::tr("Close"), 664, 966, 24, theme.text);
+        list.rounded_rect({664, 988, 592, 14}, 7, theme.text_muted.with_alpha(.25f));
+        list.rounded_rect({664, 988, 592 * exit_progress_, 14}, 7, theme.primary);
+    }
 }
 
 void View::draw_header(ui::Canvas &canvas, ui::Painter &paint) const

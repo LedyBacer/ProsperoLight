@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "pyrowave_renderer.hpp"
 #include "native_agc_present.hpp"
-#include "moonlight_stream_keyboard.hpp"
+#include "stream_overlay.hpp"
 #include "yuv_spirv.hpp"
 void PyroWaveRenderer::initialize(VulkanContext &c, const Output &output, VkFormat format,
                                   const std::vector<VkImageView> &targets)
@@ -62,7 +62,7 @@ void PyroWaveRenderer::initialize(VulkanContext &c, const Output &output, VkForm
     }
     vkUpdateDescriptorSets(c.device, 3, writes, 0, nullptr);
     VkBufferCreateInfo buffer_info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    buffer_info.size = (1 + 72 * 6 + 1 + 72 * 8) * sizeof(uint32_t);
+    buffer_info.size = 4 * sizeof(uint32_t) + KEYBOARD_SURFACE_BYTES;
     buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     VK_OK(vkCreateBuffer(c.device, &buffer_info, nullptr, &hud_buffer_));
     VkMemoryRequirements req;
@@ -85,7 +85,8 @@ void PyroWaveRenderer::initialize(VulkanContext &c, const Output &output, VkForm
     hud_write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     hud_write.pBufferInfo = &buffer_descriptor;
     vkUpdateDescriptorSets(c.device, 1, &hud_write, 0, nullptr);
-    update_hud("PyroWave: waiting for stream statistics", false);
+    stream_overlay::graph = {};
+    update_hud(nullptr, false);
     VkAttachmentDescription attachment = {};
     attachment.format = format;
     attachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -213,60 +214,36 @@ void PyroWaveRenderer::render(VkCommandBuffer cmd, const Output &output, unsigne
     vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRenderPass(cmd);
 }
-void PyroWaveRenderer::update_hud(const char *text, bool enabled)
+void PyroWaveRenderer::update_hud(const native_agc_metrics_t *metrics, bool enabled)
 {
     if (!hud_mapped_)
         return;
-    hud_mapped_[0] = enabled ? 1 : 0;
-    if (text)
-    {
-        std::fill(hud_mapped_ + 1, hud_mapped_ + 1 + 72 * 6, 32u);
-        unsigned row = 0, column = 0;
-        for (const unsigned char *p = reinterpret_cast<const unsigned char *>(text); *p && row < 6;
-             ++p)
-        {
-            if (*p == '\n')
-            {
-                ++row;
-                column = 0;
-                continue;
-            }
-            if (column < 72)
-                hud_mapped_[1 + row * 72 + column++] = *p >= 32 && *p < 128 ? *p : 32;
-        }
-    }
-    // Reuse native input state/key labels; only the overlay presenter differs.
+    if (metrics)
+        hud_metrics_ = *metrics;
     int keyboard = 0, shifted = 0;
     uint32_t selected = 0;
     native_agc_keyboard_snapshot(&keyboard, &selected, &shifted);
-    hud_mapped_[1 + 72 * 6] = keyboard ? 1u : 0u;
+    const unsigned kind = keyboard ? 2u : enabled ? 1u : 0u;
+    if (!kind && !overlay_kind_)
+        return;
+    const bool changed =
+        kind != overlay_kind_ || (keyboard && (selected != last_key_ || shifted != last_shift_));
+    if (!changed && (!enabled || ++overlay_tick_ % 6u != 0))
+        return;
+    hud_mapped_[0] = keyboard ? KEYBOARD_WIDTH : HUD_WIDTH;
+    hud_mapped_[1] = keyboard ? KEYBOARD_HEIGHT : HUD_HEIGHT;
+    hud_mapped_[2] = kind;
+    auto *surface = reinterpret_cast<uint8_t *>(hud_mapped_ + 4);
     if (keyboard)
-    {
-        uint32_t *keys = hud_mapped_ + 1 + 72 * 6 + 1;
-        std::fill(keys, keys + 72 * 8, 32u);
-        auto write = [&](unsigned row, unsigned column, const char *label)
-        {
-            for (const unsigned char *p = reinterpret_cast<const unsigned char *>(label);
-                 *p && column < 72; ++p)
-                keys[row * 72 + column++] = *p;
-        };
-        write(0, 0, "ProsperoLight keyboard: selected key in brackets");
-        write(1, 0, "Cross: type  Square: backspace  Triangle: shift  Options: enter");
-        write(2, 0, "Circle: close   D-pad: select key");
-        for (unsigned row = 0; row < moonlight_keyboard_row_count; ++row)
-        {
-            const unsigned start = moonlight_keyboard_row_offsets[row];
-            const unsigned end = moonlight_keyboard_row_offsets[row + 1];
-            const unsigned cell = 72 / (end - start);
-            for (unsigned index = start; index < end; ++index)
-            {
-                const char *label = moonlight_keyboard_label(index, shifted != 0);
-                char text[16];
-                snprintf(text, sizeof(text), index == selected ? "[%s]" : " %s ", label);
-                write(row + 3, (index - start) * cell, text);
-            }
-        }
-    }
+        stream_overlay::refresh_keyboard_surface(surface, selected, shifted,
+                                                 conversion.blue_extent[3] > .5f);
+    else if (enabled)
+        stream_overlay::refresh_hud_surface(surface, &hud_metrics_, hud_metrics_.stream_width,
+                                            hud_metrics_.stream_height, 3840, 2160, 11988,
+                                            conversion.blue_extent[3] > .5f);
+    overlay_kind_ = kind;
+    last_key_ = selected;
+    last_shift_ = shifted;
     if (!hud_coherent_)
     {
         VkMappedMemoryRange range = {VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};

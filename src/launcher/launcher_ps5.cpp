@@ -572,6 +572,7 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             std::vector<std::uint32_t> posters;
             std::uint64_t frames = 0;
             unsigned slow_frames = 0;
+            std::int64_t close_started = 0;
             std::int64_t last_frame = sys::monotonic_us();
             for (;;)
             {
@@ -600,6 +601,16 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                 const InputFrame input = tracker.update(std::span<const PadSample>(samples, count),
                                                         static_cast<std::uint64_t>(now));
 
+                if (input.connected && !input.focus_lost && input.is_held(hui::Action::back))
+                {
+                    if (!close_started)
+                        close_started = now;
+                }
+                else
+                    close_started = 0;
+                const float close_progress =
+                    close_started ? std::min(1.0f, float(now - close_started) / 2000000.0f) : 0.0f;
+                view.set_exit_progress(close_progress);
                 model.Poll(static_cast<std::uint64_t>(now / 1000));
                 lap(parts[0]);
                 ArtworkImage image;
@@ -723,6 +734,11 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                     }
                 }
 #endif
+                if (close_progress >= 1.0f)
+                {
+                    outcome = Result::app_exit;
+                    break;
+                }
                 if (view.take_update_exit())
                 {
                     outcome = Result::update_exit;

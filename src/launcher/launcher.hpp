@@ -43,6 +43,7 @@ struct Selection
 
 enum class Result
 {
+    app_exit,     // Circle held in launcher: close after normal resource cleanup
     failed,       // the display or the fonts could not be opened
     start_stream, // *selection says what to stream
     update_exit,  // an update is staged: close the app so the helper can replace its files

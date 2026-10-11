@@ -278,11 +278,12 @@ int main()
         const launcher::Result result = launcher::Run(&selection, stream_error, first_start);
         first_start = false;
         stream_error[0] = '\0';
-        if (result == launcher::Result::update_exit)
+        if (result == launcher::Result::update_exit || result == launcher::Result::app_exit)
         {
             // The self-update helper waits for this process to end, then puts
             // the new version's files in place (third_party/update-check).
-            Log("[PL] main: closing for the update");
+            Log(result == launcher::Result::update_exit ? "[PL] main: closing for the update"
+                                                        : "[PL] main: closing by request");
             (void)sceSystemServiceLoadExec("exit", nullptr);
             KeepProcessAlive();
         }

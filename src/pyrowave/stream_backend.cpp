@@ -10,6 +10,7 @@
 #include <new>
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "native_agc_present.hpp"
+#include "stream_overlay.hpp"
 #include "stream_backend.hpp"
 #include "video/ps5_presentation_stats.hpp"
 #include "video/pyrowave_video_backend.hpp"
@@ -365,7 +366,16 @@ void *worker(void *)
              unsigned(PROSPEROLIGHT_FLIP_POLL_US));
     uint64_t last = now_us(), incoming = 0, decoded = 0, shown = 0, bytes = 0;
     double decode_ms = 0, render_ms = 0;
-    uint64_t samples = 0;
+    uint64_t samples = 0, unique_presented = 0, prior_unique_presented = 0;
+    native_agc_metrics_t initial_hud{};
+    initial_hud.video_codec = 2;
+    initial_hud.stream_width = s.width;
+    initial_hud.stream_height = s.height;
+    initial_hud.pacing_mode = mode;
+    initial_hud.vrr_api_active = ps5_vrr_output_active();
+    initial_hud.vsync_enabled = native_agc_vsync_active() || mode == 2;
+    s.backend->update_hud(&initial_hud, native_agc_hud_enabled() != 0);
+
     auto counters = ps5_presentation_stats();
     uint64_t vblanks = counters.vblanks;
     bool refresh_reported = false;
@@ -487,6 +497,7 @@ void *worker(void *)
                     repeat_wait.vrr = &vrr_repeats;
                     repeat_wait.previous_request = s.backend->requested();
                     repeat_wait.readiness = &readiness;
+                    s.backend->update_hud(nullptr, native_agc_hud_enabled() != 0);
                     const auto repeated_timing = s.backend->present(
                         wait_prepared_frame, &repeat_wait, true, true, admit_idle_repeat);
                     if (repeat_wait.cancelled)
@@ -657,7 +668,10 @@ void *worker(void *)
                         finished - last_picture_us > UINT64_C(1500000) / s.fps;
             last_picture_us = finished;
             repeat_retry.succeeded();
+            ++unique_presented;
             const uint64_t actual_submit = wait.submit_us ? wait.submit_us : finished;
+            stream_overlay::graph.record(native_agc_hud_enabled() != 0 && s.backend->hud_visible(),
+                                         actual_submit);
             vrr_repeats.presented(actual_submit);
             // Consume previous completion before replacing its unique-frame evidence.
             observe_feedback(ps5_presentation_stats());
@@ -760,29 +774,33 @@ void *worker(void *)
                          (unsigned long long)s.partial.load(),
                          (unsigned long long)s.rejected.load(), (unsigned long long)s.losses.load(),
                          (unsigned long long)counters.failed);
-                char hud[512];
-                snprintf(hud, sizeof(hud),
-                         "PyroWave %ux%u %u FPS / %s %s %u-bit\n"
-                         "Incoming %.2f   Decoded %.2f   Presented %.2f FPS\n"
-                         "VideoOut %.2f Hz   Data %.2f Mbps\n"
-                         "Policy %s%s   VSync %s   Nominal %.2f Hz\n"
-                         "GPU decode %.3f ms   render %.3f ms\n"
-                         "Queue %zu/%zu   Stale %llu   Partial %llu\n"
-                         "Lost packets %llu   Rejected %llu   Flip errors %llu",
-                         s.width, s.height, s.fps, s.hdr ? "HDR10" : "SDR",
-                         s.chroma444 ? "4:4:4" : "4:2:0", s.hdr ? 10u : 8u,
-                         (s.incoming.load() - incoming) / seconds,
-                         (s.decoded.load() - decoded) / seconds, (s.shown.load() - shown) / seconds,
-                         refresh, (s.bytes.load() - bytes) * 8.0 / elapsed,
-                         moonlight::effective_pacing_name(mode, ps5_vrr_output_active()),
-                         mode == 2 && !ps5_vrr_output_active() ? " / fixed fallback" : "",
-                         selected_vsync || mode == 2 ? "On" : "Off", s.backend->refresh_hz(),
-                         samples ? decode_ms / samples : 0, samples ? render_ms / samples : 0,
-                         depth, high, (unsigned long long)s.stale.load(),
-                         (unsigned long long)s.partial.load(), (unsigned long long)s.losses.load(),
-                         (unsigned long long)s.rejected.load(),
-                         (unsigned long long)counters.failed);
-                s.backend->update_hud(hud, native_agc_hud_enabled() != 0);
+                native_agc_metrics_t hud{};
+                hud.video_codec = 2;
+                hud.incoming_fps_x100 = uint32_t((s.incoming.load() - incoming) * 100 / seconds);
+                hud.decoded_fps_x100 = uint32_t((s.decoded.load() - decoded) * 100 / seconds);
+                // Unique frames, unlike the separate shown/scanout repeat counter.
+                hud.rendering_fps_x100 =
+                    uint32_t((unique_presented - prior_unique_presented) * 100 / seconds);
+                hud.stream_width = s.width;
+                hud.stream_height = s.height;
+                hud.gpu_render_average_us = uint64_t(samples ? render_ms * 1000 / samples : 0);
+                hud.decode_average_us = uint64_t(samples ? decode_ms * 1000 / samples : 0);
+                hud.decoder_load_permille = unsigned(hud.decode_average_us * s.fps / 1000);
+                hud.pending_frames = unsigned(depth);
+                hud.not_displayed = unsigned(s.stale.load());
+                hud.lost_packets = s.losses.load();
+                hud.partial_frames = unsigned(s.partial.load());
+                hud.rejected_frames = unsigned(s.rejected.load());
+                hud.network_drop_percent_x100 =
+                    unsigned(s.rejected.load() * 10000 / std::max<uint64_t>(1, s.incoming.load()));
+                hud.rtt_valid = LiGetEstimatedRttInfo(&hud.rtt_ms, &hud.rtt_variance_ms);
+                hud.vsync_enabled = selected_vsync || mode == 2;
+                hud.pacing_mode = mode;
+                hud.vrr_api_active = ps5_vrr_output_active();
+                hud.pacing_reserve_us =
+                    hud.vrr_api_active ? vrr_repeats.playout_reserve_us() : pacer.stats.reserve_us;
+                s.backend->update_hud(&hud, native_agc_hud_enabled() != 0);
+                prior_unique_presented = unique_presented;
                 last = now;
                 incoming = s.incoming;
                 decoded = s.decoded;

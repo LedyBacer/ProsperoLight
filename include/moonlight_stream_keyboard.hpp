@@ -84,11 +84,12 @@ inline constexpr moonlight_keyboard_key moonlight_keyboard_keys[] = {
     {"SPACE", "SPACE", 0x20, moonlight_keyboard_action::space},
     {"BACK", "BACK", 0x08, moonlight_keyboard_action::backspace},
     {"ENTER", "ENTER", 0x0d, moonlight_keyboard_action::enter},
+    {"ESC", "ESC", 0x1b, moonlight_keyboard_action::key},
     {"CLOSE", "CLOSE", 0, moonlight_keyboard_action::close},
 };
 
-inline constexpr uint8_t moonlight_keyboard_row_offsets[] = {0, 13, 26, 37, 47, 52};
-inline constexpr uint32_t moonlight_keyboard_key_count = 52;
+inline constexpr uint8_t moonlight_keyboard_row_offsets[] = {0, 13, 26, 37, 47, 53};
+inline constexpr uint32_t moonlight_keyboard_key_count = 53;
 inline constexpr uint32_t moonlight_keyboard_row_count = 5;
 
 static_assert(sizeof(moonlight_keyboard_keys) / sizeof(moonlight_keyboard_keys[0]) ==

@@ -53,6 +53,10 @@ typedef struct native_agc_metrics
     uint32_t pacing_mode, vrr_api_active;
     uint64_t pacing_reserve_us;
     uint64_t decoder_cpu_mask;
+    uint32_t stream_width, stream_height; // RADV overlay source dimensions
+    uint64_t gpu_render_average_us;
+    uint64_t lost_packets;
+    uint32_t partial_frames, rejected_frames;
 } native_agc_metrics_t;
 
 int native_agc_present_nv12(const void *source, size_t source_bytes, uint32_t pitch,

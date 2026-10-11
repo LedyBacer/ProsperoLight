@@ -152,10 +152,12 @@ class ToolTests(unittest.TestCase):
         self.assertNotIn("hdr_enabled", resolution)
 
     def test_hdr_overlay_identifies_hdr_on_the_first_line(self):
-        source = (ROOT / "src/native_agc_present.cpp").read_text(encoding="utf-8")
+        source = (ROOT / "include/stream_overlay.hpp").read_text(encoding="utf-8")
         first_line = source[source.index('"Video stream: %ux%u %u.%02u FPS (Codec: %s%s)') :]
         first_line = first_line[: first_line.index("hud_line(luma, 0,")]
+        first_line = " ".join(first_line.split())
         self.assertIn('metrics->video_codec ? "HEVC" : "H.264"', first_line)
+        self.assertIn('"PyroWave"', first_line)
         self.assertIn('hdr ? " / HDR" : ""', first_line)
 
     def test_selectable_frame_rate_reaches_sunshine_and_decoder(self):

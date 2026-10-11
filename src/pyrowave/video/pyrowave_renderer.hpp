@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "../vulkan/vulkan_context.hpp"
+#include "native_agc_present.hpp"
 struct PlaneConversion
 {
     float red_green[4] = {1.5748f, -0.187324f, -0.468124f, 512.0f / 1023.0f};
@@ -14,7 +15,11 @@ class PyroWaveRenderer
     void initialize(VulkanContext &context, const Output &planes, VkFormat format,
                     const std::vector<VkImageView> &targets);
     void render(VkCommandBuffer cmd, const Output &planes, unsigned target);
-    void update_hud(const char *text, bool enabled);
+    void update_hud(const native_agc_metrics_t *metrics, bool enabled);
+    bool hud_visible() const
+    {
+        return overlay_kind_ == 1;
+    }
     void shutdown();
     ~PyroWaveRenderer()
     {
@@ -28,6 +33,11 @@ class PyroWaveRenderer
     VkDeviceMemory hud_memory_ = VK_NULL_HANDLE;
     uint32_t *hud_mapped_ = nullptr;
     bool hud_coherent_ = false;
+    native_agc_metrics_t hud_metrics_{};
+    unsigned overlay_tick_ = 0;
+    uint32_t last_key_ = UINT32_MAX;
+    int last_shift_ = -1;
+    unsigned overlay_kind_ = 0;
     VkRenderPass pass_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE;
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
