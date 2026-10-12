@@ -109,6 +109,9 @@ class Scheduler:
     async def create(self, suite, profile):
         if profile.get('schema') != 'prosperolight-test/1':
             raise ValueError('profile must use prosperolight-test/1')
+        if self.execution_mode == 'real':
+            from ..suites import apply_suite
+            profile = apply_suite(suite, profile)
         timing = profile.get('timing', {})
         if not isinstance(timing, dict) or type(timing.get('hard_seconds', 120)) is not int \
                 or not 1 <= timing.get('hard_seconds', 120) <= 1800:
@@ -257,6 +260,7 @@ class Scheduler:
                                       {'elapsed_seconds': report['stage_results'][stage]['elapsed_seconds']})
             if self.execution_mode == 'fake':
                 report['verdict'] = 'PASS'
+            self._archive_report(run_id, profile, report)
             report['finished_unix'] = time.time()
             report['artifacts'] = [item['name'] for item in self.store.files(run_id) or []]
             if 'report.json' not in report['artifacts']:
@@ -284,6 +288,7 @@ class Scheduler:
                           reason_code=reason_code,
                           cleanup_errors=errors, finished_unix=time.time())
             report['artifacts'] = ['profile.json', 'report.json']
+            self._archive_report(run_id, profile, report)
             pending = self.store.report_artifact(run_id, report)
             current = self.store.get(run_id)
             if current and current['state'] not in TERMINAL:
@@ -311,6 +316,7 @@ class Scheduler:
                     report.update(verdict='INCONCLUSIVE', reason_code='LEASE_LOST',
                                   reason='PS5 lease ownership was lost during cleanup')
                 report['artifacts'] = ['profile.json', 'report.json']
+                self._archive_report(run_id, profile, report)
                 pending = self.store.report_artifact(run_id, report)
                 current = self.store.get(run_id)
                 if not current or current['state'] in TERMINAL:
@@ -325,6 +331,25 @@ class Scheduler:
             self.tasks.pop(run_id, None); self.cancellations.pop(run_id, None); self.lost_leases.discard(run_id)
             self.shutdown_requested.discard(run_id)
 
+    def _archive_report(self, run_id, profile, report):
+        from ..analysis import analyze_run
+        from ..report import archive_analysis
+        directory = self.store.artifacts / run_id
+        if not report.get('ps5_measurement'):
+            from ..analysis import read_bounded
+            try:
+                evidence = json.loads(read_bounded(directory / 'ps5/executor.json')).get('collected')
+                if evidence and evidence.get('receipt', {}).get('run_id') == run_id:
+                    report['ps5_measurement'] = evidence
+            except (OSError, ValueError, TypeError):
+                pass
+        report['analysis'] = analyze_run(profile, report, directory)
+        if report['analysis']['functional_verdict'] == 'FAIL' and not report.get('cleanup_errors') and report.get('reason_code') not in ('LEASE_LOST','COORDINATOR_SHUTDOWN'):
+            report['verdict'] = 'FAIL'
+        report['summary_verdict'] = (report['verdict'] if report['verdict'] in ('FAIL', 'CANCELLED') else
+            'INCONCLUSIVE' if self.execution_mode == 'real' and report['analysis']['measurement_validity'] != 'VALID' else report['verdict'])
+        archive_analysis(self.store.artifacts / run_id, profile, report, self.store.list_events(run_id) or [])
+
     async def _cleanup(self, profile, run_id):
         errors = []
         for name, adapter in (('ps5', self.ps5), ('host', self.host)):
@@ -332,7 +357,7 @@ class Scheduler:
                 self.lost_leases.add(run_id)
                 return errors
             try:
-                await asyncio.wait_for(adapter.cleanup(profile), timeout=4)
+                await asyncio.wait_for(adapter.cleanup(profile), timeout=min(45, max(4, getattr(adapter, 'cleanup_timeout_seconds', 4))))
             except Exception as exc:
                 errors.append({'adapter': name, 'reason_code': type(exc).__name__, 'reason': str(exc)[:256]})
         return errors

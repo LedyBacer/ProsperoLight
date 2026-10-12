@@ -6,7 +6,7 @@ import re
 
 SCHEMA = 'prosperolight-host-worker/1'
 ACTIONS = {'prepare', 'start', 'stop', 'status'}
-SCENES = {'low-motion', 'noise', 'scrolling', 'static-keepalive', 'stress', 'recover'}
+SCENES = {'low-motion', 'noise', 'scrolling', 'static-keepalive', 'stress', 'recover', 'decoder-regression'}
 
 
 def request(value):

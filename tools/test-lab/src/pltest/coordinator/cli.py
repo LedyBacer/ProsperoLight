@@ -59,8 +59,9 @@ def coordinator(host: str = '127.0.0.1', port: int = 8765,
 def doctor():
     health = request('GET', '/api/v1/health')
     result = request('GET', '/api/v1/capabilities')
-    emit({'health': health, 'capabilities': result})
-    raise typer.Exit(0)
+    diagnostics = request('GET', '/api/v1/doctor')
+    emit({'health': health, 'capabilities': result, 'diagnostics': diagnostics})
+    raise typer.Exit(exit_code(diagnostics['verdict']))
 
 
 @app.command()
@@ -87,7 +88,7 @@ def run(profile: Path = typer.Option(..., exists=True, readable=True),
             # Both CLI and API read this exact immutable report object.
             report = request('GET', '/api/v1/runs/' + created['run_id'] + '/report') if current['report'] else current
             emit(report)
-            raise typer.Exit(exit_code(report.get('verdict', current['verdict'])))
+            raise typer.Exit(exit_code(report.get('summary_verdict', report.get('verdict', current['verdict']))))
         time.sleep(2)
     request('POST', '/api/v1/runs/' + created['run_id'] + '/stop')
     current = request('GET', '/api/v1/runs/' + created['run_id'])
@@ -109,7 +110,7 @@ def stop(run_id: str):
 def report(run_id: str, json_output: bool = typer.Option(True, '--json/--no-json')):
     value = request('GET', '/api/v1/runs/' + run_id + '/report')
     emit(value) if json_output else typer.echo(json.dumps(value, indent=2, ensure_ascii=False))
-    raise typer.Exit(exit_code(value['verdict']))
+    raise typer.Exit(exit_code(value.get('summary_verdict', value['verdict'])))
 
 
 @app.command()
@@ -117,10 +118,11 @@ def artifacts(run_id: str): emit(request('GET', '/api/v1/runs/' + run_id + '/art
 
 
 @app.command()
-def compare(baseline: str, candidate: str):
+def compare(baseline: str = '', candidate: str = '', pairs: Path | None = typer.Option(None, exists=True, readable=True)):
+    payload = {'pairs': json.loads(pairs.read_text())} if pairs else {'baseline': baseline, 'candidate': candidate}
     value = request('POST', '/api/v1/compare', json={'schema_version': 'prosperolight-test-lab-api/1',
-                                                     'baseline': baseline, 'candidate': candidate})
-    emit(value); raise typer.Exit(exit_code(value['verdict']))
+                                                     **payload})
+    emit(value); raise typer.Exit(exit_code(value.get('summary_verdict', value['verdict'])))
 
 
 @app.command()
@@ -140,3 +142,59 @@ def main(argv=None):
     except typer.Exit as exc:
         return exc.exit_code or 0
     return 0
+
+
+@app.command()
+def paired(baseline: Path = typer.Option(..., exists=True, readable=True),
+           candidate: Path = typer.Option(..., exists=True, readable=True),
+           repetitions: int = typer.Option(3, min=3, max=20), suite: str = 'decoder-smoke'):
+    """Interleave A/B, then compare unique repeated run pairs; never parallelize PS5."""
+    capabilities = request('GET', '/api/v1/capabilities')
+    if capabilities['api_mode'] != 'real':
+        emit({'verdict':'INCONCLUSIVE','reason_code':'REAL_ADAPTERS_REQUIRED'}); raise typer.Exit(3)
+    pairs = []
+    for _ in range(repetitions):
+        ids = []
+        for path in (baseline, candidate):
+            created = request('POST','/api/v1/runs',json={'suite':suite,'mode':'real','profile':json.loads(path.read_text())})
+            rid = created['run_id']; request('POST','/api/v1/runs/'+rid+'/start')
+            deadline = time.monotonic()+1800
+            while time.monotonic()<deadline:
+                current=request('GET','/api/v1/runs/'+rid)
+                if current['state'] in TERMINAL: break
+                time.sleep(2)
+            else:
+                request('POST','/api/v1/runs/'+rid+'/stop'); raise typer.Exit(3)
+            if current['verdict'] != 'PASS':
+                emit(current['report'] or current); raise typer.Exit(exit_code(current['verdict']))
+            ids.append(rid)
+        pairs.append(ids)
+    value=request('POST','/api/v1/compare',json={'pairs':pairs})
+    emit(value); raise typer.Exit(exit_code(value['verdict']))
+
+
+@app.command()
+def export(run_id: str, output: Path = typer.Option(...), redact: bool = True):
+    """Download a local archive; raw files remain untouched at the coordinator."""
+    if output.exists():
+        emit({'verdict':'INCONCLUSIVE','reason_code':'OUTPUT_EXISTS'}); raise typer.Exit(2)
+    headers={'Authorization':'Bearer '+os.environ['PLTEST_API_TOKEN']} if os.environ.get('PLTEST_API_TOKEN') else {}
+    temporary=output.with_name(output.name+'.tmp')
+    total=0; created_temporary=False
+    try:
+        with httpx.stream('GET',os.environ.get('PLTEST_API_URL','http://127.0.0.1:8765')+
+                '/api/v1/runs/'+run_id+'/bundle?redact='+str(redact).lower(),headers=headers,timeout=30) as response:
+            response.raise_for_status()
+            with temporary.open('xb') as destination:
+                created_temporary=True
+                os.chmod(temporary, 0o600)
+                for data in response.iter_bytes():
+                    total+=len(data)
+                    if total>256*1024*1024:raise ValueError('export limit exceeded')
+                    destination.write(data)
+        os.link(temporary,output)
+        temporary.unlink()
+    except (OSError,ValueError,httpx.HTTPError) as exc:
+        if created_temporary: temporary.unlink(missing_ok=True)
+        emit({'verdict':'INCONCLUSIVE','reason_code':type(exc).__name__});raise typer.Exit(2)
+    emit({'output':str(output),'bytes':total,'redacted':redact})

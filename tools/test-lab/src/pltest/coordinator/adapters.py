@@ -47,6 +47,7 @@ async def _blocking(function, *args):
 class RealPs5CoordinatorAdapter:
     """Stepwise PS5 adapter. Launch is issued once; uncertain ownership is retained."""
     execution_mode = 'real'
+    cleanup_timeout_seconds = 45
 
     def __init__(self, host, probe_elf, launch_elf, expected_eboot_sha256,
                  artifacts_root, ftp_port=2121, loader_port=9021, manager_port=8084):
@@ -99,6 +100,7 @@ class RealPs5CoordinatorAdapter:
             self._save(current)
             run_profile = dict(profile, run_id=run_id, coordinated=True)
             run_profile.pop('host_stimulus', None)
+            run_profile.pop('analysis_environment', None)
             run_profile['timing'] = {k: v for k, v in profile.get('timing', {}).items()
                                      if k != 'stage_timeout_seconds'}
             # A lost reply can leave launch outcome ambiguous. Mark it active
@@ -231,6 +233,12 @@ class RealPs5CoordinatorAdapter:
                 time.sleep(.5)
         else:
             raise TimeoutError('PS5 collection deadline expired')
+        with self.ps5.connect() as ftp:
+            diagnostics = archive_logs(ftp, current['directory'] / 'diagnostics')
+        previous = current['state'].get('previous_artifacts', {})
+        for name, item in diagnostics.items():
+            if name.startswith(('pyrowave-', 'native-')) and item['sha256'] != previous.get(name, {}).get('sha256'):
+                (output / name).write_bytes((current['directory'] / 'diagnostics' / name).read_bytes())
         index = {p.name: {'bytes': p.stat().st_size,
                           'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
                  for p in output.iterdir() if p.is_file()}
@@ -253,6 +261,15 @@ class RealPs5CoordinatorAdapter:
                     await _blocking(self._command, profile['run_id'], 'cancel', 5)
                     await _blocking(self._wait_receipt, current, 15)
                 current['safe'] = bool(await _blocking(self._verify_exit, current))
+                if current['safe'] and not (current['directory'] / 'artifacts').exists():
+                    # Preserve terminal failure/cancel evidence before releasing ownership.
+                    try:
+                        evidence = await _blocking(self._collect, current, 10)
+                        current['state']['collected'] = evidence
+                        self._save(current)
+                    except (OSError, ValueError, RuntimeError, TimeoutError, Error) as exc:
+                        current['state']['forensic_collection_error'] = type(exc).__name__
+                        self._save(current)
             except (OSError, ValueError, RuntimeError, TimeoutError, Error):
                 current['safe'] = False
         await self._release_if_safe(profile)
@@ -283,6 +300,7 @@ class RealPs5CoordinatorAdapter:
 class RealHostCoordinatorAdapter:
     """Persistent authenticated connection to the existing Windows host worker."""
     execution_mode = 'real'
+    cleanup_timeout_seconds = 30
 
     def __init__(self, url, token):
         if not token or len(token) < 32:
@@ -348,7 +366,7 @@ class RealHostCoordinatorAdapter:
         try:
             result = await self.worker.command(self.run_id, 'status', timeout=5)
             if result.get('state') in ('PREPARING', 'READY', 'STARTING', 'RUNNING'):
-                await self.worker.command(self.run_id, 'stop', timeout=10)
+                await self.worker.command(self.run_id, 'stop', timeout=20)
         finally:
             await self.worker.__aexit__(None, None, None)
             self.worker = None

@@ -271,6 +271,11 @@ class RunStore:
                 Path(pending).unlink(missing_ok=True); c.rollback(); return
             os.replace(pending, path)
             c.commit()
+        if (path.parent / 'analysis.json').is_file():
+            self._atomic_write(path.parent / 'events.jsonl', ''.join(
+                json.dumps(event) + '\n' for event in self.list_events(run_id) or []))
+            from ..report import finalize_manifest
+            finalize_manifest(path.parent, run_id)
 
     def artifact_path(self, run_id, name):
         if not self.get(run_id) or any(part.startswith('.') or part.endswith(('.tmp', '.pending')) for part in Path(name).parts):

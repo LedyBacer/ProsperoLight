@@ -3,6 +3,9 @@
 #include "frame_pacing.hpp"
 #include "ps5_pacing_feedback.hpp"
 #include "scanout_trace.hpp"
+#if PROSPEROLIGHT_TEST_LAB
+#include "test_lab_output_evidence.hpp"
+#endif
 #include "pacing_decision_trace.hpp"
 #include "lan_http_report.hpp"
 #include <cstdio>
@@ -395,8 +398,15 @@ void *worker(void *)
         uint32_t number{};
         uint64_t pts{}, ready{}, requested_argument{}, requested_at_us{};
     } pending_feedback;
+#if PROSPEROLIGHT_TEST_LAB
+    prosperolight::test_lab::OutputEvidence test_output_evidence;
+#endif
     const auto observe_feedback = [&](const auto &output)
     {
+#if PROSPEROLIGHT_TEST_LAB
+        if (output.available && test_output_evidence.observe(output.shown, output.flip_count))
+            confirmed_unique_count.fetch_add(1, std::memory_order_relaxed);
+#endif
         if (output.available && pending_feedback.valid &&
             output.shown == pending_feedback.requested_argument)
         {
@@ -404,13 +414,14 @@ void *worker(void *)
                 pending_feedback.number, pending_feedback.pts, pending_feedback.ready, now_us(),
                 ps5_vrr_output_active(), pending_feedback.requested_at_us);
             pending_feedback.valid = false;
-#if PROSPEROLIGHT_TEST_LAB
-            confirmed_unique_count.fetch_add(1, std::memory_order_relaxed);
-#endif
         }
     };
     const auto record_output = [&](const PresentationStats &output, uint64_t observed)
     {
+#if PROSPEROLIGHT_TEST_LAB
+        if (output.available && test_output_evidence.observe(output.shown, output.flip_count))
+            confirmed_unique_count.fetch_add(1, std::memory_order_relaxed);
+#endif
         if (!output.available)
             return;
         scanout_trace.observe(output.flip_count, output.shown, observed,
@@ -422,9 +433,6 @@ void *worker(void *)
                 pending_feedback.number, pending_feedback.pts, pending_feedback.ready, observed,
                 ps5_vrr_output_active(), pending_feedback.requested_at_us);
             pending_feedback.valid = false;
-#if PROSPEROLIGHT_TEST_LAB
-            confirmed_unique_count.fetch_add(1, std::memory_order_relaxed);
-#endif
         }
     };
     const auto record_poll = [](void *context, const PresentationStats &output, uint64_t observed)
@@ -686,6 +694,9 @@ void *worker(void *)
             observe_feedback(ps5_presentation_stats());
             if (pending_feedback.valid)
                 vrr_repeats.invalidate_output_feedback();
+#if PROSPEROLIGHT_TEST_LAB
+            test_output_evidence.submitted(s.backend->requested(), uint32_t(frame.number));
+#endif
             pending_feedback = {true,          uint32_t(frame.number), frame.presentation_us,
                                 wait.ready_us, s.backend->requested(), actual_submit};
             if (finished - preparation_started > 50000 || preparation_started - dequeued > 50000)

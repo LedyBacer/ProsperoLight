@@ -41,10 +41,11 @@ bool Context::begin(const TestProfile &profile)
     options_ = {};
     unique_frames_ = 0;
     wall_started_ = uint64_t(time(nullptr));
-    const char *baseline_names[] = {"performance-last.json", "debug-trace.txt",
+    const char *baseline_names[] = {"performance-last.json",        "debug-trace.txt",
                                     "performance-frames-mode0.csv", "performance-frames-mode1.csv",
-                                    "performance-frames-mode2.csv"};
-    for (unsigned i = 0; i < 5; ++i)
+                                    "performance-frames-mode2.csv", "pyrowave-output-mode0.csv",
+                                    "pyrowave-output-mode1.csv",    "pyrowave-output-mode2.csv"};
+    for (unsigned i = 0; i < 8; ++i)
     {
         struct stat before
         {
@@ -192,8 +193,10 @@ bool Context::finish(const moonlight_stream_metrics_t *metrics, int result)
     const char *reason = timeline_.reason.c_str();
     if (!*reason)
         reason = result ? "STREAM_FAILED" : "USER_STOP";
+    const bool pyrowave = options_.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE;
     const std::string trace =
-        "performance-frames-mode" + std::to_string(options_.session_overrides.pacing) + ".csv";
+        std::string(pyrowave ? "pyrowave-output-mode" : "performance-frames-mode") +
+        std::to_string(options_.session_overrides.pacing) + ".csv";
     const char *names[] = {"performance-last.json", "debug-trace.txt", trace.c_str()};
     struct stat info[3]{};
     bool fresh[3]{};
@@ -203,12 +206,14 @@ bool Context::finish(const moonlight_stream_metrics_t *metrics, int result)
         const std::string path = std::string(storage::paths().logs) + "/" + names[i];
         fresh[i] = stat(path.c_str(), &info[i]) == 0 && S_ISREG(info[i].st_mode) &&
                    info[i].st_size > 0 && uint64_t(info[i].st_mtime) >= wall_started_;
-        const unsigned baseline = i < 2 ? i : 2 + options_.session_overrides.pacing;
-        if (baseline >= 5 ||
+        const unsigned baseline =
+            i < 2 ? i : (pyrowave ? 5 : 2) + options_.session_overrides.pacing;
+        if (baseline >= 8 ||
             (baseline_valid_[baseline] && baseline_sizes_[baseline] == uint64_t(info[i].st_size) &&
              baseline_times_[baseline] == uint64_t(info[i].st_mtime)))
             fresh[i] = false;
-        artifacts = artifacts && fresh[i];
+        // PyroWave exports its own output trace, not the native decoder summary.
+        artifacts = artifacts && (pyrowave && i == 0 ? true : fresh[i]);
     }
     const char *verdict =
         complete ? (artifacts ? "PASS" : "INCONCLUSIVE")
@@ -230,19 +235,21 @@ bool Context::finish(const moonlight_stream_metrics_t *metrics, int result)
     FILE *f = std::fopen(tmp.c_str(), "wb");
     if (!f)
         return false;
-    bool ok = std::fprintf(
-                  f,
-                  "{\"schema\":\"prosperolight-test-receipt/"
-                  "1\",\"run_id\":\"%s\",\"sequence\":%u,\"functional_verdict\":\"%s\","
-                  "\"reason\":\"%s\",\"result\":%d,\"stream_ready\":%s,\"measurement_complete\":"
-                  "%s,\"presented_frames\":%u,\"artifacts_complete\":%s,\"artifacts\":[{"
-                  "\"name\":\"%s\",\"bytes\":%llu,\"fresh\":%s},{\"name\":\"%s\",\"bytes\":%llu,"
-                  "\"fresh\":%s}]",
-                  timeline_.profile.run_id.c_str(), ++sequence_, verdict, reason, result,
-                  timeline_.ready_seen ? "true" : "false", timeline_.measured ? "true" : "false",
-                  metrics ? metrics->presented_frames : 0, artifacts ? "true" : "false", names[0],
-                  (unsigned long long)info[0].st_size, fresh[0] ? "true" : "false", names[1],
-                  (unsigned long long)info[1].st_size, fresh[1] ? "true" : "false") > 0;
+    bool ok =
+        std::fprintf(f,
+                     "{\"schema\":\"prosperolight-test-receipt/"
+                     "1\",\"run_id\":\"%s\",\"sequence\":%u,\"functional_verdict\":\"%s\","
+                     "\"reason\":\"%s\",\"result\":%d,\"stream_ready\":%s,\"measurement_complete\":"
+                     "%s,\"presented_frames\":%u,\"artifacts_complete\":%s,\"artifacts\":[",
+                     timeline_.profile.run_id.c_str(), ++sequence_, verdict, reason, result,
+                     timeline_.ready_seen ? "true" : "false", timeline_.measured ? "true" : "false",
+                     metrics ? metrics->presented_frames : 0, artifacts ? "true" : "false") > 0;
+    if (ok && !pyrowave)
+        ok = std::fprintf(f, "{\"name\":\"%s\",\"bytes\":%llu,\"fresh\":%s},", names[0],
+                          (unsigned long long)info[0].st_size, fresh[0] ? "true" : "false") > 0;
+    if (ok)
+        ok = std::fprintf(f, "{\"name\":\"%s\",\"bytes\":%llu,\"fresh\":%s}]", names[1],
+                          (unsigned long long)info[1].st_size, fresh[1] ? "true" : "false") > 0;
     // Append identifiers without attributing flip observation to physical latency.
     if (ok)
     {
@@ -260,12 +267,19 @@ bool Context::finish(const moonlight_stream_metrics_t *metrics, int result)
              std::fprintf(
                  f,
                  ",\"measurement_validity\":\"%s\",\"performance_delta\":"
-                 "\"NOT_COMPARABLE\",\"unique_completed_frames\":%llu,\"pid\":%d,"
+                 "\"NOT_COMPARABLE\",\"unique_completed_frames\":%llu,"
+                 "\"measurement_unique_frames\":%llu,\"pid\":%d,"
                  "\"monotonic_us\":%llu,\"completion_clock\":\"ps5_monotonic_flip_"
                  "observation\",\"trace\":{\"name\":\"%s\",\"bytes\":%llu,\"fresh\":%s}}\n",
                  std::strstr(reason, "UNSUPPORTED") ? "UNSUPPORTED" : "INCONCLUSIVE",
-                 (unsigned long long)unique_frames_, int(getpid()), (unsigned long long)now_us(),
-                 names[2], (unsigned long long)info[2].st_size, fresh[2] ? "true" : "false") > 0;
+                 (unsigned long long)unique_frames_,
+                 (unsigned long long)(timeline_.measured && timeline_.measurement_end_frames >=
+                                                                timeline_.measurement_start_frames
+                                          ? timeline_.measurement_end_frames -
+                                                timeline_.measurement_start_frames
+                                          : 0),
+                 int(getpid()), (unsigned long long)now_us(), names[2],
+                 (unsigned long long)info[2].st_size, fresh[2] ? "true" : "false") > 0;
     }
     const int closed = std::fclose(f);
     if (!ok || closed || rename(tmp.c_str(), path.c_str()))

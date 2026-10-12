@@ -21,8 +21,8 @@ pltest matrix --profile tools/test-lab/profiles/fake-smoke.json --repetitions 3
 API v1 is rooted at `/api/v1`: health, capabilities, suites, create/start/stop a
 run, read run state/events/report/artifact index, fetch an individual artifact,
 and request a comparison. Request and report schema versions are explicit. The
-comparison endpoint returns `INCONCLUSIVE/ANALYZER_DEFERRED_TO_PR6` until PR6
-implements meaningful baseline analysis. `GET /docs` is generated from the
+comparison endpoint originally deferred analysis; [PR6](PR6.md) now implements
+paired screening and explicit NOT_COMPARABLE boundaries. `GET /docs` is generated from the
 Pydantic schemas. When bound beyond loopback, set `PLTEST_API_TOKEN`; all API
 routes except health require its bearer token, including the worker WebSocket. Keep the
 token in the coordinator environment, never in a profile or report. For LAN
@@ -83,8 +83,8 @@ configuration, pairing or installed title files are changed by a real run.
 The versioned `/api/v1/ws` route requires the same bearer token when configured
 and ACKs schema-versioned event envelopes. It remains an event transport stub;
 the real host adapter talks directly to the already implemented authenticated
-worker WebSocket. Suite analysis/comparison thresholds and browser dashboard
-remain PR6/PR7.
+worker WebSocket. Suite analysis/comparison and the dashboard are now documented in
+[PR6](PR6.md) and [PR7](PR7.md).
 
 FastAPI lifespan and Pydantic response-model patterns were checked against the
 [FastAPI lifecycle](https://fastapi.tiangolo.com/advanced/events/) and

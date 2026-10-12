@@ -203,7 +203,7 @@ class CoordinatorTests(unittest.TestCase):
                 caps = client.get('/api/v1/capabilities').json()
                 self.assertEqual((caps['api_mode'], caps['ps5_adapter'], caps['host_adapter']),
                                  ('real', 'real', 'real'))
-                self.assertEqual(client.get('/api/v1/suites').json()['items'], ['decoder-smoke'])
+                self.assertIn('decoder-matrix', client.get('/api/v1/suites').json()['items'])
                 made = client.post('/api/v1/runs', json={'suite': 'decoder-smoke',
                     'mode': 'real', 'profile': profile()})
                 self.assertEqual(made.status_code, 201, made.text)
@@ -360,7 +360,7 @@ class CoordinatorTests(unittest.TestCase):
                 manifest = client.get(f'/api/v1/runs/{run_id}/artifacts').json()['items']
                 self.assertIn('report.json', [item['name'] for item in manifest])
                 compare = client.post('/api/v1/compare', json={'baseline': run_id, 'candidate': run_id}).json()
-                self.assertEqual(compare['reason_code'], 'ANALYZER_DEFERRED_TO_PR6')
+                self.assertEqual(compare['reason_code'], 'INSUFFICIENT_REPEAT_PAIRS')
                 self.assertEqual(client.get(f'/api/v1/runs/{run_id}/artifacts/../profile.json').status_code, 404)
             with TestClient(create_app(Path(directory) / 'db')) as restarted:
                 recovered = restarted.get(f'/api/v1/runs/{run_id}').json()

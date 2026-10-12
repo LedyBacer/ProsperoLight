@@ -8,10 +8,13 @@ import secrets
 
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 
 from .models import CompareRequest, RunCreate, RunView
 from .scheduler import Scheduler
 from .store import RunStore
+from ..suites import REAL_SUITES
+from ..comparison import compare_pairs
 
 SUITES = ['fake-smoke']
 
@@ -41,11 +44,36 @@ def create_app(data_dir=None, scheduler=None, token=None):
     app.state.store = store
     app.state.api_token = token
 
+    allowed_hosts = set(os.environ.get('PLTEST_ALLOWED_HOSTS', '127.0.0.1,localhost,::1,testserver').split(','))
+    allowed_origins = set(filter(None, os.environ.get('PLTEST_ALLOWED_ORIGINS', '').split(',')))
+    static = Path(__file__).with_name('static')
+    public = {'/', '/dashboard/app.js', '/dashboard/style.css', '/api/v1/health'}
+
     @app.middleware('http')
     async def require_api_token(request: Request, call_next):
-        if token and request.url.path != '/api/v1/health' and not authorized(request.headers.get('authorization')):
+        if request.url.hostname not in allowed_hosts:
+            return JSONResponse(status_code=400, content={'detail': {'code': 'HOST_NOT_ALLOWED'}})
+        origin = request.headers.get('origin')
+        same_origin = str(request.base_url).rstrip('/')
+        if origin and origin not in allowed_origins and origin != same_origin:
+            return JSONResponse(status_code=403, content={'detail': {'code': 'ORIGIN_NOT_ALLOWED'}})
+        if request.headers.get('sec-fetch-site') == 'cross-site':
+            return JSONResponse(status_code=403, content={'detail': {'code': 'CROSS_SITE_REQUEST'}})
+        if token and request.url.path not in public and not authorized(request.headers.get('authorization')):
             return JSONResponse(status_code=401, content={'detail': {'code': 'UNAUTHORIZED'}})
-        return await call_next(request)
+        response = await call_next(request)
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+        return response
+
+    @app.get('/', include_in_schema=False)
+    async def dashboard(): return FileResponse(static / 'index.html', media_type='text/html')
+
+    @app.get('/dashboard/{name}', include_in_schema=False)
+    async def dashboard_asset(name: str):
+        if name not in ('app.js', 'style.css'): raise HTTPException(404)
+        return FileResponse(static / name, media_type='text/javascript' if name.endswith('.js') else 'text/css')
 
     def authorized(value):
         return token is None or secrets.compare_digest(value or '', 'Bearer ' + token)
@@ -71,11 +99,11 @@ def create_app(data_dir=None, scheduler=None, token=None):
     @app.get('/api/v1/suites')
     async def suites():
         return {'schema_version': 'prosperolight-test-lab-api/1',
-                'items': ['decoder-smoke'] if configured_mode == 'real' else SUITES}
+                'items': list(REAL_SUITES) if configured_mode == 'real' else SUITES}
 
     @app.post('/api/v1/runs', response_model=RunView, status_code=201)
     async def create_run(body: RunCreate):
-        available_suites = ['decoder-smoke'] if configured_mode == 'real' else SUITES
+        available_suites = list(REAL_SUITES) if configured_mode == 'real' else SUITES
         if body.suite not in available_suites:
             raise HTTPException(422, detail={'code': 'UNKNOWN_SUITE'})
         if body.mode != configured_mode:
@@ -86,6 +114,32 @@ def create_app(data_dir=None, scheduler=None, token=None):
         except ValueError as exc:
             raise HTTPException(422, detail={'code': 'INVALID_PROFILE', 'message': str(exc)}) from exc
         return _view(run)
+
+    @app.get('/api/v1/runs')
+    async def recent_runs(limit: int = 50):
+        if not 1 <= limit <= 200: raise HTTPException(422, detail={'code':'INVALID_LIMIT'})
+        with store.connect() as c:
+            rows=c.execute('SELECT run_id,state,stage,verdict,created FROM runs ORDER BY created DESC LIMIT ?', (limit,)).fetchall()
+        return {'schema_version':'prosperolight-test-lab-api/1','items':[dict(row) for row in rows]}
+
+    @app.get('/api/v1/doctor')
+    async def doctor():
+        from ..doctor import check
+        import asyncio
+        return await asyncio.to_thread(check, scheduler)
+
+    @app.get('/api/v1/runs/{run_id}/bundle')
+    async def run_bundle(run_id: str, redact: bool = True):
+        from ..export import bundle
+        from .store import TERMINAL
+        run=run_or_404(run_id)
+        if run['state'] not in TERMINAL: raise HTTPException(409, detail={'code':'RUN_NOT_TERMINAL'})
+        try:
+            import asyncio
+            temporary,path=await asyncio.to_thread(bundle,store,run_id,redact)
+        except ValueError as exc:
+            raise HTTPException(413,detail={'code':'EXPORT_UNAVAILABLE','message':str(exc)}) from exc
+        return FileResponse(path,filename=run_id+'.zip',media_type='application/zip',background=BackgroundTask(temporary.cleanup))
 
     @app.get('/api/v1/runs/{run_id}', response_model=RunView)
     async def get_run(run_id: str): return _view(run_or_404(run_id))
@@ -129,14 +183,15 @@ def create_app(data_dir=None, scheduler=None, token=None):
 
     @app.post('/api/v1/compare')
     async def compare(body: CompareRequest):
-        baseline, candidate = body.baseline, body.candidate
-        a, b = run_or_404(baseline), run_or_404(candidate)
-        return {'schema_version': 'prosperolight-test-lab-report/1', 'verdict': 'INCONCLUSIVE',
-                'reason_code': 'ANALYZER_DEFERRED_TO_PR6',
-                'baseline': a['report'], 'candidate': b['report']}
+        pairs = body.pairs or [(body.baseline, body.candidate)]
+        return compare_pairs([(run_or_404(a), run_or_404(b)) for a, b in pairs])
 
     @app.websocket('/api/v1/ws')
     async def worker_ws(ws: WebSocket):
+        origin = ws.headers.get('origin')
+        expected = ('https' if ws.url.scheme == 'wss' else 'http') + '://' + ws.url.netloc
+        if ws.url.hostname not in allowed_hosts or (origin and origin != expected and origin not in allowed_origins):
+            await ws.close(code=4403); return
         if not authorized(ws.headers.get('authorization')):
             await ws.close(code=4401); return
         await ws.accept()

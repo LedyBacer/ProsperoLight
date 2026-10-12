@@ -15,9 +15,19 @@ class LifecycleTests(unittest.TestCase):
             self.skipTest('C++ compiler unavailable')
         code = r'''
 #include "test_lab_lifecycle.hpp"
+#include "test_lab_output_evidence.hpp"
 #include <cassert>
 using namespace prosperolight::test_lab;
 int main() {
+ OutputEvidence evidence;
+ evidence.submitted(1,1);evidence.submitted(2,2);evidence.submitted(3,3);
+ assert(evidence.observe(1,1));assert(!evidence.observe(1,1));
+ assert(evidence.observe(3,3)); // skipped request 2 is not counted
+ evidence.submitted(4,3);assert(!evidence.observe(4,4)); // repeat picture
+ assert(!evidence.observe(UINT64_MAX,5));
+ for(unsigned i=5;i<45;++i)evidence.submitted(i,i);
+ assert(!evidence.observe(5,5)); // overwritten bounded evidence
+ assert(evidence.observe(44,44));
  TestProfile p;p.coordinated=true;p.run_id="run";p.startup_seconds=2;p.ready_seconds=3;p.hard_seconds=40;
  p.warmup_seconds=1;p.measure_seconds=30;p.cooldown_seconds=1;
  Timeline t(p,100);t.tick(100,{true,false,0});assert(t.state==Timeline::waiting_frame);
@@ -111,6 +121,16 @@ int main(int,char **argv) {
  std::ifstream f(std::string(argv[1])+"/receipts/complete.json");
  std::string receipt((std::istreambuf_iterator<char>(f)),{});assert(receipt.find("PASS")!=std::string::npos);
  assert(!context.begin(p));assert(context.stop_requested());
+ p.run_id="pyrowave";assert(context.begin(p));options.video_codec=MOONLIGHT_VIDEO_CODEC_PYROWAVE;
+ context.attach(ready,stop,nullptr,options);start_measure_after_ready(argv[1],"pyrowave");await_stop(context);
+ std::ofstream(std::string(argv[1])+"/logs/debug-trace.txt")<<"pyrowave completed";
+ std::ofstream(std::string(argv[1])+"/logs/pyrowave-output-mode0.csv")<<"fresh output trace";
+ assert(context.finish(&metrics,0));
+ std::ifstream pyro(std::string(argv[1])+"/receipts/pyrowave.json");receipt.assign(std::istreambuf_iterator<char>(pyro),{});
+ assert(receipt.find("\"functional_verdict\":\"PASS\"")!=std::string::npos);
+ assert(receipt.find("pyrowave-output-mode0.csv")!=std::string::npos);
+ assert(receipt.find("performance-last.json")==std::string::npos); // never claim stale native metrics
+ options.video_codec=MOONLIGHT_VIDEO_CODEC_H264;
  p.run_id="cancel";assert(context.begin(p));context.attach(handshake,stop,nullptr,options);
  const auto temporary=std::string(argv[1])+"/control/cancel.tmp";
  std::ofstream(temporary)<<R"({"schema":"prosperolight-test-control/1","run_id":"cancel","command_id":"cmd1","action":"cancel"})";

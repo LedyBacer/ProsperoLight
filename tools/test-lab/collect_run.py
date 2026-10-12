@@ -15,7 +15,7 @@ from launch_spike import read_receipt, request_bytes
 
 def artifact_name(name):
     return name in ('performance-last.json', 'debug-trace.txt') or bool(
-        re.fullmatch(r'performance-frames-mode[012]\.csv', name))
+        re.fullmatch(r'(?:performance-frames|pyrowave-output)-mode[012]\.csv', name))
 
 
 def collect(ftp, run_id, output, timeout):

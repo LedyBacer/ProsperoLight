@@ -9,9 +9,12 @@ Implemented as logical stages in one branch based on upstream/main
 - [PR3](PR3.md): portable PS5 executor, ownership and hashed run archives.
 - [PR4](PR4.md): Windows interactive browser worker and deterministic stimulus.
 - [PR5](PR5.md): versioned local API, durable fake/real adapter scheduler and CLI.
+- [PR6](PR6.md): clock-aware trace analysis, suites and paired screening.
+- [PR7](PR7.md): local dashboard, read-only doctor and downloadable archives.
 
-PR6 analysis/comparison and PR7 dashboard are not present. The PS5 executor and host-worker smoke commands are
-separate; a pair of successful standalone runs is not an end-to-end benchmark.
+Use [the onboarding guide](../../docs/TEST_LAB.md) for setup, real runs and exports.
+Standalone PS5 and host-worker commands remain available; only coordinated runs
+provide combined evidence. Performance comparisons require separately valid measurements.
 
 Python 3.11+ is required. Use an isolated virtual environment and
 `python -m pip install -e 'tools/test-lab[worker,gpu]'`. Coordinator dependencies install by default; worker dependencies are

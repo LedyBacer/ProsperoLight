@@ -1,0 +1,15 @@
+# ps5-native-app-boilerplate - bounded Test Lab suite recipes.
+# Copyright (C) 2026 BlackBearReloaded
+# SPDX-License-Identifier: GPL-3.0-or-later
+{
+  "schema": "prosperolight-test-suites/1",
+  "suites": {
+    "decoder-smoke": {"scene": "low-motion", "warmup_seconds": 10, "measure_seconds": 30},
+    "decoder-matrix": {"scene": "decoder-regression", "warmup_seconds": 10, "measure_seconds": 80, "phases": [{"scene": "low-motion", "seconds": 20}, {"scene": "noise", "seconds": 40}, {"scene": "low-motion", "seconds": 20}]},
+    "bitrate-ramp": {"scene": "low-motion", "warmup_seconds": 10, "measure_seconds": 30},
+    "pacing-vrr": {"scene": "static-keepalive", "warmup_seconds": 10, "measure_seconds": 30},
+    "pyrowave-matrix": {"scene": "low-motion", "warmup_seconds": 10, "measure_seconds": 30},
+    "soak": {"scene": "low-motion", "warmup_seconds": 10, "measure_seconds": 120, "segment_seconds_max": 120}
+  },
+  "screening": {"minimum_pairs": 3, "fps_drop_fraction": 0.02, "latency_increase_fraction": 0.10, "latency_increase_us": 1000}
+}

@@ -41,7 +41,7 @@ async function prepare(s) {
   send({type:'prepared',run_id:settings.run_id,pixel_sample_sha256:preparedHash});
 }
 function draw(elapsed,frame) {
-  const mode=settings.scene;
+  const mode=settings.scene==='decoder-regression'?(elapsed<20?'low-motion':elapsed<60?'noise':'low-motion'):settings.scene;
   const noise=mode==='noise'||mode==='stress'||(mode==='recover'&&elapsed<settings.seconds*.7);
   if(noise)ctx.drawImage(textures[frame%4],0,0);
   else {
@@ -62,6 +62,7 @@ function finish(reason) {
     raf_fps:elapsed?count*1000/elapsed:0,hidden_events:hidden,fullscreen_lost:fullscreenLost,
     interval_overflow:count===intervals.length,reason,pixel_sample_sha256:preparedHash,
     browser_origin_ms:start,measure_start_ms:measureStarted,measure_end_ms:performance.now(),
+    phases:settings.scene==='decoder-regression'?[{scene:'warmup',start_s:0,end_s:10},{scene:'low-motion',start_s:10,end_s:30},{scene:'noise',start_s:30,end_s:70},{scene:'recovery',start_s:70,end_s:90}]:null,
     snapshot:snapshot(),user_agent:navigator.userAgent,clock:'browser_performance_now_raf_callback'};
   send(report);status.textContent='Finished: '+reason;button.disabled=false;
 }

@@ -1,0 +1,14 @@
+<!doctype html>
+<!-- ps5-native-app-boilerplate - local developer Test Lab dashboard. -->
+<!-- Copyright (C) 2026 BlackBearReloaded -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ProsperoLight · Test Lab</title><link rel="stylesheet" href="/dashboard/style.css"></head>
+<body><header><div><p class="eyebrow">PROSPEROLIGHT / DEVELOPER TOOLS</p><h1>Test Lab</h1></div><span id="connection" class="badge">Disconnected</span></header>
+<main><section class="panel"><h2>Coordinator</h2><p>Controls run here. The stimulus runs on the Windows worker and selected display.</p>
+<form id="connect"><label>API bearer token (if configured)<input id="token" type="password" autocomplete="off" spellcheck="false"></label><button>Connect</button></form><button id="doctor" disabled>Check environment</button><pre id="environment"></pre></section>
+<section class="panel"><h2>New run</h2><form id="create"><label>Suite<select id="suite" disabled></select></label><label>Profile JSON<textarea id="profile" rows="14" spellcheck="false">{"schema":"prosperolight-test/1","timing":{"hard_seconds":120}}</textarea></label><button id="start" disabled>Create and start</button></form><p id="mode" class="muted"></p></section>
+<section class="panel wide"><div class="row"><h2>Runs</h2><button id="refresh" disabled>Refresh</button></div><div id="runs" class="runs"></div></section>
+<section class="panel wide" id="detail" hidden><div class="row"><h2 id="run-title">Run</h2><button id="stop">Stop normally</button></div><div id="verdicts" class="row"></div><p id="stage"></p><p class="muted">Chart: PS5-local callback-to-ready p95 in µs. Windows relative to PS5 trace start; physical scanout is not measured.</p><svg id="chart" viewBox="0 0 800 180" role="img" aria-label="Callback to ready p95 by trace window"></svg><pre id="events"></pre><div id="artifacts"></div><button id="bundle">Download bundle</button><label class="inline"><input id="redact" type="checkbox" checked>Redact private IPs and credential fields in exported text</label><pre id="report"></pre></section>
+<section class="panel wide"><h2>Compare paired runs</h2><p>At least three distinct A/B pairs and verified matching environment are required. No result is uploaded.</p><label>Pairs JSON<textarea id="pairs" rows="3" placeholder='[["baseline UUID","candidate UUID"], ...]'></textarea></label><button id="compare" disabled>Compare</button><pre id="comparison"></pre></section>
+<p id="error" role="alert" class="error wide"></p></main><footer>Local developer control · production settings remain persistent and separate · no automatic deploy</footer><script src="/dashboard/app.js" defer></script></body></html>

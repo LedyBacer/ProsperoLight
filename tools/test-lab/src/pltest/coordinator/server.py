@@ -15,6 +15,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.host not in ('127.0.0.1', 'localhost', '::1') and not os.environ.get('PLTEST_API_TOKEN'):
         parser.error('binding beyond loopback requires PLTEST_API_TOKEN')
+    if args.host not in ('127.0.0.1', 'localhost', '::1') and (not os.environ.get('PLTEST_ALLOWED_HOSTS') or not os.environ.get('PLTEST_ALLOWED_ORIGINS')):
+        parser.error('LAN bind also requires PLTEST_ALLOWED_HOSTS and PLTEST_ALLOWED_ORIGINS')
     import uvicorn
     os.environ['PLTEST_DATA_DIR'] = args.data_dir
     os.environ['PLTEST_API_MODE'] = args.mode

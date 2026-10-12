@@ -64,5 +64,18 @@ class RunView(BaseModel):
 class CompareRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     schema_version: Literal['prosperolight-test-lab-api/1'] = 'prosperolight-test-lab-api/1'
-    baseline: str = Field(pattern=r'^[0-9a-fA-F-]{36}$')
-    candidate: str = Field(pattern=r'^[0-9a-fA-F-]{36}$')
+    baseline: str | None = Field(default=None, pattern=r'^[0-9a-fA-F-]{36}$')
+    candidate: str | None = Field(default=None, pattern=r'^[0-9a-fA-F-]{36}$')
+    pairs: list[tuple[str, str]] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode='after')
+    def identities(self):
+        import uuid
+        if bool(self.pairs) == bool(self.baseline or self.candidate):
+            raise ValueError('provide either baseline/candidate or pairs')
+        values = self.pairs or [(self.baseline, self.candidate)]
+        for a, b in values:
+            for value in (a, b):
+                if not isinstance(value, str) or str(uuid.UUID(value)) != value:
+                    raise ValueError('expected canonical run UUID')
+        return self

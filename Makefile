@@ -401,3 +401,9 @@ $(HOST_UNIT_TEST) test-integration test-stream-performance test-performance-guar
 
 # The app folder carries the helper that installs the next release.
 app: self-update-helper
+
+.PHONY: test-lab-test
+test-lab-test:
+	@python3 -m unittest discover -s tests -p 'test_test_lab*.py' -v
+	@python3 -m unittest discover -s tests -p 'test_decoder_benchmark.py' -v
+	@python3 -m unittest discover -s tests -p 'test_pacing_test_tools.py' -v

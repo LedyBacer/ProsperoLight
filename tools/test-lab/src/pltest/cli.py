@@ -15,7 +15,7 @@ from control_run import command
 
 def main():
     args = sys.argv[1:]
-    if args in (['--help'], ['-h']) or (args and (args[0] in {'coordinator', 'status', 'report', 'artifacts', 'compare', 'matrix'}
+    if args in (['--help'], ['-h']) or (args and (args[0] in {'coordinator', 'status', 'report', 'artifacts', 'compare', 'matrix', 'paired', 'export'}
                  or (args[0] in {'run', 'doctor', 'stop'} and '--ps5' not in args))):
         from .coordinator.cli import main as coordinator_cli
         return coordinator_cli(args)

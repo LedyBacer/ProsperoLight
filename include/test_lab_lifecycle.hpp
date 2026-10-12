@@ -28,7 +28,7 @@ struct Timeline
     };
     State state = connecting;
     uint64_t origin = 0, phase_started = 0;
-    uint64_t last_frames = 0, measurement_start_frames = 0;
+    uint64_t last_frames = 0, measurement_start_frames = 0, measurement_end_frames = 0;
     uint64_t ready_us = 0, measure_start_us = 0, measure_end_us = 0;
     bool ready_seen = false, measurement_requested = false, measured = false;
     std::string reason;
@@ -152,6 +152,7 @@ struct Timeline
                 {
                     measured = true;
                     measure_end_us = now;
+                    measurement_end_frames = o.unique_frames;
                     state = cooldown;
                     phase_started = now;
                 }
@@ -195,8 +196,8 @@ class Context
     unsigned sequence_ = 2;
     uint64_t wall_started_ = 0;
     uint64_t unique_frames_ = 0;
-    uint64_t baseline_sizes_[5]{}, baseline_times_[5]{};
-    bool baseline_valid_[5]{};
+    uint64_t baseline_sizes_[8]{}, baseline_times_[8]{};
+    bool baseline_valid_[8]{};
     std::vector<std::string> commands_;
     std::string last_command_, last_action_, last_result_;
 };
