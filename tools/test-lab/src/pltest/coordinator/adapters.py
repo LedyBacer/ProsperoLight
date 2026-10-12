@@ -132,6 +132,7 @@ class RealPs5CoordinatorAdapter:
                                                         else 'INCONCLUSIVE'))
             current['safe'] = result['title_exit_verified']
             self._save(current)
+            return result
         elif stage == 'ANALYZE':
             return current.get('collected', {})
         return

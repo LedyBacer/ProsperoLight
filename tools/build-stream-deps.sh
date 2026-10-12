@@ -9,6 +9,11 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/tools/native-toolchain.sh"
 bash "$root/tools/pyrowave/apply-transport.sh"
+build_jobs=${BUILD_JOBS:-4}
+[[ "$build_jobs" =~ ^[1-9][0-9]*$ ]] || {
+    echo 'BUILD_JOBS must be positive' >&2
+    exit 2
+}
 fec_simd=${FEC_SIMD:-0}
 opus_simd=${OPUS_SIMD:-0}
 [[ "$fec_simd" =~ ^[01]$ && "$opus_simd" =~ ^[01]$ ]] || {
@@ -98,7 +103,7 @@ cmake -S "$opus" -B "$opus_build" \
     -DOPUS_X86_PRESUME_SSE4_1=OFF \
     -DOPUS_STACK_PROTECTOR=OFF \
     -DOPUS_FORTIFY_SOURCE=OFF >/dev/null
-cmake --build "$opus_build" --target opus --parallel >/dev/null
+cmake --build "$opus_build" --target opus --parallel "$build_jobs" >/dev/null
 cp "$opus_build/libopus.a" "$output/libopus.a"
 
 includes=(

@@ -28,6 +28,47 @@ def profile(**extra):
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_host_transport_answers_pings_during_idle_ps5_stage(self):
+        import asyncio
+        from aiohttp import web
+        from pltest.host.client import HostWorkerAdapter
+        from pltest.host.protocol import SCHEMA
+        async def exercise():
+            async def peer(request):
+                ws = web.WebSocketResponse(heartbeat=.2)
+                await ws.prepare(request)
+                async for message in ws:
+                    value = message.json()
+                    await ws.send_json({'schema': SCHEMA, 'command_id': value['command_id'],
+                                        'run_id': value['run_id'], 'ack': 'accepted', 'state': 'READY'})
+                return ws
+            app = web.Application(); app.router.add_get('/ws', peer)
+            runner = web.AppRunner(app); await runner.setup()
+            site = web.TCPSite(runner, '127.0.0.1', 0); await site.start()
+            port = site._server.sockets[0].getsockname()[1]
+            try:
+                async with HostWorkerAdapter('http://127.0.0.1:' + str(port), 't' * 48) as client:
+                    await client.command('run', 'status')
+                    await asyncio.sleep(.8)  # More than two peer heartbeat deadlines.
+                    results = await asyncio.gather(client.command('run', 'status'), client.command('run', 'status'))
+                    self.assertEqual([r['ack'] for r in results], ['accepted', 'accepted'])
+                    self.assertFalse(client.pending)
+            finally:
+                await runner.cleanup()
+        asyncio.run(exercise())
+
+    def test_real_collect_returns_evidence_to_scheduler(self):
+        import asyncio
+        adapter = RealPs5CoordinatorAdapter.__new__(RealPs5CoordinatorAdapter)
+        current = {'state': {}, 'safe': False}
+        adapter.runs = {'run': current}; adapter._save = lambda current: None
+        evidence = {'receipt': {'functional_verdict': 'PASS'},
+                    'title_exit_verified': True, 'stale_artifacts': []}
+        with patch.object(adapter, '_collect', return_value=evidence):
+            result = asyncio.run(adapter.stage('COLLECT', {'run_id': 'run'}, asyncio.Event()))
+        self.assertEqual(result, evidence)
+        self.assertTrue(current['safe'])
+
     def test_profile_structure_limit_and_cli_remote_mode_detection(self):
         from pltest.coordinator.models import RunCreate
         from pltest.coordinator.adapters import RealHostCoordinatorAdapter

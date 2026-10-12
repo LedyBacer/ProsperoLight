@@ -51,8 +51,6 @@ hardware run IDs and limits. All milestones share the `codex/test-lab` branch. P
 publication and exact validation evidence are recorded in the stage documents.
 
 PR5 supports a durable SQLite coordinator with explicitly separate fake and
-configured real-adapter modes. Real-mode code is host-tested; hardware PASS still
-requires a coordinated run on the PS5 and interactive Windows worker. The PR5
-host suite passed 35 tests on macOS; configured Linux checks passed 130
-tests (3 skips) and source/format/metadata/asset lint. Clang tidy status is
-recorded in [PR5](PR5.md).
+configured real-adapter modes. A real coordinated Windows/PS5 smoke run and
+cancellation during measurement passed on 2026-10-12. See [PR5](PR5.md) for exact
+build/run identities, validation boundaries and reproduction settings.

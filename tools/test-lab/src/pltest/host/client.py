@@ -13,6 +13,9 @@ class HostWorkerAdapter:
             raise ValueError('expected worker HTTP origin')
         self.url, self.token = url.rstrip('/'), token
         self.session = self.socket = None
+        self.reader = None
+        self.pending = {}
+        self.reader_error = None
 
     async def __aenter__(self):
         from aiohttp import ClientSession, ClientTimeout
@@ -23,30 +26,65 @@ class HostWorkerAdapter:
         except BaseException:
             await self.session.close()
             raise
+        self.reader = asyncio.create_task(self._read(), name="pltest-worker-reader")
         return self
 
     async def __aexit__(self, *args):
         if self.socket:
             await self.socket.close()
+        if self.reader:
+            self.reader.cancel()
+            await asyncio.gather(self.reader, return_exceptions=True)
         if self.session:
             await self.session.close()
+
+    async def _read(self):
+        from aiohttp import WSMsgType
+        error = ConnectionError('worker connection closed')
+        try:
+            async for message in self.socket:
+                if message.type != WSMsgType.TEXT:
+                    continue
+                value = message.json()
+                if not isinstance(value, dict) or value.get('schema') != SCHEMA:
+                    raise ValueError('worker protocol mismatch')
+                identifier = value.get('command_id')
+                if isinstance(identifier, str):
+                    future = self.pending.get(identifier)
+                    if future and not future.done():
+                        future.set_result(value)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            error = exc
+        finally:
+            self.reader_error = error
+            for future in self.pending.values():
+                if not future.done():
+                    future.set_exception(error)
 
     async def command(self, run_id, action, settings=None, timeout=90):
         identifier = str(uuid.uuid4())
         message = {'schema': SCHEMA, 'run_id': run_id, 'command_id': identifier, 'action': action}
         if settings is not None:
             message['settings'] = settings
-        await self.socket.send_json(message)
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            response = await self.socket.receive_json(timeout=max(.1, deadline - time.monotonic()))
-            if not isinstance(response, dict) or response.get('schema') != SCHEMA:
-                raise ValueError('worker protocol mismatch')
-            if response.get('command_id') == identifier:
-                if response.get('ack') != 'accepted' or response.get('run_id') != run_id:
-                    raise RuntimeError('worker command rejected: ' + str(response.get('reason')))
-                return response
-        raise TimeoutError('worker ACK absent')
+        if self.reader_error:
+            raise self.reader_error
+        if len(self.pending) >= 64:
+            raise RuntimeError('worker pending command quota exceeded')
+        future = asyncio.get_running_loop().create_future()
+        self.pending[identifier] = future
+        try:
+            await self.socket.send_json(message)
+            response = await asyncio.wait_for(future, timeout=timeout)
+            if response.get('ack') != 'accepted' or response.get('run_id') != run_id:
+                raise RuntimeError('worker command rejected: ' + str(response.get('reason')))
+            return response
+        finally:
+            self.pending.pop(identifier, None)
+            if not future.done():
+                future.cancel()
+
 
     async def wait_report(self, run_id, timeout=120):
         deadline = time.monotonic() + timeout

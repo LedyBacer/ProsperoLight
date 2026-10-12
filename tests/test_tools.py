@@ -21,6 +21,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ToolTests(unittest.TestCase):
+    def test_opus_build_uses_bounded_parallelism(self):
+        source = (ROOT / 'tools/build-stream-deps.sh').read_text()
+        validation = source.split('build_jobs=', 1)[1].split('fec_simd=', 1)[0]
+        validation = 'build_jobs=' + validation
+        command = next(line for line in source.splitlines() if line.startswith('cmake --build'))
+        harness = validation + '\nopus_build=fixture\ncmake() { printf "%s\\n" "$@" > "$RESULT"; }\n' + command
+        with tempfile.TemporaryDirectory() as directory:
+            result = Path(directory) / 'args'
+            for jobs, expected in [('2', 0), ('0', 2), ('-1', 2)]:
+                environment = dict(os.environ, BUILD_JOBS=jobs, RESULT=str(result))
+                process = subprocess.run(['bash', '-c', harness], env=environment, capture_output=True)
+                self.assertEqual(process.returncode, expected)
+                if expected == 0:
+                    self.assertEqual(result.read_text().splitlines()[-2:], ['--parallel', jobs])
+
     def test_pyrowave_embedded_shader_matches_sources(self):
         # The shipped header is compiled into the PS5 binary; a stale shader can
         # silently interpret an updated CPU overlay buffer with the old layout.

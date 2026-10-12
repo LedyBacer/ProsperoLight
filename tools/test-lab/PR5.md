@@ -104,7 +104,7 @@ The live Uvicorn CLI smoke run `dcb75452-b0ac-45cd-aa98-4e7af29f9753` returned
 PASS with `execution_mode=fake`; its API report matched the CLI JSON, and both
 profile/report artifacts were indexed. Restarting the service with the same
 SQLite directory returned the identical report. No PS5 or Windows worker was
-used for PR5 acceptance.
+used for that initial acceptance.
 
 The wider Test Lab suite also exercises PR0–PR4: 35 host tests passed on macOS.
 On the configured Linux builder, `make test` passed 130 tests (3 environment
@@ -154,7 +154,7 @@ the dependency was not bypassed or changed.
 Cancellation timeouts are cooperative: blocking device I/O must settle before
 cleanup or lease release. The scheduler may remain nonterminal beyond the nominal
 stop timeout while that bounded I/O settles; it never forcibly terminates the PS5.
-The current coordinator acceptance is fake/transport evidence. A real coordinated
+That review acceptance was fake/transport evidence. A real coordinated
 Windows/PS5 run requires a newly built TEST_LAB app that supports `coordinated` and
 sticky readiness; the older installed PR2 hardware build is not evidence for PR5.
 
@@ -171,3 +171,64 @@ CI installs the coordinator package before discovering its FastAPI/Typer tests;
 the shared `codex/test-lab` branch is included in the existing build workflow.
 Without this dependency step, a clean CI runner cannot import the PR5 test module.
 No browser download or Windows worker extras are required by coordinator CI.
+
+
+### Real Windows/PS5 acceptance (2026-10-12)
+
+The joint run `815a20d4-97e3-47e2-bc5a-dd08bb969e94` completed with
+`execution_mode=real`, functional PASS and confirmed normal title exit.
+The installed developer build label is `test-lab-pr5-420a820`, source commit
+`420a820bf78d876ad233da45c1444debf2dd5e33`, eboot SHA256
+`740e9b6aa12588702fae39af42544b19d336da34bfbc2f8c8441d4380d8a2266`.
+All 131 deployed files were read back and hash-verified before launch.
+
+Reproduce using the real-mode commands above with that exact installed hash and
+label. Copy `profiles/pr2-native-smoke.json` to an ignored local file, set its
+build label/source SHA to the installed build, set timing to warmup 2 seconds,
+measure 30 seconds, hard limit 180 seconds and stage timeout 90 seconds, and set
+`host_stimulus` to `{"scene":"low-motion","seed":137,"fps":240,"monitor":"virtual"}`.
+The Windows worker used managed installed Chrome in the unlocked desktop session,
+with a unique virtual primary display at 1920×1080/240 Hz. Worker traffic passed
+through an authenticated SSH tunnel to loopback; firewall/display modes were not
+changed. PS5 streamed Desktop at HEVC 4:2:0 SDR 1080p60, 20 Mbps.
+
+Host measurement was VALID (239.934 rAF FPS, 7,197 measured intervals), with
+resource cleanup complete. PS5 measured for 30.076 seconds, recorded 1,964 unique
+completed frames and fresh receipt, JSON, frame CSV and debug trace artifacts.
+The durable SQLite report matched the published report and no coordinator lease
+remained. This is functional coordinator acceptance. The receipt deliberately
+keeps performance validity INCONCLUSIVE and delta NOT_COMPARABLE; cross-machine
+clock alignment, comparative analysis and per-frame host encoding latency remain
+outside PR5 (analysis belongs to PR6).
+
+Run `0ee879f1-8e8a-4698-b0f4-043c29c4de19` was stopped through the API during
+MEASURE. It returned CANCELLED/CANCELLED_BY_OPERATOR with no cleanup errors;
+the matching PS5 receipt was CANCELLED, title exit was independently confirmed,
+and the remote executor lease was absent. Config and pairing hashes matched the
+pre-existing baseline after both runs. No forced title termination was used.
+
+The first joint attempt `819dc000-f6a3-4401-9d7f-a7d031717e08` reached stream-ready
+but ended INCONCLUSIVE/CLEANUP_FAILED: the client stopped reading the worker
+WebSocket while waiting for PS5, so it missed heartbeat ping/pong. The adapter now
+has one persistent reader and dispatches ACKs by command ID, with bounded pending
+commands, timeouts and error propagation. A regression exercises idle heartbeat
+handling and concurrent commands. This follows aiohttp's
+[WebSocket client contract](https://github.com/aio-libs/aiohttp/blob/master/docs/client_reference.rst)
+and [single-reader requirement](https://github.com/aio-libs/aiohttp/blob/master/docs/faq.rst).
+A second regression ensures real COLLECT returns evidence to the scheduler.
+
+The old dependency-build block above is superseded: the current SDK/cache built
+and signed the app successfully without dependency changes. Unbounded Opus build
+parallelism exhausted container swap during the first build attempt; it now uses
+positive `BUILD_JOBS` (default 4). The successful build used `BUILD_JOBS=2` and
+`CMAKE_BUILD_PARALLEL_LEVEL=2`. Validation rejects invalid job counts and tests the
+actual CMake argument. Local evidence is in ignored `build/test-lab-pr5-hardware/`;
+reports and credentials are not committed.
+
+Final checks: macOS portable Test Lab suite passed 47 tests; tooling suite passed
+60 tests with one unavailable LLVM18 check skipped. The configured Linux builder
+passed full `make test`: 143 Python tests (3 explicit Node skips), native/mock
+suites and the sanitizer-backed self-update check. Source/format/metadata/asset
+lint passed for 259 attributed files; prior full Clang Tidy remains applicable
+because this follow-up changes no C++ source. The temporary Windows worker task
+was removed after normal shutdown, and the dedicated SSH tunnel was closed.
