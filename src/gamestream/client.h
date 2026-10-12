@@ -52,6 +52,8 @@ extern "C"
                      const gs_host_options_t *options);
     int gs_quit_app(gs_server_t *server);
     int gs_refresh_status(gs_server_t *server);
+    /* No discovery fallback: test cleanup requires authenticated host status. */
+    int gs_refresh_paired_status(gs_server_t *server);
 
 #ifdef __cplusplus
 }

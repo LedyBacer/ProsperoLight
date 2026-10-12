@@ -665,3 +665,10 @@ int gs_refresh_status(gs_server_t *server)
         result = load_server_info(server, false);
     return result;
 }
+
+int gs_refresh_paired_status(gs_server_t *server)
+{
+    if (!server || !server->paired || !server->https_port)
+        return GS_WRONG_STATE;
+    return load_server_info(server, true);
+}

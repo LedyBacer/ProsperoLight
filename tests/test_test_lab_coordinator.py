@@ -28,6 +28,38 @@ def profile(**extra):
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_paired_refresh_never_falls_back_after_transport_failure(self):
+        import subprocess
+        from pathlib import Path
+        source=(Path(__file__).resolve().parents[1]/'src/gamestream/client.c').read_text()
+        function=source[source.index('int gs_refresh_paired_status('):]
+        function=function[:function.index('\n}')+2]
+        harness = r"""
+#include <stdbool.h>
+#include <assert.h>
+#define GS_WRONG_STATE -3
+struct server { bool paired; unsigned https_port; };
+typedef struct server gs_server_t;
+static int calls;
+static int load_server_info(gs_server_t *server, bool https) { assert(https); calls++; return -77; }
+"""+function+r"""
+int main(void) {
+ gs_server_t s={false,47984};
+ assert(gs_refresh_paired_status(0)==GS_WRONG_STATE);
+ assert(gs_refresh_paired_status(&s)==GS_WRONG_STATE);
+ s.paired=true;s.https_port=0;
+ assert(gs_refresh_paired_status(&s)==GS_WRONG_STATE);assert(calls==0);
+ s.https_port=47984;
+ assert(gs_refresh_paired_status(&s)==-77);assert(calls==1);
+ return 0;
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'strict.c';path.write_text(harness)
+            binary=Path(directory)/'strict'
+            subprocess.run(['cc','-std=c11',str(path),'-o',str(binary)],check=True,capture_output=True)
+            subprocess.run([str(binary)],check=True)
+
     def test_host_session_guard_uses_paired_identity_and_confirms_idle(self):
         import asyncio
         from unittest.mock import AsyncMock

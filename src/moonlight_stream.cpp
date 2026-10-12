@@ -4070,7 +4070,7 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
             prosperolight::test_lab::context().fail("HOST_CLEANUP_REJECTED");
             return result;
         }
-        result = gs_refresh_status(server);
+        result = gs_refresh_paired_status(server);
         if (result != GS_OK || server->current_game != 0)
         {
             prosperolight::test_lab::context().fail("HOST_CLEANUP_UNCONFIRMED");
