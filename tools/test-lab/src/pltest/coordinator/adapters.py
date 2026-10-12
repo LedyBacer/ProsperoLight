@@ -321,8 +321,8 @@ class RealHostCoordinatorAdapter:
         self.profile = profile
         self.run_id = profile['run_id']
         self.worker = HostWorkerAdapter(self.url, self.token)
-        await self.worker.__aenter__()
         try:
+            await self.worker.__aenter__()
             settings = dict(profile.get('host_stimulus', {}))
             timing = profile.get('timing', {})
             client = profile['client']

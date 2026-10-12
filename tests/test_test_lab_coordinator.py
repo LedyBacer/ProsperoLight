@@ -28,6 +28,23 @@ def profile(**extra):
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_failed_worker_connect_leaves_no_cleanup_command(self):
+        import asyncio
+        from pltest.coordinator.adapters import RealHostCoordinatorAdapter
+        async def exercise():
+            adapter=RealHostCoordinatorAdapter('http://127.0.0.1:1','t'*48)
+            with patch('pltest.coordinator.adapters.HostWorkerAdapter') as factory:
+                worker=factory.return_value
+                from unittest.mock import AsyncMock
+                worker.__aenter__=AsyncMock(side_effect=ConnectionError('offline'))
+                worker.__aexit__=AsyncMock()
+                with self.assertRaises(ConnectionError):
+                    await adapter.prepare({'run_id':'run','client':{'fps':60}},asyncio.Event())
+                self.assertIsNone(adapter.worker)
+                await adapter.cleanup({})
+                worker.command.assert_not_called()
+        asyncio.run(exercise())
+
     def test_host_transport_answers_pings_during_idle_ps5_stage(self):
         import asyncio
         from aiohttp import web

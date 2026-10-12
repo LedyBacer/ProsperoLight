@@ -88,7 +88,10 @@ class AnalysisTests(unittest.TestCase):
             performance.pop('decode_errors');performance['network_frame_gaps']=1
             (root/'performance-last.json').write_text(json.dumps(performance))
             self.assertEqual(analyze_run(profile,report,directory)['measurement_validity'],'INCONCLUSIVE')
-            performance.pop('network_frame_gaps');performance['fps']=60
+            performance.pop('network_frame_gaps');performance['decoder_pipeline_depth']=1
+            (root/'performance-last.json').write_text(json.dumps(performance))
+            self.assertIn('EFFECTIVE_SETTINGS_MISMATCH',analyze_run(profile,report,directory)['issues'])
+            performance['decoder_pipeline_depth']=3;performance['fps']=60
             (root/'performance-last.json').write_text(json.dumps(performance))
             self.assertIn('EFFECTIVE_SETTINGS_MISMATCH',analyze_run(profile,report,directory)['issues'])
             (root/'performance-frames-mode0.csv').write_bytes(trace.replace(b'omitted=0',b'omitted=1'))

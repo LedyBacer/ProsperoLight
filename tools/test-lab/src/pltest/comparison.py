@@ -73,7 +73,9 @@ def compare_pairs(pairs):
             if type(av) not in (int, float) or type(bv) not in (int, float) or not math.isfinite(av) or not math.isfinite(bv) or av <= 0 or bv < 0:
                 result['reason_code'] = 'METRIC_UNAVAILABLE'; return result
             metrics[key] = {'baseline': av, 'candidate': bv, 'delta': bv-av, 'fraction': (bv-av)/av}
-        result['pairs'].append({'baseline': a['run_id'], 'candidate': b['run_id'], 'metrics': metrics})
+        result['pairs'].append({'baseline': a['run_id'], 'candidate': b['run_id'], 'metrics': metrics,
+            'baseline_identity': {k:a['profile']['profile'].get(k) for k in ('source_sha','build_label')},
+            'candidate_identity': {k:b['profile']['profile'].get(k) for k in ('source_sha','build_label')}})
     screening = result['screening']; summaries = {}
     for key in ('unique_presented_fps', *latency_keys):
         vals = [p['metrics'][key] for p in result['pairs']]

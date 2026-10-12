@@ -57,6 +57,7 @@ def bundle(store, run_id, redact=True):
                 manifest[name]={'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
             archive.writestr('export-manifest.json',json.dumps({'schema_version':'prosperolight-test-export/1',
                 'redacted':redact,'run_id':run_id,'files':manifest},indent=2))
+        if path.stat().st_size > MAX_BUNDLE: raise ValueError('compressed bundle exceeds byte limit')
         return temporary,path
     except BaseException:
         temporary.cleanup();raise

@@ -90,6 +90,7 @@ def analyze_run(profile, report, directory):
             result['metrics'] = {'measurement_seconds':span,'unique_presented_fps':unique/span,
                 'ready_to_submit_us':result['pyrowave']['ready_to_submit_us'],
                 'submit_to_post_present_observation_us':result['pyrowave']['submit_to_post_present_observation_us']}
+            result['trace'] = {'count':result['pyrowave']['output_samples'], 'omitted':0}
             result['browser_phases'] = browser_phases(host)
             if not issues: result['measurement_validity'] = 'VALID'
         except (OSError,ValueError,TypeError,KeyError) as exc:
@@ -127,7 +128,13 @@ def analyze_run(profile, report, directory):
             result['settings_mismatches'] = mismatches
             if mismatches: issues.append('EFFECTIVE_SETTINGS_MISMATCH')
             legacy = decoder_analyze({'settings': settings}, performance, data)
+            mismatches.update({k:v for k,v in legacy['mismatches'].items() if k not in ('hdr','vsync_requested')})
+            if mismatches and 'EFFECTIVE_SETTINGS_MISMATCH' not in issues: issues.append('EFFECTIVE_SETTINGS_MISMATCH')
+            requested_mask = (1 << (client['decoder_cores'] * 2)) - 1
+            if performance.get('decoder_cpu_affinity') != requested_mask: issues.append('EFFECTIVE_CPU_MASK_MISMATCH')
+            if performance.get('vsync_fallbacks',0): issues.append('OUTPUT_MODE_FALLBACK')
             result['windows'] = legacy['windows']
+            result['limitations'] = legacy['limitations']
         else:
             # Backend timing is analyzed independently below; never call it Videodec latency.
             result['pyrowave'] = analyze_pyrowave(artifact_dir, receipt, profile)

@@ -38,3 +38,24 @@ doctor, create/start fake run, terminal classifications and indexed artifacts.
 Security and archive tests exercise bearer/origin/host checks, read-only doctor,
 terminal-only bundles, content hashes and raw-data preservation. Real combined
 hardware checks and repeated fresh-build acceptance are recorded below.
+
+## Final host verification and fresh-build boundary
+
+Portable checks passed: 63 lab tests, five legacy decoder tests and two pacing
+tool tests. Linux `make test` passed 159 Python tests (three Node skips), plus
+native/mock/sanitizer checks. Full Clang Tidy passed before the final Python-only
+review fixes; final source/metadata/shell lint passed for 270 attributed files.
+The 0.7.0 wheel includes all dashboard assets and the six executable suites.
+
+The fresh `test-lab-pr67-25157d2` developer app was built, signed, uploaded and
+read back on PS5. Eboot SHA256:
+`f9e13d7d77cfcb69a3c155c4b4e0134c655b25b91e415f2719f728cda3fd3848`.
+Production config and pairing hashes remained unchanged. Two fresh-build
+PyroWave attempts (`8eeae8cd-1c4a-442b-9d5e-4c25e57c87c9`,
+`2655a7ac-94f4-45b1-8cd7-341021f07c97`) stopped before title launch at
+`RAF_BELOW_TARGET`: fullscreen, visible and focused Chrome measured about
+170 FPS on the unchanged 240 Hz virtual display. Cleanup completed without
+errors. These runs do not validate the new PyroWave evidence counter or a
+fresh-build stream. The earlier real native smoke/matrix results above remain
+valid functional evidence; real paired performance validation remains pending
+complete negotiated settings and a stable host stimulus.

@@ -22,11 +22,27 @@ def archive_analysis(directory, profile, report, events):
     atomic_json(directory / 'stimulus/settings.json', profile.get('host_stimulus', {}))
     atomic_json(directory / 'analysis.json', report['analysis'])
     (directory / 'events.jsonl').write_text(''.join(json.dumps(e, allow_nan=False) + '\n' for e in events), encoding='utf-8')
-    body = html.escape(json.dumps({'run_id': report['run_id'], 'verdict': report['verdict'],
-                                 'analysis': report['analysis']}, indent=2))
-    (directory / 'report.html').write_text('<!doctype html><html lang="en"><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width"><title>ProsperoLight Test Lab report</title>'
-        '<h1>ProsperoLight Test Lab</h1><pre>' + body + '</pre></html>', encoding='utf-8')
+    analysis = report['analysis']
+    escape = lambda value: html.escape(str(value))
+    rows = []
+    for name, value in analysis.get('metrics', {}).items():
+        if isinstance(value, dict):
+            cells = [name, value.get('count'), value.get('median'), value.get('p95'), value.get('p99')]
+        else:
+            cells = [name, '', value, '', '']
+        rows.append('<tr>'+''.join('<td>'+escape(v)+'</td>' for v in cells)+'</tr>')
+    classifications = ' · '.join(escape(analysis.get(key, 'INCONCLUSIVE')) for key in
+                               ('functional_verdict','measurement_validity','performance_delta'))
+    body = ('<!doctype html><html lang="en"><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width"><title>ProsperoLight Test Lab report</title>'
+            '<h1>ProsperoLight Test Lab</h1><p>'+escape(report['run_id'])+'</p><p>'+classifications+'</p>'
+            '<p>Timing fields ending in _us are microseconds. Software observations are not physical scanout.</p>'
+            '<table><thead><tr><th>Metric</th><th>Count</th><th>Median / value</th><th>p95</th><th>p99</th></tr></thead><tbody>'+
+            ''.join(rows)+'</tbody></table><h2>Evidence limits</h2><ul>'+
+            ''.join('<li>'+escape(issue)+'</li>' for issue in analysis.get('issues',[]))+'</ul>'+
+            '<details><summary>Complete analysis and clock semantics</summary><pre>'+
+            escape(json.dumps(analysis,indent=2))+'</pre></details></html>')
+    (directory / 'report.html').write_text(body, encoding='utf-8')
     finalize_manifest(directory, report['run_id'])
 
 
