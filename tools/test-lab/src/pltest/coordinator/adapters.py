@@ -302,7 +302,7 @@ class RealHostCoordinatorAdapter:
     execution_mode = 'real'
     cleanup_timeout_seconds = 30
 
-    def __init__(self, url, token):
+    def __init__(self, url, token, session_guard=None):
         if not token or len(token) < 32:
             raise ValueError('real host worker requires a token of at least 32 characters')
         endpoint = urlsplit(url)
@@ -310,10 +310,16 @@ class RealHostCoordinatorAdapter:
                 or endpoint.password or endpoint.query or endpoint.fragment:
             raise ValueError('worker URL must be HTTP(S) without credentials or query')
         self.url, self.token = url, token
+        self.session_guard = session_guard
         self.worker = None
         self.profile = None
         self.run_id = None
         self.report = None
+
+    async def preflight(self, profile, cancel):
+        if self.session_guard:
+            return await self.session_guard.ensure_idle(cancel)
+        return {'verified':False,'reason':'HOST_SESSION_API_NOT_CONFIGURED'}
 
     async def prepare(self, profile, cancel):
         if cancel.is_set():

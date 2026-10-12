@@ -56,6 +56,7 @@ bool Context::begin(const TestProfile &profile)
         baseline_times_[i] = uint64_t(before.st_mtime);
     }
     stopping_.store(false);
+    host_cleanup_confirmed_.store(false);
     running_.store(true);
     struct stat receipt
     {
@@ -255,7 +256,8 @@ bool Context::finish(const moonlight_stream_metrics_t *metrics, int result)
     {
         ok = options_.session_overrides.enabled ? write_resolved_options(f, options_)
                                                 : std::fputs(",\"resolved\":null", f) >= 0;
-        ok = ok && std::fputs(",\"negotiated\":null", f) >= 0;
+        ok = ok && std::fprintf(f, ",\"negotiated\":null,\"paired_host_cleanup_confirmed\":%s",
+                                host_cleanup_confirmed_.load() ? "true" : "false") > 0;
         ok = ok && std::fprintf(
                        f,
                        ",\"origin_monotonic_us\":%llu,\"ready_monotonic_us\":%llu,\"measure_start_"

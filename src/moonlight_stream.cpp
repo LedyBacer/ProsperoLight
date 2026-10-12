@@ -4055,6 +4055,30 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
             return GS_FAILED;
         }
     }
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active())
+    {
+        // Use the existing paired identity. A test must launch a fresh session,
+        // never resume a Desktop stream left by another client.
+        result = gs_quit_app(server);
+        snprintf(notification.message, sizeof(notification.message),
+                 "Test Lab paired host cleanup: cancel_rc=%08x error=%s", (uint32_t)result,
+                 gs_error ? gs_error : "");
+        (void)lan_http_report_text(notification.message);
+        if (result != GS_OK)
+        {
+            prosperolight::test_lab::context().fail("HOST_CLEANUP_REJECTED");
+            return result;
+        }
+        result = gs_refresh_status(server);
+        if (result != GS_OK || server->current_game != 0)
+        {
+            prosperolight::test_lab::context().fail("HOST_CLEANUP_UNCONFIRMED");
+            return result != GS_OK ? result : GS_WRONG_STATE;
+        }
+        prosperolight::test_lab::context().host_cleanup_confirmed();
+    }
+#endif
     if (server->current_game && server->current_game != target_id)
     {
         if (overrides && overrides->enabled)

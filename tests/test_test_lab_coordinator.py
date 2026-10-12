@@ -28,6 +28,29 @@ def profile(**extra):
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_host_session_guard_uses_paired_identity_and_confirms_idle(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from pltest.host.session_guard import SessionGuard
+        async def exercise():
+            guard=SessionGuard('https://localhost:47990','t'*48,'disconnect')
+            guard.inventory=AsyncMock(side_effect=[(['paired-client'],1),([],0)])
+            guard.request=AsyncMock(return_value={'status':True})
+            result=await guard.ensure_idle(asyncio.Event())
+            guard.request.assert_awaited_once_with('POST','/api/clients/disconnect',{'uuid':'paired-client'})
+            self.assertTrue(result['verified'])
+            guard=SessionGuard('https://localhost:47990','t'*48)
+            guard.inventory=AsyncMock(return_value=(['paired-client'],1))
+            guard.request=AsyncMock()
+            with self.assertRaisesRegex(RuntimeError,'HOST_STREAM_BUSY'):
+                await guard.ensure_idle(asyncio.Event())
+            guard.request.assert_not_called()
+            guard=SessionGuard('https://localhost:47990','t'*48,'disconnect')
+            guard.inventory=AsyncMock(return_value=([],1))
+            with self.assertRaisesRegex(RuntimeError,'HOST_STREAM_OWNER_UNVERIFIED'):
+                await guard.ensure_idle(asyncio.Event())
+        asyncio.run(exercise())
+
     def test_failed_worker_connect_leaves_no_cleanup_command(self):
         import asyncio
         from pltest.coordinator.adapters import RealHostCoordinatorAdapter
@@ -305,6 +328,7 @@ class CoordinatorTests(unittest.TestCase):
         class Host:
             execution_mode = 'real'
             def __init__(self): self.stages = []
+            async def preflight(self, profile, cancel): return {'verified':True}
             async def prepare(self, profile, cancel): self.stages.append('PREPARE')
             async def start(self, cancel): self.stages.append('START')
             async def measure(self, profile, cancel):

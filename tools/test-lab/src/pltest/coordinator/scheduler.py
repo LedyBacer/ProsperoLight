@@ -216,11 +216,20 @@ class Scheduler:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0: raise TimeoutError('RUN_DEADLINE_EXCEEDED')
                     async def perform():
-                        if stage == 'PREPARE_STIMULUS': await self.host.prepare(profile, cancel)
+                        if stage == 'PREFLIGHT':
+                            await self.ps5.stage(stage, profile, cancel)
+                            if self.execution_mode == 'real':
+                                report['host_session_preflight'] = await self.host.preflight(profile, cancel)
+                        elif stage == 'PREPARE_STIMULUS':
+                            if self.execution_mode == 'real' and profile.get('host_stimulus',{}).get('monitor') == 'virtual':
+                                report['stimulus_preparation'] = 'deferred until own stream creates virtual display'
+                            else: await self.host.prepare(profile, cancel)
                         elif stage == 'START_PS5': await self.ps5.stage(stage, profile, cancel)
                         elif stage == 'WAIT_STREAM_READY': await self.ps5.stage(stage, profile, cancel)
                         elif stage == 'WARMUP':
                             if self.execution_mode == 'real':
+                                if profile.get('host_stimulus',{}).get('monitor') == 'virtual':
+                                    await self.host.prepare(profile, cancel)
                                 await self.host.start(cancel)
                                 await self.ps5.stage(stage, profile, cancel)
                             else:

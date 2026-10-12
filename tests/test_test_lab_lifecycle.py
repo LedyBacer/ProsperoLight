@@ -117,9 +117,10 @@ int main(int,char **argv) {
  std::ofstream(std::string(argv[1])+"/logs/debug-trace.txt")<<"finished";
  std::ofstream(std::string(argv[1])+"/logs/performance-frames-mode0.csv")<<"fixture trace";
  moonlight_stream_metrics_t metrics{};metrics.presented_frames=9;
- assert(context.finish(&metrics,0));assert(!context.finish(&metrics,0));
+ context.host_cleanup_confirmed();assert(context.finish(&metrics,0));assert(!context.finish(&metrics,0));
  std::ifstream f(std::string(argv[1])+"/receipts/complete.json");
  std::string receipt((std::istreambuf_iterator<char>(f)),{});assert(receipt.find("PASS")!=std::string::npos);
+ assert(receipt.find("\"paired_host_cleanup_confirmed\":true")!=std::string::npos);
  assert(!context.begin(p));assert(context.stop_requested());
  p.run_id="pyrowave";assert(context.begin(p));options.video_codec=MOONLIGHT_VIDEO_CODEC_PYROWAVE;
  context.attach(ready,stop,nullptr,options);start_measure_after_ready(argv[1],"pyrowave");await_stop(context);
@@ -129,6 +130,7 @@ int main(int,char **argv) {
  std::ifstream pyro(std::string(argv[1])+"/receipts/pyrowave.json");receipt.assign(std::istreambuf_iterator<char>(pyro),{});
  assert(receipt.find("\"functional_verdict\":\"PASS\"")!=std::string::npos);
  assert(receipt.find("pyrowave-output-mode0.csv")!=std::string::npos);
+ assert(receipt.find("\"paired_host_cleanup_confirmed\":false")!=std::string::npos);
  assert(receipt.find("performance-last.json")==std::string::npos); // never claim stale native metrics
  options.video_codec=MOONLIGHT_VIDEO_CODEC_H264;
  p.run_id="cancel";assert(context.begin(p));context.attach(handshake,stop,nullptr,options);

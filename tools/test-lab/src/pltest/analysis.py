@@ -71,6 +71,8 @@ def analyze_run(profile, report, directory):
         issues.append('SIMULATED_ADAPTERS')
         return result
     if host.get('measurement_validity') != 'VALID': issues.append('HOST_MEASUREMENT_INVALID')
+    if report.get('host_session_preflight',{}).get('verified') is False:
+        issues.append('HOST_SESSION_EXCLUSIVITY_UNVERIFIED')
     if not ps5.get('title_exit_verified') or ps5.get('stale_artifacts'): issues.append('INCOMPLETE_OR_STALE_PS5')
     if receipt.get('functional_verdict') == 'PASS' and ps5.get('title_exit_verified'):
         result['functional_verdict'] = 'PASS'

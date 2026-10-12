@@ -230,7 +230,14 @@ def _real_scheduler(store, data_dir):
         os.environ['PLTEST_PS5_HOST'], os.environ['PLTEST_PS5_PROBE_ELF'],
         os.environ['PLTEST_PS5_LAUNCH_ELF'], os.environ['PLTEST_PS5_EBOOT_SHA256'],
         store.artifacts)
-    host = RealHostCoordinatorAdapter(os.environ['PLTEST_HOST_WORKER_URL'], worker_token)
+    guard = None
+    if os.environ.get('PLTEST_HOST_API_URL'):
+        from ..host.session_guard import SessionGuard
+        path = Path(os.environ['PLTEST_HOST_API_TOKEN_FILE'])
+        if not path.is_file() or path.stat().st_size > 4096: raise ValueError('host API token file unavailable/oversized')
+        guard = SessionGuard(os.environ['PLTEST_HOST_API_URL'], path.read_text().strip(),
+            os.environ.get('PLTEST_HOST_SESSION_POLICY','reject'), os.environ.get('PLTEST_HOST_API_CA_FILE'))
+    host = RealHostCoordinatorAdapter(os.environ['PLTEST_HOST_WORKER_URL'], worker_token, guard)
     return Scheduler(store, ps5=ps5, host=host)
 
 

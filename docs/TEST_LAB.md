@@ -207,3 +207,35 @@ Run `make test-lab-test`, existing `make test` and Linux SDK `make lint` for cha
 See [PR6](../tools/test-lab/PR6.md) and [PR7](../tools/test-lab/PR7.md) for exact
 hardware evidence and remaining measurement boundaries. Tokens/raw run archives
 belong in ignored `build/`, never tracked source.
+
+## Existing streams and virtual display lifecycle
+
+Developer Test Lab launch uses the existing PS5 paired GameStream `/cancel`
+before starting a fresh app session, then requires an acknowledged cancel and
+successful status refresh with no current game. A refused/uncertain cleanup
+fails with HOST_CLEANUP_REJECTED/HOST_CLEANUP_UNCONFIRMED; launch is not replayed.
+The receipt records `paired_host_cleanup_confirmed`. This does not change ordinary
+production launch or claim visibility of every Remote Input/Monitor session.
+No administrator token is required for this paired path.
+
+For a per-session virtual display, PREPARE_STIMULUS is deferred until the own
+PS5 stream is ready and has created its display. Browser Ready is still required
+before warmup/measurement. A display belonging to an unrelated Moonlight stream
+is no longer required. Do not keep another Moonlight session running for tests.
+
+An optional authenticated Vibepollo guard provides a broader paired Moonlight
+inventory before PS5 launch. Configure PLTEST_HOST_API_URL (HTTPS origin),
+PLTEST_HOST_API_TOKEN_FILE (private local file), optional PLTEST_HOST_API_CA_FILE
+(trusted server certificate/CA; TLS validation stays enabled), and
+PLTEST_HOST_SESSION_POLICY=reject or disconnect. Default reject blocks a busy host.
+Explicit disconnect calls `/api/clients/disconnect` once per connected paired
+client UUID and polls until clients and RTSP inventory are empty. Unidentified
+owners, unsupported schema, refusal or timeout stop the run; no process kill,
+unpair, app deletion, configuration edit or API mutation retry occurs.
+
+To provision the optional token, use Vibepollo Web UI API Tokens with GET
+`/api/clients/list`, GET `/api/rtsp/sessions`, and POST
+`/api/clients/disconnect`. This is separate from the Windows account password.
+Never pass an RTSP history UUID as a paired client UUID. Without this adapter,
+reports retain HOST_SESSION_EXCLUSIVITY_UNVERIFIED, even when paired cancel
+is acknowledged. This guard covers Moonlight RTSP, not WebRTC or all remote roles.

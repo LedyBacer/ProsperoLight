@@ -178,6 +178,10 @@ class Context
         return stopping_.load();
     }
     void fail(const char *reason);
+    void host_cleanup_confirmed()
+    {
+        host_cleanup_confirmed_.store(true);
+    }
     void join();
     bool finish(const moonlight_stream_metrics_t *metrics, int result);
 
@@ -188,6 +192,7 @@ class Context
     pthread_mutex_t mutex_ = PTHREAD_MUTEX_INITIALIZER;
     bool started_ = false;
     std::atomic<bool> running_{false}, stopping_{false};
+    std::atomic<bool> host_cleanup_confirmed_{false};
     Timeline timeline_{TestProfile{}, 0};
     Observation (*sample_)(void *) = nullptr;
     void (*stop_)(void *) = nullptr;

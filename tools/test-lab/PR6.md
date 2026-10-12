@@ -97,3 +97,17 @@ errors. These runs do not validate the new PyroWave evidence counter or a
 fresh-build stream. The earlier real native smoke/matrix results above remain
 valid functional evidence; real paired performance validation remains pending
 complete negotiated settings and a stable host stimulus.
+
+Fresh-build acceptance after the operator closed the competing Moonlight session:
+PyroWave `be167b38-667a-4c67-a978-1b6789aeab83` and HEVC
+`5da15671-c158-4136-84ea-dc5edbaf2754` both returned functional PASS, fresh
+artifacts and confirmed normal title exit. PyroWave confirmed 1802 unique
+measurement pictures over 30.074s (59.920 FPS); host stimulus measured
+239.897 rAF FPS. Ready-to-submit p95/p99 were 404/1576us, and the post-present
+CPU observation timing was 26/40us, not physical scanout latency. These results
+validate the repaired bounded developer-only output evidence on real hardware.
+Preparing the virtual-display stimulus after the own PS5 stream became ready
+removed the dependency on a separate Moonlight session. Measurement validity
+remains INCONCLUSIVE: negotiated settings are missing and global host session
+exclusion was not authenticated. Optional session guard behavior is host-tested;
+its real authenticated disconnect has not been executed without API credentials.
