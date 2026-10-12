@@ -151,7 +151,7 @@ jobs:
         run: |
           # Validated streaming releases retain the measured build settings.
           case "$CONTENT_VERSION" in
-            01.000.062|01.000.070|01.000.080|01.000.090|01.000.095)
+            01.000.062|01.000.070|01.000.080|01.000.090|01.000.095|01.000.100)
               make app FEC_SIMD=1 OPUS_SIMD=1 PERFORMANCE_DETAIL=1 FLIP_POLL_US=200 INPUT_POLL_US=2000 VIDEO_SLICES_PER_FRAME=8
               ;;
             *)

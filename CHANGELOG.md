@@ -1,14 +1,28 @@
 # Changelog
 
-## Unreleased
+## 01.000.100
 
-- **Stop app tells the truth.** When the PC accepts the stop but keeps the app running, the
-  launcher says so instead of "App stopped", and starting another app explains why it cannot.
-- **Home-screen forwarders.** A forwarder tile can open ProsperoLight with `--pc`, `--app` and
-  `--exit-after-stream`, and the stream starts by itself, straight from the connecting screen. See
-  [docs/FORWARDER.md](docs/FORWARDER.md).
-- **A list for forwarder tools.** The saved PCs, their apps and box art are kept under
-  `/data/prosperolight/forwarder`, so a forwarder tool can offer them to pick from.
+### Stable: a home-screen tile for each PC game
+
+### New
+
+- **Home-screen forwarders.** A separate tile on the PS5 home screen can now start one PC app or game directly. The tile opens ProsperoLight with `--pc`, `--app` and `--exit-after-stream`; ProsperoLight shows its connecting screen at once, with no opening animation and none of the launcher's pages, and goes straight into the stream. If the PC is off, not paired or has no such app, the launcher opens and says why. Tiles are made with tools that follow the PS5 Forwarder Format, such as Forwarder Manager. See [docs/FORWARDER.md](docs/FORWARDER.md).
+- **A list for forwarder tools.** The saved PCs, their apps and box art are kept under `/data/prosperolight/forwarder`, so a tool can let you pick a PC and an app instead of typing their names.
+- **Start-up timing** in the diagnostic log: how long system modules, the decoder warm-up and storage take before the first frame.
+
+### Changed
+
+- **Stop app tells the truth.** When the PC accepts the stop but keeps the app running, the launcher says so instead of "App stopped", and starting another app explains why it cannot.
+- **Launch background:** the picture the console shows while ProsperoLight loads is now a plain dark gradient in the connecting screen's colours. The home-screen background is unchanged.
+- **PyroWave:** the app's high-frame-rate declaration is read from the folder the app runs from.
+- Updated the bundled PS5-Lapy-JB-Daemon helper.
+
+### Installation / update
+
+Title ID remains `PPSA99002`; saved PCs, settings and pairing are kept. Close the app before updating. Extract `PPSA99002.zip` and copy the complete `PPSA99002/` folder to `/data/homebrew/`. Keep only one installation for this title. `SHA256SUMS` verifies the download.
+
+> [!NOTE]
+> The new launch background appears once ProsperoLight is registered again: remove its old registration from the PS5 home screen, then let ShadowMountPlus register the app. Everything else works without this step.
 
 ## 01.000.095
 
