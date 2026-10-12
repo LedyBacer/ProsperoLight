@@ -915,7 +915,7 @@ void View::sync_settings_from_config()
     form_.set_visible(kCustomFps, custom);
     form_.set_slider(kCustomFps, static_cast<float>(config.stream_fps));
     const auto *host = model_.selected_host();
-    const auto host_settings = prosperolight::host_preferences(host);
+    const auto host_settings = prosperolight::host_preferences(host, !model_.session_only());
     form_.row(kHostIdentity)->text =
         host ? (host->name[0] ? host->name : host->address) : i18n::tr("Select a PC first");
     form_.set_toggle(kMuteHost, host_settings.mute_host);
@@ -963,6 +963,8 @@ void View::sync_settings_from_config()
 
 void View::apply_setting(int id)
 {
+    if (model_.session_only())
+        return;
     prosperolight_debug_line("setting", "row %d changed", id);
     moonlight_config_t &config = model_.settings();
     switch (id)
@@ -1005,7 +1007,7 @@ void View::apply_setting(int id)
         const auto *host = model_.selected_host();
         if (!host)
             return;
-        auto preferences = prosperolight::host_preferences(host);
+        auto preferences = prosperolight::host_preferences(host, !model_.session_only());
         if (id == kHostReset)
             preferences = prosperolight::HostPreferences{};
         else if (id == kMuteHost)
@@ -1820,7 +1822,8 @@ void View::launch(ui::Feedback &feedback)
     }
     launching_ = true;
     {
-        const auto host_settings = prosperolight::host_preferences(model_.selected_host());
+        const auto host_settings =
+            prosperolight::host_preferences(model_.selected_host(), !model_.session_only());
         prosperolight_debug_line(
             "launch",
             "pc=\"%s\" server=%s app=\"%s\" id=%d running=%d | %s %u FPS codec=%s hdr=%u chroma=%u "

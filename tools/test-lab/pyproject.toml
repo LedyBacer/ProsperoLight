@@ -1,0 +1,24 @@
+# ps5-native-app-boilerplate - portable developer tools packaging.
+# Copyright (C) 2026 BlackBearReloaded
+# SPDX-License-Identifier: GPL-3.0-or-later
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "prosperolight-test-lab"
+version = "0.5.0"
+requires-python = ">=3.11"
+description = "Developer-only ProsperoLight hardware test tools"
+dependencies = ["fastapi>=0.115,<1", "typer>=0.15,<1", "uvicorn>=0.34,<1", "httpx>=0.28,<1", "aiohttp>=3.13.2,<4"]
+[project.optional-dependencies]
+worker = ["playwright>=1.58,<2"]
+gpu = ["nvidia-ml-py>=12"]
+[project.scripts]
+pltest = "pltest.cli:main"
+pltest-coordinator = "pltest.coordinator.server:main"
+[tool.setuptools]
+py-modules = ["launch_spike", "collect_run", "control_run"]
+packages = ["pltest", "pltest.ps5", "pltest.host", "pltest.coordinator"]
+package-dir = {"" = ".", "pltest" = "src/pltest"}
+[tool.setuptools.package-data]
+"pltest.host" = ["static/*.html", "static/*.js"]

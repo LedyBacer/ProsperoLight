@@ -10,6 +10,7 @@
 #include "app_storage.hpp"
 
 #include <chrono>
+#include <atomic>
 #include <fcntl.h>
 #include <mutex>
 #include <pthread.h>
@@ -27,6 +28,9 @@ namespace
 std::mutex log_mutex;
 bool logs_loaded = false;
 bool logs_enabled = true;
+#if PROSPEROLIGHT_TEST_LAB
+std::atomic<bool> test_logs_override{false};
+#endif
 std::string log_settings()
 {
     return storage::setting_file("prosperolight-logging.bin");
@@ -47,8 +51,21 @@ void load_logs()
 }
 } // namespace
 
+void prosperolight_test_logs_override(int enabled)
+{
+#if PROSPEROLIGHT_TEST_LAB
+    test_logs_override.store(enabled != 0);
+#else
+    (void)enabled;
+#endif
+}
+
 int prosperolight_logs_enabled(void)
 {
+#if PROSPEROLIGHT_TEST_LAB
+    if (test_logs_override.load())
+        return 1;
+#endif
     std::lock_guard<std::mutex> guard(log_mutex);
     load_logs();
     return logs_enabled;

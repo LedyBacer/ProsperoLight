@@ -25,9 +25,17 @@ struct ForwardedLaunch
     std::string pc;  // a saved PC's name or address; empty: the PC last selected
     std::string app; // an app's name, or its number on the PC
     bool exit_after_stream = false;
+#if PROSPEROLIGHT_TEST_LAB
+    std::string test_run;
+    bool test_requested = false;
+#endif
 
     bool requested() const
     {
+#if PROSPEROLIGHT_TEST_LAB
+        if (test_requested)
+            return true;
+#endif
         return !app.empty();
     }
 };
@@ -36,8 +44,7 @@ namespace forwarded_detail
 {
 inline std::string tidy(std::string_view text)
 {
-    while (!text.empty() &&
-           (text.front() == ' ' || text.front() == '\t' || text.front() == '"'))
+    while (!text.empty() && (text.front() == ' ' || text.front() == '\t' || text.front() == '"'))
         text.remove_prefix(1);
     while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r' ||
                              text.back() == '\n' || text.back() == '"'))
@@ -73,16 +80,30 @@ inline ForwardedLaunch parse_forwarded_launch(int argc, char **argv)
         if (!argv[index])
             return false;
         const std::string_view argument{argv[index]};
+#if PROSPEROLIGHT_TEST_LAB
+        const auto assign = [&](std::string_view text)
+        { *out = name == "--test-run" ? std::string(text) : forwarded_detail::tidy(text); };
+#else
+        const auto assign = [&](std::string_view text) { *out = forwarded_detail::tidy(text); };
+#endif
         if (argument == name)
         {
+#if PROSPEROLIGHT_TEST_LAB
+            if (name == "--test-run")
+                result.test_requested = true;
+#endif
             if (index + 1 < argc && argv[index + 1])
-                *out = forwarded_detail::tidy(argv[++index]);
+                assign(argv[++index]);
             return true;
         }
         if (argument.size() > name.size() && argument.substr(0, name.size()) == name &&
             argument[name.size()] == '=')
         {
-            *out = forwarded_detail::tidy(argument.substr(name.size() + 1));
+#if PROSPEROLIGHT_TEST_LAB
+            if (name == "--test-run")
+                result.test_requested = true;
+#endif
+            assign(argument.substr(name.size() + 1));
             return true;
         }
         return false;
@@ -93,6 +114,11 @@ inline ForwardedLaunch parse_forwarded_launch(int argc, char **argv)
             break;
         if (std::string_view{argv[index]} == "--exit-after-stream")
             result.exit_after_stream = true;
+#if PROSPEROLIGHT_TEST_LAB
+        else if (value(index, "--test-run", &result.test_run))
+        {
+        }
+#endif
         else if (!value(index, "--pc", &result.pc))
             (void)value(index, "--app", &result.app);
     }
@@ -111,8 +137,8 @@ inline int forwarded_host(const moonlight_config_t &config, std::string_view pc)
     {
         const moonlight_config_host_t &host = config.hosts[index];
         if (forwarded_detail::same_text(host.name, pc) || pc == host.address ||
-            pc == std::string(host.address) + ":" +
-                      std::to_string(moonlight_config_host_port(&host)))
+            pc ==
+                std::string(host.address) + ":" + std::to_string(moonlight_config_host_port(&host)))
             return static_cast<int>(index);
     }
     return -1;

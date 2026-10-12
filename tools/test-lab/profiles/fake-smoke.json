@@ -1,0 +1,9 @@
+{
+  "schema": "prosperolight-test/1",
+  "build_label": "test-lab-fake",
+  "client": {"host": "fake-ps5"},
+  "timing": {"hard_seconds": 30},
+  "fake_measure_seconds": 0.05,
+  "fake_frames": 120,
+  "fake_raf_fps": 60
+}

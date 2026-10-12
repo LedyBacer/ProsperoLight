@@ -52,11 +52,7 @@ async function prepare() {
     for(let n=0;n<4;n++) {
       const texture=document.createElement('canvas');texture.width=s.width;texture.height=s.height;
       const image=texture.getContext('2d').createImageData(s.width,s.height);
-      let seed=(s.seed+n)>>>0;
-      for(let at=0;at<image.data.length;at+=4) {
-        seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;
-        const shade=32+(seed>>>25);image.data[at]=shade;image.data[at+1]=shade;image.data[at+2]=shade;image.data[at+3]=255;
-      }
+      PLTestPatterns.fillNoise(image.data,s.seed+n);
       texture.getContext('2d').putImageData(image,0,0);noise.push(texture);
       await new Promise(resolve=>setTimeout(resolve,0));
     }

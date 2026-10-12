@@ -34,6 +34,8 @@ extern "C"
     } client_identity_t;
 
     int identity_init(client_identity_t *identity, const char *key_directory);
+    /* Read-only test session: never generates or overwrites pairing material. */
+    int identity_init_existing(client_identity_t *identity, const char *key_directory);
     int identity_forget(const char *key_directory);
     void identity_free(client_identity_t *identity);
     void bytes_to_hex(const unsigned char *input, char *output, size_t length);

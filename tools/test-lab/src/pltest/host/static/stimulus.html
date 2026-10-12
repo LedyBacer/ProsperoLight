@@ -1,0 +1,8 @@
+<!doctype html>
+<!-- ps5-native-app-boilerplate - Windows host stimulus operator page.
+Copyright (C) 2026 BlackBearReloaded
+SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en"><meta charset="utf-8"><title>ProsperoLight Test Lab Stimulus</title>
+<style>html,body{margin:0;background:#202020;color:white;font:16px system-ui}main{padding:20px}canvas{width:100vw;height:100vh;display:none}body.prepared canvas{display:block}body.prepared main{position:fixed;z-index:1;background:#202020d0}body.running main{display:none}canvas:fullscreen{width:100vw;height:100vh;background:#202020}</style>
+<main><h1>ProsperoLight host stimulus</h1><p>Place this window on the selected display. Ready enters fullscreen and measures actual rAF before a run.</p><button id="ready" disabled>Ready</button><pre id="status">Waiting for worker preparation</pre></main>
+<canvas id="scene"></canvas><script src="/assets/patterns.js"></script><script src="/assets/stimulus.js"></script></html>

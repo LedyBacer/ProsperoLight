@@ -5,10 +5,12 @@
 #include "Limelight.h"
 namespace prosperolight::pyrowave
 {
-void prepare_callbacks(void (*on_error)(int), bool vsync, bool tv_safe);
+void prepare_callbacks(void (*on_error)(int), bool vsync, bool tv_safe, unsigned pacing,
+                       unsigned vrr_profile);
 void set_hdr_mode(bool enabled, const SS_HDR_METADATA *metadata);
 DECODER_RENDERER_CALLBACKS *callbacks();
 uint64_t presented();
+uint64_t completed_unique();
 void clear_error();
 void copy_error(char *destination, size_t capacity);
 void cleanup();

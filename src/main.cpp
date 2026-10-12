@@ -8,6 +8,13 @@
 #include "lan_http_report.hpp"
 #include "crash_report.hpp"
 #include "forwarded_launch.hpp"
+#if PROSPEROLIGHT_TEST_LAB
+#include "test_lab_profile.hpp"
+#include "test_lab_lifecycle.hpp"
+#endif
+#if PROSPEROLIGHT_LAUNCH_PROOF
+#include "launch_proof.hpp"
+#endif
 #include "connecting_plate.hpp"
 #include "launcher/launcher.hpp"
 #include "moonlight_stream.hpp"
@@ -269,6 +276,9 @@ int main(int argc, char **argv)
         moonlight_native_decoder_warmup(decoder_warmup);
     const long long warmup_ms = since_entry();
     storage::Initialize();
+#if PROSPEROLIGHT_LAUNCH_PROOF
+    (void)prosperolight::write_launch_proof(argc, argv);
+#endif
     prosperolight_debug_line(
         "main", "start-up: system modules %lld ms, decoder warm-up %lld ms, storage %lld ms",
         modules_ms, warmup_ms - modules_ms, since_entry() - warmup_ms);
@@ -280,6 +290,72 @@ int main(int argc, char **argv)
     crash::Install(storage::paths().logs, storage::log_descriptor());
     // A home-screen forwarder names the stream to start (docs/FORWARDER.md).
     prosperolight::pending_forwarded_launch() = prosperolight::parse_forwarded_launch(argc, argv);
+#if PROSPEROLIGHT_TEST_LAB
+    {
+        auto &launch = prosperolight::pending_forwarded_launch();
+        if (launch.test_requested)
+        {
+            auto reject = [&](const std::string &reason)
+            {
+                prosperolight::test_lab::write_profile_status(launch.test_run, "failed", 1, nullptr,
+                                                              reason);
+                prosperolight_debug_line("test-lab", "profile rejected: %s", reason.c_str());
+                if (prosperolight::test_lab::safe_run_id(launch.test_run))
+                {
+                    prosperolight::test_lab::TestProfile failed;
+                    failed.run_id = launch.test_run;
+                    prosperolight::test_lab::context().begin(failed);
+                    prosperolight::test_lab::context().fail(reason.c_str());
+                    prosperolight_debug_flush();
+                    prosperolight::test_lab::context().finish(nullptr, -1);
+                }
+                (void)sceSystemServiceLoadExec("exit", nullptr);
+                KeepProcessAlive();
+            };
+            std::string error;
+            if (!prosperolight::test_lab::read_profile(
+                    launch.test_run, prosperolight::test_lab::active_profile(), error))
+            {
+                reject(error);
+            }
+            moonlight_config_t saved_config{};
+            const auto &expected_label = prosperolight::test_lab::active_profile().build_label;
+            if (!expected_label.empty())
+            {
+                const std::string path = std::string(storage::paths().app) + "/build-label.txt";
+                char label[257]{};
+                FILE *file = std::fopen(path.c_str(), "rb");
+                const std::size_t size = file ? std::fread(label, 1, sizeof(label) - 1, file) : 0;
+                if (file)
+                    std::fclose(file);
+                std::string actual(label, size);
+                while (!actual.empty() && (actual.back() == '\n' || actual.back() == '\r'))
+                    actual.pop_back();
+                if (actual != expected_label)
+                {
+                    reject("BUILD_LABEL_MISMATCH");
+                }
+            }
+            (void)moonlight_config_load(&saved_config);
+            if (prosperolight::forwarded_host(saved_config,
+                                              prosperolight::test_lab::active_profile().host) < 0)
+            {
+                reject("NOT_SAVED_HOST");
+            }
+            prosperolight::test_lab::active() = true;
+            (void)prosperolight::test_lab::context().begin(
+                prosperolight::test_lab::active_profile());
+            prosperolight_test_logs_override(1);
+            prosperolight_debug_line("test-lab", "run=%s profile validated",
+                                     launch.test_run.c_str());
+            prosperolight::test_lab::write_profile_status(launch.test_run, "profile_validated", 1,
+                                                          nullptr);
+            launch.pc = prosperolight::test_lab::active_profile().host;
+            launch.app = prosperolight::test_lab::active_profile().app;
+            launch.exit_after_stream = true;
+        }
+    }
+#endif
     if (prosperolight::pending_forwarded_launch().requested())
         std::printf("[PL] main: forwarded launch pc=\"%s\" app=\"%s\" exit_after_stream=%d\n",
                     prosperolight::pending_forwarded_launch().pc.c_str(),
@@ -302,6 +378,13 @@ int main(int argc, char **argv)
         stream_error[0] = '\0';
         if (result == launcher::Result::update_exit || result == launcher::Result::app_exit)
         {
+#if PROSPEROLIGHT_TEST_LAB
+            if (prosperolight::test_lab::active())
+            {
+                prosperolight_debug_flush();
+                prosperolight::test_lab::context().finish(nullptr, -1);
+            }
+#endif
             // The self-update helper waits for this process to end, then puts
             // the new version's files in place (third_party/update-check).
             Log(result == launcher::Result::update_exit ? "[PL] main: closing for the update"
@@ -353,6 +436,7 @@ int main(int argc, char **argv)
         options.vsync_enabled = selection.vsync_enabled;
         options.decoder_pipeline = selection.decoder_pipeline;
         options.decoder_cores = selection.decoder_cores;
+        options.session_overrides = selection.session_overrides;
         moonlight_connecting_picture_t picture{};
         if (selection.connecting_rgba.size() ==
             static_cast<std::size_t>(connecting::kWidth) * connecting::kHeight * 4u)
@@ -385,6 +469,16 @@ int main(int argc, char **argv)
         sceKernelUsleep(settle_ms * 1000u);
         // A forwarder asked to return to the home screen once its stream is over. A
         // stream that failed opens the launcher instead, which says why.
+#if PROSPEROLIGHT_TEST_LAB
+        if (prosperolight::test_lab::active())
+        {
+            prosperolight_debug_flush();
+            prosperolight::test_lab::context().finish(&metrics, stream_result);
+            prosperolight_release_splash();
+            (void)sceSystemServiceLoadExec("exit", nullptr);
+            KeepProcessAlive();
+        }
+#endif
         if (selection.exit_after_stream && stream_result == 0)
         {
             Log("[PL] main: closing after the forwarded stream");

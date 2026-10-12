@@ -58,6 +58,9 @@ int main(int,char **argv) {
     assert(!ps5_videoout_hfr_accepted(1,-1));
     snprintf(storage::g_paths.config,sizeof(storage::g_paths.config),"%s/settings.bin",argv[1]);
     assert(moonlight::save_presentation_mode(2));
+    ps5_stream_output_policy(2);
+    // The stream policy is independent of the saved launcher preference.
+    assert(moonlight::save_presentation_mode(0));
     int h=__wrap_sceVideoOutOpen(0,0,0,nullptr);
     assert(!ps5_vrr_output_active());
     assert(__wrap_sceVideoOutConfigureOutput(h,15,nullptr,nullptr,nullptr)==0 && refresh==11988);

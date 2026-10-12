@@ -22,3 +22,5 @@ results/
 *.sprx
 *.prx
 *.pkg
+tools/test-lab/*.egg-info/
+tools/test-lab/.venv/

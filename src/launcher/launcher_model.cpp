@@ -50,7 +50,8 @@ void Model::Initialize(std::uint64_t now_ms)
     i18n::initialize(std::string(storage::paths().app) + "/assets/locales");
     now_ms_ = now_ms;
     (void)moonlight_config_load(&config_);
-    prosperolight::forwarder_catalog::prune(config_);
+    if (!session_only_)
+        prosperolight::forwarder_catalog::prune(config_);
     ResetSelected();
     if (selected_host())
     {
@@ -163,6 +164,8 @@ std::vector<Notice> Model::TakeNotices()
 void Model::Save()
 {
     save_pending_ = false;
+    if (session_only_)
+        return;
     if (!moonlight_config_save(&config_))
         Notify(NoticeKind::error, i18n::tr("Settings were not saved"),
                i18n::tr("The console refused the file."));
@@ -277,6 +280,8 @@ void Model::Refresh(bool discover)
 
 void Model::StartPairing()
 {
+    if (session_only_)
+        return;
     const moonlight_config_host_t *host = selected_host();
     if (!host)
     {
@@ -305,6 +310,8 @@ void Model::StartPairing()
 
 void Model::Unpair()
 {
+    if (session_only_)
+        return;
     if (!selected_host() || pairing())
         return;
     if (!backend_.online)
@@ -328,6 +335,8 @@ void Model::Unpair()
 
 void Model::RemoveHost()
 {
+    if (session_only_)
+        return;
     const moonlight_config_host_t *host = selected_host();
     if (!host || pairing())
         return;
@@ -355,6 +364,8 @@ void Model::RemoveHost()
 
 bool Model::AddHost(const char *text, std::string *error)
 {
+    if (session_only_)
+        return false;
     char address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
     std::uint16_t port = 0;
     if (!moonlight_config_parse_endpoint(text, address, &port))
@@ -380,6 +391,8 @@ bool Model::AddHost(const char *text, std::string *error)
 
 bool Model::SetPort(const char *text, std::string *error)
 {
+    if (session_only_)
+        return false;
     std::uint16_t port = MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT;
     const bool blank = !text || text[std::strspn(text, " \t")] == '\0';
     if (!selected_host() || (!blank && !moonlight_config_parse_port(text, &port)))
@@ -403,6 +416,8 @@ bool Model::SetPort(const char *text, std::string *error)
 
 void Model::StopApp()
 {
+    if (session_only_)
+        return;
     if (!selected_host() || pairing())
         return;
     if (!backend_.current_app_id)
@@ -567,7 +582,7 @@ void Model::Run(const Job &job, JobResult *result)
         result->result = moonlight_backend_fetch_app_artwork(job.host, job.https_port, job.app_id);
         std::size_t size = 0;
         const unsigned char *png = moonlight_backend_find_app_artwork(job.app_id, &size);
-        if (png && size)
+        if (png && size && !session_only_)
             (void)prosperolight::forwarder_catalog::save_poster(job.host, job.port, job.app_id, png,
                                                                 size);
         if (png && size && !job.catalog_only && artwork_decoder_ &&
@@ -862,7 +877,7 @@ bool Model::ApplySelected(const Job &job, const JobResult &result)
         {
             PublishCatalog(job.host, job.port, backend_);
             // Each app's box art once per visit to this PC, when the catalog lacks it.
-            if (prosperolight::forwarder_catalog::enabled() && backend_.paired)
+            if (!session_only_ && prosperolight::forwarder_catalog::enabled() && backend_.paired)
                 for (const moonlight_backend_app_t &app : backend_.apps)
                     if (std::find(catalog_asked_.begin(), catalog_asked_.end(), app.id) ==
                         catalog_asked_.end())
@@ -896,7 +911,7 @@ void Model::PublishCatalog(const char *host, std::uint16_t port,
                            const moonlight_backend_snapshot_t &state)
 {
     // An unpaired PC answers without its apps: what was written before stays.
-    if (!state.online || !state.paired)
+    if (session_only_ || !state.online || !state.paired)
         return;
     const char *name = state.name;
     for (std::uint32_t i = 0; i < config_.host_count; ++i)

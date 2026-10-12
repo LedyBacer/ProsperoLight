@@ -5,7 +5,6 @@
 #include "scanout_trace.hpp"
 #include "pacing_decision_trace.hpp"
 #include "lan_http_report.hpp"
-#include "presentation_preferences.hpp"
 #include <cstdio>
 #include <new>
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -34,6 +33,7 @@ namespace prosperolight::pyrowave
 {
 namespace
 {
+unsigned selected_pacing = 0, selected_vrr_profile = 1;
 struct Frame
 {
     std::vector<uint8_t> bytes;
@@ -48,7 +48,7 @@ struct Session
     std::mutex mutex;
     std::condition_variable wake;
     std::deque<Frame> queue;
-    PacingDecisionTrace decisions{"pyrowave", moonlight::presentation_mode()};
+    PacingDecisionTrace decisions{"pyrowave", selected_pacing};
     bool running{}, started{};
     pthread_t worker{};
     unsigned width{}, height{}, fps{};
@@ -62,6 +62,7 @@ struct Session
 std::unique_ptr<Session> session;
 void (*error_callback)(int) = nullptr;
 std::atomic<uint64_t> presented_count{0};
+std::atomic<uint64_t> confirmed_unique_count{0};
 std::atomic<bool> hdr_active{false}, hdr_known{false}, requested_hdr{false};
 // moonlight-common-c queries this on its UDP receiver, not the renderer.
 // A single atomic deadline snapshot prevents lock inversion with the queue.
@@ -129,7 +130,7 @@ struct OutputTrace
                 (unsigned long long)vrr.stats.repeats, (unsigned long long)vrr.stats.wait_total_us,
                 (unsigned long long)vrr.stats.late_max_us, (unsigned long long)vrr.stats.gap_max_us,
                 vrr.source_rate(), vrr.repeat_factor(), (unsigned long long)vrr.interval(),
-                moonlight::vrr_profile(), (unsigned long long)vrr.playout_reserve_us(),
+                selected_vrr_profile, (unsigned long long)vrr.playout_reserve_us(),
                 (unsigned long long)vrr.feedback_misses(),
                 (unsigned long long)vrr.feedback_ambiguous(),
                 (unsigned long long)vrr.feedback_epoch_resets());
@@ -347,14 +348,14 @@ void *worker(void *)
     auto &s = *session;
     moonlight::FramePacing pacer;
     moonlight::SourceTimestamp source_clock;
-    const unsigned mode = moonlight::presentation_mode();
+    const unsigned mode = selected_pacing;
     const uint32_t selected_refresh_x100 =
         static_cast<uint32_t>(s.backend->refresh_hz() * 100 + 0.5);
     pacer.reset(s.fps);
     const bool paced = mode != 0;
     moonlight::VrrRepeatPolicy vrr_repeats;
     vrr_repeats.reset(s.fps);
-    vrr_repeats.configure(moonlight::vrr_profile(), selected_refresh_x100);
+    vrr_repeats.configure(selected_vrr_profile, selected_refresh_x100);
     moonlight::VrrPreparationLead preparation_lead;
     moonlight::Ps5ReadinessEstimator readiness;
     unsigned cadence_rate = s.fps, cadence_copies = vrr_repeats.repeat_factor();
@@ -403,6 +404,9 @@ void *worker(void *)
                 pending_feedback.number, pending_feedback.pts, pending_feedback.ready, now_us(),
                 ps5_vrr_output_active(), pending_feedback.requested_at_us);
             pending_feedback.valid = false;
+#if PROSPEROLIGHT_TEST_LAB
+            confirmed_unique_count.fetch_add(1, std::memory_order_relaxed);
+#endif
         }
     };
     const auto record_output = [&](const PresentationStats &output, uint64_t observed)
@@ -418,6 +422,9 @@ void *worker(void *)
                 pending_feedback.number, pending_feedback.pts, pending_feedback.ready, observed,
                 ps5_vrr_output_active(), pending_feedback.requested_at_us);
             pending_feedback.valid = false;
+#if PROSPEROLIGHT_TEST_LAB
+            confirmed_unique_count.fetch_add(1, std::memory_order_relaxed);
+#endif
         }
     };
     const auto record_poll = [](void *context, const PresentationStats &output, uint64_t observed)
@@ -850,7 +857,7 @@ int setup(int format, int width, int height, int fps, void *, int flags)
         s.context->init(true);
         s.backend = std::make_unique<PyroWaveVideoBackend>(*s.context);
         s.backend->initialize(width, height, fps, s.chroma444, s.hdr, selected_vsync,
-                              selected_tv_safe);
+                              selected_tv_safe, selected_pacing);
         log_line("PyroWave negotiated: %dx%d @ %d FPS, %s %s %u-bit limited range, "
                  "compression=0",
                  width, height, fps, s.hdr ? "HDR10" : "SDR", s.chroma444 ? "4:4:4" : "4:2:0",
@@ -984,20 +991,24 @@ void cleanup()
         log_line("PyroWave VideoOut handoff complete: rc=%08x", unsigned(release_result));
     }
 }
-void prepare_callbacks(void (*on_error)(int), bool vsync, bool tv_safe)
+void prepare_callbacks(void (*on_error)(int), bool vsync, bool tv_safe, unsigned pacing,
+                       unsigned vrr_profile)
 {
     record_error("");
+    selected_pacing = pacing;
+    selected_vrr_profile = vrr_profile;
     selected_vsync = vsync;
     selected_tv_safe = tv_safe;
     hdr_known = false;
     hdr_active = false;
     error_callback = on_error;
     presented_count = 0;
+    confirmed_unique_count = 0;
     receive_deadline.clear();
     // The patched moonlight-common-c callback is registered before
     // LiStartConnection(). Unpaced explicitly disables deadline pressure.
-    LiSetVideoReassemblyDeadlineCallback(
-        moonlight::presentation_mode() == 0 ? nullptr : pyrowave_receive_deadline);
+    LiSetVideoReassemblyDeadlineCallback(selected_pacing == 0 ? nullptr
+                                                              : pyrowave_receive_deadline);
     video_callbacks = {};
     video_callbacks.setup = setup;
     video_callbacks.start = start;
@@ -1032,5 +1043,9 @@ DECODER_RENDERER_CALLBACKS *callbacks()
 uint64_t presented()
 {
     return presented_count.load();
+}
+uint64_t completed_unique()
+{
+    return confirmed_unique_count.load(std::memory_order_relaxed);
 }
 } // namespace prosperolight::pyrowave

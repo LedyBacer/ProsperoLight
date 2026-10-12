@@ -1,0 +1,25 @@
+{
+  "schema": "prosperolight-test/1",
+  "run_id": "pr1-native-smoke",
+  "suite": "decoder-smoke",
+  "source_sha": "78947e272566bbac31a5baab8965bf73cea87740",
+  "build_label": "test-lab-pr1-78947e2",
+  "client": {
+    "host": "192.168.1.5:47989",
+    "app": "Desktop",
+    "codec": "hevc",
+    "chroma": "420",
+    "hdr": false,
+    "resolution": "1080p",
+    "fps": 60,
+    "bitrate_mbps": 20,
+    "vsync": true,
+    "decoder_pipeline": "classic",
+    "decoder_cores": 3,
+    "pacing": "paced",
+    "vrr_profile": "balanced",
+    "host_extensions": { "enabled": false }
+  },
+  "timing": { "startup_seconds": 30, "ready_seconds": 30, "hard_seconds": 120 },
+  "capture": { "detailed_frame_trace": true, "host_logs": false, "gpu_metrics": false }
+}

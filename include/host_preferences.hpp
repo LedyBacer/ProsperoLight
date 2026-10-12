@@ -54,7 +54,7 @@ inline bool read_host_preferences(const std::string &path, HostPreferences &p)
     return true;
 }
 inline bool host_preferences_save(const moonlight_config_host_t &host, const HostPreferences &p);
-inline HostPreferences host_preferences(const moonlight_config_host_t *host)
+inline HostPreferences host_preferences(const moonlight_config_host_t *host, bool migrate = true)
 {
     HostPreferences p;
     p.optimize = client_preferences().optimize;
@@ -62,7 +62,8 @@ inline HostPreferences host_preferences(const moonlight_config_host_t *host)
     p.quit_host = host_quit_enabled();
     if (host && !read_host_preferences(host_preferences_path(*host), p) && host->unique_id[0] &&
         read_host_preferences(host_preferences_path(*host, false), p))
-        (void)host_preferences_save(*host, p);
+        if (migrate)
+            (void)host_preferences_save(*host, p);
     return p;
 }
 inline bool host_preferences_save(const moonlight_config_host_t &host, const HostPreferences &p)

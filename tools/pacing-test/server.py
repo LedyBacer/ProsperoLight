@@ -26,6 +26,15 @@ def handler(directory, reports, benchmarks=None):
             self.wfile.write(body)
 
         def do_GET(self):
+            if self.path.split('?')[0] == '/scene-patterns.js':
+                source = Path(__file__).resolve().parents[1] / 'test-lab/src/pltest/host/static/patterns.js'
+                data = source.read_bytes()
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/javascript; charset=utf-8')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if self.path.startswith('/api/decoder/runs/') and benchmarks:
                 try:
                     self.reply(benchmarks.status(self.path.rsplit('/', 1)[-1]))

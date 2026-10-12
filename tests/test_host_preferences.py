@@ -24,7 +24,11 @@ int main(int argc,char **argv) {
  assert(prosperolight::host_preferences_save(a,p));
  assert(!prosperolight::host_preferences(&b).extensions);
  b=a;b.http_port=48989;assert(!prosperolight::host_preferences(&b).extensions);
- strcpy(a.unique_id,"stable-host");assert(prosperolight::host_preferences(&a).scale==75);
+ strcpy(a.unique_id,"stable-host");
+ const auto migrated=prosperolight::host_preferences_path(a);
+ assert(prosperolight::host_preferences(&a,false).scale==75);
+ FILE *probe=fopen(migrated.c_str(),"rb");assert(probe==nullptr);
+ assert(prosperolight::host_preferences(&a).scale==75);
  assert(prosperolight::host_preferences_save(a,p));strcpy(a.address,"192.168.1.99");a.http_port=48989;
  assert(prosperolight::host_preferences(&a).scale==75);
  char query[160];gs_host_options_t options{false,1,1,75,15};

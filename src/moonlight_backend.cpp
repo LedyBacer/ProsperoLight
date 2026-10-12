@@ -5,6 +5,9 @@
  */
 
 #include "moonlight_backend.hpp"
+#if PROSPEROLIGHT_TEST_LAB
+#include "test_lab_profile.hpp"
+#endif
 #include "server_endpoint.h"
 
 #include "app_storage.hpp"
@@ -51,6 +54,15 @@ typedef struct pairing_job
 
 static pairing_job_t pairing_job;
 
+static int session_identity_init(client_identity_t *identity, const char *directory)
+{
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active())
+        return identity_init_existing(identity, directory);
+#endif
+    return identity_init(identity, directory);
+}
+
 int moonlight_backend_refresh(const char *host, uint16_t http_port,
                               moonlight_backend_snapshot_t *snapshot)
 {
@@ -69,7 +81,7 @@ int moonlight_backend_refresh(const char *host, uint16_t http_port,
     snprintf(snapshot->host, sizeof(snapshot->host), "%s", host);
     snapshot->http_port = http_port;
 
-    result = identity_init(&identity, MOONLIGHT_IDENTITY_DIRECTORY);
+    result = session_identity_init(&identity, MOONLIGHT_IDENTITY_DIRECTORY);
     if (result != GS_OK)
         goto done;
 
@@ -128,7 +140,7 @@ static void *pairing_thread(void *unused)
     int result;
 
     (void)unused;
-    result = identity_init(identity, MOONLIGHT_IDENTITY_DIRECTORY);
+    result = session_identity_init(identity, MOONLIGHT_IDENTITY_DIRECTORY);
     if (result != GS_OK)
         goto done;
     http_init(identity, 0);
@@ -232,7 +244,7 @@ static int run_paired_action(const char *host, uint16_t http_port,
     memset(&server, 0, sizeof(server));
     snprintf(snapshot->host, sizeof(snapshot->host), "%s", host);
     snapshot->http_port = http_port;
-    result = identity_init(&identity, MOONLIGHT_IDENTITY_DIRECTORY);
+    result = session_identity_init(&identity, MOONLIGHT_IDENTITY_DIRECTORY);
     if (result != GS_OK)
     {
         identity_free(&identity);
@@ -337,7 +349,7 @@ int moonlight_backend_fetch_app_artwork(const char *host, uint16_t https_port, i
         return GS_OK;
 
     memset(&identity, 0, sizeof(identity));
-    result = identity_init(&identity, MOONLIGHT_IDENTITY_DIRECTORY);
+    result = session_identity_init(&identity, MOONLIGHT_IDENTITY_DIRECTORY);
     if (result != GS_OK)
     {
         identity_free(&identity);

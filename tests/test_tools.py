@@ -779,7 +779,7 @@ class ToolTests(unittest.TestCase):
         self.assertNotIn("int getaddrinfo(", curl)
         # Asked once per launch, on the worker, when nothing else waits; the
         # app's own param.json is read from where the app really is.
-        self.assertIn("if (first_start)\n                model.set_update_check(CheckForUpdate);", platform)
+        self.assertIn("if (first_start && !model.session_only())\n                model.set_update_check(CheckForUpdate);", platform)
         check = platform[platform.index("bool CheckForUpdate(") :]
         self.assertIn('std::string(storage::paths().app) + "/sce_sys/param.json"', check)
         self.assertNotIn("update_check_run_self", platform)

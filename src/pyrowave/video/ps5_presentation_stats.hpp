@@ -16,3 +16,6 @@ void ps5_launcher_output_policy(bool enabled);
 
 // Result of the actual RADV VRR request, rather than the selected UI mode.
 bool ps5_vrr_output_active();
+
+// Session-scoped policy supplied before the stream opens VideoOut.
+void ps5_stream_output_policy(unsigned mode);

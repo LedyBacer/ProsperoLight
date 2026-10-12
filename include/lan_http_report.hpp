@@ -14,6 +14,8 @@ extern "C"
 
     int prosperolight_logs_enabled(void);
     int prosperolight_logs_set_enabled(int enabled);
+    // In-memory developer override; never persists the logging preference.
+    void prosperolight_test_logs_override(int enabled);
     void prosperolight_log_append(const char *path, const char *message);
 
     // Detailed trace controlled by the single Diagnostic logs setting. The

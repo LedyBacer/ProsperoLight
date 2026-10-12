@@ -5,6 +5,11 @@
  */
 
 #include "launcher/launcher.hpp"
+#if PROSPEROLIGHT_TEST_LAB
+#include "test_lab_profile.hpp"
+#include "test_lab_lifecycle.hpp"
+#include "presentation_preferences.hpp"
+#endif
 #include "lan_http_report.hpp"
 #include "ui_sound_preferences.hpp"
 #if PROSPEROLIGHT_PYROWAVE
@@ -171,6 +176,47 @@ bool FillSelection(const Model &model, Selection *selection)
     selection->vsync_enabled = config.vsync_enabled;
     selection->decoder_pipeline = config.decoder_pipeline;
     selection->decoder_cores = config.decoder_cores;
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active())
+    {
+        moonlight_stream_options_t saved{};
+        saved.video_codec = selection->video_codec;
+        saved.chroma_sampling = selection->chroma_sampling;
+        saved.stream_resolution = selection->stream_resolution;
+        saved.stream_fps = selection->stream_fps;
+        saved.bitrate_kbps = selection->bitrate_kbps;
+        saved.hdr_enabled = selection->hdr_enabled;
+        saved.vsync_enabled = selection->vsync_enabled;
+        saved.decoder_pipeline = selection->decoder_pipeline;
+        saved.decoder_cores = selection->decoder_cores;
+        moonlight_stream_options_t resolved{};
+        std::string error;
+        if (!prosperolight::test_lab::resolve_profile(
+                prosperolight::test_lab::active_profile(), saved,
+                prosperolight::host_preferences(host, false), moonlight::presentation_mode(),
+                moonlight::vrr_profile(), resolved, error))
+        {
+            prosperolight::test_lab::context().fail(error.c_str());
+            prosperolight::test_lab::write_profile_status(
+                prosperolight::test_lab::active_profile().run_id, "failed", 2, nullptr, error);
+            prosperolight_debug_line("test-lab", "profile resolution failed: %s", error.c_str());
+            return false;
+        }
+        selection->video_codec = resolved.video_codec;
+        selection->chroma_sampling = resolved.chroma_sampling;
+        selection->stream_resolution = resolved.stream_resolution;
+        selection->stream_fps = resolved.stream_fps;
+        selection->bitrate_kbps = resolved.bitrate_kbps;
+        selection->hdr_enabled = resolved.hdr_enabled;
+        selection->vsync_enabled = resolved.vsync_enabled;
+        selection->decoder_pipeline = resolved.decoder_pipeline;
+        selection->decoder_cores = resolved.decoder_cores;
+        selection->session_overrides = resolved.session_overrides;
+        if (!prosperolight::test_lab::write_profile_status(
+                prosperolight::test_lab::active_profile().run_id, "launching", 2, &resolved))
+            return false;
+    }
+#endif
     return true;
 }
 
@@ -534,10 +580,13 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             audio::SoundBank &sounds = Sounds();
 
             Model model;
+#if PROSPEROLIGHT_TEST_LAB
+            model.set_session_only(prosperolight::test_lab::active());
+#endif
             model.set_artwork_decoder(DecodePoster);
             model.set_worker_start(PlaceWorker);
             // Once per launch of the app, not after every stream.
-            if (first_start)
+            if (first_start && !model.session_only())
                 model.set_update_check(CheckForUpdate);
             model.Initialize(static_cast<std::uint64_t>(sys::monotonic_us() / 1000));
             View view(model, fonts);
@@ -567,8 +616,16 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             bool forwarded_stream = false;
             if (first_start)
             {
-                forwarded.Begin(std::move(prosperolight::pending_forwarded_launch()),
-                                static_cast<std::uint64_t>(sys::monotonic_us() / 1000));
+                forwarded.Begin(
+                    std::move(prosperolight::pending_forwarded_launch()),
+                    static_cast<std::uint64_t>(sys::monotonic_us() / 1000)
+#if PROSPEROLIGHT_TEST_LAB
+                        ,
+                    prosperolight::test_lab::active()
+                        ? prosperolight::test_lab::active_profile().startup_seconds * 1000ull
+                        : 15000ull
+#endif
+                );
                 prosperolight::pending_forwarded_launch() = {};
                 if (forwarded.active())
                     view.begin_forwarded(forwarded.launch().app, forwarded.launch().pc);
@@ -589,6 +646,13 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
             for (;;)
             {
                 const std::int64_t now = sys::monotonic_us();
+#if PROSPEROLIGHT_TEST_LAB
+                if (model.session_only() && prosperolight::test_lab::context().stop_requested())
+                {
+                    outcome = Result::app_exit;
+                    break;
+                }
+#endif
                 // A frame that took long enough to be seen as a stutter.
                 if (frames > 1 && now - last_frame > 50000 && slow_frames < 60)
                 {
@@ -780,12 +844,35 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                     else if (step == ForwardedStart::Step::failed)
                     {
                         PL_LOG("[PL] launcher: forwarded launch failed: %s", reason.c_str());
+                        if (model.session_only())
+                        {
+#if PROSPEROLIGHT_TEST_LAB
+                            const auto &backend = model.backend();
+                            const bool not_paired =
+                                (model.backend_valid() && backend.online && !backend.paired) ||
+                                std::strstr(backend.error, "NOT_PAIRED") != nullptr;
+                            prosperolight::test_lab::context().fail(
+                                not_paired ? "NOT_PAIRED" : "FORWARDED_START_FAILED");
+                            prosperolight::test_lab::write_profile_status(
+                                prosperolight::test_lab::active_profile().run_id, "failed", 2,
+                                nullptr, not_paired ? "NOT_PAIRED" : "FORWARDED_START_FAILED");
+#endif
+                            outcome = Result::app_exit;
+                            break;
+                        }
                         view.end_forwarded();
                         model.ShowNotice(NoticeKind::error, i18n::tr("The stream was not started"),
                                          reason, 8.0f);
                     }
                 }
-                if (view.take_start_stream() && FillSelection(model, selection))
+                const bool start_requested = view.take_start_stream();
+                const bool selection_ready = start_requested && FillSelection(model, selection);
+                if (start_requested && model.session_only() && !selection_ready)
+                {
+                    outcome = Result::app_exit;
+                    break;
+                }
+                if (selection_ready)
                 {
                     selection->exit_after_stream =
                         forwarded_stream && forwarded.exit_after_stream();

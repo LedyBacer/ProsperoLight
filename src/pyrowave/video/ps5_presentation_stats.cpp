@@ -20,13 +20,22 @@ extern "C" int __real_sceVideoOutVrrUnpegFromFixedRate(int32_t);
 static std::atomic<bool> vrr_output{false};
 static std::atomic<int> video_handle{-1};
 static std::atomic<bool> launcher_output{false};
+static std::atomic<unsigned> stream_policy{0};
+static unsigned output_policy()
+{
+    return launcher_output.load() ? moonlight::presentation_mode() : stream_policy.load();
+}
+void ps5_stream_output_policy(unsigned mode)
+{
+    stream_policy.store(mode);
+}
 static void record_output_policy(int handle, const char *operation, int result)
 {
     prosperolight_debug_line(
         "videoout",
         "handle=%08x owner=%s mode=%u operation=%s rc=%08x variable=%d nominal_refresh_x100=%u",
-        unsigned(handle), launcher_output.load() ? "launcher" : "stream",
-        moonlight::presentation_mode(), operation, unsigned(result), vrr_output.load(),
+        unsigned(handle), launcher_output.load() ? "launcher" : "stream", output_policy(),
+        operation, unsigned(result), vrr_output.load(),
         handle >= 0 ? native_videoout_refresh_x100(handle) : 0);
     // Infrequent mode setup only: bypass buffered stdout so this receipt also
     // works on SDKs where reopening the process streams failed. Bounded file.
@@ -45,7 +54,7 @@ static void record_output_policy(int handle, const char *operation, int result)
             return;
     }
     fprintf(file, "handle=%08x mode=%u operation=%s rc=%08x vrr_api=%d\n", unsigned(handle),
-            moonlight::presentation_mode(), operation, unsigned(result), vrr_output.load());
+            output_policy(), operation, unsigned(result), vrr_output.load());
     fclose(file);
 }
 extern "C" int __real_sceVideoOutVrrPegToFixedRate(int32_t, uint64_t, uint64_t);
@@ -117,7 +126,7 @@ extern "C" int __wrap_sceVideoOutOpen(int32_t user, int32_t bus, int32_t index, 
         video_handle.store(handle);
         // Low-refresh RADV sessions do not enter the high-refresh preset
         // branch. They still need an explicit fixed-output request.
-        if (!launcher_output.load() && moonlight::presentation_mode() != 2)
+        if (!launcher_output.load() && output_policy() != 2)
             (void)__wrap_sceVideoOutVrrPegToFixedRate(handle, 0, 0);
         record_output_policy(handle, "open", 0);
         flips.store(0);
@@ -162,6 +171,12 @@ extern "C" int __wrap_sceVideoOutSubmitFlip(int32_t handle, int32_t buffer, uint
             errors.fetch_add(1);
     }
     return result;
+}
+#endif
+#ifndef __PROSPERO__
+void ps5_stream_output_policy(unsigned mode)
+{
+    (void)mode;
 }
 #endif
 void ps5_launcher_output_policy(bool enabled)

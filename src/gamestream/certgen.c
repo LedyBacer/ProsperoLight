@@ -165,7 +165,7 @@ static int parse_identity(client_identity_t *identity)
     return result;
 }
 
-int identity_init(client_identity_t *identity, const char *key_directory)
+static int identity_init_mode(client_identity_t *identity, const char *key_directory, int create)
 {
     static const char personalization[] = "moonlight-ps5";
     char certificate_path[256];
@@ -187,7 +187,7 @@ int identity_init(client_identity_t *identity, const char *key_directory)
         gs_error = "Could not initialize client RNG";
         return GS_FAILED;
     }
-    if (mkdir(key_directory, 0755) != 0 && errno != EEXIST)
+    if (create && mkdir(key_directory, 0755) != 0 && errno != EEXIST)
     {
         gs_error = "Could not create identity directory";
         return GS_IO_ERROR;
@@ -219,6 +219,11 @@ int identity_init(client_identity_t *identity, const char *key_directory)
     }
     if (!loaded)
     {
+        if (!create)
+        {
+            gs_error = "NOT_PAIRED: existing client identity is missing or invalid";
+            return GS_WRONG_STATE;
+        }
         LOGI("generating persistent RSA client identity in %s", key_directory);
         if (generate_identity(identity) != GS_OK)
             return GS_FAILED;
@@ -248,6 +253,15 @@ int identity_init(client_identity_t *identity, const char *key_directory)
     bytes_to_hex((const unsigned char *)identity->cert_pem, identity->cert_hex,
                  strlen(identity->cert_pem));
     return GS_OK;
+}
+
+int identity_init(client_identity_t *identity, const char *key_directory)
+{
+    return identity_init_mode(identity, key_directory, 1);
+}
+int identity_init_existing(client_identity_t *identity, const char *key_directory)
+{
+    return identity_init_mode(identity, key_directory, 0);
 }
 
 int identity_forget(const char *key_directory)

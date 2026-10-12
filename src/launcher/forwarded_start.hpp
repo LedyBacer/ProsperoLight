@@ -15,6 +15,7 @@
 #include "launcher/launcher_model.hpp"
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 namespace launcher
@@ -31,12 +32,13 @@ class ForwardedStart
         failed,  // *message says why; the launcher stays open
     };
 
-    void Begin(prosperolight::ForwardedLaunch launch, std::uint64_t now_ms)
+    void Begin(prosperolight::ForwardedLaunch launch, std::uint64_t now_ms,
+               std::uint64_t patience_ms = kPatienceMs)
     {
         launch_ = std::move(launch);
         active_ = launch_.requested();
         selected_ = false;
-        deadline_ms_ = now_ms + kPatienceMs;
+        deadline_ms_ = now_ms + patience_ms;
     }
 
     // Still on its way to a stream: the launcher keeps its screens out of sight.
@@ -74,6 +76,9 @@ class ForwardedStart
         }
         const moonlight_backend_snapshot_t &backend = model.backend();
         const std::string pc = PcName(model);
+        if (model.session_only() && model.backend_valid() &&
+            std::strstr(backend.error, "NOT_PAIRED") != nullptr)
+            return Fail(message, "NOT_PAIRED");
         if (model.backend_valid() && backend.online)
         {
             if (!backend.paired)

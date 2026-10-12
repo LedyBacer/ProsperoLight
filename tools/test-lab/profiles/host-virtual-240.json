@@ -1,0 +1,9 @@
+{
+  "scene": "low-motion",
+  "seed": 137,
+  "fps": 240,
+  "seconds": 10,
+  "warmup_seconds": 2,
+  "monitor": "virtual",
+  "require_hdr": false
+}

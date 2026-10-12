@@ -7,6 +7,7 @@
 #pragma once
 
 #include "moonlight_config.hpp"
+#include "moonlight_stream.hpp"
 
 #include <cstdint>
 #include <vector>
@@ -41,6 +42,7 @@ struct Selection
     float connecting_progress = 0.0f;
     // A forwarder started this stream and wants the app closed when it ends.
     bool exit_after_stream = false;
+    moonlight_session_overrides_t session_overrides{};
 };
 
 enum class Result

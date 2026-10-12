@@ -10,61 +10,73 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/* The launcher's connecting screen, for the stream to keep showing. */
-typedef struct moonlight_connecting_picture {
-    const uint8_t *rgba; /* 3840 x 2160 sRGB pixels, top row first */
-    float bar_x;         /* the progress bar, in pixels of the picture */
-    float bar_y;
-    float bar_width;
-    float bar_height;
-    uint8_t fill[3]; /* the colour of the bar's fill */
-    float progress;  /* where the launcher's bar stood, 0 to 1 */
-} moonlight_connecting_picture_t;
+    /* The launcher's connecting screen, for the stream to keep showing. */
+    typedef struct moonlight_connecting_picture
+    {
+        const uint8_t *rgba; /* 3840 x 2160 sRGB pixels, top row first */
+        float bar_x;         /* the progress bar, in pixels of the picture */
+        float bar_y;
+        float bar_width;
+        float bar_height;
+        uint8_t fill[3]; /* the colour of the bar's fill */
+        float progress;  /* where the launcher's bar stood, 0 to 1 */
+    } moonlight_connecting_picture_t;
 
-typedef struct moonlight_stream_options {
-    const char *host;
-    uint16_t host_port; /* Sunshine port of that PC; 0 selects the default */
-    const char *app_name;
-    int app_id;
-    uint32_t bitrate_kbps;
-    uint32_t synthetic_motion;
-    uint32_t display_area;
-    uint32_t video_codec;
-    uint32_t stream_resolution;
-    uint32_t stream_fps;
-    uint32_t hdr_enabled;
-    uint32_t chroma_sampling;
-    uint32_t audio_configuration;
-    uint32_t vsync_enabled;
-    uint32_t decoder_pipeline; /* MOONLIGHT_DECODER_PIPELINE_* */
-    uint32_t decoder_cores;    /* 3-5 physical cores for Videodec2 workers */
-    /* NULL shows a black screen until the first picture */
-    const moonlight_connecting_picture_t *connecting;
-} moonlight_stream_options_t;
+    /* Session-scoped values; enabled=0 preserves ordinary persistent fallbacks. */
+    typedef struct moonlight_session_overrides
+    {
+        uint32_t enabled, pacing, vrr_profile;
+        uint32_t extensions, host_vrr, display, scale, optimize, mute_host, quit_host;
+    } moonlight_session_overrides_t;
 
-typedef struct moonlight_stream_metrics {
-    int result;
-    uint32_t presented_frames;
-    uint32_t access_units;
-    uint32_t pending_frames;
-    uint32_t audio_packets;
-    uint32_t audio_overruns;
-    uint32_t controller_polls;
-    uint32_t controller_errors;
-    uint32_t hdr_active;
-    uint32_t hdr_transitions;
-    uint64_t callback_to_flip_average_us;
-    char error[192];
-} moonlight_stream_metrics_t;
+    typedef struct moonlight_stream_options
+    {
+        const char *host;
+        uint16_t host_port; /* Sunshine port of that PC; 0 selects the default */
+        const char *app_name;
+        int app_id;
+        uint32_t bitrate_kbps;
+        uint32_t synthetic_motion;
+        uint32_t display_area;
+        uint32_t video_codec;
+        uint32_t stream_resolution;
+        uint32_t stream_fps;
+        uint32_t hdr_enabled;
+        uint32_t chroma_sampling;
+        uint32_t audio_configuration;
+        uint32_t vsync_enabled;
+        uint32_t decoder_pipeline; /* MOONLIGHT_DECODER_PIPELINE_* */
+        uint32_t decoder_cores;    /* 3-5 physical cores for Videodec2 workers */
+        moonlight_session_overrides_t session_overrides;
+        /* NULL shows a black screen until the first picture */
+        const moonlight_connecting_picture_t *connecting;
+    } moonlight_stream_options_t;
 
-/* Resolve lazy decoder libraries before an elevation backend can change root. */
-void moonlight_native_decoder_warmup(int results[4]);
+    typedef struct moonlight_stream_metrics
+    {
+        int result;
+        uint32_t presented_frames;
+        uint32_t access_units;
+        uint32_t pending_frames;
+        uint32_t audio_packets;
+        uint32_t audio_overruns;
+        uint32_t controller_polls;
+        uint32_t controller_errors;
+        uint32_t hdr_active;
+        uint32_t hdr_transitions;
+        uint64_t callback_to_flip_average_us;
+        char error[192];
+    } moonlight_stream_metrics_t;
 
-int moonlight_stream_run(const moonlight_stream_options_t *options,
-                         moonlight_stream_metrics_t *metrics);
+    /* Resolve lazy decoder libraries before an elevation backend can change root. */
+    void moonlight_native_decoder_warmup(int results[4]);
+
+    int moonlight_stream_run(const moonlight_stream_options_t *options,
+                             moonlight_stream_metrics_t *metrics);
 
 #ifdef __cplusplus
 }

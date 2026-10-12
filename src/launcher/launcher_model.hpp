@@ -126,6 +126,8 @@ struct UpdateActions
 
 class Model
 {
+    bool session_only_ = false;
+
   public:
     Model() = default;
     Model(const Model &) = delete;
@@ -133,6 +135,14 @@ class Model
     ~Model();
 
     void Initialize(std::uint64_t now_ms);
+    void set_session_only(bool value)
+    {
+        session_only_ = value;
+    }
+    bool session_only() const
+    {
+        return session_only_;
+    }
     void Poll(std::uint64_t now_ms);
     // Finishes the request in flight and saves pending settings.
     void Shutdown();
