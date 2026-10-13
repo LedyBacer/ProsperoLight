@@ -203,3 +203,55 @@ updates. Confirmed unique output measured 59.878 FPS and traffic 15.073 Mbps;
 analysis recorded no issues and title exit was verified. Config/pairing hashes
 matched the pre-smoke snapshot. These are software timing observations, not
 HDMI/input-to-photon measurements.
+
+## Clean remote builds and observed environment
+
+`pltest build-variant` now builds a requested full source SHA in a fresh detached
+Linux SDK worktree, downloads its developer image and provenance, and prepares
+the deployment manifest. It never builds native PS5 code on the Mac coordinator.
+The explicit builder JSON has schema `prosperolight-linux-builder/1`, `ssh_host`,
+`identity_file`, `repository`, HTTPS `repository_url`, `workspace_root`,
+`dependencies`, `runtime_bin`, and `jobs` (1–4, use 2 on this builder). These paths
+are machine-local configuration; credentials do not belong in profiles or Git.
+
+```sh
+pltest build-variant --builder builder.json --source-sha "$FULL_SOURCE_SHA" \
+  --directory "$ROOT/B" --provenance "$ROOT/B-provenance.json" \
+  --profile smoke.json --manifest-root "$ROOT" --output "$ROOT/candidate.json"
+```
+
+The command was validated against source
+`8773a184082ead066da851859a0f2ad479bdd408` on the configured Linux builder.
+Its signed eboot SHA256 was
+`0096eb6ed8baa33c02f3f048ddb1bcb2b2584c83797130a0d74891e6b0aa7638`.
+This identifies that tested artifact; later source changes require another build.
+
+Environment evidence now uses the read-only PS5 `kernel_get_fw_version` probe,
+authenticated Vibepollo metadata, accepted RTSP settings, and capture selection
+from the current host log after a verified idle snapshot. Historical capture
+entries and rotated/replaced log prefixes cannot prove this run's output.
+Firmware is stored as its raw unsigned identifier, without an inferred human
+version. Both endpoints use Ethernet, confirmed by the operator on 2026-10-13;
+this is explicitly operator-supplied evidence rather than automatic link detection.
+Missing independent fields make the fingerprint incomplete; profile assertions
+cannot set `verified` or substitute for firmware, host version, or encoder data.
+
+Report publication compares JSON-normalized values: tuple-valued internal
+measurements cannot leave a committed terminal result stranded in a `.pending`
+file. Recovery reconstructs report files and updates their immutable manifest
+hashes from the committed journal. A/A calibration uses every pair's absolute
+latency delta, rather than letting opposite large errors cancel in the median.
+Progress diagnostics correlate overlapping input and completion gap intervals;
+an unrelated earlier input gap cannot explain a later client presentation stall.
+
+The first interleaved physical series yielded A1/B1/A2 PASS, then B2 stopped
+with `HOST_SESSION_LOST_DURING_MEASUREMENT` and `CLEANUP_FAILED`. The recovered
+PS5 receipt independently reported `COMPLETE`, functional PASS, and complete
+artifacts; a read-only probe confirmed TITLE_IDLE. Full 131-file readback
+matched B before releasing that exact run's lease, and config/pairing hashes
+remained unchanged. This exposed a terminal-delivery race rather than proven
+stream failure. The host monitor now accepts RTSP disappearance only after the
+complete duration measured from its start ACK; disappearance earlier still
+fails. Cleanup waits for the receipt when PS5 is already stopping with COMPLETE,
+instead of sending an unnecessary cancellation. That first series stays
+INCONCLUSIVE; its failed result is not relabelled as acceptance.

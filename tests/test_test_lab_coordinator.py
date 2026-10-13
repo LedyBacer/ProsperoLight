@@ -119,6 +119,31 @@ class CoordinatorTests(unittest.TestCase):
             guard.ensure_idle.assert_not_called()
         asyncio.run(exercise())
 
+    def test_session_exit_after_measurement_window_does_not_race_report_delivery(self):
+        import asyncio
+        import time
+        from unittest.mock import AsyncMock
+        from pltest.coordinator.adapters import RealHostCoordinatorAdapter
+        async def exercise(early):
+            guard = AsyncMock(); guard.capture_since.return_value = {'verified': True}
+            guard.sample_session.side_effect = [{'session': {'uuid': 'session'}}, None]
+            adapter = RealHostCoordinatorAdapter('http://127.0.0.1:1', 't'*48, guard)
+            adapter.run_id = 'run'; adapter.log_snapshot = {}
+            adapter.start_ack_monotonic = time.monotonic() if early else time.monotonic()-50
+            async def delayed_report(*args, **kwargs):
+                await asyncio.sleep(.01)
+                return {'run_id': 'run'}
+            adapter.worker = AsyncMock(); adapter.worker.wait_report.side_effect = delayed_report
+            with patch('pltest.coordinator.adapters.asyncio.wait', new=AsyncMock()):
+                if early:
+                    with self.assertRaisesRegex(RuntimeError, 'HOST_SESSION_LOST_DURING_MEASUREMENT'):
+                        await adapter.measure({'timing': {'warmup_seconds':10,'measure_seconds':30}}, asyncio.Event())
+                else:
+                    result = await adapter.measure({'timing': {'warmup_seconds':10,'measure_seconds':30}}, asyncio.Event())
+                    self.assertGreaterEqual(result['terminal_session_absence']['elapsed_since_start_ack_seconds'], 40)
+                    self.assertEqual(len(result['session_samples']), 1)
+        asyncio.run(exercise(True)); asyncio.run(exercise(False))
+
     def test_paired_refresh_never_falls_back_after_transport_failure(self):
         import subprocess
         from pathlib import Path
@@ -199,6 +224,23 @@ int main(void) {
             guard.request.return_value = {'sessions': [{}]}
             with self.assertRaisesRegex(ValueError, 'HOST_SESSION_IDENTITY_UNVERIFIED'):
                 await guard.sample_session()
+        asyncio.run(exercise())
+
+    def test_capture_log_delta_excludes_previous_sessions_and_rotation(self):
+        import asyncio
+        import hashlib
+        from unittest.mock import AsyncMock
+        from pltest.host.session_guard import SessionGuard
+        async def exercise():
+            guard=SessionGuard('https://localhost:47990','t'*48)
+            before=b"Capture worker selecting source=0 output='OLD'.\n"
+            snapshot={'bytes':len(before),'sha256':hashlib.sha256(before).hexdigest()}
+            guard.log_bytes=AsyncMock(return_value=before+b"Capture worker selecting source=0 output='DISPLAY15'.\nCapture size : 1920x1080\nCreating encoder [hevc_nvenc]\n")
+            evidence=await guard.capture_since(snapshot)
+            self.assertTrue(evidence['verified']);self.assertEqual(evidence['output'],'DISPLAY15')
+            self.assertEqual(evidence['encoders'],['hevc_nvenc'])
+            guard.log_bytes.return_value=b'rotated'
+            self.assertFalse((await guard.capture_since(snapshot))['verified'])
         asyncio.run(exercise())
 
     def test_failed_worker_connect_leaves_no_cleanup_command(self):
@@ -330,6 +372,22 @@ int main(void) {
             self.assertEqual(manifest['files']['report.json']['sha256'], hashlib.sha256(path.read_bytes()).hexdigest())
             hidden = store.report_artifact(run['run_id'], good)
             self.assertIsNone(store.artifact_path(run['run_id'], hidden.name))
+
+    def test_report_publication_accepts_json_native_capture_dimensions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RunStore(directory); run = store.create('fake-smoke', profile())
+            for stage in ('PREFLIGHT', 'PREPARE_STIMULUS', 'START_PS5', 'WAIT_STREAM_READY',
+                          'WARMUP', 'MEASURE', 'COOLDOWN', 'STOP_STREAM', 'COLLECT', 'ANALYZE'):
+                store.transition(run['run_id'], stage, stage, 'stage_started')
+            report = {'verdict': 'PASS', 'capture_sizes': [(1920, 1080)]}
+            pending = store.report_artifact(run['run_id'], report)
+            final = store.finish(run['run_id'], 'COMPLETED', 'COMPLETED', 'completed',
+                                 verdict='PASS', report=report)
+            self.assertEqual(final['report'], json.loads(json.dumps(report, allow_nan=False)))
+            store.publish_report(run['run_id'], pending)
+            path = store.artifact_path(run['run_id'], 'report.json')
+            self.assertEqual(json.loads(path.read_text())['capture_sizes'], [[1920, 1080]])
+            self.assertFalse(pending.exists())
 
     def test_real_launch_strips_coordinator_only_profile_fields(self):
         import asyncio

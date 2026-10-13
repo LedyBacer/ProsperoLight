@@ -55,6 +55,14 @@ def parse_trace(data):
 
 
 def analyze_run(profile, report, directory):
+    result = _analyze_run(profile, report, directory)
+    if not result['simulated']:
+        from .environment import environment
+        result['environment'] = environment(profile, report, result)
+    return result
+
+
+def _analyze_run(profile, report, directory):
     """Classifications remain separate. Missing evidence cannot become performance PASS."""
     host = report.get('host_measurement') or {}
     ps5 = report.get('ps5_measurement') or {}
@@ -73,6 +81,11 @@ def analyze_run(profile, report, directory):
         issues.append('SIMULATED_ADAPTERS')
         return result
     if host.get('measurement_validity') != 'VALID': issues.append('HOST_MEASUREMENT_INVALID')
+    capture = host.get('capture_evidence') or {}
+    if capture.get('verified') is not True:
+        issues.append('HOST_CAPTURE_OUTPUT_UNVERIFIED')
+    elif capture.get('output') != (host.get('selected_display') or {}).get('id'):
+        issues.append('HOST_CAPTURE_DISPLAY_MISMATCH')
     if report.get('host_session_preflight',{}).get('verified') is False:
         issues.append('HOST_SESSION_EXCLUSIVITY_UNVERIFIED')
     if not ps5.get('title_exit_verified') or ps5.get('stale_artifacts'): issues.append('INCOMPLETE_OR_STALE_PS5')

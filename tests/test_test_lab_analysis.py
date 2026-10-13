@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run_fixture(fps=60, age=3000, ready=1500, variant='a'):
-    return {'run_id': str(uuid.uuid4()), 'profile': {'profile': {
+    value = {'run_id': str(uuid.uuid4()), 'profile': {'profile': {
         'source_sha': variant*40, 'build_label': 'test-lab-fixture-' + variant,
         'client': {'codec': 'hevc', 'fps': 60},
         'analysis_environment': dict(verified=True, firmware='x', host_version='v1',
@@ -31,9 +31,32 @@ def run_fixture(fps=60, age=3000, ready=1500, variant='a'):
             'scene':'low-motion','seed':137,'content_sha256':'a'*64,'pixel_sample_sha256':'b'*64},
             'analysis': {'functional_verdict':'PASS','measurement_validity':'VALID','trace':{'omitted':0},
                 'metrics':{'unique_presented_fps':fps,'frame_age_us':{'p95':age},'callback_to_ready_us':{'p95':ready}}}}}
+    value['report']['analysis']['environment'] = copy.deepcopy(value['profile']['profile']['analysis_environment'])
+    value['report']['analysis']['session_settings'] = {'codec':{'value':'hevc','verified':True}}
+    return value
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_environment_uses_observed_sources_and_explicit_topology(self):
+        from pltest.environment import environment
+        profile={'analysis_environment':{'verified':True,'firmware':'fabricated',
+            'host_version':'fabricated','network_class':'ethernet','network_source':'operator-confirmed'}}
+        report={'ps5_preflight':{'firmware_verified':True,'firmware_source':'kernel_get_fw_version','firmware_u32':123},
+            'host_session_preflight':{'advertised':{'verified':True,'version':'2','commit':'a'*40}},
+            'ps5_measurement':{'build_variant':{'build_flags':{'TEST_LAB':1,'PERFORMANCE_DETAIL':1}}},
+            'host_measurement':{'capture_evidence':{'verified':True,'encoders':['hevc_nvenc']}}}
+        analysis={'session_settings':{key:dict(verified=True,value=value) for key,value in
+            dict(codec='hevc',hdr=False,chroma='420',host_encoder_bitrate_kbps=15000,host_requested_bitrate_kbps=20000).items()}}
+        actual=environment(profile,report,analysis)
+        self.assertTrue(actual['verified'])
+        self.assertEqual(actual['firmware'],'0x7b')
+        self.assertEqual(actual['host_version'],'2@'+'a'*40)
+        self.assertFalse(environment(profile,{},analysis)['verified'])
+        noisy = [(run_fixture(), run_fixture(age=value)) for value in (1000,3000,5000)]
+        self.assertFalse(compare_pairs(noisy, calibration=True)['screening_usable'])
+        pairs=self.pairs();pairs[0][1]['report']['analysis']['session_settings']['codec']['value']='h264'
+        self.assertEqual(compare_pairs(pairs)['reason_code'],'ENVIRONMENT_MISMATCH')
+
     def test_pyrowave_effective_output_fallback_and_unavailable(self):
         from pltest.session_evidence import backend_effective_settings
         client = dict(fps=120, hdr=True, vsync=False, pacing='vrr')
@@ -60,6 +83,9 @@ class AnalysisTests(unittest.TestCase):
         recovered = complete + list(range(3500000, 5000000, 100000))
         self.assertEqual(progress_diagnostics(0, 5000000, incoming, recovered, 'noise')['completed']['stall_count'], 1)
         self.assertEqual(progress_diagnostics(0, 5000000, incoming, incoming, 'noise')['classification'], 'CONTINUOUS')
+        early_starvation = list(range(1500000, 5000000, 100000))
+        self.assertEqual(progress_diagnostics(0, 5000000, early_starvation, complete, 'noise')['classification'],
+                         'CLIENT_PRESENTATION_STALL')
 
     def test_phase_ack_bounds_and_transition_exclusion(self):
         from pltest.phases import start_alignment
@@ -139,6 +165,8 @@ class AnalysisTests(unittest.TestCase):
         self.assertFalse(compare_pairs(pairs,calibration=True)['screening_usable'])
         self.assertEqual(compare_pairs(self.pairs(),screening={'fps_drop_fraction':float('nan')})['reason_code'],
                          'SCREENING_CONFIGURATION_INVALID')
+        noisy = [(run_fixture(), run_fixture(age=value)) for value in (1000,3000,5000)]
+        self.assertFalse(compare_pairs(noisy, calibration=True)['screening_usable'])
         pairs=self.pairs();pairs[0][1]['report']['ps5_measurement']['installed']['eboot_sha256']='c'*64
         self.assertEqual(compare_pairs(pairs)['reason_code'],'BUILD_IDENTITY_UNVERIFIED')
 
@@ -149,7 +177,9 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(compare_pairs(self.pairs(60,3300))['performance_delta'],'NO_CLEAR_CHANGE')
 
     def test_missing_environment_mismatched_scene_and_invalid_measurement(self):
-        pairs=self.pairs();pairs[0][1]['profile']['profile']['analysis_environment'].pop('firmware')
+        noisy = [(run_fixture(), run_fixture(age=value)) for value in (1000,3000,5000)]
+        self.assertFalse(compare_pairs(noisy, calibration=True)['screening_usable'])
+        pairs=self.pairs();pairs[0][1]['report']['analysis']['environment'].pop('firmware')
         self.assertEqual(compare_pairs(pairs)['reason_code'],'FINGERPRINT_INCOMPLETE')
         pairs=self.pairs();pairs[1][1]['report']['host_measurement']['seed']=138
         self.assertEqual(compare_pairs(pairs)['reason_code'],'ENVIRONMENT_MISMATCH')
@@ -180,7 +210,9 @@ class AnalysisTests(unittest.TestCase):
         performance.update(vsync_active=1, output_width=3840, output_height=2160, refresh_x100=12000)
         profile = {'client': {'codec':'hevc','chroma':'420','hdr':False,'resolution':'2160p',
             'fps':120,'bitrate_mbps':80,'decoder_pipeline':'adaptive','decoder_cores':3,'vsync':True}}
-        report = {'execution_mode':'real','verdict':'PASS','host_measurement':{'measurement_validity':'VALID','session_samples':[{'source':'Vibepollo /api/rtsp/sessions','verified':True,'session':dict(width=3840,height=2160,fps=120,video_format=1,hdr=False,yuv444=False,encoder_bitrate_kbps=80000,requested_bitrate_kbps=80000)}]},
+        report = {'execution_mode':'real','verdict':'PASS','host_measurement':{'measurement_validity':'VALID',
+            'selected_display':{'id':'virtual'},'capture_evidence':{'verified':True,'output':'virtual'},
+            'session_samples':[{'source':'Vibepollo /api/rtsp/sessions','verified':True,'session':dict(width=3840,height=2160,fps=120,video_format=1,hdr=False,yuv444=False,encoder_bitrate_kbps=80000,requested_bitrate_kbps=80000)}]},
             'ps5_measurement':{'title_exit_verified':True,'stale_artifacts':[], 'receipt':{
                 'functional_verdict':'PASS','negotiated':{'source':'Limelight.renderer.setup.success','verified':True,'video_format':256,'width':3840,'height':2160,'fps':120},'artifacts_complete':True,
                 'measure_start_monotonic_us':1000000,'measure_end_monotonic_us':1030000,

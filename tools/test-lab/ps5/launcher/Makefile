@@ -14,6 +14,6 @@ endif
 all: test-launcher-route$(PR0_ROUTE).elf
 	cp $< test-launcher.elf
 test-launcher-route$(PR0_ROUTE).elf: main.c protocol.h loopback.h Makefile
-	$(CC) -DPR0_ROUTE=$(PR0_ROUTE) -Wall -Wextra -Werror -O2 -o $@ main.c -lSceSystemService -lSceUserService
+	$(CC) -DPR0_ROUTE=$(PR0_ROUTE) -DPLTEST_KERNEL_FW=1 -Wall -Wextra -Werror -O2 -o $@ main.c -lSceSystemService -lSceUserService
 clean:
 	rm -f test-launcher.elf test-launcher-route*.elf

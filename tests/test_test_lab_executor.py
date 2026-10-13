@@ -43,6 +43,22 @@ class FakeFtp:
 
 
 class ExecutorTests(unittest.TestCase):
+    def test_explicit_remote_builder_configuration_and_source_guard(self):
+        from pltest.remote_builder import validate_config, build
+        value = dict(schema='prosperolight-linux-builder/1', ssh_host='root@builder',
+            repository_url='https://example.com/ProsperoLight.git',
+            repository='/repo',workspace_root='/work',dependencies='/sdk/deps',runtime_bin='/sdk/bin',jobs=2)
+        self.assertEqual(validate_config(value)['jobs'],2)
+        for invalid in (dict(value,ssh_host='-oProxyCommand=bad'),dict(value,jobs=8),
+                        dict(value,workspace_root='/tmp/../production'),dict(value,repository='/repo;id'),
+                        dict(value,password='unsupported')):
+            with self.assertRaises(ValueError): validate_config(invalid)
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(ValueError,'BUILD_SOURCE_SHA_REQUIRED'):
+                build(value,'main',Path(folder)/'app',Path(folder)/'provenance.json')
+            with self.assertRaisesRegex(ValueError,'BUILD_OUTPUT_ALREADY_EXISTS'):
+                build(value,'a'*40,Path(folder),Path(folder)/'provenance.json')
+
     def test_variant_manifest_hash_provenance_and_path_guards(self):
         from pltest.build import validate_variant, load_variant
         with tempfile.TemporaryDirectory() as folder:

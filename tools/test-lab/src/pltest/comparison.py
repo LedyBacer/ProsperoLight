@@ -13,7 +13,7 @@ REQUIRED_ENVIRONMENT = ('firmware', 'host_version', 'encoder_settings', 'network
 
 
 def fingerprint(profile, report):
-    environment = profile.get('analysis_environment', {})
+    environment = (report.get('analysis') or {}).get('environment') or {}
     host = report.get('host_measurement') or {}
     display = host.get('selected_display') or {}
     client = {k: v for k, v in profile.get('client', {}).items() if k not in ('host', 'app')}
@@ -22,11 +22,15 @@ def fingerprint(profile, report):
     missing += ['display.' + k for k in required_display if display.get(k) is None]
     for key in ('content_sha256', 'pixel_sample_sha256', 'seed', 'scene'):
         if host.get(key) is None: missing.append('stimulus.' + key)
+    effective = (report.get('analysis') or {}).get('session_settings') or {}
+    if not effective or any(field.get('verified') is not True for field in effective.values()):
+        missing.append('effective_settings')
     if environment.get('verified') is not True: missing.append('environment.verified')
     value = {'environment': {k: environment.get(k) for k in REQUIRED_ENVIRONMENT},
              'stream': client, 'display': {k: display.get(k) for k in required_display},
              'stimulus': {k: host.get(k) for k in ('content_sha256', 'pixel_sample_sha256', 'seed', 'scene')},
              'workload': profile.get('host_stimulus', {}),
+             'effective':{key:field.get('value') for key,field in effective.items()},
              'timing': {k: profile.get('timing', {}).get(k) for k in ('warmup_seconds', 'measure_seconds')},
              'detail': (report.get('analysis') or {}).get('trace', {}).get('omitted')}
     return {'value': value, 'missing': missing,
@@ -125,14 +129,14 @@ def _compare_pairs(pairs, calibration=False, screening=None):
         vals = [p['metrics'][key] for p in result['pairs']]
         fractions = [v['fraction'] for v in vals]; deltas = [v['delta'] for v in vals]
         summaries[key] = {'median_fraction': statistics.median(fractions), 'median_delta': statistics.median(deltas),
-                          'ordered_fractions': fractions, 'range_fraction': [min(fractions), max(fractions)],
+                          'ordered_fractions': fractions, 'ordered_deltas': deltas, 'range_fraction': [min(fractions), max(fractions)],
                           'baseline_first_to_last': vals[-1]['baseline']-vals[0]['baseline'],
                           'candidate_first_to_last': vals[-1]['candidate']-vals[0]['candidate']}
     fps = summaries['unique_presented_fps']['median_fraction']
     if calibration:
         noise = {key: max(abs(value) for value in metric['ordered_fractions']) for key,metric in summaries.items()}
         usable = noise['unique_presented_fps'] <= screening['fps_drop_fraction'] and all(
-            noise[key] <= screening['latency_increase_fraction'] or abs(summaries[key]['median_delta']) <= screening['latency_increase_us']
+            noise[key] <= screening['latency_increase_fraction'] or max(abs(value) for value in summaries[key]['ordered_deltas']) <= screening['latency_increase_us']
             for key in latency_keys)
         result.update(verdict='PASS' if usable else 'INCONCLUSIVE', functional_verdict='PASS',
             measurement_validity='VALID', performance_delta='CALIBRATION', reason_code='AA_NOISE_CALIBRATION',

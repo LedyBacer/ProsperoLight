@@ -115,7 +115,7 @@ class RealPs5CoordinatorAdapter:
             except BaseException:
                 await self._release_if_safe(profile)
                 raise
-            return
+            return self._run(profile)['state']['preflight']
         current = self._run(profile)
         if cancel.is_set():
             raise asyncio.CancelledError
@@ -292,8 +292,12 @@ class RealPs5CoordinatorAdapter:
         if current['started'] and not current['safe']:
             try:
                 if not await _blocking(self._has_receipt, profile['run_id']):
-                    await _blocking(self._command, profile['run_id'], 'cancel', 5)
-                    await _blocking(self._wait_receipt, current, 15)
+                    status = await _blocking(self._read_status, profile['run_id'])
+                    if status.get('state') == 'stopping' and status.get('reason') == 'COMPLETE':
+                        await _blocking(self._wait_receipt, current, 15)
+                    else:
+                        await _blocking(self._command, profile['run_id'], 'cancel', 5)
+                        await _blocking(self._wait_receipt, current, 15)
                 current['safe'] = bool(await _blocking(self._verify_exit, current))
                 if current['safe'] and not (current['directory'] / 'artifacts').exists():
                     # Preserve terminal failure/cancel evidence before releasing ownership.
@@ -364,7 +368,12 @@ class RealHostCoordinatorAdapter:
             raise RuntimeError('HOST_WORKER_BUSY')
         if cancel.is_set(): raise asyncio.CancelledError
         if self.session_guard:
-            return await self.session_guard.ensure_idle(cancel)
+            inventory = await self.session_guard.ensure_idle(cancel)
+            inventory['advertised'] = await self.session_guard.metadata()
+            data = await self.session_guard.log_bytes()
+            self.log_snapshot = {'bytes':len(data), 'sha256':hashlib.sha256(data).hexdigest()}
+            inventory['log_snapshot'] = self.log_snapshot
+            return inventory
         return {'verified':False,'reason':'HOST_SESSION_API_NOT_CONFIGURED'}
 
     async def prepare(self, profile, cancel):
@@ -400,6 +409,7 @@ class RealHostCoordinatorAdapter:
         response = await self.worker.command(self.run_id, 'start')
         if response.get('state') != 'RUNNING':
             raise RuntimeError('HOST_START_NOT_ACKNOWLEDGED')
+        self.start_ack_monotonic = time.monotonic()
         return response
 
     async def measure(self, profile, cancel):
@@ -407,6 +417,7 @@ class RealHostCoordinatorAdapter:
             raise asyncio.CancelledError
         timing = profile.get('timing', {})
         samples = []
+        capture = await self.session_guard.capture_since(self.log_snapshot) if self.session_guard else None
         pending = asyncio.create_task(self.worker.wait_report(self.run_id,
             timeout=timing.get('warmup_seconds', 0) + timing.get('measure_seconds', 30) + 90))
         try:
@@ -419,14 +430,24 @@ class RealHostCoordinatorAdapter:
                         raise RuntimeError('HOST_SESSION_IDENTITY_CHANGED')
                     samples.append(sample)
                 elif samples:
-                    raise RuntimeError('HOST_SESSION_LOST_DURING_MEASUREMENT')
+                    duration = timing.get('warmup_seconds', 0) + timing.get('measure_seconds', 30)
+                    elapsed = time.monotonic() - getattr(self, 'start_ack_monotonic', time.monotonic())
+                    if elapsed < duration:
+                        raise RuntimeError('HOST_SESSION_LOST_DURING_MEASUREMENT')
+                    # A terminal PS5 exit may precede browser report delivery.
+                    # Absence before the complete ACK-bounded window still fails.
+                    self.terminal_session_absence = {'elapsed_since_start_ack_seconds': elapsed,
+                        'source': 'authenticated RTSP inventory after complete start-ACK-bounded window'}
+                    break
                 await asyncio.wait({pending}, timeout=1)
             self.report = await pending
         finally:
             if not pending.done():
                 pending.cancel()
                 await asyncio.gather(pending, return_exceptions=True)
+        self.report['terminal_session_absence'] = getattr(self, 'terminal_session_absence', None)
         self.report['session_samples'] = samples
+        self.report['capture_evidence'] = capture
         if self.report.get('run_id') != self.run_id:
             raise ValueError('host report identity mismatch')
         return self.report

@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#if PLTEST_KERNEL_FW
+#include <ps5/kernel.h>
+#endif
 #ifndef ROOT
 #define ROOT "/data/prosperolight/test-lab/pr0"
 #endif
@@ -131,13 +134,20 @@ static int receipt(const char *id, const char *state, int rc, int user)
     FILE *f = fopen(tmp, "wx");
     if (!f)
         return 1;
+    uint32_t firmware = 0;
+#if PLTEST_KERNEL_FW
+    firmware = kernel_get_fw_version();
+#endif
     int ok =
         fprintf(
             f,
             "{\"schema\":\"prosperolight-launch-spike/1\",\"request_id\":\"%s\","
             "\"state\":\"%s\",\"launch_rc\":%d,\"user\":%d,"
-            "\"route\":%d,\"argv_verified\":false,\"target_pid\":%d,\"kernel_argv_observed\":%s}\n",
-            id, state, rc, user, PR0_ROUTE, g_target_pid, g_argv_observed ? "true" : "false") > 0;
+            "\"route\":%d,\"argv_verified\":false,\"target_pid\":%d,\"kernel_argv_observed\":%s,"
+            "\"firmware_u32\":%u,\"firmware_verified\":%s,\"firmware_source\":\"kernel_get_fw_"
+            "version\"}\n",
+            id, state, rc, user, PR0_ROUTE, g_target_pid, g_argv_observed ? "true" : "false",
+            firmware, firmware ? "true" : "false") > 0;
     if (fclose(f))
         ok = 0;
     if (!ok || rename(tmp, path))

@@ -2,6 +2,7 @@
 # Copyright (C) 2026 BlackBearReloaded
 # SPDX-License-Identifier: GPL-3.0-or-later
 import asyncio
+import hashlib
 import re
 import ssl
 import time
@@ -80,6 +81,42 @@ class SessionGuard:
                 'session': {key: sessions[0].get(key) for key in fields},
                 'latency_semantics': 'host processing start to packetization observation; not isolated GPU encode time',
                 'gpu_semantics': 'capture display adapter model; not verified encode adapter identity'}
+
+    async def metadata(self):
+        value = await self.request('GET', '/api/metadata')
+        return {'source':'Vibepollo /api/metadata', 'verified':True,
+                'version':value.get('version'), 'commit':value.get('commit'),
+                'encoder_status':value.get('encoder_status'),
+                'semantics':'advertised readiness; not selected encoder or effective session configuration'}
+
+    async def log_bytes(self):
+        from aiohttp import ClientSession, ClientTimeout
+        data = bytearray()
+        async with ClientSession(timeout=ClientTimeout(total=10)) as session:
+            async with session.get(self.url+'/api/logs', ssl=self.ssl,
+                    headers={'Authorization':'Bearer '+self.token}, allow_redirects=False) as response:
+                if response.status != 200: raise RuntimeError('HOST_LOG_API_UNAVAILABLE')
+                async for chunk in response.content.iter_chunked(65536):
+                    data.extend(chunk)
+                    if len(data) > 16*1024*1024: raise ValueError('HOST_LOG_SIZE_LIMIT')
+        return bytes(data)
+
+    async def capture_since(self, snapshot):
+        data = await self.log_bytes()
+        begin = snapshot['bytes']
+        if len(data) < begin or hashlib.sha256(data[:begin]).hexdigest() != snapshot['sha256']:
+            return {'verified':False, 'reason':'HOST_LOG_ROTATED_OR_REPLACED'}
+        text = data[begin:].decode('utf-8', errors='replace')
+        outputs = re.findall(r"Capture worker selecting source=(\d+) output='([^'\r\n]+)'", text)
+        sizes = re.findall(r'Capture size\s*:\s*(\d+)x(\d+)',text)
+        encoders = re.findall(r'Creating encoder \[([A-Za-z0-9_-]+)\]',text)
+        return {'verified': bool(outputs) and len(set(outputs)) == 1,
+                'source':'Vibepollo authenticated current-session log after idle snapshot',
+                'output':outputs[-1][1] if outputs else None,
+                'capture_source':int(outputs[-1][0]) if outputs else None,
+                'capture_sizes': [list(size) for size in sorted(set((int(w),int(h)) for w,h in sizes))],
+                'encoders':sorted(set(encoders)), 'selection_events':len(outputs),
+                'reason':None if outputs and len(set(outputs)) == 1 else 'HOST_CAPTURE_OUTPUT_UNVERIFIED'}
 
     async def ensure_idle(self, cancel):
         active, count = await self.inventory()

@@ -217,7 +217,7 @@ class Scheduler:
                     if remaining <= 0: raise TimeoutError('RUN_DEADLINE_EXCEEDED')
                     async def perform():
                         if stage == 'PREFLIGHT':
-                            await self.ps5.stage(stage, profile, cancel)
+                            report['ps5_preflight'] = await self.ps5.stage(stage, profile, cancel)
                             if self.execution_mode == 'real':
                                 report['host_session_preflight'] = await self.host.preflight(profile, cancel)
                         elif stage == 'PREPARE_STIMULUS':
@@ -289,7 +289,7 @@ class Scheduler:
             final = self.store.finish(run_id, terminal_state, final_stage,
                                       'completed' if terminal_state == 'COMPLETED' else 'analysis_inconclusive',
                                       verdict=terminal_verdict, reason_code=report.get('reason_code'), report=report)
-            if final and final['state'] == terminal_state and final['report'] == report:
+            if final and final['state'] == terminal_state and final['report'] == json.loads(json.dumps(report, allow_nan=False)):
                 self.store.publish_report(run_id, pending)
         except asyncio.CancelledError:
             lease_lost = run_id in self.lost_leases
@@ -311,7 +311,7 @@ class Scheduler:
                 state = 'CANCELLED' if terminal == 'CANCELLED' else 'INCONCLUSIVE'
                 final = self.store.finish(run_id, state, 'STOP_STREAM', 'cancelled' if state == 'CANCELLED' else 'cleanup_failed',
                                           verdict=terminal, reason_code=report['reason_code'], report=report)
-                if final and final['state'] == state and final['report'] == report:
+                if final and final['state'] == state and final['report'] == json.loads(json.dumps(report, allow_nan=False)):
                     self.store.publish_report(run_id, pending)
         except Exception as exc:
             current = self.store.get(run_id)
@@ -339,7 +339,7 @@ class Scheduler:
                 terminal = 'FAILED' if report['verdict'] == 'FAIL' else 'INCONCLUSIVE'
                 final = self.store.finish(run_id, terminal, stage, 'stage_failed', verdict=report['verdict'],
                                           reason_code=report['reason_code'], reason=report.get('reason', '')[:512], report=report)
-                if final and final['state'] == terminal and final['report'] == report:
+                if final and final['state'] == terminal and final['report'] == json.loads(json.dumps(report, allow_nan=False)):
                     self.store.publish_report(run_id, pending)
         finally:
             self.store.release(run_id)

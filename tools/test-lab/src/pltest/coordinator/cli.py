@@ -180,6 +180,29 @@ def prepare_variant(directory: Path = typer.Option(..., exists=True, file_okay=F
 
 
 @app.command()
+def build_variant(builder: Path = typer.Option(..., exists=True, dir_okay=False),
+                  source_sha: str = typer.Option(...),
+                  directory: Path = typer.Option(...), provenance: Path = typer.Option(...),
+                  profile: Path = typer.Option(..., exists=True, dir_okay=False),
+                  manifest_root: Path = typer.Option(..., exists=True, file_okay=False),
+                  output: Path = typer.Option(...)):
+    """Build a clean source commit using an explicitly configured Linux SDK host."""
+    from ..remote_builder import build
+    import subprocess
+    try:
+        root = manifest_root.resolve()
+        if any(root not in path.resolve().parents for path in (directory,provenance,output)):
+            raise ValueError('BUILD_OUTPUT_OUTSIDE_MANIFEST_ROOT')
+        if output.exists() or builder.stat().st_size > 16384:
+            raise ValueError('BUILD_CONFIGURATION_OR_OUTPUT_INVALID')
+        build(json.loads(builder.read_bytes()),source_sha,directory,provenance)
+    except (OSError,ValueError,KeyError,TypeError,RuntimeError,subprocess.SubprocessError) as exc:
+        emit({'verdict':'INCONCLUSIVE','reason_code':'BUILD_FAILED','reason':str(exc)[:256]})
+        raise typer.Exit(3)
+    prepare_variant(directory,provenance,profile,manifest_root,output)
+
+
+@app.command()
 def paired(baseline: Path = typer.Option(..., exists=True, readable=True),
            candidate: Path = typer.Option(..., exists=True, readable=True),
            repetitions: int = typer.Option(3, min=3, max=20), suite: str = 'decoder-smoke',

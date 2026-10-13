@@ -19,7 +19,8 @@ def progress_diagnostics(begin, end, received, completed, scene, stall_us=100000
     if output['stall_count']:
         if scene in ('static-keepalive', 'static'):
             classification = 'STATIC_CONTENT_OR_STALL_UNRESOLVED'
-        elif incoming['stall_count']:
+        elif all(any(max(start, a) < min(stop, b) for a,b in incoming['stalls'])
+                 for start,stop in output['stalls']):
             classification = 'INPUT_STARVATION_OR_HOST_REDUCED_CAPTURE'
         else:
             classification = 'CLIENT_PRESENTATION_STALL'
