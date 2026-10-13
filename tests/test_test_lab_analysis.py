@@ -63,6 +63,10 @@ class AnalysisTests(unittest.TestCase):
         receipt = {'backend_output': dict(source='PyroWave.backend.initialize.success', verified=True,
             width=3840,height=2160,refresh_x100=12000,pacing=2,vsync=True,hdr=True)}
         self.assertEqual(backend_effective_settings(receipt,client)[1], [])
+        receipt['backend_output']['refresh_x100'] = 11988
+        self.assertEqual(backend_effective_settings(receipt,client)[1], [])
+        receipt['backend_output']['refresh_x100'] = 11900
+        self.assertIn('OUTPUT_MODE_FALLBACK',backend_effective_settings(receipt,client)[1])
         receipt['backend_output']['refresh_x100'] = 6000
         self.assertIn('OUTPUT_MODE_FALLBACK',backend_effective_settings(receipt,client)[1])
         receipt['backend_output']['hdr'] = False

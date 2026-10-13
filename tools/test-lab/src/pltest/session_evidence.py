@@ -114,6 +114,10 @@ def backend_effective_settings(receipt, client):
     for key, value in expected.items():
         if result['output_' + key]['verified'] and evidence[key] != value:
             issues.append('EFFECTIVE_FIELD_MISMATCH:output_' + key)
-    if result['output_refresh_x100']['verified'] and evidence['refresh_x100'] < client.get('fps', 0) * 100:
+    # Integer requested FPS includes the standard 1000/1001 display-rate alias.
+    # Keep the measured refresh unchanged; 59.94/119.88 are nominal 60/120,
+    # while a genuine 60 Hz output for a 120 FPS request remains a fallback.
+    minimum_refresh = client.get('fps', 0) * 100 * 1000 // 1001
+    if result['output_refresh_x100']['verified'] and evidence['refresh_x100'] < minimum_refresh:
         issues.append('OUTPUT_MODE_FALLBACK')
     return result, issues

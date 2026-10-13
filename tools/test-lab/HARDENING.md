@@ -36,20 +36,17 @@ for newly archived results. Simulated success is `SIMULATED`, with CLI exit 3;
 only a verified real PASS returns exit 0. Historical immutable archives are
 preserved. API run views expose separate classifications without rewriting them.
 
-## Remaining acceptance work
+## Acceptance status
 
-- Complete backend-specific effective pacing/HDR evidence and host ownership evidence.
-- Per-variant manifests and safe interleaved deployment of distinct binaries.
-- GPU adapter selection, trustworthy host telemetry and WebGL2 workloads.
-- Phase acknowledgements, uncertainty windows and continuous progress diagnostics.
-- Expanded sweeps, 4K120/HDR/pacing suites and A/A calibration.
-- Recovery/security audit and complete checks.
-- Real 1080p60 acceptance followed by supported advanced modes.
-- Single-command three-pair physical A/B across two source commits.
+Verified physical smoke, high-entropy, phased decoder regression and a full
+single-command three-pair cross-build A/B are recorded below with identities.
+Implementation includes telemetry, progress, alignment, benchmark plans, A/A,
+safe deployment, authenticated ownership checks and immutable export.
 
-The current physical acceptance checkpoint below validates one new native smoke.
-The earlier PR7 receipts remain historical evidence and do not satisfy this task's
-new acceptance scenario. Advanced modes and cross-build acceptance remain pending.
+A/A calibration and advanced mode acceptance are still being executed. Generated
+4K120/HDR/chroma/pacing/soak plans are implementation evidence, not hardware PASS.
+Unavailable capture/encode timestamps, encoder GPU identity and physical scanout
+remain explicit missing evidence rather than inferred measurements.
 
 ## Prepared cross-build workflow
 
@@ -82,9 +79,9 @@ lease and executor journal; no automatic retry or production restoration occurs.
 A terminal invalid measurement stops the sequence with exit 3 rather than
 reporting a successful performance comparison.
 
-This prepared-artifact path does not yet automate obtaining clean source
-checkouts and invoking remote Linux/WSL builds. Hardware cross-build acceptance
-has not been run.
+The prepared-artifact path also supports `pltest build-variant` on a configured
+Linux/WSL builder. Verified remote builds and physical cross-build acceptance
+are recorded below.
 
 ## Host telemetry and workloads
 
@@ -377,3 +374,20 @@ Latest Linux validation completed `make test-lab-test`, full `make test`, and
 phase/progress changes. Linux lacks Node for one optional pacing fixture; that
 fixture passed locally on the Mac. Subsequent Python/JS changes have their own
 focused tests and do not expand this native build validation claim.
+
+
+## Nominal refresh validation and recovery checkpoint
+
+PyroWave run `1c4eea38-1f68-438d-9ee4-350296181ef8` completed with a functional
+PASS, verified title exit, 59.941 unique FPS and 300 completion polls without
+stalls. Its original overall result remains INCONCLUSIVE: the analyzer incorrectly
+classified a verified 5994/100 Hz output as fallback for nominal 60 FPS.
+The validator now accepts the standard 1000/1001 refresh alias while preserving
+the exact measured value. A true 60 Hz output for a 120 FPS request still fails.
+Separate read-only reanalysis is VALID; the original immutable report is unchanged.
+Regression tests accept 119.88 Hz for nominal 120 and reject 119 Hz.
+
+A/A attempt `18139222-3beb-4116-a362-58f061569751` stopped before launch with
+`NO_USER`. After the operator selected a profile, all 131 installed C files were
+read back and matched; TITLE_IDLE was verified and that exact owner's retained
+lease was released. No launch was replayed. A fresh calibration uses new run IDs.
