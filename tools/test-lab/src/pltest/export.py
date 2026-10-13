@@ -39,13 +39,30 @@ def bundle(store, run_id, redact=True):
     path = Path(temporary.name) / (run_id+'.zip')
     total=0; manifest={}
     try:
+        index_path=store.artifact_path(run_id,'manifest.json')
+        if index_path is None or index_path.stat().st_size>1024*1024:
+            raise ValueError('ARTIFACT_MANIFEST_UNAVAILABLE')
+        index_bytes=index_path.read_bytes()
+        index=json.loads(index_bytes)
+        if index.get('schema_version')!='prosperolight-test-manifest/1' or index.get('run_id')!=run_id or not isinstance(index.get('files'),dict):
+            raise ValueError('ARTIFACT_MANIFEST_INVALID')
+        items=store.files(run_id) or []
+        if {item['name'] for item in items if item['name']!='manifest.json'} != set(index['files']):
+            raise ValueError('ARTIFACT_MANIFEST_FILE_SET_MISMATCH')
         with zipfile.ZipFile(path,'w',zipfile.ZIP_DEFLATED) as archive:
-            for item in store.files(run_id) or []:
+            for item in items:
                 name=item['name']; source=store.artifact_path(run_id,name)
                 if source is None: raise ValueError('unsafe export path')
                 total += source.stat().st_size
                 if total > MAX_BUNDLE: raise ValueError('bundle exceeds total byte limit')
-                data=source.read_bytes()
+                expected=index['files'].get(name) if name!='manifest.json' else None
+                if name!='manifest.json' and (not isinstance(expected,dict) or type(expected.get('bytes')) is not int or not 0<=expected['bytes']<=MAX_BUNDLE):
+                    raise ValueError('ARTIFACT_MANIFEST_ENTRY_MISSING')
+                with source.open('rb') as stream:data=stream.read((expected['bytes'] if expected else 1024*1024)+1)
+                if expected and (len(data)!=expected['bytes'] or hashlib.sha256(data).hexdigest()!=expected.get('sha256')):
+                    raise ValueError('ARTIFACT_MANIFEST_HASH_MISMATCH')
+                if name=='manifest.json' and data!=index_bytes:
+                    raise ValueError('ARTIFACT_MANIFEST_CHANGED')
                 if redact:
                     if source.suffix=='.json':
                         data=(json.dumps(scrub(json.loads(data)),indent=2)+'\n').encode()

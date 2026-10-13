@@ -64,10 +64,15 @@ class Worker:
         s = value['settings']
         inventory = display.probe()
         monitor = display.select(inventory, s['monitor'])
-        if s.get('require_hdr') and monitor['hdr'] is not True:
-            raise RuntimeError('HDR_CAPABILITY_UNVERIFIED')
+        if s.get('require_hdr'):
+            if monitor.get('hdr_verified') is not True:
+                raise RuntimeError('HDR_CAPABILITY_UNVERIFIED')
+            if monitor.get('hdr') is not True:
+                raise RuntimeError('UNSUPPORTED_HDR_DISPLAY')
+            if monitor.get('hdr_active') is not True:
+                raise RuntimeError('UNSUPPORTED_HDR_CURRENT_DISPLAY_MODE')
         if not 320 <= monitor['width'] <= 3840 or not 240 <= monitor['height'] <= 2160:
-            raise RuntimeError('DISPLAY_RESOLUTION_UNSUPPORTED')
+            raise RuntimeError('UNSUPPORTED_DISPLAY_RESOLUTION')
         folder = self.output / value['run_id']
         folder.mkdir(parents=True, exist_ok=False)
         self.run_id, self.folder, self.monitor = value['run_id'], folder, monitor

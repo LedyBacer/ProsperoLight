@@ -23,7 +23,7 @@ async function prepare(s) {
   const fresh=canvas.cloneNode(false);canvas.replaceWith(fresh);canvas=fresh;
   canvas.width=s.render_width??s.width;canvas.height=s.render_height??s.height;textures=[];gpuScene=null;
   intervals=new Float64Array(Math.min(250000,Math.ceil((s.seconds+s.warmup_seconds+5)*240)));
-  if(s.scene==='gpu-entropy') {
+  if(s.scene==='gpu-entropy'||s.workload_backend==='webgl2') {
     gpuScene=new PLTestGpuScene(canvas,s);ctx=null;gpuScene.draw(0);
     const bytes=await crypto.subtle.digest('SHA-256',gpuScene.sample());
     preparedHash=Array.from(new Uint8Array(bytes),v=>v.toString(16).padStart(2,'0')).join('');
@@ -48,7 +48,8 @@ async function prepare(s) {
   send({type:'prepared',run_id:settings.run_id,pixel_sample_sha256:preparedHash});
 }
 function draw(elapsed,frame) {
-  if(gpuScene){gpuScene.draw(elapsed);return;}
+  if(gpuScene){const phased=settings.scene==='decoder-regression';
+    gpuScene.draw(elapsed,phased?(elapsed>=20&&elapsed<60?1:0):undefined);return;}
   if(settings.scene==='test-pattern') {
     const bars=['#fff','#ff0','#0ff','#0f0','#f0f','#f00','#00f','#000'];
     bars.forEach((color,index)=>{ctx.fillStyle=color;ctx.fillRect(index*canvas.width/8,0,Math.ceil(canvas.width/8),canvas.height);});

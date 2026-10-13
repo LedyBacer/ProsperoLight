@@ -78,7 +78,8 @@ class HostWorkerAdapter:
             await self.socket.send_json(message)
             response = await asyncio.wait_for(future, timeout=timeout)
             if response.get('ack') != 'accepted' or response.get('run_id') != run_id:
-                if response.get('reason') in ('UNSUPPORTED_WEBGL2', 'UNSUPPORTED_WEBGL2_SHADER', 'UNSUPPORTED_WEBGL2_PROGRAM'):
+                if response.get('reason') in ('UNSUPPORTED_WEBGL2', 'UNSUPPORTED_WEBGL2_SHADER', 'UNSUPPORTED_WEBGL2_PROGRAM',
+                    'UNSUPPORTED_HDR_DISPLAY','UNSUPPORTED_HDR_CURRENT_DISPLAY_MODE','UNSUPPORTED_DISPLAY_RESOLUTION'):
                     raise RuntimeError(response['reason'])
                 raise RuntimeError('worker command rejected: ' + str(response.get('reason')))
             return response

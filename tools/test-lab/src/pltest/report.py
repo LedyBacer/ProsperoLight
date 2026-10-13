@@ -50,7 +50,7 @@ def finalize_manifest(directory, run_id):
     directory = Path(directory)
     files = {}
     for path in sorted(directory.rglob('*')):
-        if path.is_file() and not path.is_symlink() and not path.name.endswith(('.tmp', '.pending')) and path.name != 'manifest.json':
+        if path.is_file() and not path.is_symlink() and not path.name.endswith(('.tmp', '.pending')) and path != directory / 'manifest.json':
             files[path.relative_to(directory).as_posix()] = {'bytes': path.stat().st_size,
                 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
     atomic_json(directory / 'manifest.json', {'schema_version': 'prosperolight-test-manifest/1',

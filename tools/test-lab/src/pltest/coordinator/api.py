@@ -144,7 +144,7 @@ def create_app(data_dir=None, scheduler=None, token=None):
             import asyncio
             temporary,path=await asyncio.to_thread(bundle,store,run_id,redact)
         except ValueError as exc:
-            raise HTTPException(413,detail={'code':'EXPORT_UNAVAILABLE','message':str(exc)}) from exc
+            raise HTTPException(409 if str(exc).startswith('ARTIFACT_MANIFEST') else 413,detail={'code':'EXPORT_UNAVAILABLE','message':str(exc)}) from exc
         return FileResponse(path,filename=run_id+'.zip',media_type='application/zip',background=BackgroundTask(temporary.cleanup))
 
     @app.get('/api/v1/runs/{run_id}', response_model=RunView)

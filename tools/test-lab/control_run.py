@@ -47,6 +47,7 @@ def command(ftp, run_id, action, timeout=10):
     ftp.storbinary('STOR ' + path + '.tmp', io.BytesIO(data))
     if read_receipt(ftp, path + '.tmp') != payload:
         raise RuntimeError('control readback mismatch')
+    send_begin = time.monotonic_ns() // 1000
     ftp.rename(path + '.tmp', path)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -54,6 +55,8 @@ def command(ftp, run_id, action, timeout=10):
         if status.get('run_id') != run_id or status.get('schema') != 'prosperolight-test-status/1':
             raise ValueError('ACK identity mismatch')
         if status.get('command_id') == identifier and status.get('command_action') == action:
+            status['coordinator_ack_bounds'] = {'begin_us':send_begin, 'end_us':time.monotonic_ns()//1000,
+                'source':'coordinator monotonic; mailbox rename through matching ACK read'}
             return status
         time.sleep(.2)
     raise TimeoutError('control ACK absent; do not escalate to process kill')

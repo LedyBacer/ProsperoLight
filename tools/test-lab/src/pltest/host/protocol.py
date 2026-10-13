@@ -20,8 +20,10 @@ def request(value):
     if value['action'] == 'prepare':
         s = value.get('settings')
         if not isinstance(s, dict) or set(s) - {'scene', 'seed', 'fps', 'seconds', 'warmup_seconds', 'monitor', 'require_hdr',
-                                               'entropy', 'movement', 'update_hz', 'render_width', 'render_height'}:
+                                               'entropy', 'movement', 'update_hz', 'render_width', 'render_height', 'workload_backend'}:
             raise ValueError('invalid stimulus settings')
+        if s.get('workload_backend', 'canvas') not in ('canvas','webgl2'):
+            raise ValueError('invalid workload backend')
         if s.get('scene') not in SCENES or not isinstance(s.get('monitor'), str):
             raise ValueError('unknown scene/monitor')
         for key, low, high in (('seed', 0, 0xffffffff), ('fps', 30, 240), ('seconds', 1, 1800), ('warmup_seconds', 0, 120)):

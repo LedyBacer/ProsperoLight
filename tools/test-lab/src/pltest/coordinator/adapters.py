@@ -388,6 +388,7 @@ class RealHostCoordinatorAdapter:
         if cancel.is_set():
             raise asyncio.CancelledError
         self.profile = profile
+        self.terminal_session_absence = None
         self.run_id = profile['run_id']
         self.worker = HostWorkerAdapter(self.url, self.token)
         try:

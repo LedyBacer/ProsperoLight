@@ -282,3 +282,98 @@ within the conservative PS5-local windows. Control mailbox replay now rejects
 reuse of one command ID for a different action. Duplicate identical commands
 remain idempotent. These changes require a newly built image and refreshed worker;
 unit checks do not substitute for their subsequent hardware acceptance.
+
+## Physical cross-build acceptance: 2026-10-13
+
+A single `pltest paired --repetitions 3 --allow-deploy` completed the full
+A1/B1/A2/B2/A3/B3 sequence with PASS/VALID for all six runs. Baseline source was
+`b40671e74a035f0f6783321ccc461e68e2f580ed`, signed eboot
+`307a5789ded53bf5b9c0dce52d86d2c3916fcdb71402d48e597e8e4f3815e8c4`.
+Candidate source was `8773a184082ead066da851859a0f2ad479bdd408`, signed eboot
+`0096eb6ed8baa33c02f3f048ddb1bcb2b2584c83797130a0d74891e6b0aa7638`.
+Both used identical complete compiler definitions, HEVC 1080p60 SDR 4:2:0,
+20 Mbps ceiling, and the same seeded WebGL2 entropy workload on DISPLAY15.
+
+| Order | Run | Unique completion FPS |
+| --- | --- | --- |
+| A1 | `594cb77e-b985-41dd-b094-ae69fcfadd9f` | 59.745 |
+| B1 | `964f14ce-8fe6-47bc-b162-bad77005b7af` | 59.910 |
+| A2 | `7b8d7907-a1d2-4e85-aeac-0a94ce7747f8` | 59.669 |
+| B2 | `54ee80c5-5388-498a-a9f5-d6bb28ba3461` | 59.874 |
+| A3 | `386f0875-d185-4af0-894a-2d0586f606e9` | 59.912 |
+| B3 | `decc820e-8b2c-474d-b73c-c67a054c8893` | 59.904 |
+
+Comparison returned PASS, VALID, `NO_CLEAR_CHANGE`, three independent pairs,
+reason `PAIRED_SCREENING`, CLI exit 0. This is screening under the documented
+thresholds, not proof that the binaries are universally equivalent. Each run's
+51-file archive manifest was independently verified. Configuration and pairing
+hashes matched the original baseline after the sequence. Installation remains
+the tested developer image; no production-restoration claim is made.
+
+Completion polling and clock-probe changes in source `37659f6` were committed
+after these artifacts were built and are not covered by this acceptance series.
+
+## Sequential sweeps, mode plans and host HDR evidence
+
+```sh
+pltest sweep --profile smoke.json --bitrates 10,20,40,60,80
+pltest benchmark-plan --profile smoke.json --name native-4k120 --output-dir plan-4k
+pltest benchmark-plan --profile smoke.json --name pyrowave-chroma-hdr --output-dir plan-pyro
+pltest paired --baseline "$ROOT/phase-native.json" --candidate "$ROOT/phase-native.json" \
+  --manifest-root "$ROOT" --repetitions 3 --allow-deploy --calibration
+```
+
+Sweeps run high-entropy points in ascending requested Mbps, archive every report,
+and stop on invalid health/evidence. An optional stop identifies a measured
+throughput plateau accompanied by a >5% completion-FPS drop. A compressed/static
+scene falling below its bitrate ceiling is not saturation evidence. This stop is
+screening, not proof of an encoder bottleneck. Missing measured throughput is
+explicitly inconclusive, including backends without a trusted byte measurement.
+Plans include native and PyroWave 4K120, HEVC HDR10, PyroWave 4:2:0/4:4:4 SDR/HDR,
+unpaced/paced/VRR, segmented soak, and WebGL2 20/40/20 decoder-regression phases.
+Generated files request capabilities; their creation never establishes support.
+
+Windows inventory now reads active paths with QueryDisplayConfig and requests
+HDR-specific GET_ADVANCED_COLOR_INFO_2. This distinguishes HDR support, user
+enablement, and current HDR mode from wide color gamut. Unsupported OS queries,
+ambiguous cloned display paths, and missing topology stay null/unverified. No
+DisplayConfigSetDeviceInfo or display configuration mutation is performed.
+The definitions follow the [Microsoft SDK header](https://github.com/microsoft/win32metadata/blob/main/generation/WinSDK/RecompiledIdlHeaders/um/wingdi.h).
+Older advanced-color capability bits are intentionally insufficient for HDR.
+
+The dashboard separately displays installed identity, source SHA, build flags,
+effective fields with evidence sources, environment, clock uncertainty, progress,
+missing evidence and cleanup errors. Its comparison form supports explicit A/A
+calibration and screening overrides. CLI reports retain the same structured data.
+
+Source `37659f691513cea8deb2ec070ce79f2378b5c68f` built successfully, with signed
+eboot `d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f`.
+Its new hardware smoke `4544b49a-4865-4b08-b4c8-d86515b1578a` was PASS/VALID:
+300 completion polls, zero stalls, maximum polling interval 115868 µs, matching
+start/late/end identities. The original broad FTP request timing gave a 1.096 s
+clock uncertainty and correctly did not validate steady phase comparison. The
+control transport now brackets mailbox rename through matching ACK read, excluding
+pre-command upload/readback checks while retaining all actual execution uncertainty.
+The historical smoke report is not retroactively changed to claim finer precision.
+
+The subsequent 90-second decoder-regression run
+`bd599b79-c882-4459-b2d0-489ca05ecf7c` was PASS/VALID with no issues, fresh
+artifacts, and verified title exit. The actual WebGL2 phase program executed
+20/40/20 measured seconds after 10 seconds warmup. Start clock uncertainty was
+393899 µs, late clock uncertainty 292162 µs, and the conservative offset envelope
+422078 µs. Steady-state comparison was verified, with that uncertainty excluded
+at each transition. Native phase completion rates were 59.888/59.932/59.912 FPS;
+received throughput was 11.934/15.156/11.596 Mbps. These are software measurements,
+not physical scanout timing. The earlier coarse-bound smoke remains unchanged.
+
+Export now checks the original immutable artifact manifest, complete file set,
+byte lengths, and SHA256 before redaction. Missing, modified, or unindexed files
+refuse export; redaction then produces a separate manifest for transformed bytes.
+A real 52-file redacted export from the accepted A/B series passed independent
+hash verification. Tests cover post-publication mutation rejection.
+
+Latest Linux validation completed `make test-lab-test`, full `make test`, and
+`make lint` successfully; lint covered 280 attributed files after the native
+phase/progress changes. Linux lacks Node for one optional pacing fixture; that
+fixture passed locally on the Mac. Subsequent Python/JS changes have their own
+focused tests and do not expand this native build validation claim.

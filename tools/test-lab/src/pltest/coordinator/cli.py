@@ -206,7 +206,7 @@ def build_variant(builder: Path = typer.Option(..., exists=True, dir_okay=False)
 def paired(baseline: Path = typer.Option(..., exists=True, readable=True),
            candidate: Path = typer.Option(..., exists=True, readable=True),
            repetitions: int = typer.Option(3, min=3, max=20), suite: str = 'decoder-smoke',
-           allow_deploy: bool = False,
+           allow_deploy: bool = False, calibration: bool = False,
            manifest_root: Path = typer.Option(..., exists=True, file_okay=False)):
     """Interleave A/B, then compare unique repeated run pairs; never parallelize PS5."""
     from ..build import validate_variant
@@ -223,7 +223,10 @@ def paired(baseline: Path = typer.Option(..., exists=True, readable=True),
                 allow_deploy=True, build_variant={'manifest':path.resolve().relative_to(manifest_root.resolve()).as_posix(),
                                                 'sha256':hashlib.sha256(data).hexdigest()})
             prepared.append((variant, profile))
-        if prepared[0][0]['source_sha'] == prepared[1][0]['source_sha'] or prepared[0][0]['eboot_sha256'] == prepared[1][0]['eboot_sha256']:
+        if calibration:
+            if any(prepared[0][0][key] != prepared[1][0][key] for key in ('source_sha','build_label','eboot_sha256')):
+                raise ValueError('CALIBRATION_REQUIRES_SAME_BUILD')
+        elif prepared[0][0]['source_sha'] == prepared[1][0]['source_sha'] or prepared[0][0]['eboot_sha256'] == prepared[1][0]['eboot_sha256']:
             raise ValueError('DISTINCT_SOURCE_AND_BINARY_REQUIRED')
         if prepared[0][0]['build_flags'] != prepared[1][0]['build_flags']:
             raise ValueError('BUILD_FLAGS_MISMATCH')
@@ -249,7 +252,7 @@ def paired(baseline: Path = typer.Option(..., exists=True, readable=True),
                 emit(current['report'] or current); raise typer.Exit(exit_code(current['verdict']))
             ids.append(rid)
         pairs.append(ids)
-    value=request('POST','/api/v1/compare',json={'pairs':pairs})
+    value=request('POST','/api/v1/compare',json={'pairs':pairs,'calibration':calibration})
     emit(value); raise typer.Exit(exit_code(value['verdict']))
 
 
@@ -278,3 +281,59 @@ def export(run_id: str, output: Path = typer.Option(...), redact: bool = True):
         if created_temporary: temporary.unlink(missing_ok=True)
         emit({'verdict':'INCONCLUSIVE','reason_code':type(exc).__name__});raise typer.Exit(2)
     emit({'output':str(output),'bytes':total,'redacted':redact})
+
+
+@app.command()
+def benchmark_plan(profile: Path = typer.Option(..., exists=True, readable=True),
+                   name: str = typer.Option(...), output_dir: Path = typer.Option(...)):
+    """Write explicit mode profiles; does not claim hardware support or run them."""
+    from ..sweeps import benchmark_profiles
+    values = benchmark_profiles(json.loads(profile.read_text()), name)
+    output_dir.mkdir(parents=True, exist_ok=False)
+    paths=[]
+    for index,value in enumerate(values):
+        path=output_dir/('profile-'+str(index+1)+'.json')
+        path.write_text(json.dumps(value,indent=2)+'\n');paths.append(str(path))
+    emit({'schema':'prosperolight-benchmark-plan/1','profiles':paths,
+          'capability_verification':'each real run required; requested modes are not verified support'})
+
+
+@app.command()
+def sweep(profile: Path = typer.Option(..., exists=True, readable=True),
+          bitrates: str = '10,20,40,60,80', stop_on_saturation: bool = True):
+    """Run ordered high-entropy bitrate points, preserving each exact report."""
+    from ..sweeps import bitrate_profiles, saturation
+    try:
+        values=bitrate_profiles(json.loads(profile.read_text()),[int(rate) for rate in bitrates.split(',')])
+    except (ValueError,KeyError,TypeError) as exc:
+        emit({'overall_verdict':'INCONCLUSIVE','reason_code':'SWEEP_CONFIGURATION_INVALID','reason':str(exc)})
+        raise typer.Exit(3)
+    if request('GET','/api/v1/capabilities')['api_mode'] != 'real':
+        emit({'overall_verdict':'INCONCLUSIVE','reason_code':'REAL_ADAPTERS_REQUIRED'});raise typer.Exit(3)
+    reports=[];reason='ALL_POINTS_COMPLETED'
+    for value in values:
+        created=request('POST','/api/v1/runs',json={'suite':'bitrate-ramp','mode':'real','profile':value})
+        rid=created['run_id'];request('POST','/api/v1/runs/'+rid+'/start')
+        deadline=time.monotonic()+1800
+        while time.monotonic()<deadline:
+            current=request('GET','/api/v1/runs/'+rid)
+            if current['state'] in TERMINAL:break
+            time.sleep(2)
+        else:
+            request('POST','/api/v1/runs/'+rid+'/stop')
+            emit({'overall_verdict':'INCONCLUSIVE','reason_code':'SWEEP_POINT_TIMEOUT','run_id':rid});raise typer.Exit(3)
+        report=request('GET','/api/v1/runs/'+rid+'/report');reports.append(report);emit(report)
+        if report.get('overall_verdict') != 'PASS':reason='POINT_NOT_VALID';break
+        plateau=saturation(reports[-2] if len(reports)>1 else report,report)
+        if plateau is None:reason='THROUGHPUT_METRIC_UNAVAILABLE';break
+        if stop_on_saturation and plateau:reason='THROUGHPUT_PLATEAU_WITH_FPS_DROP';break
+    verdict=reports[-1].get('overall_verdict','INCONCLUSIVE')
+    if reason=='THROUGHPUT_METRIC_UNAVAILABLE':verdict='INCONCLUSIVE'
+    emit({'schema':'prosperolight-bitrate-sweep/1','overall_verdict':verdict,'verdict':verdict,'summary_verdict':verdict,
+          'execution_state':'COMPLETED' if verdict=='PASS' else 'INCONCLUSIVE',
+          'functional_verdict':reports[-1].get('functional_verdict',(reports[-1].get('analysis') or {}).get('functional_verdict','INCONCLUSIVE')),
+          'measurement_validity':'VALID' if verdict=='PASS' else 'INCONCLUSIVE','reason_code':reason,
+          'run_ids':[r['run_id'] for r in reports],'requested_mbps':[v['client']['bitrate_mbps'] for v in values],
+          'completed_points':len(reports),'performance_delta':'NOT_COMPARABLE',
+          'limitations':['plateau is screening evidence, not proof of encoder saturation; each point retains its own report']})
+    raise typer.Exit(exit_code(verdict))

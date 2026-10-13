@@ -15,7 +15,7 @@ CLOCKS = {
     'ps5': 'PS5 monotonic callback/VideoOut flip observation; not physical scanout',
     'network': 'paired callback clocks translate enqueue age; never subtract raw network clock from PS5 clock',
     'browser': 'Windows browser performance.now/rAF; no subtraction from PS5 clock',
-    'phase_alignment': 'approximate: sequential host start ACK then PS5 start_measure ACK; no cross-clock offset measured',
+    'phase_alignment': 'see phase_alignment ACK evidence; approximate fallback when independent clock bounds unavailable',
     'input_to_photon': None,
 }
 
@@ -312,5 +312,5 @@ def browser_phases(host):
              'boundaries_verified': observed, 'excluded_transition_intervals': excluded,
              'interval_ms': distribution(samples[name]),
              'raf_fps':len(samples[name])*1000/sum(samples[name]) if samples[name] else None,
-             'clock':'browser-local observed rAF boundaries; PS5 clock drift remains unverified'}
+             'clock':'browser-local observed rAF boundaries; cross-clock alignment is reported separately'}
             for name,start,finish,identity in bounds]

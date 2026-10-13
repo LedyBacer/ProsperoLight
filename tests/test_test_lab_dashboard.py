@@ -51,6 +51,8 @@ class DashboardTests(unittest.TestCase):
                 time.sleep(.01)
             root=Path(directory)/'runs'/rid
             private=root/'private.json';private.write_text(json.dumps({'host':'192.168.1.5','password':'never-export'}))
+            from pltest.report import finalize_manifest
+            finalize_manifest(root,rid)
             response=client.get(f'/api/v1/runs/{rid}/bundle')
             self.assertEqual(response.status_code,200)
             with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
@@ -61,6 +63,10 @@ class DashboardTests(unittest.TestCase):
                     self.assertEqual(hashlib.sha256(archive.read(name)).hexdigest(),item['sha256'])
                 self.assertIn('report.html',archive.namelist())
             self.assertIn('never-export',private.read_text())
+            private.write_text('{}')
+            rejected=client.get(f'/api/v1/runs/{rid}/bundle')
+            self.assertEqual(rejected.status_code,409)
+            self.assertIn('ARTIFACT_MANIFEST_HASH_MISMATCH',rejected.text)
             local=json.loads((root/'manifest.json').read_text())
             self.assertEqual(local['files']['report.json']['sha256'],hashlib.sha256((root/'report.json').read_bytes()).hexdigest())
             self.assertEqual(len((root/'events.jsonl').read_text().splitlines()),len(client.get(f'/api/v1/runs/{rid}/events').json()['items']))

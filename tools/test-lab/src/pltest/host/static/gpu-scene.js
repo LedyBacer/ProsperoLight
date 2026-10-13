@@ -31,12 +31,14 @@ class PLTestGpuScene {
     gl.useProgram(this.program);this.vao=gl.createVertexArray();gl.bindVertexArray(this.vao);
     this.frameLocation=gl.getUniformLocation(this.program,'frame');
     gl.uniform1ui(gl.getUniformLocation(this.program,'seed'),settings.seed>>>0);
-    gl.uniform1f(gl.getUniformLocation(this.program,'entropy'),settings.entropy??1);
+    this.entropyLocation=gl.getUniformLocation(this.program,'entropy');
+    gl.uniform1f(this.entropyLocation,settings.entropy??1);
     gl.uniform1f(gl.getUniformLocation(this.program,'movement'),settings.movement??1);
     gl.viewport(0,0,canvas.width,canvas.height);
     canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();finish('BROWSER_GPU_CONTEXT_LOST');});
   }
-  draw(elapsed) {
+  draw(elapsed,entropy) {
+    this.gl.uniform1f(this.entropyLocation,entropy??this.settings.entropy??1);
     const index=Math.floor(elapsed*(this.settings.update_hz??this.settings.fps));
     // Drawing every rAF preserves the non-preserved backbuffer. Content changes
     // only at the configured update rate, independent of the display rAF rate.
@@ -49,7 +51,7 @@ class PLTestGpuScene {
     this.gl.readPixels(0,0,64,64,this.gl.RGBA,this.gl.UNSIGNED_BYTE,bytes);
     return bytes; // preparation only; never read back frames in the rAF loop
   }
-  statistics() {return {version:'webgl2-hash/1',supported:true,draw_calls:this.draws,
+  statistics() {return {version:'webgl2-hash/2',phase_program:this.settings.scene==='decoder-regression'?'low entropy 20s / full entropy 40s / recovery 20s':null,supported:true,draw_calls:this.draws,
     content_update_hz:this.settings.update_hz??this.settings.fps,entropy:this.settings.entropy??1,
     movement:this.settings.movement??1,width:this.gl.drawingBufferWidth,height:this.gl.drawingBufferHeight};}
 }

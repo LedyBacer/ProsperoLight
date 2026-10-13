@@ -48,6 +48,11 @@ def probe():
         raise RuntimeError('unexpected Windows DEVMODEW ABI')
     user.EnumDisplayDevicesW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(Device), wintypes.DWORD]
     user.EnumDisplaySettingsW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(Mode)]
+    from .advanced_color import inventory
+    try: advanced = inventory(user)
+    except (OSError,AttributeError,RuntimeError) as exc:
+        advanced = {}; advanced_reason = str(exc)[:128]
+    else: advanced_reason = 'active display path not independently matched'
     displays = []
     for index in range(64):
         adapter = Device(); adapter.cb = ctypes.sizeof(adapter)
@@ -69,7 +74,7 @@ def probe():
                          'refresh_source': 'EnumDisplaySettings current integer mode',
                          'virtual': True if identified_virtual else None,
                          'virtual_reason': None if identified_virtual else 'driver identity does not establish virtual/physical',
-                         'hdr': None, 'hdr_reason': 'advanced color capability not probed in this adapter'})
+                         **advanced.get(adapter.name, {'hdr':None,'hdr_active':None,'hdr_verified':False,'hdr_reason':advanced_reason})})
     return {'supported': True, 'interactive': interactive, 'session_id': session.value,
             'input_desktop': desktop_name, 'reason': None if interactive else 'NONINTERACTIVE_OR_LOCKED',
             'displays': displays}

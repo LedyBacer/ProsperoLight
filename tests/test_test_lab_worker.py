@@ -206,3 +206,17 @@ class FakeWorkerSession(unittest.IsolatedAsyncioTestCase):
                 self.assertAlmostEqual(report['raf_fps'], 60)
             await task; await page_socket.close(); await client.close()
             self.assertTrue((Path(directory) / 'run/host-report.json').is_file())
+
+
+class AdvancedColorTests(unittest.TestCase):
+    def test_hdr_specific_bits_do_not_confuse_wide_color_with_hdr(self):
+        import ctypes
+        from pltest.host.advanced_color import ColorInfo, DisplayPath, ModeInfo, SourceName, decode
+        self.assertEqual(ctypes.sizeof(DisplayPath),72)
+        self.assertEqual(ctypes.sizeof(ModeInfo),64)
+        self.assertEqual(ctypes.sizeof(SourceName),84)
+        value=ColorInfo();value.value=3 | (1<<6);value.active_mode=1;value.bits=10
+        result=decode(value);self.assertFalse(result['hdr']);self.assertFalse(result['hdr_active'])
+        value.value |= (1<<4)|(1<<5);value.active_mode=2
+        result=decode(value);self.assertTrue(result['hdr']);self.assertTrue(result['hdr_active'])
+        self.assertTrue(result['hdr_verified']);self.assertEqual(result['color_bits'],10)
