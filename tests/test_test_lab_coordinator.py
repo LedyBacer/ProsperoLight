@@ -28,6 +28,19 @@ def profile(**extra):
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_offline_worker_blocks_before_session_disconnect(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from pltest.coordinator.adapters import RealHostCoordinatorAdapter
+        from aiohttp import ClientConnectorError
+        async def exercise():
+            guard=AsyncMock()
+            adapter=RealHostCoordinatorAdapter('http://127.0.0.1:1','t'*48,guard)
+            with self.assertRaises(ClientConnectorError):
+                await adapter.preflight({},asyncio.Event())
+            guard.ensure_idle.assert_not_called()
+        asyncio.run(exercise())
+
     def test_paired_refresh_never_falls_back_after_transport_failure(self):
         import subprocess
         from pathlib import Path
@@ -361,7 +374,9 @@ int main(void) {
             execution_mode = 'real'
             def __init__(self): self.stages = []
             async def preflight(self, profile, cancel): return {'verified':True}
-            async def prepare(self, profile, cancel): self.stages.append('PREPARE')
+            async def prepare(self, profile, cancel):
+                assert 'WAIT_STREAM_READY' in self.ps5.stages
+                self.stages.append('PREPARE')
             async def start(self, cancel): self.stages.append('START')
             async def measure(self, profile, cancel):
                 self.stages.append('MEASURE')
@@ -371,8 +386,9 @@ int main(void) {
         async def exercise(directory):
             store = RunStore(directory)
             ps5, host = Ps5(), Host()
+            host.ps5 = ps5
             scheduler = Scheduler(store, ps5=ps5, host=host)
-            made = await scheduler.create('decoder-smoke', profile(timing={'hard_seconds': 30}))
+            made = await scheduler.create('decoder-smoke', profile(timing={'hard_seconds': 30},host_stimulus={'monitor':'virtual'}))
             await scheduler.start(made['run_id'])
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:

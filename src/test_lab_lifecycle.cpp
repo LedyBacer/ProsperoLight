@@ -57,6 +57,7 @@ bool Context::begin(const TestProfile &profile)
     }
     stopping_.store(false);
     host_cleanup_confirmed_.store(false);
+    host_exit_cleanup_.store(0);
     running_.store(true);
     struct stat receipt
     {
@@ -192,6 +193,11 @@ bool Context::finish(const moonlight_stream_metrics_t *metrics, int result)
     bool complete = metrics && result == 0 && metrics->presented_frames && timeline_.ready_seen &&
                     timeline_.measured && timeline_.reason == "COMPLETE";
     const char *reason = timeline_.reason.c_str();
+    if (host_exit_cleanup_.load() == 2 || (timeline_.measured && host_exit_cleanup_.load() != 1))
+    {
+        complete = false;
+        reason = "HOST_EXIT_CLEANUP_UNCONFIRMED";
+    }
     if (!*reason)
         reason = result ? "STREAM_FAILED" : "USER_STOP";
     const bool pyrowave = options_.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE;
@@ -258,6 +264,8 @@ bool Context::finish(const moonlight_stream_metrics_t *metrics, int result)
                                                 : std::fputs(",\"resolved\":null", f) >= 0;
         ok = ok && std::fprintf(f, ",\"negotiated\":null,\"paired_host_cleanup_confirmed\":%s",
                                 host_cleanup_confirmed_.load() ? "true" : "false") > 0;
+        ok = ok && std::fprintf(f, ",\"paired_host_exit_cleanup_confirmed\":%s",
+                                host_exit_cleanup_.load() == 1 ? "true" : "false") > 0;
         ok = ok && std::fprintf(
                        f,
                        ",\"origin_monotonic_us\":%llu,\"ready_monotonic_us\":%llu,\"measure_start_"

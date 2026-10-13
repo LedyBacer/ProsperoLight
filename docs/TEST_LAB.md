@@ -214,7 +214,9 @@ Developer Test Lab launch uses the existing PS5 paired GameStream `/cancel`
 before starting a fresh app session, then requires an acknowledged cancel and
 successful status refresh with no current game. A refused/uncertain cleanup
 fails with HOST_CLEANUP_REJECTED/HOST_CLEANUP_UNCONFIRMED; launch is not replayed.
-The receipt records `paired_host_cleanup_confirmed`. This does not change ordinary
+Test Lab also always invokes paired cancel on exit, independently of the saved
+Quit Host preference. The receipt records `paired_host_cleanup_confirmed` and
+`paired_host_exit_cleanup_confirmed`; unconfirmed exit cleanup prevents PASS. This does not change ordinary
 production launch or claim visibility of every Remote Input/Monitor session.
 No administrator token is required for this paired path.
 

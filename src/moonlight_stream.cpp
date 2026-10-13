@@ -5035,10 +5035,24 @@ done:
              (uint32_t)physical_input.mouse_unload_result);
     (void)lan_http_report_text(notification.message);
     ps5_controller_shutdown(&controller);
-    if (session_started && (!controller.requested_stop || session_preferences.quit_host))
+    bool quit_host_on_stop = session_preferences.quit_host;
+#if PROSPEROLIGHT_TEST_LAB
+    // A lab owns a bounded host session even when the saved Quit Host option is off.
+    quit_host_on_stop = quit_host_on_stop || prosperolight::test_lab::active();
+#endif
+    if (session_started && (!controller.requested_stop || quit_host_on_stop))
     {
         http_set_timeout_ms(2000);
         int quit_result = gs_quit_app(&gs_server);
+#if PROSPEROLIGHT_TEST_LAB
+        if (prosperolight::test_lab::active())
+        {
+            const int refresh_result =
+                quit_result == GS_OK ? gs_refresh_paired_status(&gs_server) : GS_WRONG_STATE;
+            prosperolight::test_lab::context().host_exit_cleanup_result(
+                quit_result == GS_OK && refresh_result == GS_OK && gs_server.current_game == 0);
+        }
+#endif
         snprintf(notification.message, sizeof(notification.message),
                  "Native NVHTTP cancel: rc=%08x error=%s", (uint32_t)quit_result,
                  gs_error ? gs_error : "");

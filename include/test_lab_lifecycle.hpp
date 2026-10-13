@@ -182,6 +182,10 @@ class Context
     {
         host_cleanup_confirmed_.store(true);
     }
+    void host_exit_cleanup_result(bool confirmed)
+    {
+        host_exit_cleanup_.store(confirmed ? 1 : 2);
+    }
     void join();
     bool finish(const moonlight_stream_metrics_t *metrics, int result);
 
@@ -193,6 +197,7 @@ class Context
     bool started_ = false;
     std::atomic<bool> running_{false}, stopping_{false};
     std::atomic<bool> host_cleanup_confirmed_{false};
+    std::atomic<unsigned> host_exit_cleanup_{0};
     Timeline timeline_{TestProfile{}, 0};
     Observation (*sample_)(void *) = nullptr;
     void (*stop_)(void *) = nullptr;
