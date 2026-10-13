@@ -73,8 +73,11 @@ def _analyze_run(profile, report, directory):
               'issues': [], 'metrics': {}, 'windows': [], 'clock_semantics': CLOCKS,
               'backend': profile.get('client', {}).get('codec'), 'simulated': report.get('execution_mode') != 'real'}
     issues = result['issues']
-    from .phases import start_alignment
-    result['phase_alignment'] = start_alignment(report)
+    from .phases import bounded_alignment, steady_windows
+    result['phase_alignment'] = bounded_alignment(report)
+    result['steady_phase_windows'] = steady_windows(report, result['phase_alignment'])
+    if profile.get('suite') == 'decoder-matrix' and not result['steady_phase_windows']:
+        issues.append('PHASE_ALIGNMENT_UNVERIFIED')
     if str(report.get('reason_code', '')).startswith('UNSUPPORTED'):
         result['measurement_validity'] = 'UNSUPPORTED'
     if result['simulated']:
@@ -115,6 +118,11 @@ def _analyze_run(profile, report, directory):
                 'submit_to_post_present_observation_us':result['pyrowave']['submit_to_post_present_observation_us']}
             result['trace'] = {'count':result['pyrowave']['output_samples'], 'omitted':0}
             result['browser_phases'] = browser_phases(host)
+            from .progress import polled_progress
+            result['progress'] = polled_progress(receipt, host.get('scene'))
+            if not result['progress']['verified'] or result['progress']['classification'] != 'CONTINUOUS':
+                issues.append(result['progress']['classification'])
+                result['functional_verdict'] = 'INCONCLUSIVE'
             if not issues: result['measurement_validity'] = 'VALID'
         except (OSError,ValueError,TypeError,KeyError) as exc:
             issues.append('PYROWAVE_ANALYSIS_UNAVAILABLE: '+str(exc)[:160])
@@ -205,6 +213,19 @@ def _analyze_run(profile, report, directory):
         metrics['pending_max'] = max(r['pending'] for r in samples)
         metrics['superseded'] = sum(r['outcome'] == 2 for r in samples)
         metrics['refused'] = sum(r['outcome'] == 3 for r in samples)
+        result['steady_phase_metrics'] = []
+        for window in result['steady_phase_windows']:
+            left,right = window['start_ps5_us'],window['end_ps5_us']
+            phase_rows = [r for r in samples if left <= r['callback_us'] < right]
+            phase_completions = sorted({r['completion_us'] for r in phase_rows
+                if r['outcome'] == 1 and left <= r['completion_us'] < right})
+            duration = (right-left)/1e6
+            result['steady_phase_metrics'].append(dict(window,
+                received_fps=len(phase_rows)/duration, unique_presented_fps=len(phase_completions)/duration,
+                actual_mbps=sum(r['bytes'] for r in phase_rows)*8/(duration*1e6),
+                callback_to_ready_us=distribution([r['ready_us'] for r in phase_rows if r['ready_us']]),
+                callback_to_flip_observed_us=distribution([r['completion_us']-r['callback_us']
+                    for r in phase_rows if r['outcome']==1 and left<=r['completion_us']<right and r['completion_us']>=r['callback_us']])))
         result['trace'] = {'count': len(rows), 'measured_count': len(samples), 'omitted': omitted}
         result['browser_phases'] = browser_phases(host)
         result['host'] = {'raf_fps': host.get('raf_fps'), 'scene': host.get('scene'),

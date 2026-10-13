@@ -185,6 +185,10 @@ class FakeWorkerSession(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(start['action'], 'start')
                 await page_socket.send_json({'type': 'started', 'run_id': run_id,
                                             'command_id': start['command_id'], 'browser_origin_ms': 100})
+                probe = await page_socket.receive_json(timeout=5)
+                self.assertEqual(probe['action'], 'clock_probe')
+                await page_socket.send_json({'type':'clock_probe','run_id':run_id,
+                    'command_id':probe['command_id'],'browser_now_ms':1900})
                 await page_socket.send_json({'type': 'report', 'run_id': run_id, 'reason': 'COMPLETE',
                     'intervals_ms': [1000 / 60] * 120, 'measured_intervals': 120, 'raf_fps': 999,
                     'rendered_frames': 121, 'hidden_events': 0, 'fullscreen_lost': 0, 'interval_overflow': False})
@@ -194,6 +198,9 @@ class FakeWorkerSession(unittest.IsolatedAsyncioTestCase):
                 ack = await adapter.command('run', 'prepare', settings)
                 self.assertEqual(ack['state'], 'READY')
                 await adapter.command('run', 'start')
+                clock = await adapter.command('run', 'clock_probe')
+                self.assertEqual(clock['browser_clock']['command_id'], clock['command_id'])
+                self.assertEqual(clock['browser_clock']['browser_now_ms'],1900)
                 report = await adapter.wait_report('run', timeout=5)
                 self.assertEqual(report['measurement_validity'], 'VALID')
                 self.assertAlmostEqual(report['raf_fps'], 60)

@@ -13,7 +13,7 @@ from launch_spike import read_receipt, request_bytes
 
 def command(ftp, run_id, action, timeout=10):
     request_bytes(run_id, 'unused')
-    if action not in ('start_measure', 'stop', 'cancel'):
+    if action not in ('start_measure', 'stop', 'cancel', 'clock_probe'):
         raise ValueError('unsupported control action')
     status_path = '/data/prosperolight/test-lab/status/' + run_id + '.json'
     status = read_receipt(ftp, status_path)
@@ -64,7 +64,7 @@ def main():
     parser.add_argument('--host', required=True)
     parser.add_argument('--ftp-port', type=int, default=2121)
     parser.add_argument('--run-id', required=True)
-    parser.add_argument('--action', choices=('start_measure', 'stop', 'cancel'), required=True)
+    parser.add_argument('--action', choices=('start_measure', 'stop', 'cancel', 'clock_probe'), required=True)
     args = parser.parse_args()
     with FTP() as ftp:
         ftp.connect(args.host, args.ftp_port, timeout=5)

@@ -129,6 +129,18 @@ class Worker:
             self.deadline = time.monotonic() + self.settings['seconds'] + self.settings['warmup_seconds'] + 10
         self.event('started')
 
+    async def clock_probe(self, command_id):
+        if not self.page or self.state != 'RUNNING':
+            raise RuntimeError('CLOCK_PROBE_NOT_RUNNING')
+        self.clock_probe_id = command_id
+        self.clock_probe_ack = None
+        self.clock_probe_event = asyncio.Event()
+        await self.page.send_json({'action': 'clock_probe', 'command_id': command_id})
+        await asyncio.wait_for(self.clock_probe_event.wait(), 5)
+        if self.page_error or not self.clock_probe_ack:
+            raise RuntimeError('CLOCK_PROBE_ACK_UNAVAILABLE')
+        return self.clock_probe_ack
+
     async def stop(self, reason='STOP_REQUESTED'):
         if self.state == 'IDLE' or self.finalizing or (self.state in ('COMPLETED', 'INCONCLUSIVE') and self.report):
             return
@@ -267,6 +279,11 @@ class Worker:
                             raise ValueError('PAGE_START_ACK_IDENTITY_MISMATCH')
                         self.start_ack = data
                         self.started_event.set()
+                    elif kind == 'clock_probe':
+                        if data.get('command_id') != getattr(self, 'clock_probe_id', None):
+                            raise ValueError('CLOCK_PROBE_ACK_IDENTITY_MISMATCH')
+                        self.clock_probe_ack = data
+                        self.clock_probe_event.set()
                     elif kind == 'report' and data.get('run_id') == self.run_id:
                         self.report = validate_report(data); self.report_event.set()
                         if self.state in ('STARTING', 'RUNNING'):
@@ -310,11 +327,14 @@ class Worker:
                         elif value['action'] == 'start':
                             if self.state != 'RUNNING':
                                 await self.start()
+                        elif value['action'] == 'clock_probe':
+                            await self.clock_probe(key)
                         elif value['action'] == 'stop':
                             await self.stop()
                         ack = {'schema': SCHEMA, 'command_id': key, 'run_id': value['run_id'],
                                'ack': 'accepted', 'state': self.state, 'ready': self.ready, 'report': self.report,
-                               'browser_start': getattr(self, 'start_ack', None)}
+                               'browser_start': getattr(self, 'start_ack', None),
+                               'browser_clock': getattr(self, 'clock_probe_ack', None)}
                         if value['action'] != 'status' and len(self.commands) < 65:
                             self.commands[key] = (value, ack)
                         await ws.send_json(ack)

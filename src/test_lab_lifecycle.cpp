@@ -168,15 +168,19 @@ void Context::run()
             {
                 bool seen = false;
                 for (const auto &id : commands_)
-                    if (id == command.command_id)
+                    if (id.command_id == command.command_id)
+                    {
                         seen = true;
+                        if (id.action != command.action)
+                            timeline_.stop("CONTROL_ID_REUSE");
+                    }
                 if (!seen)
                 {
                     if (commands_.size() >= 64)
                         timeline_.stop("CONTROL_LIMIT");
                     else
                     {
-                        commands_.push_back(command.command_id);
+                        commands_.push_back(command);
                         ack = command.command_id;
                         last_command_ = ack;
                         last_action_ = command.action;
@@ -315,6 +319,27 @@ bool Context::finish(const moonlight_stream_metrics_t *metrics, int result)
                        (unsigned long long)timeline_.origin, (unsigned long long)timeline_.ready_us,
                        (unsigned long long)timeline_.measure_start_us,
                        (unsigned long long)timeline_.measure_end_us) > 0;
+        ok = ok &&
+             std::fprintf(f,
+                          ",\"measure_start_phase_id\":\"%s:measure-start\",\"measure_end_phase_"
+                          "id\":\"%s:measure-end\"",
+                          timeline_.profile.run_id.c_str(), timeline_.profile.run_id.c_str()) > 0;
+        ok = ok &&
+             std::fprintf(
+                 f,
+                 ",\"continuous_progress\":{\"source\":\"confirmed unique completion counter "
+                 "polled on control worker\","
+                 "\"clock\":\"PS5 monotonic\",\"longest_no_progress_us\":%llu,\"stall_count\":%llu,"
+                 "\"stall_threshold_us\":1000000,\"poll_max_us\":%llu,\"samples\":%llu,\"gap_log2_"
+                 "bins\":[",
+                 (unsigned long long)timeline_.progress_longest_us,
+                 (unsigned long long)timeline_.progress_stalls,
+                 (unsigned long long)timeline_.progress_poll_max_us,
+                 (unsigned long long)timeline_.progress_samples) > 0;
+        for (unsigned bin = 0; bin < 64; ++bin)
+            ok = ok && std::fprintf(f, "%s%llu", bin ? "," : "",
+                                    (unsigned long long)timeline_.progress_gap_bins[bin]) > 0;
+        ok = ok && std::fprintf(f, "]}") > 0;
         ok = ok &&
              std::fprintf(
                  f,

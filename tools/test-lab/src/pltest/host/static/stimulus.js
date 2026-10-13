@@ -77,6 +77,7 @@ function finish(reason) {
     interval_overflow:count===intervals.length,reason,pixel_sample_sha256:preparedHash,
     browser_origin_ms:start,measure_start_ms:measureStarted,measure_end_ms:performance.now(),
     start_command_id:startCommand,phase_events:phaseEvents,
+    measure_start_phase_id:settings.run_id+':measure-start',measure_end_phase_id:settings.run_id+':measure-end',
     gpu_workload:gpuScene?gpuScene.statistics():{supported:false,reason:'compatibility Canvas scene selected'},
     snapshot:snapshot(),user_agent:navigator.userAgent,clock:'browser_performance_now_raf_callback'};
   send(report);status.textContent='Finished: '+reason;button.disabled=false;
@@ -95,7 +96,7 @@ function tick(now) {
         const phase=measured<0?'warmup':settings.scene==='decoder-regression'?
           (measured<20?'low-motion':measured<60?'high-entropy':'recovery'):'measure';
         if(!phaseEvents.length||phaseEvents.at(-1).phase!==phase)
-          phaseEvents.push({phase,phase_id:settings.run_id+':'+phase,browser_ms:now});
+          phaseEvents.push({run_id:settings.run_id,phase,phase_id:settings.run_id+':'+phase,browser_ms:now});
         if(elapsed>=settings.warmup_seconds) {
           if(!measureStarted)measureStarted=now;
           else if(last&&count<intervals.length)intervals[count++]=now-last;
@@ -124,6 +125,7 @@ socket.onmessage=async event=>{
       startCommand=data.command_id;phaseEvents=[];if(gpuScene)gpuScene.draws=0;
       document.body.classList.add('running');send({type:'started',run_id:settings.run_id,command_id:startCommand,browser_origin_ms:start});
     }
+    if(data.action==='clock_probe')send({type:'clock_probe',run_id:settings.run_id,command_id:data.command_id,browser_now_ms:performance.now()});
     if(data.action==='stop')finish('STOP_REQUESTED');
   } catch(e){send({type:'error',run_id:settings?.run_id,reason:String(e.message)});}
 };

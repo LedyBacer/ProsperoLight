@@ -30,6 +30,10 @@ struct Timeline
     uint64_t origin = 0, phase_started = 0;
     uint64_t last_frames = 0, measurement_start_frames = 0, measurement_end_frames = 0;
     uint64_t ready_us = 0, measure_start_us = 0, measure_end_us = 0;
+    uint64_t progress_last_us = 0, progress_last_frames = 0, progress_longest_us = 0;
+    uint64_t progress_stalls = 0, progress_samples = 0, progress_poll_max_us = 0;
+    uint64_t progress_previous_poll_us = 0, progress_gap_bins[64]{};
+    bool progress_stalled = false;
     bool ready_seen = false, measurement_requested = false, measured = false;
     std::string reason;
     TestProfile profile;
@@ -69,6 +73,8 @@ struct Timeline
     }
     bool command(const std::string &action, uint64_t now)
     {
+        if (action == "clock_probe")
+            return state != stopping;
         if (action == "cancel")
         {
             stop("CANCELLED");
@@ -141,9 +147,37 @@ struct Timeline
                 phase_started = now;
                 measure_start_us = now;
                 measurement_start_frames = o.unique_frames;
+                progress_last_us = progress_previous_poll_us = now;
+                progress_last_frames = o.unique_frames;
             }
             break;
         case measuring:
+        {
+            const uint64_t gap = now >= progress_last_us ? now - progress_last_us : 0;
+            if (gap > progress_longest_us)
+                progress_longest_us = gap;
+            const uint64_t poll =
+                now >= progress_previous_poll_us ? now - progress_previous_poll_us : 0;
+            if (poll > progress_poll_max_us)
+                progress_poll_max_us = poll;
+            progress_previous_poll_us = now;
+            ++progress_samples;
+            if (gap >= 1000000 && !progress_stalled)
+            {
+                ++progress_stalls;
+                progress_stalled = true;
+            }
+            if (o.unique_frames > progress_last_frames ||
+                elapsed(phase_started, profile.measure_seconds))
+            {
+                unsigned bin = 0;
+                for (uint64_t value = gap; value > 1 && bin < 63; value >>= 1)
+                    ++bin;
+                ++progress_gap_bins[bin];
+                progress_last_us = now;
+                progress_last_frames = o.unique_frames;
+                progress_stalled = false;
+            }
             if (elapsed(phase_started, profile.measure_seconds))
             {
                 if (o.unique_frames <= measurement_start_frames)
@@ -158,6 +192,7 @@ struct Timeline
                 }
             }
             break;
+        }
         case cooldown:
             if (elapsed(phase_started, profile.cooldown_seconds))
                 stop("COMPLETE");
@@ -214,7 +249,7 @@ class Context
     uint64_t unique_frames_ = 0;
     uint64_t baseline_sizes_[8]{}, baseline_times_[8]{};
     bool baseline_valid_[8]{};
-    std::vector<std::string> commands_;
+    std::vector<ControlCommand> commands_;
     std::string last_command_, last_action_, last_result_;
 };
 Context &context();

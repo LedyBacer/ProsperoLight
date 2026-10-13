@@ -455,7 +455,7 @@ bool write_profile_status(std::string_view id, const char *state, unsigned seque
         return false;
     if (!command_id.empty() && ((command_result != "accepted" && command_result != "rejected") ||
                                 (command_action != "start_measure" && command_action != "stop" &&
-                                 command_action != "cancel")))
+                                 command_action != "cancel" && command_action != "clock_probe")))
         return false;
     for (char c : error)
         if (c < ' ' || c == '"' || c == '\\')
@@ -477,7 +477,7 @@ bool write_profile_status(std::string_view id, const char *state, unsigned seque
                   f,
                   "{\"schema\":\"prosperolight-test-status/1\",\"run_id\":\"%s\",\"state\":\"%s\","
                   "\"sequence\":%u,\"monotonic_us\":%llu,\"reason\":\"%.*s\","
-                  "\"stream_ready\":%s,\"negotiated\":null",
+                  "\"stream_ready\":%s,\"negotiated\":null,\"capabilities\":[\"clock_probe\"]",
                   std::string(id).c_str(), state, sequence, us, static_cast<int>(error.size()),
                   error.empty() ? "" : error.data(), stream_ready ? "true" : "false") > 0;
     if (options)
@@ -507,7 +507,7 @@ bool parse_control(std::string_view json, std::string_view id, ControlCommand &o
         !text(root, "command_id", command.command_id, true) || !safe_run_id(command.command_id) ||
         !text(root, "action", command.action, true) ||
         (command.action != "start_measure" && command.action != "stop" &&
-         command.action != "cancel"))
+         command.action != "cancel" && command.action != "clock_probe"))
         return false;
     out = std::move(command);
     return true;

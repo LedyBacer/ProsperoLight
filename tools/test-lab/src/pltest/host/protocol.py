@@ -5,7 +5,7 @@ import math
 import re
 
 SCHEMA = 'prosperolight-host-worker/1'
-ACTIONS = {'prepare', 'start', 'stop', 'status'}
+ACTIONS = {'prepare', 'start', 'stop', 'status', 'clock_probe'}
 SCENES = {'low-motion', 'noise', 'scrolling', 'static-keepalive', 'stress', 'recover', 'decoder-regression', 'gpu-entropy', 'test-pattern'}
 
 

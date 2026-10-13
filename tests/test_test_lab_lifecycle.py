@@ -35,6 +35,7 @@ int main() {
  t.tick(300,{true,true,1});assert(t.ready_seen && t.state==Timeline::stream_ready);
  t.tick(400,{true,true,1});assert(t.state==Timeline::warmup);
  assert(!t.measured && !t.measurement_requested);
+ assert(t.command("clock_probe",450) && t.state==Timeline::warmup);
  assert(t.command("start_measure",500));
  t.tick(1000500,{true,true,20});assert(t.state==Timeline::measuring);
  t.tick(31000500,{true,true,100});assert(t.measured && t.state==Timeline::cooldown);
@@ -55,9 +56,18 @@ int main() {
  assert(stalled.command("start_measure",3));stalled.tick(1000003,{true,true,1});
  stalled.tick(31000003,{true,true,1});
  assert(!stalled.measured && stalled.state==Timeline::stopping);
+ assert(stalled.progress_stalls == 1 && stalled.progress_longest_us == 30000000);
+ Timeline recovered(p,0);recovered.tick(1,{true,true,0});recovered.tick(2,{true,true,1});
+ assert(recovered.command("start_measure",3));recovered.tick(1000003,{true,true,1});
+ recovered.tick(1100003,{true,true,2});recovered.tick(2200003,{true,true,2});
+ recovered.tick(2300003,{true,true,3});recovered.tick(2400003,{true,true,4});
+ assert(recovered.progress_stalls == 1 && recovered.progress_longest_us == 1200000);
+ assert(recovered.progress_samples == 4 && !recovered.progress_stalled);
+ assert(recovered.progress_gap_bins[16] == 2 && recovered.progress_gap_bins[20] == 1);
  ControlCommand c;
  const char *valid=R"({"schema":"prosperolight-test-control/1","run_id":"run","command_id":"cmd-1","action":"stop"})";
  assert(parse_control(valid,"run",c) && c.action=="stop");
+ assert(parse_control(R"({"schema":"prosperolight-test-control/1","run_id":"run","command_id":"clock","action":"clock_probe"})","run",c));
  assert(!parse_control(valid,"other",c));
  assert(!parse_control(R"({"schema":"prosperolight-test-control/1","run_id":"run","command_id":"../x","action":"stop"})","run",c));
  assert(!parse_control(R"({"schema":"prosperolight-test-control/1","run_id":"run","command_id":"c","action":"stop","action":"cancel"})","run",c));
@@ -155,6 +165,23 @@ int main(int,char **argv) {
   assert(receipt.find(reason)!=std::string::npos);
   assert(receipt.find("\"stream_ready\":false")!=std::string::npos);
  }
+ p.run_id="reused-command";assert(context.begin(p));context.attach(handshake,stop,nullptr,options);
+ const auto mailbox=std::string(argv[1])+"/control/reused-command.json";
+ std::ofstream(mailbox+".tmp")<<R"({"schema":"prosperolight-test-control/1","run_id":"reused-command","command_id":"same","action":"clock_probe"})";
+ std::filesystem::rename(mailbox+".tmp",mailbox);
+ bool acknowledged=false;
+ for(int i=0;i<20;++i) {
+  std::ifstream status(std::string(argv[1])+"/status/reused-command.json");
+  std::string value((std::istreambuf_iterator<char>(status)),{});
+  if(value.find("\"command_id\":\"same\"")!=std::string::npos){acknowledged=true;break;}
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+ }
+ assert(acknowledged);
+ std::ofstream(mailbox+".tmp")<<R"({"schema":"prosperolight-test-control/1","run_id":"reused-command","command_id":"same","action":"cancel"})";
+ std::filesystem::rename(mailbox+".tmp",mailbox);
+ await_stop(context);assert(context.finish(nullptr,-1));
+ std::ifstream replay(std::string(argv[1])+"/receipts/reused-command.json");receipt.assign(std::istreambuf_iterator<char>(replay),{});
+ assert(receipt.find("CONTROL_ID_REUSE")!=std::string::npos);
  p.run_id="crash";assert(context.begin(p));context.join(); // abrupt execution has no receipt
  assert(!std::filesystem::exists(std::string(argv[1])+"/receipts/crash.json"));
 }

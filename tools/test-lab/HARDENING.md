@@ -255,3 +255,30 @@ complete duration measured from its start ACK; disappearance earlier still
 fails. Cleanup waits for the receipt when PS5 is already stopping with COMPLETE,
 instead of sending an unnecessary cancellation. That first series stays
 INCONCLUSIVE; its failed result is not relabelled as acceptance.
+
+## Completion polling and bounded phase comparison
+
+New receipts include backend-independent continuous progress from the existing
+confirmed unique completion counter, sampled only by the control worker.
+They record the longest no-progress span, stalled intervals, maximum polling
+period, sample count, and a fixed logarithmic gap histogram. These are sampled
+completion intervals, not individual frame jitter or HDMI timing. If the worker
+itself is delayed beyond 250 ms, diagnosis is uncertain. For PyroWave, missing
+progress evidence or unresolved sustained stalls prevent a streaming-health PASS
+in analysis; intentional static content has its own unresolved classification.
+
+New status files advertise `clock_probe`; the coordinator sends that read-only
+command only to titles advertising the capability. Browser probes require a
+matching run and command ACK. Late measurement probes bracket each local clock
+with coordinator request/response timestamps. Reports retain separate clock
+offset intervals, endpoint drift bounds, matching local start/end phase IDs,
+and conservative phase windows that exclude transition uncertainty. They never
+subtract raw timestamps from unrelated clocks. The clock rate is assumed stable
+between the observed anchors; the interval is explicitly reported. Old binaries
+retain approximate alignment and cannot validate decoder-matrix phase comparison.
+
+Native steady-state phase metrics use only callback and completion timestamps
+within the conservative PS5-local windows. Control mailbox replay now rejects
+reuse of one command ID for a different action. Duplicate identical commands
+remain idempotent. These changes require a newly built image and refreshed worker;
+unit checks do not substitute for their subsequent hardware acceptance.

@@ -87,6 +87,24 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(progress_diagnostics(0, 5000000, early_starvation, complete, 'noise')['classification'],
                          'CLIENT_PRESENTATION_STALL')
 
+    def test_polled_completion_health_requires_bounded_sampling(self):
+        from pltest.progress import polled_progress
+        value = dict(source='confirmed unique completion counter polled on control worker',
+            clock='PS5 monotonic', longest_no_progress_us=100000, stall_count=0,
+            stall_threshold_us=1000000, poll_max_us=100000, samples=300, gap_log2_bins=[0]*64)
+        value['gap_log2_bins'][16] = 299
+        result = polled_progress({'continuous_progress':value}, 'gpu-entropy')
+        self.assertTrue(result['verified']); self.assertEqual(result['classification'], 'CONTINUOUS')
+        self.assertEqual(result['gap_distribution'][0]['lower_us'], 65536)
+        value.update(stall_count=1, longest_no_progress_us=2000000)
+        self.assertEqual(polled_progress({'continuous_progress':value}, 'gpu-entropy')['classification'],
+                         'CLIENT_OR_INPUT_STALL_UNRESOLVED')
+        self.assertEqual(polled_progress({'continuous_progress':value}, 'static-keepalive')['classification'],
+                         'STATIC_CONTENT_OR_STALL_UNRESOLVED')
+        value['poll_max_us'] = 1200000
+        self.assertFalse(polled_progress({'continuous_progress':value}, 'noise')['verified'])
+        self.assertFalse(polled_progress({}, 'noise')['verified'])
+
     def test_phase_ack_bounds_and_transition_exclusion(self):
         from pltest.phases import start_alignment
         from pltest.analysis import browser_phases
@@ -99,6 +117,28 @@ class AnalysisTests(unittest.TestCase):
         value = start_alignment(report)
         self.assertEqual(value['ps5_minus_browser_us'], [2700,2900])
         self.assertFalse(value['steady_state_comparable'])
+        from pltest.phases import bounded_alignment, steady_windows
+        report['phase_anchors'].update(
+            browser_end_probe={'coordinator_start_us':10000,'coordinator_end_us':10100,
+                'ack': {'command_id':'end-browser','browser_clock':{'run_id':'run','command_id':'end-browser','browser_now_ms':11}}},
+            ps5_end_probe={'coordinator_start_us':10200,'coordinator_end_us':10300,
+                'ack': {'run_id':'run','command_id':'end-ps5','command_action':'clock_probe',
+                        'command_result':'accepted','monotonic_us':14000}})
+        report['host_measurement'].update(measure_start_phase_id='run:measure-start', measure_end_phase_id='run:measure-end', reason='COMPLETE')
+        report['ps5_measurement']={'receipt':{'measure_start_phase_id':'run:measure-start','measure_end_phase_id':'run:measure-end','measurement_complete':True}}
+        value = bounded_alignment(report)
+        self.assertTrue(value['clock_drift_verified']); self.assertEqual(value['endpoint_drift_bounds_us'],[-200,200])
+        report['host_measurement'].update(measure_end_ms=12,
+            phase_events=[{'run_id':'run','phase':'low-motion','phase_id':'run:low-motion','browser_ms':2},
+                          {'run_id':'run','phase':'high-entropy','phase_id':'run:high-entropy','browser_ms':6}])
+        report['ps5_measurement']['receipt'].update(measure_start_monotonic_us=5000,measure_end_monotonic_us=15000)
+        windows=steady_windows(report,value)
+        self.assertEqual(windows[0]['start_ps5_us'],5000)
+        self.assertEqual(windows[0]['end_ps5_us'],8700)
+        self.assertEqual(windows[1]['start_ps5_us'],8900)
+        report['phase_anchors']['browser_end_probe']['ack']['browser_clock']['command_id']='wrong'
+        self.assertFalse(bounded_alignment(report)['steady_state_comparable'])
+
         report['phase_anchors']['ps5_start']['ack']['command_result'] = 'rejected'
         self.assertFalse(start_alignment(report)['verified'])
         host = {'measure_start_ms':100,'measure_end_ms':160,'intervals_ms':[10]*6,

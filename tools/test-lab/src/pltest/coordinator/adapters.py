@@ -208,6 +208,14 @@ class RealPs5CoordinatorAdapter:
             raise ValueError('PS5 status identity mismatch')
         return value
 
+    async def clock_probe(self, profile, cancel):
+        if cancel.is_set(): raise asyncio.CancelledError
+        run_id = profile['run_id']
+        status = await _blocking(self._read_status, run_id)
+        if 'clock_probe' not in status.get('capabilities', []):
+            return {'unsupported': True, 'reason': 'installed title lacks clock_probe capability'}
+        return await _blocking(self._command, run_id, 'clock_probe', 10)
+
     def _wait_stream_ready(self, current, timeout):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -411,6 +419,10 @@ class RealHostCoordinatorAdapter:
             raise RuntimeError('HOST_START_NOT_ACKNOWLEDGED')
         self.start_ack_monotonic = time.monotonic()
         return response
+
+    async def clock_probe(self, cancel):
+        if cancel.is_set(): raise asyncio.CancelledError
+        return await self.worker.command(self.run_id, 'clock_probe', timeout=10)
 
     async def measure(self, profile, cancel):
         if cancel.is_set():

@@ -241,7 +241,7 @@ class Scheduler:
                             else:
                                 await self.ps5.stage(stage, profile, cancel)
                         elif stage == 'MEASURE':
-                            report['host_measurement'] = await self.host.measure(profile, cancel)
+                            report['host_measurement'] = await self._measure_with_phase_anchors(profile, cancel, report)
                         elif stage == 'STOP_STREAM':
                             await self.ps5.stage(stage, profile, cancel)
                             await self.host.cleanup(profile)
@@ -345,6 +345,35 @@ class Scheduler:
             self.store.release(run_id)
             self.tasks.pop(run_id, None); self.cancellations.pop(run_id, None); self.lost_leases.discard(run_id)
             self.shutdown_requested.discard(run_id)
+
+    async def _measure_with_phase_anchors(self, profile, cancel, report):
+        if self.execution_mode != 'real':
+            return await self.host.measure(profile, cancel)
+        async def probe():
+            if not hasattr(self.ps5, 'clock_probe') or not hasattr(self.host, 'clock_probe'):
+                report.setdefault('phase_anchors', {})['end_probe_unsupported'] = True
+                return
+            timing = profile.get('timing', {})
+            duration = timing.get('warmup_seconds', 0) + timing.get('measure_seconds', 30)
+            start = getattr(self.host, 'start_ack_monotonic', time.monotonic())
+            await asyncio.sleep(max(0, start + duration - 3 - time.monotonic()))
+            anchors = report.setdefault('phase_anchors', {})
+            for name, operation in (('ps5_end_probe', self.ps5.clock_probe(profile, cancel)),
+                                    ('browser_end_probe', None)):
+                begin = time.monotonic_ns() // 1000
+                ack = await operation if operation is not None else await self.host.clock_probe(cancel)
+                anchors[name] = {'coordinator_start_us': begin,
+                    'coordinator_end_us': time.monotonic_ns() // 1000, 'ack': ack}
+                if ack.get('unsupported'): break
+        pending = asyncio.create_task(probe())
+        try:
+            value = await self.host.measure(profile, cancel)
+            await pending
+            return value
+        finally:
+            if not pending.done():
+                pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
 
     def _archive_report(self, run_id, profile, report):
         from ..analysis import analyze_run
