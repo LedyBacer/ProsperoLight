@@ -179,6 +179,8 @@ class Context
     }
     void fail(const char *reason);
     void negotiated(int format, int width, int height, int fps);
+    void backend_output(unsigned width, unsigned height, unsigned refresh_x100, unsigned pacing,
+                        bool vsync, bool hdr);
     void host_cleanup_confirmed()
     {
         host_cleanup_confirmed_.store(true);
@@ -205,6 +207,8 @@ class Context
     void *data_ = nullptr;
     moonlight_stream_options_t options_{};
     int format_ = 0, width_ = 0, height_ = 0, fps_ = 0;
+    unsigned output_width_ = 0, output_height_ = 0, output_refresh_ = 0, output_pacing_ = 0;
+    bool output_vsync_ = false, output_hdr_ = false;
     unsigned sequence_ = 2;
     uint64_t wall_started_ = 0;
     uint64_t unique_frames_ = 0;

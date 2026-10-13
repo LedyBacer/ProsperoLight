@@ -95,3 +95,25 @@ def native_effective_settings(performance):
             category='configured' if name == 'bitrate_ceiling_kbps' else 'effective',
             reason=None if verified else 'final renderer configuration snapshot missing')
     return result
+
+
+def backend_effective_settings(receipt, client):
+    evidence = receipt.get('backend_output') or {}
+    trusted = evidence.get('verified') is True and evidence.get('source') == 'PyroWave.backend.initialize.success'
+    result, issues = {}, []
+    for key in ('width', 'height', 'refresh_x100', 'pacing', 'vsync', 'hdr'):
+        value = evidence.get(key)
+        valid = trusted and (type(value) is bool if key in ('vsync', 'hdr') else
+                              type(value) is int and (value in (0,1,2) if key == 'pacing' else value > 0))
+        result['output_' + key] = dict(value=value if valid else None, verified=valid,
+            source=evidence.get('source') if valid else None, category='effective',
+            reason=None if valid else 'successful backend output configuration missing')
+        if not valid: issues.append('EFFECTIVE_FIELD_UNVERIFIED:output_' + key)
+    expected = dict(pacing={'unpaced':0,'paced':1,'vrr':2}.get(client.get('pacing')),
+                    hdr=client.get('hdr'), vsync=client.get('vsync') or client.get('pacing') == 'vrr')
+    for key, value in expected.items():
+        if result['output_' + key]['verified'] and evidence[key] != value:
+            issues.append('EFFECTIVE_FIELD_MISMATCH:output_' + key)
+    if result['output_refresh_x100']['verified'] and evidence['refresh_x100'] < client.get('fps', 0) * 100:
+        issues.append('OUTPUT_MODE_FALLBACK')
+    return result, issues

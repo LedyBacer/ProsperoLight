@@ -72,6 +72,8 @@ class CompareRequest(BaseModel):
     baseline: str | None = Field(default=None, pattern=r'^[0-9a-fA-F-]{36}$')
     candidate: str | None = Field(default=None, pattern=r'^[0-9a-fA-F-]{36}$')
     pairs: list[tuple[str, str]] = Field(default_factory=list, max_length=20)
+    calibration: bool = False
+    screening: dict[str, float | int] | None = None
 
     @model_validator(mode='after')
     def identities(self):

@@ -118,10 +118,12 @@ def artifacts(run_id: str): emit(request('GET', '/api/v1/runs/' + run_id + '/art
 
 
 @app.command()
-def compare(baseline: str = '', candidate: str = '', pairs: Path | None = typer.Option(None, exists=True, readable=True)):
+def compare(baseline: str = '', candidate: str = '', pairs: Path | None = typer.Option(None, exists=True, readable=True),
+            calibration: bool = False, screening: Path | None = typer.Option(None, exists=True, readable=True)):
     payload = {'pairs': json.loads(pairs.read_text())} if pairs else {'baseline': baseline, 'candidate': candidate}
     value = request('POST', '/api/v1/compare', json={'schema_version': 'prosperolight-test-lab-api/1',
-                                                     **payload})
+                                                     **payload, 'calibration':calibration,
+                                                     'screening':json.loads(screening.read_text()) if screening else None})
     emit(value); raise typer.Exit(exit_code(value.get('summary_verdict', value['verdict'])))
 
 
@@ -157,11 +159,14 @@ def prepare_variant(directory: Path = typer.Option(..., exists=True, file_okay=F
     try:
         root = manifest_root.resolve()
         identity = prebuilt(directory)
-        provenance_value = json.loads(provenance.read_bytes())
+        provenance_bytes = provenance.read_bytes()
+        provenance_value = json.loads(provenance_bytes)
         value = dict(schema='prosperolight-build-variant/1', source_sha=provenance_value['commit'],
             build_label=identity['build_label'], eboot_sha256=identity['eboot_sha256'],
             directory=directory.resolve().relative_to(root).as_posix(),
             provenance=provenance.resolve().relative_to(root).as_posix(),
+            provenance_sha256=hashlib.sha256(provenance_bytes).hexdigest(),
+            source_tree_sha256=provenance_value['source_sha256'],
             build_flags=definition_flags(provenance_value), profile=json.loads(profile.read_bytes()))
         value['files'] = {path.relative_to(directory).as_posix(): {
             'bytes':path.stat().st_size, 'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}

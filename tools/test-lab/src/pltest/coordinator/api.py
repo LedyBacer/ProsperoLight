@@ -190,7 +190,7 @@ def create_app(data_dir=None, scheduler=None, token=None):
     @app.post('/api/v1/compare')
     async def compare(body: CompareRequest):
         pairs = body.pairs or [(body.baseline, body.candidate)]
-        return compare_pairs([(run_or_404(a), run_or_404(b)) for a, b in pairs])
+        return compare_pairs([(run_or_404(a), run_or_404(b)) for a, b in pairs], body.calibration, body.screening)
 
     @app.websocket('/api/v1/ws')
     async def worker_ws(ws: WebSocket):

@@ -7,7 +7,7 @@ const status=document.querySelector('#status'),button=document.querySelector('#r
 const socket=new WebSocket(`ws://${location.host}/page`);
 let settings=null,textures=[],simple=null,prepared=false,running=false,report=null,start=0,last=0,count=0;
 let intervals=null,hidden=0,fullscreenLost=0,lastPulse=0,preparedHash=null,preflightFrames=[];
-let pendingReady=false,frameNumber=0,measureStarted=0;
+let pendingReady=false,frameNumber=0,measureStarted=0,startCommand=null,phaseEvents=[];
 function snapshot() {
   const elapsed=preflightFrames.length>1?preflightFrames.at(-1)-preflightFrames[0]:0;
   return {visibility:document.visibilityState,focused:document.hasFocus(),fullscreen:!!document.fullscreenElement,
@@ -22,12 +22,12 @@ async function prepare(s) {
   document.title='ProsperoLight Test Lab '+s.run_id;
   const fresh=canvas.cloneNode(false);canvas.replaceWith(fresh);canvas=fresh;
   canvas.width=s.render_width??s.width;canvas.height=s.render_height??s.height;textures=[];gpuScene=null;
+  intervals=new Float64Array(Math.min(250000,Math.ceil((s.seconds+s.warmup_seconds+5)*240)));
   if(s.scene==='gpu-entropy') {
     gpuScene=new PLTestGpuScene(canvas,s);ctx=null;gpuScene.draw(0);
     const bytes=await crypto.subtle.digest('SHA-256',gpuScene.sample());
     preparedHash=Array.from(new Uint8Array(bytes),v=>v.toString(16).padStart(2,'0')).join('');
   } else {ctx=canvas.getContext('2d',{alpha:false});
-  intervals=new Float64Array(Math.min(250000,Math.ceil((s.seconds+s.warmup_seconds+5)*240)));
   for(let n=0;n<4;n++) {
     const t=document.createElement('canvas');t.width=s.width;t.height=s.height;
     const image=t.getContext('2d').createImageData(s.width,s.height);
@@ -76,7 +76,7 @@ function finish(reason) {
     raf_fps:elapsed?count*1000/elapsed:0,hidden_events:hidden,fullscreen_lost:fullscreenLost,
     interval_overflow:count===intervals.length,reason,pixel_sample_sha256:preparedHash,
     browser_origin_ms:start,measure_start_ms:measureStarted,measure_end_ms:performance.now(),
-    phases:settings.scene==='decoder-regression'?[{scene:'warmup',start_s:0,end_s:10},{scene:'low-motion',start_s:10,end_s:30},{scene:'noise',start_s:30,end_s:70},{scene:'recovery',start_s:70,end_s:90}]:null,
+    start_command_id:startCommand,phase_events:phaseEvents,
     gpu_workload:gpuScene?gpuScene.statistics():{supported:false,reason:'compatibility Canvas scene selected'},
     snapshot:snapshot(),user_agent:navigator.userAgent,clock:'browser_performance_now_raf_callback'};
   send(report);status.textContent='Finished: '+reason;button.disabled=false;
@@ -91,6 +91,11 @@ function tick(now) {
       const elapsed=(now-start)/1000;
       if(elapsed>=settings.warmup_seconds+settings.seconds)finish('COMPLETE');
       else {
+        const measured=elapsed-settings.warmup_seconds;
+        const phase=measured<0?'warmup':settings.scene==='decoder-regression'?
+          (measured<20?'low-motion':measured<60?'high-entropy':'recovery'):'measure';
+        if(!phaseEvents.length||phaseEvents.at(-1).phase!==phase)
+          phaseEvents.push({phase,phase_id:settings.run_id+':'+phase,browser_ms:now});
         if(elapsed>=settings.warmup_seconds) {
           if(!measureStarted)measureStarted=now;
           else if(last&&count<intervals.length)intervals[count++]=now-last;
@@ -116,7 +121,8 @@ socket.onmessage=async event=>{
     if(data.action==='start') {
       if(!settings||running||document.hidden||!document.fullscreenElement)throw Error('not Ready');
       running=true;start=performance.now();last=0;count=0;hidden=0;fullscreenLost=0;frameNumber=0;measureStarted=0;
-      document.body.classList.add('running');send({type:'started',run_id:settings.run_id});
+      startCommand=data.command_id;phaseEvents=[];if(gpuScene)gpuScene.draws=0;
+      document.body.classList.add('running');send({type:'started',run_id:settings.run_id,command_id:startCommand,browser_origin_ms:start});
     }
     if(data.action==='stop')finish('STOP_REQUESTED');
   } catch(e){send({type:'error',run_id:settings?.run_id,reason:String(e.message)});}

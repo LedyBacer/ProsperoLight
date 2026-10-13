@@ -16,13 +16,17 @@ from pltest.report import archive_analysis
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run_fixture(fps=60, age=3000, ready=1500):
+def run_fixture(fps=60, age=3000, ready=1500, variant='a'):
     return {'run_id': str(uuid.uuid4()), 'profile': {'profile': {
-        'source_sha': 'a'*40, 'build_label': 'test-lab-fixture',
+        'source_sha': variant*40, 'build_label': 'test-lab-fixture-' + variant,
         'client': {'codec': 'hevc', 'fps': 60},
         'analysis_environment': dict(verified=True, firmware='x', host_version='v1',
             encoder_settings={'codec':'hevc'}, network_class='wired', build_flags={'TEST_LAB':1}, renderer='native')}},
-        'report': {'execution_mode':'real', 'host_measurement': {
+        'report': {'execution_mode':'real', 'ps5_measurement': {
+            'installed_identity_verified':True,
+            'installed':{'build_label':'test-lab-fixture-' + variant,'eboot_sha256':variant*64},
+            'build_variant':{'source_sha':variant*40,'build_label':'test-lab-fixture-' + variant,'eboot_sha256':variant*64}},
+            'host_measurement': {
             'selected_display':{'id':'virtual', 'width':1920, 'height':1080,'refresh_hz':240},
             'scene':'low-motion','seed':137,'content_sha256':'a'*64,'pixel_sample_sha256':'b'*64},
             'analysis': {'functional_verdict':'PASS','measurement_validity':'VALID','trace':{'omitted':0},
@@ -30,6 +34,55 @@ def run_fixture(fps=60, age=3000, ready=1500):
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_pyrowave_effective_output_fallback_and_unavailable(self):
+        from pltest.session_evidence import backend_effective_settings
+        client = dict(fps=120, hdr=True, vsync=False, pacing='vrr')
+        receipt = {'backend_output': dict(source='PyroWave.backend.initialize.success', verified=True,
+            width=3840,height=2160,refresh_x100=12000,pacing=2,vsync=True,hdr=True)}
+        self.assertEqual(backend_effective_settings(receipt,client)[1], [])
+        receipt['backend_output']['refresh_x100'] = 6000
+        self.assertIn('OUTPUT_MODE_FALLBACK',backend_effective_settings(receipt,client)[1])
+        receipt['backend_output']['hdr'] = False
+        self.assertIn('EFFECTIVE_FIELD_MISMATCH:output_hdr',backend_effective_settings(receipt,client)[1])
+        self.assertEqual(len(backend_effective_settings({},client)[1]), 6)
+
+    def test_progress_detects_freeze_starvation_static_and_recovery(self):
+        from pltest.progress import progress_diagnostics
+        incoming = list(range(0, 5000000, 100000))
+        complete = list(range(0, 2000000, 100000))
+        result = progress_diagnostics(0, 5000000, incoming, complete, 'gpu-entropy')
+        self.assertEqual(result['classification'], 'CLIENT_PRESENTATION_STALL')
+        self.assertEqual(result['completed']['longest_no_progress_us'], 3100000)
+        self.assertEqual(progress_diagnostics(0, 5000000, complete, complete, 'noise')['classification'],
+                         'INPUT_STARVATION_OR_HOST_REDUCED_CAPTURE')
+        self.assertEqual(progress_diagnostics(0, 5000000, incoming, complete, 'static-keepalive')['classification'],
+                         'STATIC_CONTENT_OR_STALL_UNRESOLVED')
+        recovered = complete + list(range(3500000, 5000000, 100000))
+        self.assertEqual(progress_diagnostics(0, 5000000, incoming, recovered, 'noise')['completed']['stall_count'], 1)
+        self.assertEqual(progress_diagnostics(0, 5000000, incoming, incoming, 'noise')['classification'], 'CONTINUOUS')
+
+    def test_phase_ack_bounds_and_transition_exclusion(self):
+        from pltest.phases import start_alignment
+        from pltest.analysis import browser_phases
+        report = {'run_id': 'run', 'host_measurement': {'start_command_id': 'browser'}, 'phase_anchors': {
+            'browser_start': {'coordinator_start_us':1000,'coordinator_end_us':1100,
+                'ack': {'browser_start': {'run_id':'run','command_id':'browser','browser_origin_ms':2}}},
+            'ps5_start': {'coordinator_start_us':1200,'coordinator_end_us':1300,
+                'ack': {'run_id':'run','command_id':'ps5','command_action':'start_measure',
+                        'command_result':'accepted','monotonic_us':5000}}}}
+        value = start_alignment(report)
+        self.assertEqual(value['ps5_minus_browser_us'], [2700,2900])
+        self.assertFalse(value['steady_state_comparable'])
+        report['phase_anchors']['ps5_start']['ack']['command_result'] = 'rejected'
+        self.assertFalse(start_alignment(report)['verified'])
+        host = {'measure_start_ms':100,'measure_end_ms':160,'intervals_ms':[10]*6,
+                'phase_events':[{'phase':'warmup','browser_ms':0,'phase_id':'run:warmup'},
+                                {'phase':'low-motion','browser_ms':100,'phase_id':'run:low'},
+                                {'phase':'high-entropy','browser_ms':125,'phase_id':'run:high'}]}
+        phases = browser_phases(host)
+        self.assertEqual([p['interval_ms']['count'] for p in phases], [2,2])
+        self.assertEqual(phases[0]['excluded_transition_intervals'], 2)
+
     def test_negotiation_requires_callback_identity_and_every_material_field(self):
         from pltest.session_evidence import validate_negotiation
         client = dict(codec='hevc', hdr=False, chroma='420', resolution='1080p', fps=60, bitrate_mbps=20)
@@ -76,7 +129,18 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(classify(report)['overall_verdict'], 'SIMULATED')
 
     def pairs(self, fps=60, age=3000):
-        return [(run_fixture(),run_fixture(fps,age)) for _ in range(3)]
+        return [(run_fixture(),run_fixture(fps,age,variant='b')) for _ in range(3)]
+
+    def test_binary_identity_calibration_and_thresholds(self):
+        pairs = [(run_fixture(),run_fixture()) for _ in range(3)]
+        self.assertEqual(compare_pairs(pairs)['reason_code'],'DISTINCT_BUILDS_REQUIRED')
+        self.assertTrue(compare_pairs(pairs,calibration=True)['screening_usable'])
+        pairs = [(run_fixture(),run_fixture(55)) for _ in range(3)]
+        self.assertFalse(compare_pairs(pairs,calibration=True)['screening_usable'])
+        self.assertEqual(compare_pairs(self.pairs(),screening={'fps_drop_fraction':float('nan')})['reason_code'],
+                         'SCREENING_CONFIGURATION_INVALID')
+        pairs=self.pairs();pairs[0][1]['report']['ps5_measurement']['installed']['eboot_sha256']='c'*64
+        self.assertEqual(compare_pairs(pairs)['reason_code'],'BUILD_IDENTITY_UNVERIFIED')
 
     def test_three_pairs_regression_and_improvement_screening(self):
         self.assertEqual(compare_pairs(self.pairs(57))['performance_delta'],'REGRESSED')

@@ -143,7 +143,7 @@ class RealPs5CoordinatorAdapter:
                                    profile.get('timing', {}).get('ready_seconds', 30) +
                                    profile.get('timing', {}).get('startup_seconds', 30) + 15)
         elif stage == 'WARMUP':
-            await _blocking(self._command, run_id, 'start_measure',
+            return await _blocking(self._command, run_id, 'start_measure',
                             profile.get('timing', {}).get('ready_seconds', 30))
         elif stage == 'COOLDOWN':
             await _blocking(self._wait_receipt, current,
@@ -196,7 +196,10 @@ class RealPs5CoordinatorAdapter:
 
     def _command(self, run_id, action, timeout):
         with self.ps5.connect() as ftp:
-            return control_run.command(ftp, run_id, action, timeout=timeout)
+            status = control_run.command(ftp, run_id, action, timeout=timeout)
+        if status.get('command_result') != 'accepted':
+            raise RuntimeError('PS5_COMMAND_REJECTED:' + action)
+        return status
 
     def _read_status(self, run_id):
         with self.ps5.connect() as ftp:
@@ -279,6 +282,7 @@ class RealPs5CoordinatorAdapter:
             self.ps5.host, self.ps5.manager_port, receipt.get('pid')))
         return {'receipt': receipt, 'artifact_index': index, 'title_exit_verified': exited,
                 'stale_artifacts': stale, 'installed': current['state'].get('installed'),
+                'installed_identity_verified': True, 'installed_identity_source': 'leased FTP eboot and label readback before launch',
                 'build_variant': current['state'].get('build_variant')}
 
     async def cleanup(self, profile):

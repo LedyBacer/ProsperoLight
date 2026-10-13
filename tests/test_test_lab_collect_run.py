@@ -63,6 +63,8 @@ class CollectionTests(unittest.TestCase):
             p = Path(directory)
             result = collector.collect(Fake(), 'run', p / 'valid', 1)
             self.assertEqual(result['run_id'], 'run')
+            receipt['schema'] = 'prosperolight-test-receipt/2'
+            self.assertEqual(collector.collect(Fake(), 'run', p / 'valid-v2', 1)['schema'], receipt['schema'])
             self.assertEqual((p / 'valid/performance-last.json').read_bytes(), b'{}')
             with self.assertRaises(FileExistsError): collector.collect(Fake(), 'run', p / 'valid', 1)
             receipt['run_id'] = 'different'

@@ -4,6 +4,7 @@
 import hashlib
 import json
 import math
+import re
 import statistics
 
 from .suites import DEFINITIONS
@@ -25,6 +26,7 @@ def fingerprint(profile, report):
     value = {'environment': {k: environment.get(k) for k in REQUIRED_ENVIRONMENT},
              'stream': client, 'display': {k: display.get(k) for k in required_display},
              'stimulus': {k: host.get(k) for k in ('content_sha256', 'pixel_sample_sha256', 'seed', 'scene')},
+             'workload': profile.get('host_stimulus', {}),
              'timing': {k: profile.get('timing', {}).get(k) for k in ('warmup_seconds', 'measure_seconds')},
              'detail': (report.get('analysis') or {}).get('trace', {}).get('omitted')}
     return {'value': value, 'missing': missing,
@@ -32,20 +34,52 @@ def fingerprint(profile, report):
             'source_sha': profile.get('source_sha'), 'build_label': profile.get('build_label')}
 
 
-def compare_pairs(pairs):
+def build_identity(profile, report):
+    ps5 = report.get('ps5_measurement') or {}
+    installed, variant = ps5.get('installed') or {}, ps5.get('build_variant') or {}
+    identity = dict(source_sha=profile.get('source_sha'), build_label=installed.get('build_label'),
+                    eboot_sha256=installed.get('eboot_sha256'))
+    if (ps5.get('installed_identity_verified') is not True or
+        not re.fullmatch(r'[0-9a-f]{40}', identity['source_sha'] or '') or
+        not re.fullmatch(r'[0-9a-f]{64}', identity['eboot_sha256'] or '') or
+        not identity['build_label'] or identity['build_label'] != profile.get('build_label') or
+        any(variant.get(key) != value for key,value in identity.items())):
+        raise ValueError('BUILD_IDENTITY_UNVERIFIED')
+    return identity
+
+
+def compare_pairs(pairs, calibration=False, screening=None):
+    result = _compare_pairs(pairs, calibration, screening)
+    result['overall_verdict'] = result['summary_verdict'] = result['verdict']
+    result['execution_state'] = 'COMPLETED'
+    return result
+
+
+def _compare_pairs(pairs, calibration=False, screening=None):
     result = {'schema_version': 'prosperolight-test-comparison/1', 'verdict': 'INCONCLUSIVE',
               'functional_verdict': 'INCONCLUSIVE', 'measurement_validity': 'INCONCLUSIVE',
               'performance_delta': 'NOT_COMPARABLE', 'reason_code': None, 'pairs': [],
-              'screening': DEFINITIONS['screening'], 'limitations': [
+              'screening': dict(DEFINITIONS['screening']), 'calibration': calibration, 'limitations': [
                   'Paired screening heuristics are not statistical proof.',
                   'Run interleaved A/B pairs; distribution and ordered drift are reported.',
                   'Build/source identities are recorded separately; changed code is allowed only with identical build flags/environment.']}
-    if len(pairs) < DEFINITIONS['screening']['minimum_pairs']:
+    if screening:
+        if not isinstance(screening, dict) or set(screening) - set(result['screening']):
+            result['reason_code'] = 'SCREENING_CONFIGURATION_INVALID'; return result
+        for key,value in screening.items():
+            if (type(value) not in (int,float) or not math.isfinite(value) or value <= 0 or
+                    key == 'minimum_pairs' and (type(value) is not int or not 3 <= value <= 20) or
+                    key.endswith('fraction') and value >= 1):
+                result['reason_code'] = 'SCREENING_CONFIGURATION_INVALID'; return result
+        result['screening'].update(screening)
+    if len(pairs) < result['screening']['minimum_pairs']:
         result['reason_code'] = 'INSUFFICIENT_REPEAT_PAIRS'; return result
     seen = set(); expected = None
     latency_keys = None
+    expected_builds = [None, None]
     for a, b in pairs:
-        for run in (a, b):
+        identities = []
+        for side, run in enumerate((a, b)):
             rid = run['run_id']
             if rid in seen:
                 result['reason_code'] = 'REUSED_RUN_IN_PAIRS'; return result
@@ -58,12 +92,23 @@ def compare_pairs(pairs):
                 result.update(verdict='FAIL', functional_verdict='FAIL', reason_code='FUNCTIONAL_FAILURE'); return result
             if report.get('execution_mode') != 'real' or analysis.get('measurement_validity') != 'VALID':
                 result['reason_code'] = 'INVALID_MEASUREMENT'; return result
+            try:
+                identity = build_identity(profile, report)
+            except ValueError as exc:
+                result['reason_code'] = str(exc); return result
+            if expected_builds[side] is None: expected_builds[side] = identity
+            if expected_builds[side] != identity:
+                result['reason_code'] = 'BUILD_CHANGED_WITHIN_VARIANT'; return result
+            identities.append(identity)
             fp = fingerprint(profile, report)
             if fp['missing']:
                 result.update(reason_code='FINGERPRINT_INCOMPLETE', missing=fp['missing']); return result
             if expected is None: expected = fp['sha256']
             if expected != fp['sha256']:
                 result['reason_code'] = 'ENVIRONMENT_MISMATCH'; return result
+        equal = identities[0]['eboot_sha256'] == identities[1]['eboot_sha256']
+        if calibration and identities[0] != identities[1] or not calibration and (equal or identities[0]['source_sha'] == identities[1]['source_sha']):
+            result['reason_code'] = 'CALIBRATION_REQUIRES_SAME_BUILD' if calibration else 'DISTINCT_BUILDS_REQUIRED'; return result
         am, bm = a['report']['analysis']['metrics'], b['report']['analysis']['metrics']
         latency_keys = ('ready_to_submit_us', 'submit_to_post_present_observation_us') if a['profile']['profile']['client']['codec'] == 'pyrowave' else ('frame_age_us', 'callback_to_ready_us')
         metrics = {}
@@ -74,8 +119,7 @@ def compare_pairs(pairs):
                 result['reason_code'] = 'METRIC_UNAVAILABLE'; return result
             metrics[key] = {'baseline': av, 'candidate': bv, 'delta': bv-av, 'fraction': (bv-av)/av}
         result['pairs'].append({'baseline': a['run_id'], 'candidate': b['run_id'], 'metrics': metrics,
-            'baseline_identity': {k:a['profile']['profile'].get(k) for k in ('source_sha','build_label')},
-            'candidate_identity': {k:b['profile']['profile'].get(k) for k in ('source_sha','build_label')}})
+            'baseline_identity': identities[0], 'candidate_identity': identities[1]})
     screening = result['screening']; summaries = {}
     for key in ('unique_presented_fps', *latency_keys):
         vals = [p['metrics'][key] for p in result['pairs']]
@@ -85,6 +129,15 @@ def compare_pairs(pairs):
                           'baseline_first_to_last': vals[-1]['baseline']-vals[0]['baseline'],
                           'candidate_first_to_last': vals[-1]['candidate']-vals[0]['candidate']}
     fps = summaries['unique_presented_fps']['median_fraction']
+    if calibration:
+        noise = {key: max(abs(value) for value in metric['ordered_fractions']) for key,metric in summaries.items()}
+        usable = noise['unique_presented_fps'] <= screening['fps_drop_fraction'] and all(
+            noise[key] <= screening['latency_increase_fraction'] or abs(summaries[key]['median_delta']) <= screening['latency_increase_us']
+            for key in latency_keys)
+        result.update(verdict='PASS' if usable else 'INCONCLUSIVE', functional_verdict='PASS',
+            measurement_validity='VALID', performance_delta='CALIBRATION', reason_code='AA_NOISE_CALIBRATION',
+            metrics=summaries, noise_floor_fraction=noise, screening_usable=usable, sample_pairs=len(pairs))
+        return result
     regression = fps < -screening['fps_drop_fraction']
     improved = fps > screening['fps_drop_fraction']
     for key in latency_keys:

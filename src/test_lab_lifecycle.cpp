@@ -40,6 +40,8 @@ bool Context::begin(const TestProfile &profile)
     data_ = nullptr;
     options_ = {};
     format_ = width_ = height_ = fps_ = 0;
+    output_width_ = output_height_ = output_refresh_ = output_pacing_ = 0;
+    output_vsync_ = output_hdr_ = false;
     unique_frames_ = 0;
     wall_started_ = uint64_t(time(nullptr));
     const char *baseline_names[] = {"performance-last.json",        "debug-trace.txt",
@@ -110,6 +112,18 @@ void Context::negotiated(int format, int width, int height, int fps)
     width_ = width;
     height_ = height;
     fps_ = fps;
+    pthread_mutex_unlock(&mutex_);
+}
+void Context::backend_output(unsigned width, unsigned height, unsigned refresh_x100,
+                             unsigned pacing, bool vsync, bool hdr)
+{
+    pthread_mutex_lock(&mutex_);
+    output_width_ = width;
+    output_height_ = height;
+    output_refresh_ = refresh_x100;
+    output_pacing_ = pacing;
+    output_vsync_ = vsync;
+    output_hdr_ = hdr;
     pthread_mutex_unlock(&mutex_);
 }
 void Context::fail(const char *reason)
@@ -281,6 +295,15 @@ bool Context::finish(const moonlight_stream_metrics_t *metrics, int result)
                      format_, width_, height_, fps_) > 0;
         else
             ok = ok && std::fputs(",\"negotiated\":null", f) >= 0;
+        if (output_width_ && output_height_ && output_refresh_)
+            ok =
+                ok && std::fprintf(
+                          f,
+                          ",\"backend_output\":{\"source\":\"PyroWave.backend.initialize.success\","
+                          "\"verified\":true,\"width\":%u,\"height\":%u,\"refresh_x100\":%u,"
+                          "\"pacing\":%u,\"vsync\":%s,\"hdr\":%s}",
+                          output_width_, output_height_, output_refresh_, output_pacing_,
+                          output_vsync_ ? "true" : "false", output_hdr_ ? "true" : "false") > 0;
         ok = ok && std::fprintf(f, ",\"paired_host_cleanup_confirmed\":%s",
                                 host_cleanup_confirmed_.load() ? "true" : "false") > 0;
         ok = ok && std::fprintf(f, ",\"paired_host_exit_cleanup_confirmed\":%s",

@@ -181,8 +181,10 @@ class FakeWorkerSession(unittest.IsolatedAsyncioTestCase):
                 await page_socket.send_json({'type': 'prepared', 'run_id': run_id})
                 await page_socket.send_json({'type': 'heartbeat', 'run_id': run_id, 'snapshot': page})
                 await page_socket.send_json({'type': 'ready', 'run_id': run_id, 'snapshot': page})
-                self.assertEqual((await page_socket.receive_json(timeout=5))['action'], 'start')
-                await page_socket.send_json({'type': 'started', 'run_id': run_id})
+                start = await page_socket.receive_json(timeout=5)
+                self.assertEqual(start['action'], 'start')
+                await page_socket.send_json({'type': 'started', 'run_id': run_id,
+                                            'command_id': start['command_id'], 'browser_origin_ms': 100})
                 await page_socket.send_json({'type': 'report', 'run_id': run_id, 'reason': 'COMPLETE',
                     'intervals_ms': [1000 / 60] * 120, 'measured_intervals': 120, 'raf_fps': 999,
                     'rendered_frames': 121, 'hidden_events': 0, 'fullscreen_lost': 0, 'interval_overflow': False})

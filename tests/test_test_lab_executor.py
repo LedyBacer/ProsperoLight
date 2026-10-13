@@ -51,12 +51,14 @@ class ExecutorTests(unittest.TestCase):
             (app / 'eboot.bin').write_bytes(b'baseline')
             (app / 'build-label.txt').write_text('test-lab-baseline\n')
             identity = hashlib.sha256(b'baseline').hexdigest()
-            provenance = dict(commit='a'*40, eboot_sha256=identity,
+            provenance = dict(commit='a'*40, eboot_sha256=identity, source_sha256='d'*64,
                 definitions=['PROSPEROLIGHT_TEST_LAB=1', 'PROSPEROLIGHT_PERFORMANCE_DETAIL=1'])
             (root / 'provenance.json').write_text(json.dumps(provenance))
             value = dict(schema='prosperolight-build-variant/1', source_sha='a'*40,
                 eboot_sha256=identity, build_label='test-lab-baseline', directory='baseline',
                 provenance='provenance.json', build_flags={'TEST_LAB':1, 'PERFORMANCE_DETAIL':1},
+                provenance_sha256=hashlib.sha256((root/'provenance.json').read_bytes()).hexdigest(),
+                source_tree_sha256='d'*64,
                 files={p.name:dict(bytes=p.stat().st_size, sha256=hashlib.sha256(p.read_bytes()).hexdigest())
                        for p in app.iterdir()})
             self.assertEqual(validate_variant(value, root)['eboot_sha256'], identity)

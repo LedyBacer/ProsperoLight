@@ -28,6 +28,20 @@ def profile(**extra):
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_ps5_rejected_control_ack_and_public_prepare_command(self):
+        from unittest.mock import MagicMock
+        from pltest.cli import main
+        with patch.object(sys, 'argv', ['pltest', 'prepare-variant', '--help']), \
+                patch('pltest.coordinator.cli.main', return_value=0) as cli:
+            self.assertEqual(main(), 0)
+            cli.assert_called_once_with(['prepare-variant', '--help'])
+        with tempfile.TemporaryDirectory() as folder:
+            adapter = RealPs5CoordinatorAdapter('fake', 'probe', 'launch', 'a'*64, folder)
+            adapter.ps5.connect = MagicMock()
+            with patch('pltest.coordinator.adapters.control_run.command', return_value={'command_result':'rejected'}):
+                with self.assertRaisesRegex(RuntimeError, 'PS5_COMMAND_REJECTED:start_measure'):
+                    adapter._command('run', 'start_measure', 1)
+
     def test_variant_deployment_verifies_identity_and_retains_uncertain_lease(self):
         import asyncio
         from contextlib import contextmanager
@@ -311,6 +325,9 @@ int main(void) {
             store.restore_reports()
             path = store.artifact_path(run['run_id'], 'report.json')
             self.assertEqual(json.loads(path.read_text()), good)
+            import hashlib
+            manifest = json.loads((path.parent/'manifest.json').read_text())
+            self.assertEqual(manifest['files']['report.json']['sha256'], hashlib.sha256(path.read_bytes()).hexdigest())
             hidden = store.report_artifact(run['run_id'], good)
             self.assertIsNone(store.artifact_path(run['run_id'], hidden.name))
 

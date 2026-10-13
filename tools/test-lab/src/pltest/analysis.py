@@ -65,6 +65,8 @@ def analyze_run(profile, report, directory):
               'issues': [], 'metrics': {}, 'windows': [], 'clock_semantics': CLOCKS,
               'backend': profile.get('client', {}).get('codec'), 'simulated': report.get('execution_mode') != 'real'}
     issues = result['issues']
+    from .phases import start_alignment
+    result['phase_alignment'] = start_alignment(report)
     if str(report.get('reason_code', '')).startswith('UNSUPPORTED'):
         result['measurement_validity'] = 'UNSUPPORTED'
     if result['simulated']:
@@ -84,6 +86,10 @@ def analyze_run(profile, report, directory):
     if not receipt.get('artifacts_complete'): issues.append('ARTIFACTS_INCOMPLETE')
     artifact_dir = Path(directory) / 'ps5' / 'artifacts'
     if profile.get('client', {}).get('codec') == 'pyrowave':
+        from .session_evidence import backend_effective_settings
+        backend_fields, backend_issues = backend_effective_settings(receipt, profile['client'])
+        result['session_settings'].update(backend_fields)
+        issues.extend(backend_issues)
         try:
             result['pyrowave'] = analyze_pyrowave(artifact_dir, receipt, profile)
             begin, end = receipt['measure_start_monotonic_us'], receipt['measure_end_monotonic_us']
@@ -110,6 +116,12 @@ def analyze_run(profile, report, directory):
         name = receipt.get('trace', {}).get('name', '')
         if not re.fullmatch(r'performance-frames-mode[012]\.csv', name):
             raise ValueError('missing supported trace')
+        pacing = int(name.removesuffix('.csv')[-1])
+        result['session_settings']['output_pacing'] = dict(value=pacing, verified=True,
+            source='final renderer trace filename', category='effective', reason=None)
+        requested_pacing = profile.get('client', {}).get('pacing')
+        if requested_pacing is not None and pacing != {'unpaced':0,'paced':1,'vrr':2}.get(requested_pacing):
+            issues.append('EFFECTIVE_FIELD_MISMATCH:output_pacing')
         data = read_bounded(artifact_dir / name)
         rows, omitted = parse_trace(data)
         if omitted: issues.append('TRACE_TRUNCATED')
@@ -157,6 +169,14 @@ def analyze_run(profile, report, directory):
         metrics = result['metrics']
         metrics['measurement_seconds'] = span
         metrics['unique_presented_fps'] = len(completions) / span
+        from .progress import progress_diagnostics
+        result['progress'] = progress_diagnostics(begin, end,
+            [r['callback_us'] for r in samples], completions, host.get('scene'))
+        if result['progress']['classification'] == 'CLIENT_PRESENTATION_STALL':
+            result['functional_verdict'] = 'FAIL'
+            issues.append('CLIENT_PRESENTATION_STALL')
+        elif result['progress']['classification'] != 'CONTINUOUS':
+            issues.append(result['progress']['classification'])
         if not completions:
             result['functional_verdict'] = 'FAIL'; issues.append('ZERO_PRESENTED_MEASURED_FRAMES')
         metrics['received_fps'] = len(samples) / span
@@ -212,19 +232,51 @@ def analyze_pyrowave(directory, receipt, profile):
 
 
 def browser_phases(host):
-    """Only browser-local intervals; boundaries are approximate at one rAF interval."""
+    """Intervals crossing observed phase transitions are excluded."""
     intervals = host.get('intervals_ms', [])
     if not isinstance(intervals, list) or len(intervals) > 250000:
         raise ValueError('browser interval limit')
-    phases = [('simple', 0, 20), ('noise-motion', 20, 60), ('recovery', 60, 80)] if host.get('scene') == 'decoder-regression' else [('measure',0,float('inf'))]
-    elapsed = 0; samples = {name: [] for name,_,_ in phases}
+    events = host.get('phase_events') or []
+    observed = bool(events)
+    origin = host.get('measure_start_ms', 0)
+    if type(origin) not in (int,float) or not math.isfinite(origin):
+        raise ValueError('browser measurement origin unavailable')
+    if observed:
+        if len(events) > 16: raise ValueError('browser phase limit')
+        previous = -float('inf')
+        phases = []
+        for event in events:
+            point = event.get('browser_ms')
+            if type(point) not in (int,float) or not math.isfinite(point) or point < previous:
+                raise ValueError('browser phase boundaries invalid')
+            previous = point
+            if event.get('phase') != 'warmup':
+                phases.append((event['phase'], point, event.get('phase_id')))
+        end = host.get('measure_end_ms')
+        if type(end) not in (int,float) or not math.isfinite(end) or end < previous:
+            raise ValueError('browser measurement end invalid')
+        bounds = [(name,start,phases[i+1][1] if i+1<len(phases) else end,identity)
+                  for i,(name,start,identity) in enumerate(phases)]
+    else:
+        schedule = [('low-motion',0,20),('high-entropy',20,60),('recovery',60,80)] if host.get('scene') == 'decoder-regression' else [('measure',0,float('inf'))]
+        bounds = [(name,origin+start*1000,origin+end*1000,None) for name,start,end in schedule]
+    elapsed = origin
+    samples = {name: [] for name,_,_,_ in bounds}
+    excluded = 0
     for interval in intervals:
         if type(interval) not in (int,float) or not math.isfinite(interval) or not 0 < interval <= 60000:
             raise ValueError('invalid browser interval')
-        elapsed += interval/1000
-        for name, start, end in phases:
-            if start <= elapsed < end: samples[name].append(interval)
-    return [{'phase': name, 'interval_ms': distribution(values),
-             'raf_fps':len(values)*1000/sum(values) if values else None,
-             'clock':'browser-local approximate rAF boundary; not synchronized to PS5'}
-            for name,values in samples.items()]
+        end = elapsed + interval
+        matched = False
+        for name,start,finish,_ in bounds:
+            if start <= elapsed and end < finish:
+                samples[name].append(interval); matched = True; break
+        if not matched: excluded += 1
+        elapsed = end
+    return [{'phase': name, 'phase_id': identity, 'start_browser_ms': start,
+             'end_browser_ms': finish if math.isfinite(finish) else None,
+             'boundaries_verified': observed, 'excluded_transition_intervals': excluded,
+             'interval_ms': distribution(samples[name]),
+             'raf_fps':len(samples[name])*1000/sum(samples[name]) if samples[name] else None,
+             'clock':'browser-local observed rAF boundaries; PS5 clock drift remains unverified'}
+            for name,start,finish,identity in bounds]

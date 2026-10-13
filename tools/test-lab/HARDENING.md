@@ -47,8 +47,9 @@ preserved. API run views expose separate classifications without rewriting them.
 - Real 1080p60 acceptance followed by supported advanced modes.
 - Single-command three-pair physical A/B across two source commits.
 
-No hardware run has validated these new changes yet. The earlier PR7 receipts
-are historical evidence and do not satisfy this task's acceptance scenario.
+The current physical acceptance checkpoint below validates one new native smoke.
+The earlier PR7 receipts remain historical evidence and do not satisfy this task's
+new acceptance scenario. Advanced modes and cross-build acceptance remain pending.
 
 ## Prepared cross-build workflow
 
@@ -137,3 +138,68 @@ isolated GPU encode duration or encoder adapter identity.
 A scoped token has been provisioned and real authenticated idle inventory
 confirmed on the configured host. This is API validation, not hardware benchmark
 acceptance of the new workload or cross-build comparison.
+
+## Phase and continuous-progress evidence
+
+Worker start acknowledgements include a browser-local timestamp and a matching
+page command ID. The coordinator archives both start ACKs with coordinator
+monotonic request/response bounds. `phase_alignment` reports an interval for
+PS5 minus browser time, including command delivery uncertainty. It does not
+claim end-to-end clock drift verification; cross-clock steady-state phase
+comparisons remain unavailable until an independent end anchor is recorded.
+Browser reports use explicit run-qualified phase IDs and observed rAF boundaries.
+Intervals crossing a transition are excluded from browser-local phase statistics.
+Warmup duration comes from the profile rather than a fixed ten-second label.
+
+Native traces now include longest received/completed no-progress intervals,
+frame-gap distributions and stall frequency including measurement edges. One
+second without completion while callbacks continue is a client presentation
+stall. Missing callbacks remains input starvation or reduced host capture;
+static content remains explicitly ambiguous. A few early frames followed by a
+freeze cannot produce VALID evidence. PyroWave completion continuity still needs
+backend-specific observation evidence; its post-present CPU timestamps must not
+be substituted for unique completed-picture times.
+
+PyroWave receipts additionally record successful backend output initialization:
+accepted swapchain extent, display-mode refresh, FIFO/immediate behavior, HDR
+colorspace and pacing policy. These fields describe driver configuration, not
+physical HDR/VRR scanout. Missing fields or a 120-to-60 Hz fallback are rejected.
+Native pacing is verified from the final renderer trace mode.
+
+## Binary identity and A/A screening
+
+Variant manifests bind the complete provenance file SHA256 and source-tree digest
+as well as source commit, compiler definitions and every deployed file. Comparisons
+require confirmed installed identity matching the selected build variant, stable
+identity across repetitions, and different commits and binaries for A/B.
+`pltest compare --pairs pairs.json --calibration` explicitly permits identical
+builds for A/A, reports observed paired noise and whether the selected screening
+thresholds exceed that noise. `--screening thresholds.json` overrides the validated
+suite screening values; this remains a heuristic, not statistical proof.
+
+## Current physical acceptance checkpoint
+
+Real HEVC 1080p60 smoke `371bc3cb-ac4c-4dca-be78-90f4a38e75f9` completed with
+`functional_verdict=PASS`, `measurement_validity=VALID`, `overall_verdict=PASS`.
+It deployed baseline source `b40671e74a035f0f6783321ccc461e68e2f580ed`, eboot
+`307a5789ded53bf5b9c0dce52d86d2c3916fcdb71402d48e597e8e4f3815e8c4`,
+with all 131 files checked against the manifest. Independent RTSP session evidence
+matched codec/HDR/chroma/dimensions/FPS. Observed unique output was 59.907 FPS;
+requested bitrate was 20 Mbps, server encoder configuration 14.988 Mbps, and
+measured traffic 1.388 Mbps for the low-motion scene. The title exited normally,
+artifacts were fresh, and the analysis recorded no issues. This proves one native
+smoke, not advanced-mode or two-build comparison acceptance.
+
+Earlier failed attempts remain INCONCLUSIVE: one exposed a receipt /2 collector
+compatibility gap, another exceeded its explicitly configured 120s deployment
+stage budget. The latter's retained lease was released only after full 131-file
+readback reconciliation and TITLE_IDLE proof; no launch replay occurred. Hardware
+deployment runs now use an explicit 300s stage budget and 600s total budget.
+
+Real WebGL2 high-entropy smoke `3e629107-56b0-46af-87f2-4b660a8f1123` also
+completed PASS/VALID on the same verified baseline binary. Browser rAF measured
+239.965 Hz with 1920x1080 rendering, entropy=1, movement=1 and 240 Hz content
+updates. Confirmed unique output measured 59.878 FPS and traffic 15.073 Mbps;
+analysis recorded no issues and title exit was verified. Config/pairing hashes
+matched the pre-smoke snapshot. These are software timing observations, not
+HDMI/input-to-photon measurements.

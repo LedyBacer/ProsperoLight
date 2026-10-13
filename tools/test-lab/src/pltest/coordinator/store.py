@@ -60,6 +60,7 @@ class RunStore:
 
     def restore_reports(self):
         """Repair a crash between journal commit and report-file publication."""
+        repaired = []
         with self.connect() as c:
             c.execute('BEGIN IMMEDIATE')
             for row in c.execute('SELECT run_id,state,report FROM runs WHERE report IS NOT NULL'):
@@ -72,7 +73,11 @@ class RunStore:
                         matches = False
                     if not matches:
                         self._atomic_write(path, json.dumps(value, indent=2) + '\n')
+                        repaired.append((path.parent, row['run_id']))
             c.commit()
+        from ..report import finalize_manifest
+        for directory, run_id in repaired:
+            finalize_manifest(directory, run_id)
 
     def recover_expired(self, ttl=10):
         cutoff = time.time() - ttl; recovered = []
@@ -162,6 +167,9 @@ class RunStore:
 
     def finish(self, run_id, state, stage, kind, verdict, reason_code=None, reason=None, report=None, expected_state=None):
         if state not in TERMINAL: raise ValueError('finish requires a terminal state')
+        if report is not None:
+            from ..verdicts import apply_classification
+            verdict = apply_classification(report, state)['overall_verdict']
         now = time.time()
         with self.connect() as c:
             c.execute('BEGIN IMMEDIATE')
@@ -258,6 +266,8 @@ class RunStore:
         os.replace(temporary, path)
 
     def report_artifact(self, run_id, report):
+        from ..verdicts import apply_classification
+        apply_classification(report)
         path = self.artifacts / run_id / 'report.json'
         pending = path.with_name(path.name + '.' + str(uuid.uuid4()) + '.pending')
         self._atomic_write(pending, json.dumps(report, indent=2) + '\n')

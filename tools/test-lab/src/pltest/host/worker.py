@@ -74,6 +74,7 @@ class Worker:
         self.settings = dict(s, run_id=self.run_id, width=monitor['width'], height=monitor['height'],
                              warmup_seconds=s.get('warmup_seconds', 0))
         self.ready = self.report = None
+        self.start_ack = None
         self.page_error = None
         self.commands.clear()
         self.finalizing = False
@@ -102,6 +103,8 @@ class Worker:
         if self.browser:
             await self.browser.ready()
         await asyncio.wait_for(self.ready_event.wait(), 45)
+        if self.page_error:
+            raise RuntimeError(self.page_error)
         self.event('ready', self.ready)
         if not self.ready['ready']:
             raise RuntimeError(','.join(self.ready['reasons']))
@@ -115,7 +118,9 @@ class Worker:
             raise RuntimeError('READY_EXPIRED')
         self.state = 'STARTING'
         self.started_event = asyncio.Event()
-        await self.page.send_json({'action': 'start'})
+        import uuid
+        self.page_start_command = str(uuid.uuid4())
+        await self.page.send_json({'action': 'start', 'command_id': self.page_start_command})
         await asyncio.wait_for(self.started_event.wait(), 5)
         if self.page_error:
             raise RuntimeError(self.page_error)
@@ -258,6 +263,9 @@ class Worker:
                             if not gate['ready']:
                                 asyncio.create_task(self.stop(','.join(gate['reasons'])))
                     elif kind == 'started' and data.get('run_id') == self.run_id:
+                        if data.get('command_id') != self.page_start_command:
+                            raise ValueError('PAGE_START_ACK_IDENTITY_MISMATCH')
+                        self.start_ack = data
                         self.started_event.set()
                     elif kind == 'report' and data.get('run_id') == self.run_id:
                         self.report = validate_report(data); self.report_event.set()
@@ -267,6 +275,7 @@ class Worker:
                         self.page_error = str(data.get('reason'))[:256]
                         self.event('page_error', self.page_error)
                         self.prepared_event.set()
+                        self.ready_event.set()
                         if hasattr(self, 'started_event'):
                             self.started_event.set()
             finally:
@@ -304,7 +313,8 @@ class Worker:
                         elif value['action'] == 'stop':
                             await self.stop()
                         ack = {'schema': SCHEMA, 'command_id': key, 'run_id': value['run_id'],
-                               'ack': 'accepted', 'state': self.state, 'ready': self.ready, 'report': self.report}
+                               'ack': 'accepted', 'state': self.state, 'ready': self.ready, 'report': self.report,
+                               'browser_start': getattr(self, 'start_ack', None)}
                         if value['action'] != 'status' and len(self.commands) < 65:
                             self.commands[key] = (value, ack)
                         await ws.send_json(ack)

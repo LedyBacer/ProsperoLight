@@ -69,7 +69,13 @@ def validate_variant(value, root):
     provenance_path = provenance_path.resolve(strict=True)
     if root not in provenance_path.parents or not provenance_path.is_file() or provenance_path.stat().st_size > 256 * 1024:
         raise ValueError('BUILD_PROVENANCE_REQUIRED')
-    provenance = json.loads(provenance_path.read_bytes())
+    provenance_bytes = provenance_path.read_bytes()
+    if value.get('provenance_sha256') != hashlib.sha256(provenance_bytes).hexdigest():
+        raise ValueError('BUILD_PROVENANCE_HASH_MISMATCH')
+    provenance = json.loads(provenance_bytes)
+    digest = value.get('source_tree_sha256')
+    if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest) or digest != provenance.get('source_sha256'):
+        raise ValueError('BUILD_SOURCE_TREE_DIGEST_MISMATCH')
     if provenance.get('commit') != value['source_sha'] or provenance.get('eboot_sha256') != value['eboot_sha256']:
         raise ValueError('BUILD_PROVENANCE_IDENTITY_MISMATCH')
     if definition_flags(provenance) != flags:

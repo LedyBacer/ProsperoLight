@@ -230,8 +230,14 @@ class Scheduler:
                             if self.execution_mode == 'real':
                                 if profile.get('host_stimulus',{}).get('monitor') == 'virtual':
                                     await self.host.prepare(profile, cancel)
-                                await self.host.start(cancel)
-                                await self.ps5.stage(stage, profile, cancel)
+                                anchors = report['phase_anchors'] = {}
+                                for name, operation in (('browser_start', self.host.start(cancel)),
+                                                        ('ps5_start', None)):
+                                    begin = time.monotonic_ns() // 1000
+                                    ack = await operation if operation is not None else await self.ps5.stage(stage, profile, cancel)
+                                    anchors[name] = {'coordinator_start_us': begin,
+                                                     'coordinator_end_us': time.monotonic_ns() // 1000,
+                                                     'ack': ack}
                             else:
                                 await self.ps5.stage(stage, profile, cancel)
                         elif stage == 'MEASURE':

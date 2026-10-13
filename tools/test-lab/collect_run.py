@@ -32,7 +32,7 @@ def collect(ftp, run_id, output, timeout):
             time.sleep(2)
         else:
             break
-    if receipt.get('schema') != 'prosperolight-test-receipt/1' or receipt.get('run_id') != run_id:
+    if receipt.get('schema') not in ('prosperolight-test-receipt/1', 'prosperolight-test-receipt/2') or receipt.get('run_id') != run_id:
         raise ValueError('terminal receipt identity mismatch')
     if not isinstance(receipt.get('artifacts', []), list) or not all(
             isinstance(item, dict) for item in receipt.get('artifacts', [])) or (

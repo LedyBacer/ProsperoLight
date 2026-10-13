@@ -7,10 +7,13 @@ def classify(report, execution_state=None):
     """Keep execution, streaming health and evidence validity independent."""
     analysis = report.get('analysis') or {}
     prior = report.get('verdict', 'INCONCLUSIVE')
-    functional = analysis.get('functional_verdict', prior)
-    validity = analysis.get('measurement_validity', 'INCONCLUSIVE')
-    delta = analysis.get('performance_delta', 'NOT_COMPARABLE')
+    functional = analysis.get('functional_verdict', report.get('functional_verdict',
+                              prior if prior in ('PASS', 'FAIL') else 'INCONCLUSIVE'))
+    validity = analysis.get('measurement_validity', report.get('measurement_validity', 'INCONCLUSIVE'))
+    delta = analysis.get('performance_delta', report.get('performance_delta', 'NOT_COMPARABLE'))
     simulated = report.get('execution_mode') != 'real'
+    if execution_state is None:
+        execution_state = report.get('execution_state')
     if execution_state is None:
         execution_state = ('CANCELLED' if prior == 'CANCELLED' else
                            'FAILED' if prior == 'FAIL' or functional == 'FAIL' else
