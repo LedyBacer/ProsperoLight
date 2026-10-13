@@ -235,7 +235,7 @@ def _real_scheduler(store, data_dir):
     ps5 = RealPs5CoordinatorAdapter(
         os.environ['PLTEST_PS5_HOST'], os.environ['PLTEST_PS5_PROBE_ELF'],
         os.environ['PLTEST_PS5_LAUNCH_ELF'], os.environ['PLTEST_PS5_EBOOT_SHA256'],
-        store.artifacts)
+        store.artifacts, build_root=os.environ.get('PLTEST_BUILD_ROOT'))
     guard = None
     if os.environ.get('PLTEST_HOST_API_URL'):
         from ..host.session_guard import SessionGuard

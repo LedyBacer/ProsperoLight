@@ -28,6 +28,45 @@ def profile(**extra):
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_variant_deployment_verifies_identity_and_retains_uncertain_lease(self):
+        import asyncio
+        from contextlib import contextmanager
+        variant = dict(source_sha='a'*40, build_label='test-lab-A', eboot_sha256='b'*64,
+                       directory='/prepared/A', files={'eboot.bin':{'sha256':'b'*64,'bytes':1}})
+        value = profile(run_id='variant-run', source_sha='a'*40, build_label='test-lab-A',
+                        build_variant={'manifest':'A.json','sha256':'c'*64}, allow_deploy=True)
+        for fails in (False, True):
+            with tempfile.TemporaryDirectory() as folder:
+                (Path(folder)/'variant-run').mkdir()
+                adapter = RealPs5CoordinatorAdapter('fake','probe','launch','d'*64,folder,build_root=folder)
+                owners = []
+                @contextmanager
+                def lease(run_id):
+                    owner = {'safe_to_release':False}; owners.append(owner)
+                    yield owner
+                adapter.ps5.lease = lease
+                adapter.ps5.idle = lambda host: {'state':'TITLE_IDLE'}
+                adapter._archive_and_inspect = lambda destination: ({}, {'eboot_sha256':'d'*64,'build_label':'test-lab-old'})
+                calls = []
+                def deploy(directory, digest):
+                    calls.append((directory,digest))
+                    if fails: raise TimeoutError('lost FTP acknowledgement')
+                    return variant['files']
+                adapter.ps5.deploy = deploy
+                adapter.ps5.installed = lambda: {'eboot_sha256':'b'*64,'build_label':'test-lab-A'}
+                async def exercise():
+                    with patch('pltest.build.load_variant',return_value=variant):
+                        if fails:
+                            with self.assertRaisesRegex(RuntimeError,'REMOTE_LEASE_RETAINED'):
+                                await adapter.stage('PREFLIGHT',value,asyncio.Event())
+                        else:
+                            await adapter.stage('PREFLIGHT',value,asyncio.Event())
+                            self.assertEqual(adapter._run(value)['state']['installed']['eboot_sha256'],'b'*64)
+                            await adapter._release_if_safe(value)
+                asyncio.run(exercise())
+                self.assertEqual(calls,[('/prepared/A','b'*64)])
+                self.assertEqual(owners[0]['safe_to_release'],not fails)
+
     def test_cli_main_preserves_classification_exit_codes(self):
         import io
         from contextlib import redirect_stdout

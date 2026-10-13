@@ -49,3 +49,38 @@ preserved. API run views expose separate classifications without rewriting them.
 
 No hardware run has validated these new changes yet. The earlier PR7 receipts
 are historical evidence and do not satisfy this task's acceptance scenario.
+
+## Prepared cross-build workflow
+
+The coordinator opts into deployment by setting `PLTEST_BUILD_ROOT` to a local
+prepared artifact root. Keep baseline and candidate app directories and their
+`build/build-provenance.json` files independently under that root. Build on the
+configured Linux/WSL SDK, using separate clean source checkouts and the same
+flags (`TEST_LAB=1 PERFORMANCE_DETAIL=1 LAN_TELEMETRY=0`); Mac coordinators can
+consume these prebuilt artifacts without an SDK. A manifest binds every file,
+source commit, developer label, eboot hash and complete compiler definitions.
+
+```sh
+pltest prepare-variant --directory "$ROOT/A" --provenance "$ROOT/A-provenance.json" \
+  --profile smoke.json --manifest-root "$ROOT" --output "$ROOT/baseline.json"
+pltest prepare-variant --directory "$ROOT/B" --provenance "$ROOT/B-provenance.json" \
+  --profile smoke.json --manifest-root "$ROOT" --output "$ROOT/candidate.json"
+pltest paired --baseline "$ROOT/baseline.json" --candidate "$ROOT/candidate.json" \
+  --manifest-root "$ROOT" --repetitions 3 --allow-deploy
+```
+
+The coordinator must have the same root-relative manifests and artifacts.
+The CLI validates both variants before creating any run. Equal source commits,
+equal binaries, incompatible flags, missing provenance, symlinks and altered
+file manifests are refused. Each run revalidates the local artifact manifest,
+acquires the remote lease, proves TITLE_IDLE, archives prior evidence, deploys
+with full FTP readback, and verifies installed label/hash before launch.
+Execution order is A1/B1/A2/B2/A3/B3. Each receipt archive includes installed
+identity and the selected manifest. An uncertain deployment retains the remote
+lease and executor journal; no automatic retry or production restoration occurs.
+A terminal invalid measurement stops the sequence with exit 3 rather than
+reporting a successful performance comparison.
+
+This prepared-artifact path does not yet automate obtaining clean source
+checkouts and invoking remote Linux/WSL builds. Hardware cross-build acceptance
+has not been run.

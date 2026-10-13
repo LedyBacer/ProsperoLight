@@ -50,13 +50,15 @@ class RealPs5CoordinatorAdapter:
     cleanup_timeout_seconds = 45
 
     def __init__(self, host, probe_elf, launch_elf, expected_eboot_sha256,
-                 artifacts_root, ftp_port=2121, loader_port=9021, manager_port=8084):
+                 artifacts_root, ftp_port=2121, loader_port=9021, manager_port=8084,
+                 build_root=None):
         if not re.fullmatch(r'[0-9a-f]{64}', expected_eboot_sha256 or ''):
             raise ValueError('real coordinator requires the expected installed eboot SHA-256')
         self.ps5 = Ps5Adapter(host, probe_elf, launch_elf, ftp_port, loader_port, manager_port)
         self.expected = expected_eboot_sha256
         self.artifacts_root = Path(artifacts_root)
         self.runs = {}
+        self.build_root = build_root
 
     def _run(self, profile):
         run_id = profile['run_id']
@@ -70,6 +72,14 @@ class RealPs5CoordinatorAdapter:
             if profile.get('schema') != 'prosperolight-test/1' or not profile.get('build_label'):
                 raise ValueError('real run requires a versioned PS5 profile and build_label')
             request_bytes(run_id, profile['client']['host'])
+            variant = None
+            if 'build_variant' in profile:
+                from ..build import load_variant
+                if profile.get('allow_deploy') is not True:
+                    raise ValueError('DEPLOY_PERMISSION_REQUIRED')
+                variant = await _blocking(load_variant, profile['build_variant'], self.build_root)
+                if any(profile.get(key) != variant[key] for key in ('source_sha', 'build_label')):
+                    raise ValueError('PROFILE_BUILD_IDENTITY_MISMATCH')
             directory = self.artifacts_root / run_id / 'ps5'
             directory.mkdir(mode=0o700, exist_ok=False)
             await _blocking(self._acquire_lease, profile, directory)
@@ -78,15 +88,32 @@ class RealPs5CoordinatorAdapter:
                 state['preflight'] = await _blocking(self.ps5.idle, profile['client']['host'])
                 state['previous_artifacts'], installed_image = await _blocking(
                     self._archive_and_inspect, directory / 'prelaunch')
+                current = self._run(profile)
+                expected = self.expected
+                if variant:
+                    expected = variant['eboot_sha256']
+                    state['build_variant'] = variant
+                    current['safe'] = False
+                    state['stage'] = 'DEPLOY'
+                    self._save(current)
+                    if cancel.is_set():
+                        current['safe'] = True
+                        raise asyncio.CancelledError
+                    state['deployment_attempted'] = True
+                    self._save(current)
+                    state['deployed_files'] = await _blocking(self.ps5.deploy, variant['directory'], expected)
+                    if state['deployed_files'] != variant['files']:
+                        raise RuntimeError('DEPLOY_READBACK_MANIFEST_MISMATCH')
+                    installed_image = await _blocking(self.ps5.installed)
                 state['installed'] = installed_image
-                if installed_image != {'eboot_sha256': self.expected, 'build_label': profile['build_label']}:
+                if installed_image != {'eboot_sha256': expected, 'build_label': profile['build_label']}:
                     raise RuntimeError('installed build hash/label mismatch')
                 current = self._run(profile)
                 current['safe'] = True
                 state['stage'] = stage
                 self._save(current)
             except BaseException:
-                await self._release_if_safe(profile, force=True)
+                await self._release_if_safe(profile)
                 raise
             return
         current = self._run(profile)
@@ -101,6 +128,8 @@ class RealPs5CoordinatorAdapter:
             run_profile = dict(profile, run_id=run_id, coordinated=True)
             run_profile.pop('host_stimulus', None)
             run_profile.pop('analysis_environment', None)
+            run_profile.pop('build_variant', None)
+            run_profile.pop('allow_deploy', None)
             run_profile['timing'] = {k: v for k, v in profile.get('timing', {}).items()
                                      if k != 'stage_timeout_seconds'}
             # A lost reply can leave launch outcome ambiguous. Mark it active
@@ -249,7 +278,8 @@ class RealPs5CoordinatorAdapter:
         exited = bool(self.ps5.manager_port and collect_run.title_exit(
             self.ps5.host, self.ps5.manager_port, receipt.get('pid')))
         return {'receipt': receipt, 'artifact_index': index, 'title_exit_verified': exited,
-                'stale_artifacts': stale}
+                'stale_artifacts': stale, 'installed': current['state'].get('installed'),
+                'build_variant': current['state'].get('build_variant')}
 
     async def cleanup(self, profile):
         current = self.runs.get(profile.get('run_id'))

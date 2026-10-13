@@ -146,18 +146,69 @@ def main(argv=None):
 
 
 @app.command()
+def prepare_variant(directory: Path = typer.Option(..., exists=True, file_okay=False),
+                    provenance: Path = typer.Option(..., exists=True, dir_okay=False),
+                    profile: Path = typer.Option(..., exists=True, dir_okay=False),
+                    manifest_root: Path = typer.Option(..., exists=True, file_okay=False),
+                    output: Path = typer.Option(...)):
+    """Index prepared Linux/WSL artifacts; never build or deploy implicitly."""
+    from ..build import prebuilt, definition_flags, validate_variant
+    import hashlib
+    try:
+        root = manifest_root.resolve()
+        identity = prebuilt(directory)
+        provenance_value = json.loads(provenance.read_bytes())
+        value = dict(schema='prosperolight-build-variant/1', source_sha=provenance_value['commit'],
+            build_label=identity['build_label'], eboot_sha256=identity['eboot_sha256'],
+            directory=directory.resolve().relative_to(root).as_posix(),
+            provenance=provenance.resolve().relative_to(root).as_posix(),
+            build_flags=definition_flags(provenance_value), profile=json.loads(profile.read_bytes()))
+        value['files'] = {path.relative_to(directory).as_posix(): {
+            'bytes':path.stat().st_size, 'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+            for path in directory.rglob('*') if path.is_file()}
+        validate_variant(value, root)
+        with output.open('x', encoding='utf-8') as stream:
+            json.dump(value, stream, indent=2); stream.write('\n')
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        emit({'verdict':'INCONCLUSIVE','reason_code':'BUILD_MANIFEST_INVALID','reason':str(exc)}); raise typer.Exit(3)
+    emit({'manifest':str(output), 'source_sha':value['source_sha'], 'eboot_sha256':value['eboot_sha256']})
+
+
+@app.command()
 def paired(baseline: Path = typer.Option(..., exists=True, readable=True),
            candidate: Path = typer.Option(..., exists=True, readable=True),
-           repetitions: int = typer.Option(3, min=3, max=20), suite: str = 'decoder-smoke'):
+           repetitions: int = typer.Option(3, min=3, max=20), suite: str = 'decoder-smoke',
+           allow_deploy: bool = False,
+           manifest_root: Path = typer.Option(..., exists=True, file_okay=False)):
     """Interleave A/B, then compare unique repeated run pairs; never parallelize PS5."""
+    from ..build import validate_variant
+    import hashlib
+    if not allow_deploy:
+        emit({'verdict':'INCONCLUSIVE','reason_code':'DEPLOY_PERMISSION_REQUIRED'}); raise typer.Exit(3)
+    prepared = []
+    try:
+        for path in (baseline, candidate):
+            data = path.read_bytes()
+            value = json.loads(data)
+            variant = validate_variant(value, manifest_root)
+            profile = dict(value['profile'], source_sha=variant['source_sha'], build_label=variant['build_label'],
+                allow_deploy=True, build_variant={'manifest':path.resolve().relative_to(manifest_root.resolve()).as_posix(),
+                                                'sha256':hashlib.sha256(data).hexdigest()})
+            prepared.append((variant, profile))
+        if prepared[0][0]['source_sha'] == prepared[1][0]['source_sha'] or prepared[0][0]['eboot_sha256'] == prepared[1][0]['eboot_sha256']:
+            raise ValueError('DISTINCT_SOURCE_AND_BINARY_REQUIRED')
+        if prepared[0][0]['build_flags'] != prepared[1][0]['build_flags']:
+            raise ValueError('BUILD_FLAGS_MISMATCH')
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        emit({'verdict':'INCONCLUSIVE','reason_code':'BUILD_MANIFEST_INVALID','reason':str(exc)}); raise typer.Exit(3)
     capabilities = request('GET', '/api/v1/capabilities')
     if capabilities['api_mode'] != 'real':
         emit({'verdict':'INCONCLUSIVE','reason_code':'REAL_ADAPTERS_REQUIRED'}); raise typer.Exit(3)
     pairs = []
     for _ in range(repetitions):
         ids = []
-        for path in (baseline, candidate):
-            created = request('POST','/api/v1/runs',json={'suite':suite,'mode':'real','profile':json.loads(path.read_text())})
+        for variant, profile in prepared:
+            created = request('POST','/api/v1/runs',json={'suite':suite,'mode':'real','profile':profile})
             rid = created['run_id']; request('POST','/api/v1/runs/'+rid+'/start')
             deadline = time.monotonic()+1800
             while time.monotonic()<deadline:

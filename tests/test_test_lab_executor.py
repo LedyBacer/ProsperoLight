@@ -43,6 +43,38 @@ class FakeFtp:
 
 
 class ExecutorTests(unittest.TestCase):
+    def test_variant_manifest_hash_provenance_and_path_guards(self):
+        from pltest.build import validate_variant, load_variant
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            app = root / 'baseline'; app.mkdir()
+            (app / 'eboot.bin').write_bytes(b'baseline')
+            (app / 'build-label.txt').write_text('test-lab-baseline\n')
+            identity = hashlib.sha256(b'baseline').hexdigest()
+            provenance = dict(commit='a'*40, eboot_sha256=identity,
+                definitions=['PROSPEROLIGHT_TEST_LAB=1', 'PROSPEROLIGHT_PERFORMANCE_DETAIL=1'])
+            (root / 'provenance.json').write_text(json.dumps(provenance))
+            value = dict(schema='prosperolight-build-variant/1', source_sha='a'*40,
+                eboot_sha256=identity, build_label='test-lab-baseline', directory='baseline',
+                provenance='provenance.json', build_flags={'TEST_LAB':1, 'PERFORMANCE_DETAIL':1},
+                files={p.name:dict(bytes=p.stat().st_size, sha256=hashlib.sha256(p.read_bytes()).hexdigest())
+                       for p in app.iterdir()})
+            self.assertEqual(validate_variant(value, root)['eboot_sha256'], identity)
+            (root / 'baseline.json').write_text(json.dumps(value))
+            reference = dict(manifest='baseline.json', sha256=hashlib.sha256((root/'baseline.json').read_bytes()).hexdigest())
+            self.assertEqual(load_variant(reference, root)['source_sha'], 'a'*40)
+            with self.assertRaisesRegex(ValueError, 'HASH_MISMATCH'):
+                load_variant(dict(reference, sha256='0'*64), root)
+            with self.assertRaisesRegex(ValueError, 'PROVENANCE_IDENTITY_MISMATCH'):
+                validate_variant(dict(value, source_sha='b'*40), root)
+            (app/'extra').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError, 'FILE_MANIFEST_MISMATCH'):
+                validate_variant(value, root)
+            (app/'extra').unlink()
+            (app/'link').symlink_to(app/'eboot.bin')
+            with self.assertRaisesRegex(ValueError, 'SYMLINK'):
+                validate_variant(value, root)
+
     def test_remote_exclusion_owner_and_uncertain_run_retains_lease(self):
         ftp = FakeFtp()
         adapter = Ps5Adapter('fake', 'probe', 'launch', connect=lambda: ftp)
