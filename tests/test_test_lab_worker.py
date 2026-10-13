@@ -151,7 +151,8 @@ const sandbox={document:{visibilityState:'visible',hasFocus:()=>true,fullscreenE
 devicePixelRatio:1,window:{screenX:0,screenY:0},outerWidth:2,outerHeight:2,screen:{width:2,height:2},
 requestAnimationFrame(){callbacks++;},setTimeout,crypto:{subtle:{digest:()=>new Promise(r=>resolveHash=r)}},PLTestPatterns:{fillNoise(){}}};
 vm.createContext(sandbox);vm.runInContext(fs.readFileSync(process.argv[1],'utf8'),sandbox);
-const pending=vm.runInContext('prepare({width:2,height:2,seed:1,fps:60,seconds:2,warmup_seconds:0,scene:"low-motion",run_id:"run"})',sandbox);
+const pending=vm.runInContext('prepare({width:2,height:2,seed:1,fps:60,display_refresh_hz:480,seconds:2,warmup_seconds:0,scene:"low-motion",run_id:"run"})',sandbox);
+if(vm.runInContext('intervals.length',sandbox)<480*7)throw Error('measurement buffer ignores actual display refresh');
 vm.runInContext('tick(1)',sandbox);if(callbacks!==2)throw Error('animation loop stopped during preparation');
 resolveHash(new ArrayBuffer(32));pending.then(()=>{
  if(!vm.runInContext('prepared',sandbox))throw Error('preparation did not complete');
@@ -169,6 +170,24 @@ resolveHash(new ArrayBuffer(32));pending.then(()=>{
 
 @unittest.skipUnless(importlib.util.find_spec('aiohttp'), 'optional worker dependency aiohttp unavailable')
 class FakeWorkerSession(unittest.IsolatedAsyncioTestCase):
+    async def test_final_report_uses_actual_refresh_and_explains_invalidity(self):
+        from pltest.host.worker import Worker
+        from types import SimpleNamespace
+        for rate, refresh, hidden, expected in ((480,480,0,None),(480,240,0,'RAF_ABOVE_TARGET'),
+                                               (220,480,0,'RAF_BELOW_TARGET'),(480,480,1,'BROWSER_HIDDEN')):
+            with tempfile.TemporaryDirectory() as directory:
+                worker=Worker('a'*32,directory,mode='attached')
+                worker.state='RUNNING';worker.run_id='fixture';worker.folder=Path(directory)
+                worker.settings={'fps':240,'seconds':2};worker.monitor={'refresh_hz':refresh}
+                worker.content_hash='a'*64;worker.ready={'ready':True}
+                worker.logs=SimpleNamespace(finish=lambda path: {'supported':False})
+                worker.report={'reason':'COMPLETE','raf_fps':rate,'intervals_ms':[1000/rate]*round(rate*2),
+                               'hidden_events':hidden,'fullscreen_lost':0,'interval_overflow':False}
+                await worker.finalize('COMPLETE')
+                self.assertEqual(worker.report['measurement_validity'],'VALID' if expected is None else 'INCONCLUSIVE')
+                self.assertEqual(worker.report['validity_reasons'],[] if expected is None else [expected])
+                self.assertIn('worker.py',worker.report['worker_runtime_identity']['files'])
+
     async def test_authenticated_fake_page_prepare_start_and_report(self):
         from aiohttp.test_utils import TestServer, TestClient
         from pltest.host.worker import Worker

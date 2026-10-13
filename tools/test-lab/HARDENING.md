@@ -473,3 +473,25 @@ Make test targets now prepend absolute current-checkout module paths, including
 subprocesses launched in another working directory. The initial stale-package
 Linux results are not accepted as validation of the new source; checks are rerun
 with the repository-bound import path.
+
+High-refresh final measurement now uses the same rate gate as Ready: the minimum
+is the requested stimulus cadence and the upper bound is the independently
+observed display refresh. A 480 Hz display driving a 240 Hz content update is
+reported as such. Measurement interval capacity uses that observed refresh;
+overflow, missing duration, hidden/fullscreen events and incomplete measurements
+still invalidate the result. Final reports expose the specific validity reasons.
+
+Windows verification found a stale flat `pltest/` directory shadowing the editable
+`src/pltest/` installation when the worker started from its old source directory.
+Workers are now installed into a fresh commit-specific directory with complete
+tracked-file hash readback. Served JavaScript hashes and the resolved runtime
+module path are verified separately. Runtime reports include seven resolved source
+hashes at worker creation (disk identity, not memory attestation). Comparison also
+includes worker identity, the enforced authenticated host TLS fingerprint and GPU
+observation selection/inventory, preventing mixed-environment comparisons.
+
+Authenticated RTSP frame/byte counter observations now expose estimated sender
+rates with coordinator-clock uncertainty bounds. They are not capture FPS, wire
+throughput or exact PS5 measurement-phase rates. Missing counters remain unknown;
+counter resets and session identity changes invalidate continuity. Dashboard
+exports expose these observations and the worker runtime identity.

@@ -10,6 +10,46 @@ FORMATS = {1: ('h264', False, '420'), 4: ('h264', False, '444'),
            0x40000: ('pyrowave', True, '420'), 0x80000: ('pyrowave', True, '444')}
 
 
+def host_transport_rates(samples):
+    """Bound API counter rates in the coordinator clock; never call them capture FPS."""
+    result = {'verified':False,'source':'authenticated Vibepollo /api/rtsp/sessions counters',
+              'capture_fps':None,'capture_fps_reason':'no per-frame capture timestamps',
+              'semantics':'API-reported counters over the host observation interval, which can include warmup; not wire throughput or exact PS5 phase'}
+    if not isinstance(samples,list) or not 2 <= len(samples) <= 2048:
+        return dict(result,reason='HOST_COUNTER_SAMPLES_UNAVAILABLE')
+    previous=None; identity=None
+    for sample in samples:
+        if not isinstance(sample,dict) or sample.get('verified') is not True or sample.get('source')!='Vibepollo /api/rtsp/sessions':
+            return dict(result,reason='HOST_COUNTER_SOURCE_UNVERIFIED')
+        session=sample.get('session') or {}
+        if not isinstance(session,dict) or not isinstance(session.get('uuid'),str) or not 1<=len(session['uuid'])<=127:
+            return dict(result,reason='HOST_COUNTER_IDENTITY_UNVERIFIED')
+        if identity is not None and session['uuid']!=identity:
+            return dict(result,reason='HOST_COUNTER_SESSION_CHANGED')
+        identity=session['uuid']
+        begin,end=sample.get('coordinator_start_us'),sample.get('coordinator_end_us')
+        if any(type(v) is not int or not 0<=v<2**63 for v in (begin,end)) or begin>end or previous and begin<previous['coordinator_end_us']:
+            return dict(result,reason='HOST_COUNTER_CLOCK_BOUNDS_INVALID')
+        for key in ('frames_sent','bytes_sent'):
+            value=session.get(key)
+            if type(value) is not int or not 0<=value<2**63:
+                return dict(result,reason='HOST_COUNTER_FIELD_UNAVAILABLE:'+key)
+            if previous and value<previous['session'][key]:
+                return dict(result,reason='HOST_SENDER_COUNTER_RESET')
+        previous=sample
+    first,last=samples[0],samples[-1]
+    minimum=last['coordinator_start_us']-first['coordinator_end_us']
+    maximum=last['coordinator_end_us']-first['coordinator_start_us']
+    if minimum<=0:return dict(result,reason='HOST_COUNTER_OBSERVATION_TOO_SHORT')
+    rates={}
+    for key in ('frames_sent','bytes_sent'):
+        delta=last['session'][key]-first['session'][key]
+        rates[key]={'delta':delta,'per_second':delta*2e6/(minimum+maximum),
+                    'lower_per_second':delta*1e6/maximum,'upper_per_second':delta*1e6/minimum}
+    return dict(result,verified=True,reason=None,api_uuid=identity,
+                observation_elapsed_us_bounds=[minimum,maximum],rates=rates)
+
+
 def validate_negotiation(client, receipt, host_samples=None):
     evidence = receipt.get('negotiated')
     fields, issues = {}, []

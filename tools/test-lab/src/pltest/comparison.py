@@ -38,6 +38,10 @@ def fingerprint(profile, report):
              'stream': client, 'display': {k: display.get(k) for k in required_display},
              'stimulus': {k: host.get(k) for k in ('content_sha256', 'pixel_sample_sha256', 'seed', 'scene')},
              'workload': profile.get('host_stimulus', {}),
+             'worker_runtime_identity': host.get('worker_runtime_identity'),
+             'host_tls_peer_sha256':environment.get('host_tls_peer_sha256'),
+             'gpu_observation_configuration': [{key:sample.get(key) for key in ('selected_gpu_uuid','gpu_inventory')}
+                                              for sample in host.get('gpu_samples', [])[:1]],
              'effective':{key:field.get('value') for key,field in effective.items()},
              'timing': {k: profile.get('timing', {}).get(k) for k in ('warmup_seconds', 'measure_seconds')},
              'detail': (report.get('analysis') or {}).get('trace', {}).get('omitted')}

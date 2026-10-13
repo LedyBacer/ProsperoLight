@@ -42,6 +42,14 @@ def request(value):
     return value
 
 
+def raf_rate_reason(fps, display, target_fps):
+    if type(fps) not in (float, int) or not math.isfinite(fps) or fps < target_fps * .95:
+        return 'RAF_BELOW_TARGET'
+    if fps > max(target_fps, display.get('refresh_hz') or target_fps) * 1.05:
+        return 'RAF_ABOVE_TARGET'
+    return None
+
+
 def readiness(page, display, target_fps, desktop):
     reasons = []
     if not desktop.get('interactive'):
@@ -50,11 +58,8 @@ def readiness(page, display, target_fps, desktop):
         reasons.append('BROWSER_HIDDEN_OR_UNFOCUSED')
     if page.get('fullscreen') is not True:
         reasons.append('FULLSCREEN_REQUIRED')
-    fps = page.get('raf_fps')
-    if type(fps) not in (float, int) or not math.isfinite(fps) or fps < target_fps * .95:
-        reasons.append('RAF_BELOW_TARGET')
-    elif fps > max(target_fps, display.get('refresh_hz') or target_fps) * 1.05:
-        reasons.append('RAF_ABOVE_TARGET')
+    rate_reason = raf_rate_reason(page.get('raf_fps'), display, target_fps)
+    if rate_reason: reasons.append(rate_reason)
     # Screen coordinates are CSS pixels; compare physical coordinates using reported DPR.
     dpr = page.get('dpr', 0)
     if type(dpr) not in (float, int) or not math.isfinite(dpr) or dpr <= 0:

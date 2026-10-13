@@ -28,6 +28,7 @@ class SessionGuard:
         if policy not in ('reject', 'disconnect') or not token or len(token) > 4096:
             raise ValueError('invalid host session policy/token')
         self.url, self.token, self.policy = url.rstrip('/'), token, policy
+        self.certificate_sha256 = certificate_sha256
         if certificate_sha256 is not None:
             if not isinstance(certificate_sha256, str) or not re.fullmatch(r'[0-9a-f]{64}', certificate_sha256):
                 raise ValueError('invalid trusted host certificate SHA256')
@@ -85,6 +86,8 @@ class SessionGuard:
     async def metadata(self):
         value = await self.request('GET', '/api/metadata')
         return {'source':'Vibepollo /api/metadata', 'verified':True,
+                'tls_peer_sha256':self.certificate_sha256,
+                'tls_identity_source':'TLS fingerprint enforced on this authenticated request' if self.certificate_sha256 else None,
                 'version':value.get('version'), 'commit':value.get('commit'),
                 'encoder_status':value.get('encoder_status'),
                 'semantics':'advertised readiness; not selected encoder or effective session configuration'}

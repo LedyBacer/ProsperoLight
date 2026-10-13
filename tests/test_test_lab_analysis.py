@@ -37,6 +37,26 @@ def run_fixture(fps=60, age=3000, ready=1500, variant='a'):
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_authenticated_counter_rates_keep_clock_bounds_and_capture_unknown(self):
+        from pltest.session_evidence import host_transport_rates
+        samples=[{'source':'Vibepollo /api/rtsp/sessions','verified':True,
+                  'coordinator_start_us':begin,'coordinator_end_us':begin+100,
+                  'session':{'uuid':'client','frames_sent':frames,'bytes_sent':frames*10000}}
+                 for begin,frames in ((0,0),(1000000,60),(2000000,120))]
+        result=host_transport_rates(samples)
+        self.assertTrue(result['verified']);self.assertIsNone(result['capture_fps'])
+        self.assertEqual(result['rates']['frames_sent']['per_second'],60)
+        self.assertLess(result['rates']['frames_sent']['lower_per_second'],60)
+        self.assertGreater(result['rates']['frames_sent']['upper_per_second'],60)
+        samples[-1]['session']['frames_sent']=50
+        self.assertEqual(host_transport_rates(samples)['reason'],'HOST_SENDER_COUNTER_RESET')
+        samples[-1]['session']['frames_sent']=120;samples[-1]['session']['uuid']='other'
+        self.assertEqual(host_transport_rates(samples)['reason'],'HOST_COUNTER_SESSION_CHANGED')
+        samples[-1]['session']['uuid']='client';samples[-1]['coordinator_start_us']=1000000
+        self.assertEqual(host_transport_rates(samples)['reason'],'HOST_COUNTER_CLOCK_BOUNDS_INVALID')
+        samples[-1]['coordinator_start_us']=2000000;samples[-1]['session']['frames_sent']=None
+        self.assertFalse(host_transport_rates(samples)['verified'])
+
     def test_environment_uses_observed_sources_and_explicit_topology(self):
         from pltest.environment import environment
         profile={'analysis_environment':{'verified':True,'firmware':'fabricated',
@@ -274,8 +294,20 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(compare_pairs(pairs)['reason_code'],'ENVIRONMENT_MISMATCH')
         pairs=self.pairs();pairs[2][1]['report']['analysis']['measurement_validity']='INCONCLUSIVE'
         self.assertEqual(compare_pairs(pairs)['reason_code'],'INVALID_MEASUREMENT')
+        pairs=self.pairs()
+        for pair in pairs:
+            for run in pair:run['report']['host_measurement']['worker_runtime_identity']={'files':{'worker.py':'a'*64}}
+        self.assertEqual(compare_pairs(pairs)['measurement_validity'],'VALID')
+        pairs[1][1]['report']['host_measurement']['worker_runtime_identity']['files']['worker.py']='b'*64
+        self.assertEqual(compare_pairs(pairs)['reason_code'],'ENVIRONMENT_MISMATCH')
 
     def test_duplicate_pairs_and_insufficient_samples(self):
+        pairs=self.pairs()
+        pairs[1][1]['report']['analysis']['environment']['host_tls_peer_sha256']='a'*64
+        self.assertEqual(compare_pairs(pairs)['reason_code'],'ENVIRONMENT_MISMATCH')
+        pairs=self.pairs()
+        pairs[1][1]['report']['host_measurement']['gpu_samples']=[{'selected_gpu_uuid':'GPU-other','gpu_inventory':[]}]
+        self.assertEqual(compare_pairs(pairs)['reason_code'],'ENVIRONMENT_MISMATCH')
         pairs=self.pairs()
         self.assertEqual(compare_pairs(pairs[:1])['reason_code'],'INSUFFICIENT_REPEAT_PAIRS')
         pairs[2]=pairs[0]

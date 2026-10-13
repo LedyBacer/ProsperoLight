@@ -96,7 +96,10 @@ def _analyze_run(profile, report, directory):
         result['functional_verdict'] = 'PASS'
     if receipt.get('functional_verdict') == 'FAIL': result['functional_verdict'] = 'FAIL'
     elif receipt.get('functional_verdict') != 'PASS': issues.append('PS5_RECEIPT_NOT_PASS')
-    from .session_evidence import validate_negotiation
+    from .session_evidence import validate_negotiation, host_transport_rates
+    result['host_transport'] = host_transport_rates(host.get('session_samples'))
+    if result['host_transport'].get('reason') in ('HOST_SENDER_COUNTER_RESET','HOST_COUNTER_SESSION_CHANGED'):
+        issues.append(result['host_transport']['reason'])
     result['session_settings'], negotiation_issues = validate_negotiation(profile.get('client', {}), receipt, host.get('session_samples'))
     issues.extend(negotiation_issues)
     if not receipt.get('artifacts_complete'): issues.append('ARTIFACTS_INCOMPLETE')

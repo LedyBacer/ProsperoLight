@@ -9,7 +9,7 @@ import secrets
 import time
 from pathlib import Path
 from . import display
-from .protocol import SCHEMA, request, readiness, validate_report
+from .protocol import SCHEMA, request, readiness, validate_report, raf_rate_reason
 from .browser import ManagedBrowser
 from .metrics import GpuSampler
 from .logs import LogSlice, server_inventory
@@ -20,6 +20,11 @@ STATIC = Path(__file__).resolve().parent / 'static'
 class Worker:
     def __init__(self, token, output, mode='managed', port=8096, host_log=None, browser_channel=None):
         self.token, self.output, self.mode, self.port = token, Path(output), mode, port
+        self.runtime_identity = {'schema':'prosperolight-worker-runtime/1',
+            'source':'resolved worker package source files at process startup',
+            'semantics':'on-disk source hashes; not process-memory attestation',
+            'files':{name:hashlib.sha256((Path(__file__).parent/name).read_bytes()).hexdigest()
+                     for name in ('worker.py','protocol.py','display.py','advanced_color.py','metrics.py','browser.py','logs.py')}}
         self.page_token = secrets.token_urlsafe(32)
         self.host_log = host_log
         self.browser_channel = browser_channel
@@ -50,6 +55,8 @@ class Worker:
         return {'schema': SCHEMA, 'run_id': self.run_id, 'state': self.state,
                 'mode': self.mode, 'ready': self.ready, 'report': self.report,
                 'monitor': self.monitor, 'interactive_desktop': display.probe(),
+                'worker_runtime_identity': self.runtime_identity,
+                'worker_module_path': str(Path(__file__).resolve()),
                 'host_monotonic_ns': time.monotonic_ns()}
 
     def event(self, kind, detail=None):
@@ -77,7 +84,8 @@ class Worker:
         folder.mkdir(parents=True, exist_ok=False)
         self.run_id, self.folder, self.monitor = value['run_id'], folder, monitor
         self.settings = dict(s, run_id=self.run_id, width=monitor['width'], height=monitor['height'],
-                             warmup_seconds=s.get('warmup_seconds', 0))
+                             warmup_seconds=s.get('warmup_seconds', 0),
+                             display_refresh_hz=monitor.get('refresh_hz'))
         self.ready = self.report = None
         self.start_ack = None
         self.page_error = None
@@ -163,10 +171,17 @@ class Worker:
             return
         self.finalizing = True
         report = self.report or {'reason': reason, 'measurement_validity': 'INCONCLUSIVE'}
-        valid = (report.get('reason') == 'COMPLETE' and self.settings['fps'] * .95 <= report.get('raf_fps', 0) <= self.settings['fps'] * 1.05
-                 and sum(report.get('intervals_ms', [])) >= self.settings['seconds'] * 1000 * .95
-                 and not report.get('hidden_events') and not report.get('fullscreen_lost')
-                 and not report.get('interval_overflow') and self.ready and self.ready['ready'])
+        reasons = []
+        rate_reason = raf_rate_reason(report.get('raf_fps'), self.monitor or {}, self.settings['fps'])
+        if rate_reason: reasons.append(rate_reason)
+        if report.get('reason') != 'COMPLETE': reasons.append('HOST_REPORT_NOT_COMPLETE')
+        if sum(report.get('intervals_ms', [])) < self.settings['seconds'] * 1000 * .95:
+            reasons.append('HOST_MEASUREMENT_TOO_SHORT')
+        if report.get('hidden_events'): reasons.append('BROWSER_HIDDEN')
+        if report.get('fullscreen_lost'): reasons.append('FULLSCREEN_LOST')
+        if report.get('interval_overflow'): reasons.append('INTERVAL_OVERFLOW')
+        if not self.ready or not self.ready['ready']: reasons.append('HOST_NOT_READY')
+        valid = not reasons
         final_state = 'COMPLETED' if valid else 'INCONCLUSIVE'
         try:
             logs = self.logs.finish(self.folder / 'host-log.txt')
@@ -175,6 +190,7 @@ class Worker:
         report = dict(report, schema=SCHEMA, run_id=self.run_id,
                       host_termination_reason=reason,
                       measurement_validity='VALID' if valid else 'INCONCLUSIVE',
+                      validity_reasons=reasons, worker_runtime_identity=self.runtime_identity,
                       content_sha256=self.content_hash, selected_display=self.monitor,
                       browser=self.browser_info,
                       gpu_samples=self.samples, events=self.events,

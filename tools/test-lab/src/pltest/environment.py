@@ -37,6 +37,7 @@ def environment(profile, report, analysis):
     renderer='PyroWave/Vulkan' if codec=='pyrowave' else 'VideoDec2/native' if codec in ('hevc','h264') else None
     if renderer is None:missing.append('renderer')
     return {'verified':not missing,'missing':missing,'firmware':hex(firmware) if firmware else None,
+            'host_tls_peer_sha256':advertised.get('tls_peer_sha256'),
             'host_version':host_version,'encoder_settings':encoder,'network_class':network,
             'build_flags':flags,'renderer':renderer,
             'sources':{'firmware':'PS5 preflight kernel_get_fw_version',

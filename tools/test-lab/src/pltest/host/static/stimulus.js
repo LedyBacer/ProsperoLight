@@ -22,7 +22,7 @@ async function prepare(s) {
   document.title='ProsperoLight Test Lab '+s.run_id;
   const fresh=canvas.cloneNode(false);canvas.replaceWith(fresh);canvas=fresh;
   canvas.width=s.render_width??s.width;canvas.height=s.render_height??s.height;textures=[];gpuScene=null;
-  intervals=new Float64Array(Math.min(250000,Math.ceil((s.seconds+s.warmup_seconds+5)*240)));
+  intervals=new Float64Array(Math.min(250000,Math.ceil((s.seconds+s.warmup_seconds+5)*Math.max(240,s.display_refresh_hz||0))));
   if(s.scene==='gpu-entropy'||s.workload_backend==='webgl2') {
     gpuScene=new PLTestGpuScene(canvas,s);ctx=null;gpuScene.draw(0);
     const bytes=await crypto.subtle.digest('SHA-256',gpuScene.sample());
