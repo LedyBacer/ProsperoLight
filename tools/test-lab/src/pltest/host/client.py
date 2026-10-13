@@ -78,6 +78,8 @@ class HostWorkerAdapter:
             await self.socket.send_json(message)
             response = await asyncio.wait_for(future, timeout=timeout)
             if response.get('ack') != 'accepted' or response.get('run_id') != run_id:
+                if response.get('reason_code') == 'TimeoutError':
+                    raise TimeoutError('HOST_WORKER_COMMAND_TIMEOUT:' + action)
                 if response.get('reason') in ('UNSUPPORTED_WEBGL2', 'UNSUPPORTED_WEBGL2_SHADER', 'UNSUPPORTED_WEBGL2_PROGRAM',
                     'UNSUPPORTED_HDR_DISPLAY','UNSUPPORTED_HDR_CURRENT_DISPLAY_MODE','UNSUPPORTED_DISPLAY_RESOLUTION'):
                     raise RuntimeError(response['reason'])

@@ -403,3 +403,23 @@ remain unchanged; any continuation creates fresh independent run IDs.
 
 Packaging validation built a wheel and verified the new host/display modules,
 WebGL2 assets, dashboard assets, recipes and control transport are included.
+
+
+## High refresh readiness and HDR checkpoint
+
+The first 4K120 attempt `cb837002-b337-4d0d-9272-b9a8dbc8654f` safely ended
+INCONCLUSIVE before measurement: the actual virtual display was 3840x2160 at
+480 Hz, but a 600-frame readiness buffer could never span its required two
+seconds. Ready sampling now retains a bounded time window and tests cover
+60/240/480/1000 Hz. The rAF upper bound uses the independently inventoried
+current display refresh, while retaining the requested workload minimum and
+reporting actual rAF separately from content updates and stream FPS.
+A subsequent PyroWave 4K120 attempt `a734bfba-ad74-46e0-8d82-44fd9425eb71`
+refused the old upper rAF check; neither historical attempt is relabelled PASS.
+Blank timeout errors now carry a machine-readable exception code.
+
+Fresh PyroWave smoke `2276f302-bb05-44e7-91a8-07210e092d67` completed PASS/VALID
+with the nominal-refresh correction. After graceful worker update, HEVC HDR10
+run `e8bb7e2c-505c-4a05-bcd0-ffdf9041da25` also completed PASS/VALID with verified
+title exit and fresh artifacts. This proves that requested mode on this setup,
+not physical HDR display calibration or HDMI scanout.

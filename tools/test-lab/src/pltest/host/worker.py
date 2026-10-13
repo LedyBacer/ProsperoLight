@@ -348,7 +348,8 @@ class Worker:
                             observed = await self.browser.diagnostics()
                             (self.folder / 'browser-diagnostics.json').write_text(json.dumps(observed, indent=2), encoding='utf-8')
                         await ws.send_json({'schema': SCHEMA, 'command_id': value.get('command_id') if 'value' in locals() else None,
-                                            'ack': 'rejected', 'reason': str(exc)[:512]})
+                                            'ack': 'rejected', 'reason': (str(exc) or type(exc).__name__)[:512],
+                                            'reason_code': type(exc).__name__})
                         if self.state == 'PREPARING':
                             await self.stop('PREPARATION_FAILED')
             finally:

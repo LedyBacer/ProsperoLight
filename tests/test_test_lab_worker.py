@@ -82,6 +82,9 @@ catch(e){if(e.message!=='UNSUPPORTED_WEBGL2')throw e;}"""
                 'dpr': 1, 'screen_x': 0, 'screen_y': 0, 'outer_width': 1920, 'outer_height': 1080,
                 'screen_width': 1920, 'screen_height': 1080}
         self.assertTrue(readiness(page, monitor, 60, inventory)['ready'])
+        high_refresh = dict(monitor,refresh_hz=480)
+        self.assertTrue(readiness(dict(page,raf_fps=479),high_refresh,240,inventory)['ready'])
+        self.assertFalse(readiness(dict(page,raf_fps=720),high_refresh,240,inventory)['ready'])
         for key, value in [('visibility', 'hidden'), ('fullscreen', False), ('raf_fps', 30),
                            ('raf_fps', 120), ('screen_x', 1920), ('dpr', float('nan'))]:
             changed = dict(page); changed[key] = value
@@ -140,16 +143,26 @@ if(Buffer.compare(Buffer.from(data),Buffer.from(old)))throw Error('original nois
         if not node: self.skipTest('Node needed for browser preparation fixture')
         source = ROOT / 'tools/test-lab/src/pltest/host/static/stimulus.js'
         code = r'''
-const fs=require('fs'),vm=require('vm');let resolveHash,callbacks=0;
+const fs=require('fs'),vm=require('vm');let resolveHash,callbacks=0;const messages=[];
 const ctx={drawImage(image){if(!image)throw Error('unprepared texture');},fillRect(){},createImageData(){return {data:new Uint8ClampedArray(16)};},putImageData(){}};
 const canvas=()=>({getContext(){return ctx;},cloneNode(){return canvas();},replaceWith(){}}),nodes={'#scene':canvas(),'#ready':{},'#status':{}};
-class WS {static OPEN=1;constructor(){this.readyState=1;}send(){}}
-const sandbox={document:{querySelector:s=>nodes[s],createElement:canvas,body:{classList:{add(){},remove(){}}},addEventListener(){}},location:{host:'localhost'},WebSocket:WS,
+class WS {static OPEN=1;constructor(){this.readyState=1;}send(value){messages.push(JSON.parse(value));}}
+const sandbox={document:{visibilityState:'visible',hasFocus:()=>true,fullscreenElement:{},querySelector:s=>nodes[s],createElement:canvas,body:{classList:{add(){},remove(){}}},addEventListener(){}},location:{host:'localhost'},WebSocket:WS,
+devicePixelRatio:1,window:{screenX:0,screenY:0},outerWidth:2,outerHeight:2,screen:{width:2,height:2},
 requestAnimationFrame(){callbacks++;},setTimeout,crypto:{subtle:{digest:()=>new Promise(r=>resolveHash=r)}},PLTestPatterns:{fillNoise(){}}};
 vm.createContext(sandbox);vm.runInContext(fs.readFileSync(process.argv[1],'utf8'),sandbox);
 const pending=vm.runInContext('prepare({width:2,height:2,seed:1,fps:60,seconds:2,warmup_seconds:0,scene:"low-motion",run_id:"run"})',sandbox);
 vm.runInContext('tick(1)',sandbox);if(callbacks!==2)throw Error('animation loop stopped during preparation');
-resolveHash(new ArrayBuffer(32));pending.then(()=>{if(!vm.runInContext('prepared',sandbox))throw Error('preparation did not complete');}).catch(e=>{console.error(e);process.exitCode=1;});
+resolveHash(new ArrayBuffer(32));pending.then(()=>{
+ if(!vm.runInContext('prepared',sandbox))throw Error('preparation did not complete');
+ for(const hz of [60,240,480,1000]){
+  messages.length=0;vm.runInContext('preflightFrames=[];pendingReady=true;lastPulse=0',sandbox);
+  for(let frame=0;frame<=Math.ceil(hz*2.1);frame++)vm.runInContext(`tick(${frame*1000/hz})`,sandbox);
+  const ready=messages.filter(m=>m.type==='ready');
+  if(ready.length!==1||Math.abs(ready[0].snapshot.raf_fps-hz)>.01)throw Error('Ready failed at '+hz+' Hz');
+  if(vm.runInContext('preflightFrames.length',sandbox)>4096)throw Error('unbounded Ready samples');
+ }
+}).catch(e=>{console.error(e);process.exitCode=1;});
 '''
         subprocess.run([node, '-e', code, str(source)], check=True)
 

@@ -53,7 +53,7 @@ def readiness(page, display, target_fps, desktop):
     fps = page.get('raf_fps')
     if type(fps) not in (float, int) or not math.isfinite(fps) or fps < target_fps * .95:
         reasons.append('RAF_BELOW_TARGET')
-    elif fps > target_fps * 1.05:
+    elif fps > max(target_fps, display.get('refresh_hz') or target_fps) * 1.05:
         reasons.append('RAF_ABOVE_TARGET')
     # Screen coordinates are CSS pixels; compare physical coordinates using reported DPR.
     dpr = page.get('dpr', 0)

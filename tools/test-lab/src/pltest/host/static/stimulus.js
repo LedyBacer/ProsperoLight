@@ -85,7 +85,9 @@ function finish(reason) {
 }
 function tick(now) {
   if(settings&&prepared) {
-    preflightFrames.push(now);if(preflightFrames.length>600)preflightFrames.shift();
+    preflightFrames.push(now);
+    // Keep a time window: a 600-frame cap never reaches 2 s at 480 Hz.
+    while(preflightFrames.length>4096||(preflightFrames.length>2&&preflightFrames[1]<now-2500))preflightFrames.shift();
     if(pendingReady&&preflightFrames.length>10&&now-preflightFrames[0]>=2000) {
       pendingReady=false;send({type:'ready',run_id:settings.run_id,snapshot:snapshot(),pixel_sample_sha256:preparedHash});
     }
