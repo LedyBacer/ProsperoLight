@@ -391,3 +391,15 @@ A/A attempt `18139222-3beb-4116-a362-58f061569751` stopped before launch with
 `NO_USER`. After the operator selected a profile, all 131 installed C files were
 read back and matched; TITLE_IDLE was verified and that exact owner's retained
 lease was released. No launch was replayed. A fresh calibration uses new run IDs.
+
+
+The subsequent A/A series retained four PASS/VALID measurements before its fifth
+preflight was incorrectly expired by the coordinator's own recovery loop after
+a heartbeat delay. Recovery now refreshes known live local owners first, then
+recovers orphaned leases. It still cancels if another owner deleted/replaced the
+lease, and never takes over an uncertain PS5 lease. Tests cover both a delayed
+live heartbeat and genuine ownership loss. The failed run and original reports
+remain unchanged; any continuation creates fresh independent run IDs.
+
+Packaging validation built a wheel and verified the new host/display modules,
+WebGL2 assets, dashboard assets, recipes and control transport are included.

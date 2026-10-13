@@ -724,6 +724,24 @@ int main(void) {
                 self.assertEqual((current['state'], current['reason_code']), ('INCONCLUSIVE', 'LEASE_LOST'))
                 self.assertEqual(current['report']['cleanup_errors'], [])
 
+    def test_delayed_heartbeat_does_not_recover_its_live_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RunStore(directory); scheduler = Scheduler(store, lease_ttl=.06)
+            with TestClient(create_app(directory, scheduler=scheduler)) as client:
+                value = client.post('/api/v1/runs', json={'suite': 'fake-smoke',
+                    'profile': profile(fake_stage_delay_seconds=.1)}).json()
+                client.post(f"/api/v1/runs/{value['run_id']}/start")
+                with store.connect() as connection:
+                    connection.execute('UPDATE leases SET heartbeat=0 WHERE run_id=?', (value['run_id'],))
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    current = store.get(value['run_id'])
+                    if current['state'] in ('INCONCLUSIVE', 'COMPLETED', 'FAILED'): break
+                    time.sleep(.01)
+                self.assertEqual(current['state'], 'COMPLETED')
+                self.assertEqual(current['verdict'], 'SIMULATED')
+                self.assertNotEqual(current['reason_code'], 'COORDINATOR_RESTART')
+
     def test_api_token_and_schema_validation(self):
         with tempfile.TemporaryDirectory() as directory:
             token = 'secret-token-value-0123456789-xyz'

@@ -74,7 +74,6 @@ class Scheduler:
 
     async def _heartbeat_loop(self):
         while not self.closed:
-            self.store.recover_expired(self.lease_ttl)
             async with self.lock:
                 active = list(self.tasks)
             for run_id in active:
@@ -86,6 +85,10 @@ class Scheduler:
                     task = self.tasks.get(run_id)
                     if cancel: cancel.set()
                     if task and not task.done(): task.cancel()
+            # Refresh known live owners before recovering orphaned leases. A
+            # delayed event loop must not classify its own task as a restart.
+            # heartbeat still refuses a lease deleted/replaced by another owner.
+            self.store.recover_expired(self.lease_ttl)
             await asyncio.sleep(min(2, self.lease_ttl / 3))
 
     async def close(self):
