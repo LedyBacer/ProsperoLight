@@ -227,7 +227,7 @@ $(HOST_ELEVATION_TEST): tests/test_elevation.cpp src/elevation/elevation.cpp \
 
 test-integration:
 	@printf '%s\n' '==> [test-integration] Running host tooling integration tests'
-	@python3 -m unittest discover -s tests -p 'test_*.py' -v
+	@PYTHONPATH="$(CURDIR)/tools/test-lab/src:$(CURDIR)/tools/test-lab:$${PYTHONPATH}" python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 .PHONY: launcher-check launcher-layout-check fonts
 # The launcher on the PC: behaviour checks and a picture of every state.
@@ -404,6 +404,6 @@ app: self-update-helper
 
 .PHONY: test-lab-test
 test-lab-test:
-	@python3 -m unittest discover -s tests -p 'test_test_lab*.py' -v
-	@python3 -m unittest discover -s tests -p 'test_decoder_benchmark.py' -v
-	@python3 -m unittest discover -s tests -p 'test_pacing_test_tools.py' -v
+	@PYTHONPATH="$(CURDIR)/tools/test-lab/src:$(CURDIR)/tools/test-lab:$${PYTHONPATH}" python3 -m unittest discover -s tests -p 'test_test_lab*.py' -v
+	@PYTHONPATH="$(CURDIR)/tools/test-lab/src:$(CURDIR)/tools/test-lab:$${PYTHONPATH}" python3 -m unittest discover -s tests -p 'test_decoder_benchmark.py' -v
+	@PYTHONPATH="$(CURDIR)/tools/test-lab/src:$(CURDIR)/tools/test-lab:$${PYTHONPATH}" python3 -m unittest discover -s tests -p 'test_pacing_test_tools.py' -v

@@ -465,3 +465,11 @@ calibration and A/B are required to assess the current tool and workload.
 Paired CLI validates screening files before creating any run, including falsey
 non-object values. Invalid configuration cannot consume six hardware runs before
 being rejected by comparison. Focused tests preserve this fail-closed boundary.
+
+
+Fresh-checkout verification exposed a test invocation issue: an existing editable
+installation could cause discovery to import Test Lab from an older checkout.
+Make test targets now prepend absolute current-checkout module paths, including
+subprocesses launched in another working directory. The initial stale-package
+Linux results are not accepted as validation of the new source; checks are rerun
+with the repository-bound import path.
