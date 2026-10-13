@@ -119,11 +119,13 @@ def artifacts(run_id: str): emit(request('GET', '/api/v1/runs/' + run_id + '/art
 
 @app.command()
 def compare(baseline: str = '', candidate: str = '', pairs: Path | None = typer.Option(None, exists=True, readable=True),
-            calibration: bool = False, screening: Path | None = typer.Option(None, exists=True, readable=True)):
+            calibration: bool = False, screening: Path | None = typer.Option(None, exists=True, readable=True),
+            calibration_pairs: Path | None = typer.Option(None, exists=True, readable=True)):
     payload = {'pairs': json.loads(pairs.read_text())} if pairs else {'baseline': baseline, 'candidate': candidate}
     value = request('POST', '/api/v1/compare', json={'schema_version': 'prosperolight-test-lab-api/1',
                                                      **payload, 'calibration':calibration,
-                                                     'screening':json.loads(screening.read_text()) if screening else None})
+                                                     'screening':json.loads(screening.read_text()) if screening else None,
+                                                     'calibration_pairs':json.loads(calibration_pairs.read_text()) if calibration_pairs else None})
     emit(value); raise typer.Exit(exit_code(value.get('summary_verdict', value['verdict'])))
 
 
@@ -207,14 +209,24 @@ def paired(baseline: Path = typer.Option(..., exists=True, readable=True),
            candidate: Path = typer.Option(..., exists=True, readable=True),
            repetitions: int = typer.Option(3, min=3, max=20), suite: str = 'decoder-smoke',
            allow_deploy: bool = False, calibration: bool = False,
-           manifest_root: Path = typer.Option(..., exists=True, file_okay=False)):
+           manifest_root: Path = typer.Option(..., exists=True, file_okay=False),
+           screening: Path | None = typer.Option(None, exists=True, readable=True),
+           calibration_pairs: Path | None = typer.Option(None, exists=True, readable=True)):
     """Interleave A/B, then compare unique repeated run pairs; never parallelize PS5."""
     from ..build import validate_variant
     import hashlib
     if not allow_deploy:
         emit({'verdict':'INCONCLUSIVE','reason_code':'DEPLOY_PERMISSION_REQUIRED'}); raise typer.Exit(3)
     prepared = []
+    limits = None; reference = None
     try:
+        from .models import CompareRequest
+        limits = json.loads(screening.read_text()) if screening else None
+        reference = json.loads(calibration_pairs.read_text()) if calibration_pairs else None
+        if calibration and reference is not None:
+            raise ValueError('A/A cannot reference another calibration')
+        if reference is not None:
+            CompareRequest(pairs=reference, calibration=True, screening=limits)
         for path in (baseline, candidate):
             data = path.read_bytes()
             value = json.loads(data)
@@ -235,6 +247,10 @@ def paired(baseline: Path = typer.Option(..., exists=True, readable=True),
     capabilities = request('GET', '/api/v1/capabilities')
     if capabilities['api_mode'] != 'real':
         emit({'verdict':'INCONCLUSIVE','reason_code':'REAL_ADAPTERS_REQUIRED'}); raise typer.Exit(3)
+    if reference is not None:
+        noise = request('POST','/api/v1/compare',json={'pairs':reference,'calibration':True,'screening':limits})
+        if not noise.get('screening_usable'):
+            emit(noise); raise typer.Exit(3)
     pairs = []
     for _ in range(repetitions):
         ids = []
@@ -252,7 +268,10 @@ def paired(baseline: Path = typer.Option(..., exists=True, readable=True),
                 emit(current['report'] or current); raise typer.Exit(exit_code(current['verdict']))
             ids.append(rid)
         pairs.append(ids)
-    value=request('POST','/api/v1/compare',json={'pairs':pairs,'calibration':calibration})
+    comparison = {'pairs':pairs,'calibration':calibration}
+    if limits is not None: comparison['screening'] = limits
+    if reference is not None: comparison['calibration_pairs'] = reference
+    value=request('POST','/api/v1/compare',json=comparison)
     emit(value); raise typer.Exit(exit_code(value['verdict']))
 
 

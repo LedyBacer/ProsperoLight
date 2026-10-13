@@ -73,14 +73,17 @@ class CompareRequest(BaseModel):
     candidate: str | None = Field(default=None, pattern=r'^[0-9a-fA-F-]{36}$')
     pairs: list[tuple[str, str]] = Field(default_factory=list, max_length=20)
     calibration: bool = False
-    screening: dict[str, float | int] | None = None
+    calibration_pairs: list[tuple[str, str]] | None = Field(default=None, max_length=20)
+    screening: dict[str, float | int | dict[str, dict[str, float | int]]] | None = None
 
     @model_validator(mode='after')
     def identities(self):
         import uuid
         if bool(self.pairs) == bool(self.baseline or self.candidate):
             raise ValueError('provide either baseline/candidate or pairs')
-        values = self.pairs or [(self.baseline, self.candidate)]
+        if self.calibration and self.calibration_pairs is not None:
+            raise ValueError('A/A cannot reference another calibration')
+        values = (self.pairs or [(self.baseline, self.candidate)]) + (self.calibration_pairs or [])
         for a, b in values:
             for value in (a, b):
                 if not isinstance(value, str) or str(uuid.UUID(value)) != value:

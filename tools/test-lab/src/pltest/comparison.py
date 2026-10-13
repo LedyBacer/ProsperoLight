@@ -10,6 +10,14 @@ import statistics
 from .suites import DEFINITIONS
 
 REQUIRED_ENVIRONMENT = ('firmware', 'host_version', 'encoder_settings', 'network_class', 'build_flags', 'renderer')
+SCREENED_METRICS = {'unique_presented_fps', 'frame_age_us', 'callback_to_ready_us',
+                    'ready_to_submit_us', 'submit_to_post_present_observation_us'}
+
+
+def metric_threshold(screening, key):
+    default = {'fraction': screening['fps_drop_fraction'], 'absolute': 0} if key == 'unique_presented_fps' else {
+        'fraction': screening['latency_increase_fraction'], 'absolute': screening['latency_increase_us']}
+    return dict(default, **screening.get('metric_thresholds', {}).get(key, {}))
 
 
 def fingerprint(profile, report):
@@ -52,8 +60,30 @@ def build_identity(profile, report):
     return identity
 
 
-def compare_pairs(pairs, calibration=False, screening=None):
+def compare_pairs(pairs, calibration=False, screening=None, calibration_pairs=None):
     result = _compare_pairs(pairs, calibration, screening)
+    result['calibration_status'] = 'A/A' if calibration else 'NOT_SUPPLIED'
+    if calibration_pairs is not None and result['measurement_validity'] == 'VALID':
+        reference = _compare_pairs(calibration_pairs, True, screening)
+        result['calibration_reference'] = reference
+        reason = None
+        if calibration or reference['measurement_validity'] != 'VALID':
+            reason = 'CALIBRATION_REFERENCE_INVALID'
+        elif reference.get('fingerprint_sha256') != result.get('fingerprint_sha256'):
+            reason = 'CALIBRATION_ENVIRONMENT_MISMATCH'
+        elif reference['pairs'][0]['baseline_identity'] not in (
+                result['pairs'][0]['baseline_identity'], result['pairs'][0]['candidate_identity']):
+            reason = 'CALIBRATION_BUILD_MISMATCH'
+        elif ({run for pair in result['pairs'] for run in (pair['baseline'],pair['candidate'])} &
+              {run for pair in reference['pairs'] for run in (pair['baseline'],pair['candidate'])}):
+            reason = 'CALIBRATION_RUNS_NOT_INDEPENDENT'
+        elif not reference['screening_usable']:
+            reason = 'CALIBRATION_NOISE_EXCEEDS_THRESHOLDS'
+        if reason:
+            result.update(verdict='INCONCLUSIVE', performance_delta='NOT_COMPARABLE', reason_code=reason,
+                          calibration_status='UNUSABLE')
+        else:
+            result['calibration_status'] = 'VERIFIED'
     result['overall_verdict'] = result['summary_verdict'] = result['verdict']
     result['execution_state'] = 'COMPLETED'
     return result
@@ -68,9 +98,18 @@ def _compare_pairs(pairs, calibration=False, screening=None):
                   'Run interleaved A/B pairs; distribution and ordered drift are reported.',
                   'Build/source identities are recorded separately; changed code is allowed only with identical build flags/environment.']}
     if screening:
-        if not isinstance(screening, dict) or set(screening) - set(result['screening']):
+        if not isinstance(screening, dict) or set(screening) - (set(result['screening']) | {'metric_thresholds'}):
             result['reason_code'] = 'SCREENING_CONFIGURATION_INVALID'; return result
         for key,value in screening.items():
+            if key == 'metric_thresholds':
+                if not isinstance(value, dict) or set(value) - SCREENED_METRICS:
+                    result['reason_code'] = 'SCREENING_CONFIGURATION_INVALID'; return result
+                for limits in value.values():
+                    if (not isinstance(limits, dict) or not limits or set(limits) - {'fraction', 'absolute'} or
+                            any(type(v) not in (int,float) or not math.isfinite(v) or v < 0 or
+                                (k == 'fraction' and not 0 < v < 1) for k,v in limits.items())):
+                        result['reason_code'] = 'SCREENING_CONFIGURATION_INVALID'; return result
+                continue
             if (type(value) not in (int,float) or not math.isfinite(value) or value <= 0 or
                     key == 'minimum_pairs' and (type(value) is not int or not 3 <= value <= 20) or
                     key.endswith('fraction') and value >= 1):
@@ -132,25 +171,30 @@ def _compare_pairs(pairs, calibration=False, screening=None):
                           'ordered_fractions': fractions, 'ordered_deltas': deltas, 'range_fraction': [min(fractions), max(fractions)],
                           'baseline_first_to_last': vals[-1]['baseline']-vals[0]['baseline'],
                           'candidate_first_to_last': vals[-1]['candidate']-vals[0]['candidate']}
-    fps = summaries['unique_presented_fps']['median_fraction']
+        summaries[key]['threshold'] = metric_threshold(screening, key)
     if calibration:
         noise = {key: max(abs(value) for value in metric['ordered_fractions']) for key,metric in summaries.items()}
-        usable = noise['unique_presented_fps'] <= screening['fps_drop_fraction'] and all(
-            noise[key] <= screening['latency_increase_fraction'] or max(abs(value) for value in summaries[key]['ordered_deltas']) <= screening['latency_increase_us']
-            for key in latency_keys)
+        per_metric = {key: noise[key] <= metric_threshold(screening,key)['fraction'] or
+            max(abs(value) for value in summaries[key]['ordered_deltas']) <= metric_threshold(screening,key)['absolute']
+            for key in summaries}
+        usable = all(per_metric.values())
         result.update(verdict='PASS' if usable else 'INCONCLUSIVE', functional_verdict='PASS',
             measurement_validity='VALID', performance_delta='CALIBRATION', reason_code='AA_NOISE_CALIBRATION',
-            metrics=summaries, noise_floor_fraction=noise, screening_usable=usable, sample_pairs=len(pairs))
+            metrics=summaries, noise_floor_fraction=noise, screening_usable=usable,
+            screening_usable_by_metric=per_metric, fingerprint_sha256=expected, sample_pairs=len(pairs))
         return result
-    regression = fps < -screening['fps_drop_fraction']
-    improved = fps > screening['fps_drop_fraction']
-    for key in latency_keys:
-        v = summaries[key]
-        regression |= v['median_fraction'] > screening['latency_increase_fraction'] and v['median_delta'] > screening['latency_increase_us']
-        improved |= v['median_fraction'] < -screening['latency_increase_fraction'] and v['median_delta'] < -screening['latency_increase_us']
-    # Every pair must support the aggregate direction to screen a regression/improvement.
-    inconsistent = any(min(v['ordered_fractions']) < 0 < max(v['ordered_fractions']) for v in summaries.values())
-    delta = 'NO_CLEAR_CHANGE' if inconsistent or regression and improved else 'REGRESSED' if regression else 'IMPROVED' if improved else 'NO_CLEAR_CHANGE'
+    directions = {}
+    for key, metric in summaries.items():
+        limit = metric_threshold(screening,key)
+        exceeds = (abs(metric['median_fraction']) > limit['fraction'] and
+                   abs(metric['median_delta']) > limit['absolute'])
+        consistent = all(v < 0 for v in metric['ordered_fractions']) or all(v > 0 for v in metric['ordered_fractions'])
+        regressed = metric['median_fraction'] < 0 if key == 'unique_presented_fps' else metric['median_fraction'] > 0
+        directions[key] = ('REGRESSED' if regressed else 'IMPROVED') if exceeds and consistent else 'NO_CLEAR_CHANGE'
+        metric['performance_delta'] = directions[key]
+    # Noise in an unrelated metric must not erase a consistent FPS regression.
+    regression = 'REGRESSED' in directions.values(); improved = 'IMPROVED' in directions.values()
+    delta = 'NO_CLEAR_CHANGE' if regression and improved else 'REGRESSED' if regression else 'IMPROVED' if improved else 'NO_CLEAR_CHANGE'
     result.update(verdict='FAIL' if delta == 'REGRESSED' else 'PASS', functional_verdict='PASS',
                   measurement_validity='VALID', performance_delta=delta, reason_code='PAIRED_SCREENING',
                   metrics=summaries, fingerprint_sha256=expected, sample_pairs=len(pairs))

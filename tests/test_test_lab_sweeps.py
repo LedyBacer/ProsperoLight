@@ -87,3 +87,24 @@ class SweepTests(unittest.TestCase):
             self.assertEqual(result.exit_code,0,result.output)
             self.assertEqual(len(created),6)
             self.assertEqual(compared,[{'pairs':[['1','2'],['3','4'],['5','6']],'calibration':True}])
+
+    def test_noisy_calibration_reference_stops_before_deployment(self):
+        import uuid
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);paths=[]
+            for letter in ('a','b'):
+                manifest=dict(source_sha=letter*40,build_label='test-lab-'+letter,eboot_sha256=letter*64,
+                              build_flags={'TEST_LAB':1,'PERFORMANCE_DETAIL':1},profile=BASE)
+                path=root/(letter+'.json');path.write_text(json.dumps(manifest));paths.append(path)
+            reference=root/'reference.json';reference.write_text(json.dumps([[str(uuid.uuid4()),str(uuid.uuid4())] for _ in range(3)]))
+            calls=[]
+            def api(method,path,**kwargs):
+                calls.append(path)
+                if path.endswith('/capabilities'):return {'api_mode':'real'}
+                if path.endswith('/compare'):return {'verdict':'INCONCLUSIVE','screening_usable':False,'reason_code':'AA_NOISE_CALIBRATION'}
+                raise AssertionError('deployment must not start')
+            with patch('pltest.build.validate_variant',side_effect=lambda value,root:value), patch('pltest.coordinator.cli.request',side_effect=api):
+                result=CliRunner().invoke(app,['paired','--baseline',str(paths[0]),'--candidate',str(paths[1]),
+                    '--manifest-root',str(root),'--allow-deploy','--calibration-pairs',str(reference)])
+            self.assertEqual(result.exit_code,3,result.output)
+            self.assertEqual(calls,['/api/v1/capabilities','/api/v1/compare'])

@@ -30,5 +30,5 @@ $('create').onsubmit=safe(async()=>{$('start').disabled=true;try{const run=await
 $('doctor').onclick=safe(async()=>pretty('environment',await api('doctor')));
 $('refresh').onclick=safe(refresh);$('stop').onclick=safe(async()=>{if(selected){await api('runs/'+selected+'/stop',{});await inspect(selected);await refresh();}});
 $('bundle').onclick=safe(()=>download('runs/'+selected+'/bundle?redact='+$('redact').checked,selected+'.zip'));
-$('compare').onclick=safe(async()=>pretty('comparison',await api('compare',{pairs:JSON.parse($('pairs').value),calibration:$('calibration').checked,screening:JSON.parse($('screening').value)})));
+$('compare').onclick=safe(async()=>pretty('comparison',await api('compare',{pairs:JSON.parse($('pairs').value),calibration:$('calibration').checked,screening:JSON.parse($('screening').value),calibration_pairs:JSON.parse($('calibration-pairs').value)})));
 setInterval(async()=>{if(!connected||busy||document.hidden)return;busy=true;try{await api('health');await refresh();if(selected)await inspect(selected);}catch(e){$('connection').textContent='Connection lost';$('error').textContent=e.message;}finally{busy=false;}},2000);

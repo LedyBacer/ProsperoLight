@@ -219,6 +219,49 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(compare_pairs(self.pairs(63))['performance_delta'],'IMPROVED')
         self.assertEqual(compare_pairs(self.pairs(60,4500))['verdict'],'FAIL')
         self.assertEqual(compare_pairs(self.pairs(60,3300))['performance_delta'],'NO_CLEAR_CHANGE')
+        mixed_noise = [(run_fixture(),run_fixture(57,age,variant='b')) for age in (1000,3000,5000)]
+        result = compare_pairs(mixed_noise)
+        self.assertEqual(result['performance_delta'],'REGRESSED')
+        self.assertEqual(result['metrics']['frame_age_us']['performance_delta'],'NO_CLEAR_CHANGE')
+
+    def test_independent_metric_thresholds_and_calibration_noise(self):
+        from pltest.coordinator.models import CompareRequest
+        overrides = {'metric_thresholds': {'frame_age_us': {'absolute': 2000}}}
+        ids = [run_fixture()['run_id'],run_fixture()['run_id']]
+        self.assertEqual(CompareRequest(pairs=[ids], screening=overrides).screening, overrides)
+        result = compare_pairs(self.pairs(60,4500), screening=overrides)
+        self.assertEqual(result['performance_delta'], 'NO_CLEAR_CHANGE')
+        self.assertEqual(result['metrics']['frame_age_us']['threshold'], {'fraction': .1, 'absolute': 2000})
+        self.assertEqual(compare_pairs(self.pairs(57,4500), screening=overrides)['performance_delta'], 'REGRESSED')
+        noisy = [(run_fixture(),run_fixture(age=4500)) for _ in range(3)]
+        result = compare_pairs(noisy, calibration=True)
+        self.assertTrue(result['screening_usable_by_metric']['unique_presented_fps'])
+        self.assertFalse(result['screening_usable_by_metric']['frame_age_us'])
+        self.assertTrue(compare_pairs(noisy, calibration=True, screening=overrides)['screening_usable'])
+        for invalid in ({'unknown': {'fraction': .1}}, {'frame_age_us': {'absolute': float('inf')}},
+                        {'frame_age_us': {'fraction': 0}}, {'frame_age_us': {'absolute': -1}},
+                        {'frame_age_us': {'ignored': 1}}):
+            self.assertEqual(compare_pairs(self.pairs(), screening={'metric_thresholds': invalid})['reason_code'],
+                             'SCREENING_CONFIGURATION_INVALID')
+
+    def test_calibration_reference_blocks_noisy_or_incompatible_comparison(self):
+        pairs=self.pairs(57)
+        clean=[(run_fixture(),run_fixture()) for _ in range(3)]
+        result=compare_pairs(pairs,calibration_pairs=clean)
+        self.assertEqual(result['calibration_status'],'VERIFIED')
+        self.assertEqual(result['performance_delta'],'REGRESSED')
+        noisy=[(run_fixture(),run_fixture(age=5000)) for _ in range(3)]
+        result=compare_pairs(pairs,calibration_pairs=noisy)
+        self.assertEqual(result['reason_code'],'CALIBRATION_NOISE_EXCEEDS_THRESHOLDS')
+        self.assertEqual(result['overall_verdict'],'INCONCLUSIVE')
+        self.assertEqual(result['performance_delta'],'NOT_COMPARABLE')
+        other_build=[(run_fixture(variant='c'),run_fixture(variant='c')) for _ in range(3)]
+        self.assertEqual(compare_pairs(pairs,calibration_pairs=other_build)['reason_code'],'CALIBRATION_BUILD_MISMATCH')
+        clean[0][0]['report']['host_measurement']['seed']=138
+        self.assertEqual(compare_pairs(pairs,calibration_pairs=clean)['reason_code'],'CALIBRATION_REFERENCE_INVALID')
+        clean=[(run_fixture(),run_fixture()) for _ in range(3)]
+        clean[0]=(pairs[0][0],run_fixture())
+        self.assertEqual(compare_pairs(pairs,calibration_pairs=clean)['reason_code'],'CALIBRATION_RUNS_NOT_INDEPENDENT')
 
     def test_missing_environment_mismatched_scene_and_invalid_measurement(self):
         noisy = [(run_fixture(), run_fixture(age=value)) for value in (1000,3000,5000)]

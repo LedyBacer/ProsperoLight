@@ -423,3 +423,40 @@ with the nominal-refresh correction. After graceful worker update, HEVC HDR10
 run `e8bb7e2c-505c-4a05-bcd0-ffdf9041da25` also completed PASS/VALID with verified
 title exit and fresh artifacts. This proves that requested mode on this setup,
 not physical HDR display calibration or HDMI scanout.
+
+
+## Calibration and metric-specific screening
+
+Six independent C A/A measurements were collected, with an interruption before
+the final pair: `d12e4d0a-e178-4c47-b4d9-d44b8eb8060a`,
+`61331ffc-4b05-4467-b56d-fbb010920398`, `18a39cce-1855-41da-9fb6-21816680f310`,
+`f0f10638-1e7a-42df-9ba2-4ad35f6c09fb`, `f3641558-8e4c-4f4a-9c31-31e3e980c47d`,
+and `639c2644-c411-4c18-8a11-b253692e5db4`. Every measurement was PASS/VALID,
+but default calibration was INCONCLUSIVE: maximum paired FPS variation 0.105%,
+callback-to-ready variation 1.858%, and frame-age p95 variation up to 12864 µs.
+The defaults are usable for FPS and callback-to-ready, not for frame-age.
+This is observed software timing noise, not proof of physical latency changes.
+
+Comparison now reports noise usability per metric and allows explicit thresholds
+per metric using a suite-specific JSON file, for example:
+`{"metric_thresholds":{"frame_age_us":{"fraction":0.10,"absolute":15000}}}`.
+Those values are illustrative, not universal defaults or recommended TV latency.
+All measured fields and validity requirements remain enforced. A consistent FPS
+regression is screened independently of an unrelated noisy latency metric.
+
+`pltest compare` and `pltest paired` accept `--calibration-pairs aa-pairs.json`
+(and `--screening suite-screening.json`). The file identifies archived independent
+A/A pairs in the same coordinator. A reference must have valid measurements,
+matching environment and the exact baseline or candidate build. Reused runs,
+incompatible references and noise above configured thresholds make the A/B
+result NOT_COMPARABLE; paired preflight rejects known unusable noise before
+any deployment. The dashboard exposes the same reference and threshold inputs.
+Without a reference, calibration status is explicitly NOT_SUPPLIED and results
+remain threshold screening, not causal or statistical proof.
+
+A separate read-only reanalysis of the historical A/B identifies a frame-age
+screening regression under the initial thresholds (paired differences
+9347/4189/5385 µs). Its original NO_CLEAR_CHANGE archive remains unchanged.
+The later A/A variability exceeds those differences, so a causal presentation
+regression is not established by that uncalibrated reanalysis. A fresh matched
+calibration and A/B are required to assess the current tool and workload.
