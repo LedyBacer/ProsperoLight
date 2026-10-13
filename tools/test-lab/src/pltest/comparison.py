@@ -97,7 +97,7 @@ def _compare_pairs(pairs, calibration=False, screening=None):
                   'Paired screening heuristics are not statistical proof.',
                   'Run interleaved A/B pairs; distribution and ordered drift are reported.',
                   'Build/source identities are recorded separately; changed code is allowed only with identical build flags/environment.']}
-    if screening:
+    if screening is not None:
         if not isinstance(screening, dict) or set(screening) - (set(result['screening']) | {'metric_thresholds'}):
             result['reason_code'] = 'SCREENING_CONFIGURATION_INVALID'; return result
         for key,value in screening.items():

@@ -223,6 +223,9 @@ def paired(baseline: Path = typer.Option(..., exists=True, readable=True),
         from .models import CompareRequest
         limits = json.loads(screening.read_text()) if screening else None
         reference = json.loads(calibration_pairs.read_text()) if calibration_pairs else None
+        from ..comparison import compare_pairs
+        if compare_pairs([], screening=limits)['reason_code'] == 'SCREENING_CONFIGURATION_INVALID':
+            raise ValueError('SCREENING_CONFIGURATION_INVALID')
         if calibration and reference is not None:
             raise ValueError('A/A cannot reference another calibration')
         if reference is not None:

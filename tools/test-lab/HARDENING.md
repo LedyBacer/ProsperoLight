@@ -460,3 +460,8 @@ screening regression under the initial thresholds (paired differences
 The later A/A variability exceeds those differences, so a causal presentation
 regression is not established by that uncalibrated reanalysis. A fresh matched
 calibration and A/B are required to assess the current tool and workload.
+
+
+Paired CLI validates screening files before creating any run, including falsey
+non-object values. Invalid configuration cannot consume six hardware runs before
+being rejected by comparison. Focused tests preserve this fail-closed boundary.

@@ -243,6 +243,8 @@ class AnalysisTests(unittest.TestCase):
                         {'frame_age_us': {'ignored': 1}}):
             self.assertEqual(compare_pairs(self.pairs(), screening={'metric_thresholds': invalid})['reason_code'],
                              'SCREENING_CONFIGURATION_INVALID')
+        for invalid in (False, [], ''):
+            self.assertEqual(compare_pairs(self.pairs(),screening=invalid)['reason_code'],'SCREENING_CONFIGURATION_INVALID')
 
     def test_calibration_reference_blocks_noisy_or_incompatible_comparison(self):
         pairs=self.pairs(57)
