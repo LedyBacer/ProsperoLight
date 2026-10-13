@@ -7,6 +7,17 @@ import ssl
 from urllib.parse import urlsplit
 
 
+async def bounded_response_json(response):
+    import json
+    data = bytearray()
+    async for chunk in response.content.iter_chunked(65536):
+        data.extend(chunk)
+        if len(data) > 1024*1024: raise ValueError('oversized host JSON response')
+    value = json.loads(data)
+    if not isinstance(value,dict): raise ValueError('host response must be an object')
+    return value
+
+
 class SessionGuard:
     def __init__(self, url, token, policy='reject', cafile=None):
         endpoint = urlsplit(url)
@@ -24,10 +35,7 @@ class SessionGuard:
                     headers={'Authorization':'Bearer '+self.token}, allow_redirects=False) as response:
                 if response.status != 200:
                     raise RuntimeError('HOST_SESSION_API_UNAVAILABLE:'+str(response.status))
-                raw = await response.content.read(1024*1024+1)
-                if len(raw) > 1024*1024: raise ValueError('oversized host session inventory')
-                import json
-                return json.loads(raw)
+                return await bounded_response_json(response)
 
     async def inventory(self):
         clients = await self.request('GET','/api/clients/list')

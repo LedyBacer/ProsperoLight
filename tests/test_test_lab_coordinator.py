@@ -28,6 +28,23 @@ def profile(**extra):
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_host_json_consumes_all_transport_chunks_with_a_byte_limit(self):
+        import asyncio
+        from types import SimpleNamespace
+        from pltest.host.session_guard import bounded_response_json
+        class Content:
+            def __init__(self,chunks):self.chunks=chunks
+            async def iter_chunked(self,size):
+                for chunk in self.chunks:yield chunk
+        async def exercise():
+            response=SimpleNamespace(content=Content([b'{"field":"',b'x'*100000,b'"}']))
+            result=await bounded_response_json(response)
+            self.assertEqual(len(result['field']),100000)
+            response=SimpleNamespace(content=Content([b'x'*65536]*17))
+            with self.assertRaisesRegex(ValueError,'oversized'):
+                await bounded_response_json(response)
+        asyncio.run(exercise())
+
     def test_offline_worker_blocks_before_session_disconnect(self):
         import asyncio
         from unittest.mock import AsyncMock

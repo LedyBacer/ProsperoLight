@@ -318,13 +318,12 @@ class RealHostCoordinatorAdapter:
 
     async def preflight(self, profile, cancel):
         from aiohttp import ClientSession, ClientTimeout
+        from ..host.session_guard import bounded_response_json
         async with ClientSession(timeout=ClientTimeout(total=5)) as session:
             async with session.get(self.url+'/health', headers={'Authorization':'Bearer '+self.token},
                                    allow_redirects=False) as response:
                 if response.status != 200: raise RuntimeError('HOST_WORKER_UNAVAILABLE')
-                raw = await response.content.read(1024*1024+1)
-                if len(raw) > 1024*1024: raise ValueError('oversized worker health')
-                health = json.loads(raw)
+                health = await bounded_response_json(response)
         if health.get('schema') != 'prosperolight-host-worker/1' or not health.get('interactive_desktop',{}).get('interactive'):
             raise RuntimeError('HOST_WORKER_DESKTOP_UNAVAILABLE')
         if health.get('state') not in ('IDLE','COMPLETED','INCONCLUSIVE'):
