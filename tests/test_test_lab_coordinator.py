@@ -427,7 +427,9 @@ int main(void) {
             result, ps5, host = __import__('asyncio').run(exercise(directory))
         self.assertEqual(result['state'], 'COMPLETED')
         self.assertEqual(result['report']['execution_mode'], 'real')
-        self.assertEqual(result['report']['verdict'], 'PASS')
+        self.assertEqual(result['report']['verdict'], 'INCONCLUSIVE')
+        self.assertEqual(result['state'], 'COMPLETED')
+        self.assertEqual(result['report']['functional_verdict'], 'PASS')
         self.assertLess(host.stages.index('START'), ps5.stages.index('WARMUP'))
         self.assertEqual(ps5.stages[-2:], ['ANALYZE', 'CLEANUP'])
 
@@ -467,7 +469,7 @@ int main(void) {
                     return response.json()
                 with patch('pltest.coordinator.cli.request', side_effect=transport):
                     cli = CliRunner().invoke(cli_app, ['report', run_id, '--json'])
-                self.assertEqual(cli.exit_code, 0, cli.output)
+                self.assertEqual(cli.exit_code, 3, cli.output)
                 self.assertEqual(json.loads(cli.output), api_report)
                 events = client.get(f'/api/v1/runs/{run_id}/events').json()['items']
                 self.assertIn('MEASURE', [event['stage'] for event in events])

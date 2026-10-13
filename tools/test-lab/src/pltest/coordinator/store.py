@@ -230,6 +230,9 @@ class RunStore:
         result = dict(row)
         result['profile'] = json.loads(result['profile'])
         result['report'] = json.loads(result['report']) if result['report'] else None
+        if result['report']:
+            from ..verdicts import classify
+            result.update(classify(result['report'], result['state']))
         return result
 
     def list_events(self, run_id, after=0):

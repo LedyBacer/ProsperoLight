@@ -39,6 +39,7 @@ bool Context::begin(const TestProfile &profile)
     stop_ = nullptr;
     data_ = nullptr;
     options_ = {};
+    format_ = width_ = height_ = fps_ = 0;
     unique_frames_ = 0;
     wall_started_ = uint64_t(time(nullptr));
     const char *baseline_names[] = {"performance-last.json",        "debug-trace.txt",
@@ -101,6 +102,15 @@ void Context::join()
     sample_ = nullptr;
     stop_ = nullptr;
     data_ = nullptr;
+}
+void Context::negotiated(int format, int width, int height, int fps)
+{
+    pthread_mutex_lock(&mutex_);
+    format_ = format;
+    width_ = width;
+    height_ = height;
+    fps_ = fps;
+    pthread_mutex_unlock(&mutex_);
 }
 void Context::fail(const char *reason)
 {
@@ -245,7 +255,7 @@ bool Context::finish(const moonlight_stream_metrics_t *metrics, int result)
     bool ok =
         std::fprintf(f,
                      "{\"schema\":\"prosperolight-test-receipt/"
-                     "1\",\"run_id\":\"%s\",\"sequence\":%u,\"functional_verdict\":\"%s\","
+                     "2\",\"run_id\":\"%s\",\"sequence\":%u,\"functional_verdict\":\"%s\","
                      "\"reason\":\"%s\",\"result\":%d,\"stream_ready\":%s,\"measurement_complete\":"
                      "%s,\"presented_frames\":%u,\"artifacts_complete\":%s,\"artifacts\":[",
                      timeline_.profile.run_id.c_str(), ++sequence_, verdict, reason, result,
@@ -262,7 +272,16 @@ bool Context::finish(const moonlight_stream_metrics_t *metrics, int result)
     {
         ok = options_.session_overrides.enabled ? write_resolved_options(f, options_)
                                                 : std::fputs(",\"resolved\":null", f) >= 0;
-        ok = ok && std::fprintf(f, ",\"negotiated\":null,\"paired_host_cleanup_confirmed\":%s",
+        if (format_ && width_ > 0 && height_ > 0 && fps_ > 0)
+            ok = ok &&
+                 std::fprintf(
+                     f,
+                     ",\"negotiated\":{\"source\":\"Limelight.renderer.setup.success\","
+                     "\"verified\":true,\"video_format\":%d,\"width\":%d,\"height\":%d,\"fps\":%d}",
+                     format_, width_, height_, fps_) > 0;
+        else
+            ok = ok && std::fputs(",\"negotiated\":null", f) >= 0;
+        ok = ok && std::fprintf(f, ",\"paired_host_cleanup_confirmed\":%s",
                                 host_cleanup_confirmed_.load() ? "true" : "false") > 0;
         ok = ok && std::fprintf(f, ",\"paired_host_exit_cleanup_confirmed\":%s",
                                 host_exit_cleanup_.load() == 1 ? "true" : "false") > 0;

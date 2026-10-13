@@ -78,7 +78,9 @@ def analyze_run(profile, report, directory):
         result['functional_verdict'] = 'PASS'
     if receipt.get('functional_verdict') == 'FAIL': result['functional_verdict'] = 'FAIL'
     elif receipt.get('functional_verdict') != 'PASS': issues.append('PS5_RECEIPT_NOT_PASS')
-    if receipt.get('negotiated') is None: issues.append('NEGOTIATED_SETTINGS_UNVERIFIED')
+    from .session_evidence import validate_negotiation
+    result['session_settings'], negotiation_issues = validate_negotiation(profile.get('client', {}), receipt)
+    issues.extend(negotiation_issues)
     if not receipt.get('artifacts_complete'): issues.append('ARTIFACTS_INCOMPLETE')
     artifact_dir = Path(directory) / 'ps5' / 'artifacts'
     if profile.get('client', {}).get('codec') == 'pyrowave':
@@ -100,6 +102,11 @@ def analyze_run(profile, report, directory):
         return result
     try:
         performance = json.loads(read_bounded(artifact_dir / 'performance-last.json'))
+        from .session_evidence import native_effective_settings
+        effective = native_effective_settings(performance)
+        result['session_settings'].update(effective)
+        issues.extend('EFFECTIVE_FIELD_UNVERIFIED:' + key for key, field in effective.items()
+                      if not field['verified'])
         name = receipt.get('trace', {}).get('name', '')
         if not re.fullmatch(r'performance-frames-mode[012]\.csv', name):
             raise ValueError('missing supported trace')

@@ -57,6 +57,11 @@ class RunView(BaseModel):
     state: str
     stage: str
     verdict: str
+    execution_state: str | None = None
+    functional_verdict: str | None = None
+    measurement_validity: str | None = None
+    performance_delta: str | None = None
+    overall_verdict: str | None = None
     reason_code: str | None = None
     report: dict[str, Any] | None = None
 

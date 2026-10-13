@@ -178,6 +178,7 @@ class Context
         return stopping_.load();
     }
     void fail(const char *reason);
+    void negotiated(int format, int width, int height, int fps);
     void host_cleanup_confirmed()
     {
         host_cleanup_confirmed_.store(true);
@@ -203,6 +204,7 @@ class Context
     void (*stop_)(void *) = nullptr;
     void *data_ = nullptr;
     moonlight_stream_options_t options_{};
+    int format_ = 0, width_ = 0, height_ = 0, fps_ = 0;
     unsigned sequence_ = 2;
     uint64_t wall_started_ = 0;
     uint64_t unique_frames_ = 0;

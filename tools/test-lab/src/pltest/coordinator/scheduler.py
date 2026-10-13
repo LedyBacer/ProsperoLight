@@ -275,7 +275,7 @@ class Scheduler:
             if 'report.json' not in report['artifacts']:
                 report['artifacts'].append('report.json')
             terminal_verdict = report.get('verdict', 'INCONCLUSIVE')
-            terminal_state = {'PASS': 'COMPLETED', 'FAIL': 'FAILED'}.get(terminal_verdict, 'INCONCLUSIVE')
+            terminal_state = report['execution_state']
             if terminal_state != 'COMPLETED':
                 report.setdefault('reason_code', 'MEASUREMENT_INCONCLUSIVE')
             pending = self.store.report_artifact(run_id, report)
@@ -355,8 +355,8 @@ class Scheduler:
         report['analysis'] = analyze_run(profile, report, directory)
         if report['analysis']['functional_verdict'] == 'FAIL' and not report.get('cleanup_errors') and report.get('reason_code') not in ('LEASE_LOST','COORDINATOR_SHUTDOWN'):
             report['verdict'] = 'FAIL'
-        report['summary_verdict'] = (report['verdict'] if report['verdict'] in ('FAIL', 'CANCELLED') else
-            'INCONCLUSIVE' if self.execution_mode == 'real' and report['analysis']['measurement_validity'] != 'VALID' else report['verdict'])
+        from ..verdicts import apply_classification
+        apply_classification(report)
         archive_analysis(self.store.artifacts / run_id, profile, report, self.store.list_events(run_id) or [])
 
     async def _cleanup(self, profile, run_id):

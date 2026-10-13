@@ -2711,6 +2711,10 @@ static int moonlight_renderer_setup(int video_format, int width, int height, int
 
     active_renderer = state;
     active_renderer->last_result = 0;
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active())
+        prosperolight::test_lab::context().negotiated(video_format, width, height, redraw_rate);
+#endif
     snprintf(receipt, sizeof(receipt),
              "Moonlight callbacks setup: format=%x display=%dx%d fps=%d flags=%x capabilities=%x",
              video_format, width, height, redraw_rate, dr_flags,

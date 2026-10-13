@@ -199,7 +199,7 @@ class RealPs5CoordinatorAdapter:
         try:
             with self.ps5.connect() as ftp:
                 value = read_receipt(ftp, ROOT + '/receipts/' + run_id + '.json')
-            if value.get('run_id') != run_id or value.get('schema') != 'prosperolight-test-receipt/1':
+            if value.get('run_id') != run_id or value.get('schema') not in ('prosperolight-test-receipt/1', 'prosperolight-test-receipt/2'):
                 raise ValueError('PS5 receipt identity mismatch')
             return True
         except error_perm as exc:

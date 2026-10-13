@@ -45,7 +45,7 @@ def emit(value):
 
 
 def exit_code(verdict):
-    return {'PASS': 0, 'FAIL': 1, 'INCONCLUSIVE': 3, 'CANCELLED': 4}.get(verdict, 2)
+    return {'PASS': 0, 'SIMULATED': 3, 'FAIL': 1, 'INCONCLUSIVE': 3, 'CANCELLED': 4}.get(verdict, 2)
 
 
 @app.command()

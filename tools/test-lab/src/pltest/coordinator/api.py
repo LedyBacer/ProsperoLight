@@ -120,7 +120,13 @@ def create_app(data_dir=None, scheduler=None, token=None):
         if not 1 <= limit <= 200: raise HTTPException(422, detail={'code':'INVALID_LIMIT'})
         with store.connect() as c:
             rows=c.execute('SELECT run_id,state,stage,verdict,created FROM runs ORDER BY created DESC LIMIT ?', (limit,)).fetchall()
-        return {'schema_version':'prosperolight-test-lab-api/1','items':[dict(row) for row in rows]}
+        items = []
+        for row in rows:
+            run = store.get(row['run_id'])
+            items.append({**dict(row), **{key: run.get(key) for key in
+                ('execution_state', 'functional_verdict', 'measurement_validity',
+                 'performance_delta', 'overall_verdict')}})
+        return {'schema_version':'prosperolight-test-lab-api/1', 'items':items}
 
     @app.get('/api/v1/doctor')
     async def doctor():
@@ -244,4 +250,6 @@ def _real_scheduler(store, data_dir):
 def _view(run):
     return {'schema_version': 'prosperolight-test-lab-api/1', 'run_id': run['run_id'],
             'state': run['state'], 'stage': run['stage'], 'verdict': run['verdict'],
-            'reason_code': run['reason_code'], 'report': run['report']}
+            'reason_code': run['reason_code'], 'report': run['report'],
+            **{key: run.get(key) for key in ('execution_state', 'functional_verdict',
+                'measurement_validity', 'performance_delta', 'overall_verdict')}}

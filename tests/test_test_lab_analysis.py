@@ -30,6 +30,49 @@ def run_fixture(fps=60, age=3000, ready=1500):
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_negotiation_requires_callback_identity_and_every_material_field(self):
+        from pltest.session_evidence import validate_negotiation
+        client = dict(codec='hevc', hdr=False, chroma='420', resolution='1080p', fps=60)
+        receipt = {'negotiated': {'codec': 'hevc'}}
+        fields, issues = validate_negotiation(client, receipt)
+        self.assertEqual(len(issues), 7)
+        self.assertFalse(fields['codec']['verified'])
+        receipt['negotiated'] = dict(source='Limelight.renderer.setup.success', verified=True,
+                                    video_format=256, width=1920, height=1080, fps=60)
+        self.assertEqual(validate_negotiation(client, receipt)[1], [])
+        receipt['negotiated']['fps'] = 120
+        self.assertIn('NEGOTIATED_FIELD_MISMATCH:fps', validate_negotiation(client, receipt)[1])
+        receipt['negotiated']['fps'] = True
+        self.assertIn('NEGOTIATED_FIELD_UNVERIFIED:fps', validate_negotiation(client, receipt)[1])
+        client.update(codec='pyrowave', hdr=True, chroma='444')
+        receipt['negotiated'].update(video_format=0x80000, fps=60)
+        self.assertEqual(validate_negotiation(client, receipt)[1], [])
+        receipt['negotiated']['verified'] = False
+        self.assertEqual(len(validate_negotiation(client, receipt)[1]), 7)
+
+    def test_canonical_terminal_classifications(self):
+        from pltest.verdicts import classify
+        report = {'execution_mode': 'real', 'verdict': 'PASS', 'analysis': {
+            'functional_verdict': 'PASS', 'measurement_validity': 'INCONCLUSIVE'}}
+        value = classify(report)
+        self.assertEqual((value['execution_state'], value['overall_verdict']),
+                         ('COMPLETED', 'INCONCLUSIVE'))
+        report['analysis']['measurement_validity'] = 'VALID'
+        self.assertEqual(classify(report)['overall_verdict'], 'PASS')
+        report['analysis']['performance_delta'] = 'REGRESSED'
+        self.assertEqual(classify(report)['overall_verdict'], 'FAIL')
+        report['analysis']['performance_delta'] = 'IMPROVED'
+        self.assertEqual(classify(report)['overall_verdict'], 'PASS')
+        report['analysis']['functional_verdict'] = 'FAIL'
+        self.assertEqual(classify(report)['overall_verdict'], 'FAIL')
+        report['analysis']['functional_verdict'] = 'PASS'
+        report['reason_code'] = 'CLEANUP_FAILED'
+        self.assertEqual(classify(report)['overall_verdict'], 'INCONCLUSIVE')
+        report.pop('reason_code'); report['verdict'] = 'CANCELLED'
+        self.assertEqual(classify(report)['overall_verdict'], 'CANCELLED')
+        report['verdict'] = 'PASS'; report['execution_mode'] = 'fake'
+        self.assertEqual(classify(report)['overall_verdict'], 'SIMULATED')
+
     def pairs(self, fps=60, age=3000):
         return [(run_fixture(),run_fixture(fps,age)) for _ in range(3)]
 
@@ -68,11 +111,12 @@ class AnalysisTests(unittest.TestCase):
     def test_native_validity_fault_loss_truncation_and_settings(self):
         from test_decoder_benchmark import fixture
         browser, performance, trace = fixture()
+        performance.update(vsync_active=1, output_width=3840, output_height=2160, refresh_x100=12000)
         profile = {'client': {'codec':'hevc','chroma':'420','hdr':False,'resolution':'2160p',
             'fps':120,'bitrate_mbps':80,'decoder_pipeline':'adaptive','decoder_cores':3,'vsync':True}}
         report = {'execution_mode':'real','verdict':'PASS','host_measurement':{'measurement_validity':'VALID'},
             'ps5_measurement':{'title_exit_verified':True,'stale_artifacts':[], 'receipt':{
-                'functional_verdict':'PASS','negotiated':{'codec':'hevc'},'artifacts_complete':True,
+                'functional_verdict':'PASS','negotiated':{'source':'Limelight.renderer.setup.success','verified':True,'video_format':256,'width':3840,'height':2160,'fps':120},'artifacts_complete':True,
                 'measure_start_monotonic_us':1000000,'measure_end_monotonic_us':1030000,
                 'trace':{'name':'performance-frames-mode0.csv'}}}}
         with tempfile.TemporaryDirectory() as directory:

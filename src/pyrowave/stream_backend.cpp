@@ -5,6 +5,7 @@
 #include "scanout_trace.hpp"
 #if PROSPEROLIGHT_TEST_LAB
 #include "test_lab_output_evidence.hpp"
+#include "test_lab_lifecycle.hpp"
 #endif
 #include "pacing_decision_trace.hpp"
 #include "lan_http_report.hpp"
@@ -869,6 +870,10 @@ int setup(int format, int width, int height, int fps, void *, int flags)
         s.backend = std::make_unique<PyroWaveVideoBackend>(*s.context);
         s.backend->initialize(width, height, fps, s.chroma444, s.hdr, selected_vsync,
                               selected_tv_safe, selected_pacing);
+#if PROSPEROLIGHT_TEST_LAB
+        if (prosperolight::test_lab::active())
+            prosperolight::test_lab::context().negotiated(format, width, height, fps);
+#endif
         log_line("PyroWave negotiated: %dx%d @ %d FPS, %s %s %u-bit limited range, "
                  "compression=0",
                  width, height, fps, s.hdr ? "HDR10" : "SDR", s.chroma444 ? "4:4:4" : "4:2:0",
