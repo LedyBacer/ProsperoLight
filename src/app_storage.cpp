@@ -33,7 +33,7 @@ constexpr char kInstallDir[] = "/data/homebrew/PPSA99002";
 constexpr char kSandboxApp[] = "/mnt/sandbox/PPSA99002_000/app0";
 constexpr char kSandboxData[] = "/mnt/sandbox/PPSA99002_000/download0";
 // Compiled shaders belong to one version of the OpenGL runtime (tools/fetch-opengl-sdk.sh).
-constexpr char kShaderCache[] = "opengl-1.0.0";
+constexpr char kShaderCache[] = "opengl-1.0.2";
 constexpr char kLogName[] = "prosperolight-launcher.log";
 constexpr char kPreviousLogName[] = "prosperolight-launcher.prev.log";
 
