@@ -32,23 +32,25 @@ def run_fixture(fps=60, age=3000, ready=1500):
 class AnalysisTests(unittest.TestCase):
     def test_negotiation_requires_callback_identity_and_every_material_field(self):
         from pltest.session_evidence import validate_negotiation
-        client = dict(codec='hevc', hdr=False, chroma='420', resolution='1080p', fps=60)
+        client = dict(codec='hevc', hdr=False, chroma='420', resolution='1080p', fps=60, bitrate_mbps=20)
+        samples = [{'source':'Vibepollo /api/rtsp/sessions','verified':True,'session':dict(width=1920,height=1080,fps=60,video_format=1,hdr=False,yuv444=False,encoder_bitrate_kbps=20000,requested_bitrate_kbps=20000)}]
         receipt = {'negotiated': {'codec': 'hevc'}}
-        fields, issues = validate_negotiation(client, receipt)
-        self.assertEqual(len(issues), 7)
+        fields, issues = validate_negotiation(client, receipt, samples)
+        self.assertEqual(len([issue for issue in issues if issue.startswith('NEGOTIATED_FIELD_UNVERIFIED')]), 7)
         self.assertFalse(fields['codec']['verified'])
         receipt['negotiated'] = dict(source='Limelight.renderer.setup.success', verified=True,
                                     video_format=256, width=1920, height=1080, fps=60)
-        self.assertEqual(validate_negotiation(client, receipt)[1], [])
+        self.assertEqual(validate_negotiation(client, receipt, samples)[1], [])
         receipt['negotiated']['fps'] = 120
-        self.assertIn('NEGOTIATED_FIELD_MISMATCH:fps', validate_negotiation(client, receipt)[1])
+        self.assertIn('HOST_CLIENT_SETTINGS_MISMATCH:fps', validate_negotiation(client, receipt, samples)[1])
         receipt['negotiated']['fps'] = True
-        self.assertIn('NEGOTIATED_FIELD_UNVERIFIED:fps', validate_negotiation(client, receipt)[1])
+        self.assertIn('NEGOTIATED_FIELD_UNVERIFIED:fps', validate_negotiation(client, receipt, samples)[1])
         client.update(codec='pyrowave', hdr=True, chroma='444')
         receipt['negotiated'].update(video_format=0x80000, fps=60)
-        self.assertEqual(validate_negotiation(client, receipt)[1], [])
+        samples[0]['session'].update(video_format=3, hdr=True, yuv444=True)
+        self.assertEqual(validate_negotiation(client, receipt, samples)[1], [])
         receipt['negotiated']['verified'] = False
-        self.assertEqual(len(validate_negotiation(client, receipt)[1]), 7)
+        self.assertEqual(len([issue for issue in validate_negotiation(client, receipt, samples)[1] if issue.startswith('NEGOTIATED_FIELD_UNVERIFIED')]), 7)
 
     def test_canonical_terminal_classifications(self):
         from pltest.verdicts import classify
@@ -114,7 +116,7 @@ class AnalysisTests(unittest.TestCase):
         performance.update(vsync_active=1, output_width=3840, output_height=2160, refresh_x100=12000)
         profile = {'client': {'codec':'hevc','chroma':'420','hdr':False,'resolution':'2160p',
             'fps':120,'bitrate_mbps':80,'decoder_pipeline':'adaptive','decoder_cores':3,'vsync':True}}
-        report = {'execution_mode':'real','verdict':'PASS','host_measurement':{'measurement_validity':'VALID'},
+        report = {'execution_mode':'real','verdict':'PASS','host_measurement':{'measurement_validity':'VALID','session_samples':[{'source':'Vibepollo /api/rtsp/sessions','verified':True,'session':dict(width=3840,height=2160,fps=120,video_format=1,hdr=False,yuv444=False,encoder_bitrate_kbps=80000,requested_bitrate_kbps=80000)}]},
             'ps5_measurement':{'title_exit_verified':True,'stale_artifacts':[], 'receipt':{
                 'functional_verdict':'PASS','negotiated':{'source':'Limelight.renderer.setup.success','verified':True,'video_format':256,'width':3840,'height':2160,'fps':120},'artifacts_complete':True,
                 'measure_start_monotonic_us':1000000,'measure_end_monotonic_us':1030000,

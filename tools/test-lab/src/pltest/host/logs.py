@@ -1,6 +1,7 @@
 # ps5-native-app-boilerplate - bounded host-local log slice without credentials.
 # Copyright (C) 2026 BlackBearReloaded
 # SPDX-License-Identifier: GPL-3.0-or-later
+import math
 import re
 from pathlib import Path
 
@@ -28,8 +29,21 @@ class LogSlice:
             source.seek(start)
             text = source.read(4 * 1024 * 1024).decode('utf-8', errors='replace')
         output.write_text(redact(text), encoding='utf-8')
+        calls = []
+        for match in re.finditer(r'Video encode call duration \(min/max/avg\): ([0-9.]+)ms/([0-9.]+)ms/([0-9.]+)ms', text):
+            try:
+                minimum, maximum, average = map(float, match.groups())
+            except ValueError:
+                continue
+            if all(math.isfinite(value) for value in (minimum, maximum, average)) and 0 <= minimum <= average <= maximum:
+                calls.append(dict(minimum_ms=minimum, maximum_ms=maximum, average_ms=average))
         return {'supported': True, 'rotated': rotated, 'truncated': truncated,
-                'bytes': output.stat().st_size, 'credentials': 'host-local; omitted from report'}
+                'bytes': output.stat().st_size, 'credentials': 'host-local; omitted from report',
+                'encode_cpu_call_summaries': calls or None,
+                'encode_cpu_call_source': 'host debug log: Video encode call duration (min/max/avg)',
+                'encode_cpu_call_reason': None if calls else 'host did not log encode CPU call summaries',
+                'per_frame_capture_timestamps': None, 'per_frame_encode_timestamps': None,
+                'per_frame_reason': 'aggregate encode call logs are not per-frame GPU or capture completion timestamps'}
 
 
 def server_inventory():

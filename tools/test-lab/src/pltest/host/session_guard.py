@@ -4,6 +4,7 @@
 import asyncio
 import re
 import ssl
+import time
 from urllib.parse import urlsplit
 
 
@@ -19,14 +20,20 @@ async def bounded_response_json(response):
 
 
 class SessionGuard:
-    def __init__(self, url, token, policy='reject', cafile=None):
+    def __init__(self, url, token, policy='reject', cafile=None, certificate_sha256=None):
         endpoint = urlsplit(url)
         if endpoint.scheme != 'https' or not endpoint.hostname or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment or endpoint.path not in ('', '/'):
             raise ValueError('host API must be an HTTPS origin without credentials')
         if policy not in ('reject', 'disconnect') or not token or len(token) > 4096:
             raise ValueError('invalid host session policy/token')
         self.url, self.token, self.policy = url.rstrip('/'), token, policy
-        self.ssl = ssl.create_default_context(cafile=cafile)
+        if certificate_sha256 is not None:
+            if not isinstance(certificate_sha256, str) or not re.fullmatch(r'[0-9a-f]{64}', certificate_sha256):
+                raise ValueError('invalid trusted host certificate SHA256')
+            from aiohttp import Fingerprint
+            self.ssl = Fingerprint(bytes.fromhex(certificate_sha256))
+        else:
+            self.ssl = ssl.create_default_context(cafile=cafile)
 
     async def request(self, method, path, body=None):
         from aiohttp import ClientSession, ClientTimeout
@@ -50,6 +57,29 @@ class SessionGuard:
                 if not isinstance(uuid,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,127}',uuid): raise ValueError('invalid paired client identity')
                 active.append(uuid)
         return sorted(set(active)), len(sessions['sessions'])
+
+    async def sample_session(self):
+        begin = time.monotonic_ns() // 1000
+        value = await self.request('GET', '/api/rtsp/sessions')
+        end = time.monotonic_ns() // 1000
+        sessions = value.get('sessions')
+        if not isinstance(sessions, list):
+            raise ValueError('HOST_SESSION_SCHEMA_UNSUPPORTED')
+        if not sessions:
+            return None
+        if len(sessions) != 1 or not isinstance(sessions[0], dict):
+            raise RuntimeError('HOST_SESSION_EXCLUSIVITY_LOST')
+        identity = sessions[0].get('uuid')
+        if not isinstance(identity, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,127}', identity):
+            raise ValueError('HOST_SESSION_IDENTITY_UNVERIFIED')
+        fields = ('uuid', 'width', 'height', 'fps', 'encoder_bitrate_kbps', 'requested_bitrate_kbps',
+                  'video_format', 'codec', 'hdr', 'yuv444', 'state', 'frames_sent', 'bytes_sent',
+                  'encode_latency_ms', 'last_frame_index', 'stream_gpu_model')
+        return {'source': 'Vibepollo /api/rtsp/sessions', 'verified': True,
+                'coordinator_start_us': begin, 'coordinator_end_us': end,
+                'session': {key: sessions[0].get(key) for key in fields},
+                'latency_semantics': 'host processing start to packetization observation; not isolated GPU encode time',
+                'gpu_semantics': 'capture display adapter model; not verified encode adapter identity'}
 
     async def ensure_idle(self, cancel):
         active, count = await self.inventory()

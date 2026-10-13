@@ -74,6 +74,7 @@ class Worker:
         self.settings = dict(s, run_id=self.run_id, width=monitor['width'], height=monitor['height'],
                              warmup_seconds=s.get('warmup_seconds', 0))
         self.ready = self.report = None
+        self.page_error = None
         self.commands.clear()
         self.finalizing = False
         self.latest_page = None
@@ -96,6 +97,8 @@ class Worker:
         await asyncio.wait_for(self.page_event.wait(), 30)
         await self.page.send_json({'action': 'prepare', 'settings': self.settings})
         await asyncio.wait_for(self.prepared_event.wait(), 30)
+        if self.page_error:
+            raise RuntimeError(self.page_error)
         if self.browser:
             await self.browser.ready()
         await asyncio.wait_for(self.ready_event.wait(), 45)
@@ -114,6 +117,8 @@ class Worker:
         self.started_event = asyncio.Event()
         await self.page.send_json({'action': 'start'})
         await asyncio.wait_for(self.started_event.wait(), 5)
+        if self.page_error:
+            raise RuntimeError(self.page_error)
         if self.state == 'STARTING':
             self.state = 'RUNNING'
             self.deadline = time.monotonic() + self.settings['seconds'] + self.settings['warmup_seconds'] + 10
@@ -218,7 +223,7 @@ class Worker:
             return web.json_response({'token': self.page_token}, headers={'Cache-Control': 'no-store'})
         async def assets(req):
             name = req.match_info['name']
-            if name not in ('patterns.js', 'stimulus.js'):
+            if name not in ('patterns.js', 'gpu-scene.js', 'stimulus.js'):
                 raise web.HTTPNotFound()
             return web.FileResponse(STATIC / name)
         async def page_ws(req):
@@ -259,7 +264,11 @@ class Worker:
                         if self.state in ('STARTING', 'RUNNING'):
                             asyncio.create_task(self.finalize('COMPLETE'))
                     elif kind == 'error':
-                        self.event('page_error', str(data.get('reason'))[:256])
+                        self.page_error = str(data.get('reason'))[:256]
+                        self.event('page_error', self.page_error)
+                        self.prepared_event.set()
+                        if hasattr(self, 'started_event'):
+                            self.started_event.set()
             finally:
                 if self.page is ws:
                     self.page = None; self.page_event.clear()

@@ -84,3 +84,56 @@ reporting a successful performance comparison.
 This prepared-artifact path does not yet automate obtaining clean source
 checkouts and invoking remote Linux/WSL builds. Hardware cross-build acceptance
 has not been run.
+
+## Host telemetry and workloads
+
+NVML inventory is enumerated without assuming the encoder is device 0. Optional
+`PLTEST_GPU_UUID` selects an adapter explicitly. Missing or unmatched selection
+leaves utilization null with a reason. Explicit selection identifies the sampled
+adapter but does not independently prove that Vibepollo encoded on it. Samples
+record host monotonic time, actual sampler interval and NVML's encoder sample
+period. Utilization never becomes per-frame latency.
+
+Host log slices optionally extract `Video encode call duration (min/max/avg)`
+CPU summaries when Vibepollo already logs them. No logging configuration is
+changed. Per-frame capture/encode completion timestamps remain unavailable;
+periodic CPU call duration is not GPU encoding latency. Audit of the installed
+Vibepollo 2.0.0 source (`8a8c4b03a280ab9f567beb380110abb80f5220b8`)
+confirmed authenticated RTSP inventory and hashed stored session tokens. Logs
+show disconnect/end events, which alone do not establish all-client exclusivity.
+
+`host_stimulus.scene="gpu-entropy"` uses WebGL2 fragment shader uint hashing;
+only scalar uniforms change per frame. No full-frame CPU upload or readback
+occurs during measurement. Preparation reads a small deterministic pixel sample
+for hashing. Optional `entropy` (0..1), `movement` (0..8), `update_hz` (1..240),
+`render_width` and `render_height` control workload; reported rAF frequency is
+separate from content update frequency and requested stream FPS. Unsupported
+WebGL2/shaders explicitly reject the scenario; compatibility Canvas scenes
+remain available. `test-pattern` supplies independent color bars with a moving
+marker. Video-file playback remains optional and is not implemented.
+
+## Authenticated runtime session evidence
+
+The optional coordinator host adapter reads `PLTEST_HOST_API_TOKEN_FILE` and
+connects to `PLTEST_HOST_API_URL` over verified HTTPS. For a self-signed host
+certificate without a hostname SAN, `PLTEST_HOST_API_CERT_SHA256` pins its DER
+SHA256 fingerprint obtained through an independently trusted channel. No TLS
+verification bypass is used. Keep the token outside Git with owner-only access.
+The needed read scopes are `/api/clients/list` and `/api/rtsp/sessions`;
+`/api/metadata` and `/api/logs` allow diagnostics. Only explicit `disconnect`
+policy uses the additional POST `/api/clients/disconnect` scope. Default policy
+rejects a busy host and does not disconnect clients.
+
+During measurement the coordinator samples the authenticated RTSP inventory,
+records monotonic request bounds and sanitized session configuration, and rejects
+multiple sessions, identity replacement or loss after a session was observed.
+Decoder callback dimensions/FPS originate in client StreamConfig and alone do
+not prove independent server acceptance. VALID negotiation now also requires
+matching server session dimensions, FPS, codec, HDR, chroma and bitrate evidence.
+Server `encode_latency_ms` describes processing through packetization, while
+`stream_gpu_model` identifies the capture display adapter; neither proves
+isolated GPU encode duration or encoder adapter identity.
+
+A scoped token has been provisioned and real authenticated idle inventory
+confirmed on the configured host. This is API validation, not hardware benchmark
+acceptance of the new workload or cross-build comparison.

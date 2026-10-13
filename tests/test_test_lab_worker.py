@@ -18,6 +18,53 @@ from pltest.host.logs import LogSlice
 
 
 class WorkerTests(unittest.TestCase):
+    def test_webgl2_unsupported_and_workload_bounds(self):
+        value = {'schema':SCHEMA,'run_id':'gpu','command_id':'prepare','action':'prepare',
+                 'settings':{'scene':'gpu-entropy','seed':9,'fps':240,'seconds':30,'monitor':'virtual',
+                             'entropy':1,'movement':2,'update_hz':120,'render_width':1920,'render_height':1080}}
+        request(value)
+        value['settings']['entropy'] = float('nan')
+        with self.assertRaises(ValueError): request(value)
+        node = shutil.which('node')
+        if not node: self.skipTest('Node unavailable')
+        source = ROOT/'tools/test-lab/src/pltest/host/static/gpu-scene.js'
+        code = """const fs=require('fs'),vm=require('vm');const s={};vm.createContext(s);
+vm.runInContext(fs.readFileSync(process.argv[1],'utf8'),s);
+try{vm.runInContext('new PLTestGpuScene({getContext(){return null;}},{})',s);throw Error('unsupported context accepted');}
+catch(e){if(e.message!=='UNSUPPORTED_WEBGL2')throw e;}"""
+        subprocess.run([node,'-e',code,str(source)],check=True)
+
+    def test_multi_gpu_requires_identity_and_reports_sampling_periods(self):
+        from pltest.host.metrics import GpuSampler
+        from types import SimpleNamespace
+        class Library:
+            def nvmlInit(self): pass
+            def nvmlShutdown(self): pass
+            def nvmlDeviceGetCount(self): return 2
+            def nvmlDeviceGetHandleByIndex(self, index): return index
+            def nvmlDeviceGetUUID(self, index): return ['GPU-A','GPU-B'][index]
+            def nvmlDeviceGetName(self, index): return 'adapter '+str(index)
+            def nvmlDeviceGetHandleByUUID(self, uuid):
+                self.selected = uuid; return uuid
+            def nvmlDeviceGetUtilizationRates(self, gpu): return SimpleNamespace(gpu=23)
+            def nvmlDeviceGetMemoryInfo(self, gpu): return SimpleNamespace(used=1024)
+            def nvmlDeviceGetEncoderUtilization(self, gpu): return 17, 16667
+        library = Library()
+        with patch.dict('os.environ', {}, clear=True):
+            automatic = GpuSampler(library=library)
+            result = automatic.sample()
+            self.assertIsNone(result['encoder_utilization_pct'])
+            self.assertEqual(len(result['gpu_inventory']), 2)
+            explicit = GpuSampler('GPU-B', library=library)
+            with patch('pltest.host.metrics.time.monotonic_ns', side_effect=[1000000,2000000]):
+                explicit.sample(); result = explicit.sample()
+            self.assertEqual(library.selected, 'GPU-B')
+            self.assertEqual(result['sampler_period_us'], 1000)
+            self.assertEqual(result['encoder_sample_period_us'], 16667)
+            self.assertFalse(result['encode_adapter_verified'])
+            self.assertIsNone(result['encoding_latency_ms'])
+            self.assertEqual(GpuSampler('absent',library=library).sample()['reason'], 'SELECTED_GPU_UUID_NOT_FOUND')
+
     def test_commands_display_and_actual_ready(self):
         value = {'schema': SCHEMA, 'run_id': 'run', 'command_id': 'cmd', 'action': 'prepare',
                  'settings': {'scene': 'noise', 'seed': 1, 'fps': 60, 'seconds': 2, 'monitor': 'virtual'}}
@@ -95,7 +142,7 @@ if(Buffer.compare(Buffer.from(data),Buffer.from(old)))throw Error('original nois
         code = r'''
 const fs=require('fs'),vm=require('vm');let resolveHash,callbacks=0;
 const ctx={drawImage(image){if(!image)throw Error('unprepared texture');},fillRect(){},createImageData(){return {data:new Uint8ClampedArray(16)};},putImageData(){}};
-const canvas=()=>({getContext(){return ctx;}}),nodes={'#scene':canvas(),'#ready':{},'#status':{}};
+const canvas=()=>({getContext(){return ctx;},cloneNode(){return canvas();},replaceWith(){}}),nodes={'#scene':canvas(),'#ready':{},'#status':{}};
 class WS {static OPEN=1;constructor(){this.readyState=1;}send(){}}
 const sandbox={document:{querySelector:s=>nodes[s],createElement:canvas,body:{classList:{add(){},remove(){}}},addEventListener(){}},location:{host:'localhost'},WebSocket:WS,
 requestAnimationFrame(){callbacks++;},setTimeout,crypto:{subtle:{digest:()=>new Promise(r=>resolveHash=r)}},PLTestPatterns:{fillNoise(){}}};

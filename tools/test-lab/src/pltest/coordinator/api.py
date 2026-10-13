@@ -242,7 +242,8 @@ def _real_scheduler(store, data_dir):
         path = Path(os.environ['PLTEST_HOST_API_TOKEN_FILE'])
         if not path.is_file() or path.stat().st_size > 4096: raise ValueError('host API token file unavailable/oversized')
         guard = SessionGuard(os.environ['PLTEST_HOST_API_URL'], path.read_text().strip(),
-            os.environ.get('PLTEST_HOST_SESSION_POLICY','reject'), os.environ.get('PLTEST_HOST_API_CA_FILE'))
+            os.environ.get('PLTEST_HOST_SESSION_POLICY','reject'), os.environ.get('PLTEST_HOST_API_CA_FILE'),
+            os.environ.get('PLTEST_HOST_API_CERT_SHA256'))
     host = RealHostCoordinatorAdapter(os.environ['PLTEST_HOST_WORKER_URL'], worker_token, guard)
     return Scheduler(store, ps5=ps5, host=host)
 

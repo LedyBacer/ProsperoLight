@@ -6,7 +6,7 @@ import re
 
 SCHEMA = 'prosperolight-host-worker/1'
 ACTIONS = {'prepare', 'start', 'stop', 'status'}
-SCENES = {'low-motion', 'noise', 'scrolling', 'static-keepalive', 'stress', 'recover', 'decoder-regression'}
+SCENES = {'low-motion', 'noise', 'scrolling', 'static-keepalive', 'stress', 'recover', 'decoder-regression', 'gpu-entropy', 'test-pattern'}
 
 
 def request(value):
@@ -19,7 +19,8 @@ def request(value):
             raise ValueError('unsafe worker identity')
     if value['action'] == 'prepare':
         s = value.get('settings')
-        if not isinstance(s, dict) or set(s) - {'scene', 'seed', 'fps', 'seconds', 'warmup_seconds', 'monitor', 'require_hdr'}:
+        if not isinstance(s, dict) or set(s) - {'scene', 'seed', 'fps', 'seconds', 'warmup_seconds', 'monitor', 'require_hdr',
+                                               'entropy', 'movement', 'update_hz', 'render_width', 'render_height'}:
             raise ValueError('invalid stimulus settings')
         if s.get('scene') not in SCENES or not isinstance(s.get('monitor'), str):
             raise ValueError('unknown scene/monitor')
@@ -29,6 +30,13 @@ def request(value):
                 raise ValueError('invalid stimulus range: ' + key)
         if type(s.get('require_hdr', False)) is not bool:
             raise ValueError('invalid HDR requirement')
+        for key, low, high in (('entropy', 0, 1), ('movement', 0, 8), ('update_hz', 1, 240),
+                               ('render_width', 320, 3840), ('render_height', 240, 2160)):
+            if key in s and (type(s[key]) not in (int, float) or not math.isfinite(s[key]) or not low <= s[key] <= high):
+                raise ValueError('invalid GPU workload range: ' + key)
+        for key in ('render_width', 'render_height'):
+            if key in s and type(s[key]) is not int:
+                raise ValueError('GPU workload resolution must be integer')
     return value
 
 

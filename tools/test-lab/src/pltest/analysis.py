@@ -79,7 +79,7 @@ def analyze_run(profile, report, directory):
     if receipt.get('functional_verdict') == 'FAIL': result['functional_verdict'] = 'FAIL'
     elif receipt.get('functional_verdict') != 'PASS': issues.append('PS5_RECEIPT_NOT_PASS')
     from .session_evidence import validate_negotiation
-    result['session_settings'], negotiation_issues = validate_negotiation(profile.get('client', {}), receipt)
+    result['session_settings'], negotiation_issues = validate_negotiation(profile.get('client', {}), receipt, host.get('session_samples'))
     issues.extend(negotiation_issues)
     if not receipt.get('artifacts_complete'): issues.append('ARTIFACTS_INCOMPLETE')
     artifact_dir = Path(directory) / 'ps5' / 'artifacts'

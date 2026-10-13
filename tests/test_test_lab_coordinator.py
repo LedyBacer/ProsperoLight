@@ -160,6 +160,33 @@ int main(void) {
                 await guard.ensure_idle(asyncio.Event())
         asyncio.run(exercise())
 
+    def test_host_session_pin_and_runtime_inventory(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from pltest.host.session_guard import SessionGuard
+        from aiohttp import Fingerprint
+        async def exercise():
+            guard = SessionGuard('https://localhost:47990', 't'*48, certificate_sha256='ab'*32)
+            self.assertIsInstance(guard.ssl, Fingerprint)
+            self.assertEqual(guard.ssl.fingerprint, bytes.fromhex('ab'*32))
+            for value in ('', 'AB'*32, 'a'*63):
+                with self.assertRaises(ValueError):
+                    SessionGuard('https://localhost:47990', 't'*48, certificate_sha256=value)
+            guard.request = AsyncMock(return_value={'sessions': []})
+            self.assertIsNone(await guard.sample_session())
+            guard.request.return_value = {'sessions': [{'uuid': 'session-1', 'width': 1920, 'secret': 'omit'}]}
+            result = await guard.sample_session()
+            self.assertEqual(result['session']['width'], 1920)
+            self.assertNotIn('secret', result['session'])
+            self.assertGreaterEqual(result['coordinator_end_us'], result['coordinator_start_us'])
+            guard.request.return_value = {'sessions': [{'uuid': 'session-1'}, {'uuid': 'other'}]}
+            with self.assertRaisesRegex(RuntimeError, 'HOST_SESSION_EXCLUSIVITY_LOST'):
+                await guard.sample_session()
+            guard.request.return_value = {'sessions': [{}]}
+            with self.assertRaisesRegex(ValueError, 'HOST_SESSION_IDENTITY_UNVERIFIED'):
+                await guard.sample_session()
+        asyncio.run(exercise())
+
     def test_failed_worker_connect_leaves_no_cleanup_command(self):
         import asyncio
         from pltest.coordinator.adapters import RealHostCoordinatorAdapter

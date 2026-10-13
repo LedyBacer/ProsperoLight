@@ -402,8 +402,27 @@ class RealHostCoordinatorAdapter:
         if cancel.is_set():
             raise asyncio.CancelledError
         timing = profile.get('timing', {})
-        self.report = await self.worker.wait_report(self.run_id,
-            timeout=timing.get('warmup_seconds', 0) + timing.get('measure_seconds', 30) + 90)
+        samples = []
+        pending = asyncio.create_task(self.worker.wait_report(self.run_id,
+            timeout=timing.get('warmup_seconds', 0) + timing.get('measure_seconds', 30) + 90))
+        try:
+            while self.session_guard and not pending.done():
+                if cancel.is_set():
+                    raise asyncio.CancelledError
+                sample = await self.session_guard.sample_session()
+                if sample:
+                    if samples and sample['session']['uuid'] != samples[0]['session']['uuid']:
+                        raise RuntimeError('HOST_SESSION_IDENTITY_CHANGED')
+                    samples.append(sample)
+                elif samples:
+                    raise RuntimeError('HOST_SESSION_LOST_DURING_MEASUREMENT')
+                await asyncio.wait({pending}, timeout=1)
+            self.report = await pending
+        finally:
+            if not pending.done():
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+        self.report['session_samples'] = samples
         if self.report.get('run_id') != self.run_id:
             raise ValueError('host report identity mismatch')
         return self.report
