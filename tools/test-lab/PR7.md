@@ -73,3 +73,48 @@ removed the dependency on a separate Moonlight session. Measurement validity
 remains INCONCLUSIVE: negotiated settings are missing and global host session
 exclusion was not authenticated. Optional session guard behavior is host-tested;
 its real authenticated disconnect has not been executed without API credentials.
+
+## Published integration acceptance
+
+Installed developer app: `test-lab-pr67-5fd48df`, native source
+`5fd48df645979939a0125d5d31d994d05e6c3761`, TEST_LAB=1,
+PERFORMANCE_DETAIL=1, LAN_TELEMETRY=0. Eboot SHA256:
+`59c76198bb0c0aca545eba4ffc0167140ab5e4260fdfbdc4e194be82b050a185`.
+All 131 deployed files passed readback. PS5 moved from 192.168.1.137 to
+192.168.1.134 during validation; production settings were not edited for that move.
+
+Final HEVC smoke `41dcf9c9-bd37-4e2b-9e09-adcf3f347aed` and PyroWave smoke
+`31b1ba2b-f12c-47f2-9805-0acf55744aa2` returned functional PASS, fresh archived
+artifacts and confirmed normal title exit. Both receipts confirm paired host
+cleanup before launch and on exit, despite the profile containing quit_host=false.
+The existing paired GameStream identity performs this cleanup; no administrator
+API token was used. Before the final native run the host retained a virtual
+1080p/240 Hz display. After each final run Windows returned to the physical
+1440p/180 Hz display. Thus normal title exit and host-app closure are verified
+separately, rather than conflated.
+
+HEVC confirmed 1802 measurement pictures at 59.917 FPS. PyroWave confirmed
+1786 pictures at 59.393 FPS over 30.071s; its trace contains 1802 output samples,
+which are not all confirmed completed pictures. PyroWave ready-to-submit p95/p99
+were 4053/4342us; post-present CPU observation p95/p99 were 44/58us.
+These are software observations, not physical scanout or input-to-photon latency.
+Measurement remains INCONCLUSIVE and comparisons NOT_COMPARABLE because
+negotiated settings and authenticated global host-session exclusion are absent.
+Three-pair regression decisions are verified with synthetic fixtures, not claimed
+as a real baseline performance proof.
+
+Real doctor returned PASS in an idle-host check. CLI/API returned identical
+immutable persisted reports after coordinator restart; the CLI correctly returns
+3 for the real INCONCLUSIVE summary. Both final bundled exports passed content
+hash checks and left raw artifacts unchanged. The dashboard was exercised in an
+in-app browser against the fake API: connect, doctor, create/start, terminal
+classification/events/artifacts; no console errors were observed.
+
+The final portable target passes 68 lab, five legacy decoder and two pacing
+tool tests. Linux full tests passed 164 Python tests (three Node skips), plus
+native/mock/sanitizer checks. Full Clang Tidy passed for the installed native
+source; subsequent Python-only fixes passed source/metadata/shell lint.
+Pairing and user-setting hashes were preserved; the existing
+config/self-update-sequence bookkeeping file changed across developer builds.
+Optional administrator API disconnect remains host-tested only because no
+Vibepollo administrator token was provisioned.

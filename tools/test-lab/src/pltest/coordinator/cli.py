@@ -138,7 +138,8 @@ def matrix(profile: Path = typer.Option(..., exists=True, readable=True), repeti
 
 def main(argv=None):
     try:
-        app(args=argv, standalone_mode=False)
+        result = app(args=argv, standalone_mode=False)
+        return result if type(result) is int else 0
     except typer.Exit as exc:
         return exc.exit_code or 0
     return 0

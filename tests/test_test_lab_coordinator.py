@@ -28,6 +28,14 @@ def profile(**extra):
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_cli_main_preserves_classification_exit_codes(self):
+        import io
+        from contextlib import redirect_stdout
+        from pltest.coordinator import cli
+        for verdict, expected in [('PASS',0),('FAIL',1),('INCONCLUSIVE',3),('CANCELLED',4)]:
+            with patch.object(cli,'request',return_value={'verdict':'PASS','summary_verdict':verdict}), redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main(['report','run-id']),expected)
+
     def test_host_json_consumes_all_transport_chunks_with_a_byte_limit(self):
         import asyncio
         from types import SimpleNamespace
