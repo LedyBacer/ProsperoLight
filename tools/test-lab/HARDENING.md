@@ -141,9 +141,9 @@ acceptance of the new workload or cross-build comparison.
 Worker start acknowledgements include a browser-local timestamp and a matching
 page command ID. The coordinator archives both start ACKs with coordinator
 monotonic request/response bounds. `phase_alignment` reports an interval for
-PS5 minus browser time, including command delivery uncertainty. It does not
-claim end-to-end clock drift verification; cross-clock steady-state phase
-comparisons remain unavailable until an independent end anchor is recorded.
+PS5 minus browser time, including command delivery uncertainty. Legacy binaries only supply approximate alignment. Current binaries additionally
+supply the independent end anchors described below, enabling conservative
+steady-state windows with explicit synchronization uncertainty.
 Browser reports use explicit run-qualified phase IDs and observed rAF boundaries.
 Intervals crossing a transition are excluded from browser-local phase statistics.
 Warmup duration comes from the profile rather than a fixed ten-second label.
@@ -153,9 +153,10 @@ frame-gap distributions and stall frequency including measurement edges. One
 second without completion while callbacks continue is a client presentation
 stall. Missing callbacks remains input starvation or reduced host capture;
 static content remains explicitly ambiguous. A few early frames followed by a
-freeze cannot produce VALID evidence. PyroWave completion continuity still needs
-backend-specific observation evidence; its post-present CPU timestamps must not
-be substituted for unique completed-picture times.
+freeze cannot produce VALID evidence. Legacy PyroWave receipts lack completion continuity. Current receipts additionally
+record the confirmed unique completion counter sampled by the control worker, as
+described below. Post-present CPU timestamps never substitute for unique
+completed-picture times.
 
 PyroWave receipts additionally record successful backend output initialization:
 accepted swapchain extent, display-mode refresh, FIFO/immediate behavior, HDR
@@ -495,3 +496,64 @@ rates with coordinator-clock uncertainty bounds. They are not capture FPS, wire
 throughput or exact PS5 measurement-phase rates. Missing counters remain unknown;
 counter resets and session identity changes invalidate continuity. Dashboard
 exports expose these observations and the worker runtime identity.
+
+## Extended physical acceptance, 2026-10-13
+
+All modes below were actually executed on PS5 `192.168.1.134` and the interactive
+Windows/Vibepollo host `192.168.1.5`; both connections are operator-confirmed
+Ethernet. Source C is `37659f691513cea8deb2ec070ce79f2378b5c68f`, signed eboot
+`d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f`.
+Every listed run is PASS/VALID, with verified title exit and fresh artifacts.
+
+| Mode | Run ID |
+| --- | --- |
+| PyroWave 1080p60 | `2276f302-bb05-44e7-91a8-07210e092d67` |
+| HEVC HDR10 | `e8bb7e2c-505c-4a05-bcd0-ffdf9041da25` |
+| PyroWave 420 HDR | `30cd7f80-d0d3-4c66-aeb2-b400fc27fcb6` |
+| PyroWave 444 SDR | `05c97135-e581-475f-ba94-a385c8722c4e` |
+| PyroWave 444 HDR | `c2490355-3428-44ce-9594-86184d230626` |
+| Unpaced | `a911c758-4732-4097-8744-43232ea9f398` |
+| Paced | `754b2e35-03ca-48fa-86be-a9d0499eaa35` |
+| Paced + VRR software policy | `fdceaae5-6adb-45bf-a389-0441b6d2c8b3` |
+| 120-second soak segment 1 | `aeddf527-2cc8-47a2-8a0b-dc2d5ed34695` |
+| 120-second soak segment 2 | `97acacb3-aa70-44f0-afab-6ffcb236e531` |
+| HEVC native 4K120, refreshed worker | `12f63acd-0b4d-453a-99eb-57e176f8f9e6` |
+| PyroWave 4K120, refreshed worker | `7860a2d3-9678-4af9-ab18-7232d96a2acd` |
+
+The first ten modes retain `build/test-lab-hardening/advanced/acceptance-summary.json`.
+Fresh 4K120 retains `4k-final-worker-summary.json`, using worker source
+`04e65ec41f02f3295b044fc7c1d34b7ae08f0d2c` and independently checked runtime
+module/served asset hashes. Native measured 116.9696 unique FPS and 87.0691 received
+Mbps; PyroWave measured 119.8794 unique FPS, while received Mbps is unavailable.
+Host counter rates are separately bounded observations, not substitutes for those
+backend metrics. Neither run observed a sustained completion stall. Earlier 4K
+Ready/final validation failures remain INCONCLUSIVE in their original archives.
+HDR acceptance verifies negotiated bit depth and the captured display's active
+color mode; it does not establish physical TV color accuracy. VRR acceptance is
+software-policy evidence, not physical scanout verification.
+
+An exact changed-file inventory and subsystem explanations are in
+[HARDENING_FILES.md](HARDENING_FILES.md).
+
+## Final tool verification and interrupted sweep
+
+Worker/coordinator source `04e65ec41f02f3295b044fc7c1d34b7ae08f0d2c` passed
+`make test-lab-test` locally: 97 Test Lab + 5 decoder benchmark + 2 pacing checks.
+The configured Linux builder also completed `make test-lab-test`, `make test`
+(193 integration checks, four optional Node checks skipped), and `make lint`
+(280 attributed files). Native unit, performance ownership guards and self-update
+checks are included in `make test`. Linux Test Lab had three optional Node skips
+and pacing one skip; their local counterparts ran. SDK signed native C images
+were built and deployed as recorded above. The final Python wheel includes 58
+entries; required workload/worker/dashboard assets were checked byte-for-byte.
+
+Sweep point 20 Mbps, run `1dfe7705-5ebc-487d-81a9-4c0f230e932c`, passed with
+59.9295 unique FPS and 15.1734 measured received Mbps. Point 40 Mbps,
+`02e5febe-6a4b-4d70-91ff-27238a5d64dd`, timed out in preflight; 80 Mbps was not
+started. This is not full sweep acceptance. Original evidence remains
+INCONCLUSIVE. Following the operator pause, all 131 installed C files were
+read back and verified, TITLE_IDLE was confirmed, and only that exact run's lease
+was released; evidence is `bitrate-sweep-final/reconciliation.json`.
+Config and pairing hashes still matched the original baseline on 2026-10-14.
+A temporary Windows IP change was reverted by the operator. No endpoint override
+was retained in source and no saved PS5 configuration was changed.
