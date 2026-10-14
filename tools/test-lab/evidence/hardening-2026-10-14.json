@@ -1,0 +1,390 @@
+{
+  "schema": "prosperolight-hardware-acceptance/1",
+  "date": "2026-10-14",
+  "tool_source_sha": "04e65ec41f02f3295b044fc7c1d34b7ae08f0d2c",
+  "physical_hardware": true,
+  "profile": "HEVC SDR 420 1080p60, 20 Mbps configured ceiling, deterministic GPU entropy, warmup 10s + measure 30s",
+  "comparison": {
+    "overall_verdict": "PASS",
+    "functional_verdict": "PASS",
+    "measurement_validity": "VALID",
+    "performance_delta": "NO_CLEAR_CHANGE",
+    "calibration_status": "VERIFIED",
+    "sample_pairs": 3,
+    "fingerprint_sha256": "e3b30163445519f72cc6a9bfc6eae9a081edc72b2aa7fc0e98523b14f962eaee",
+    "reason_code": "PAIRED_SCREENING",
+    "metrics": {
+      "unique_presented_fps": {
+        "median_fraction": 0.00021868434536821801,
+        "median_delta": 0.01309983303150375,
+        "ordered_fractions": [
+          -0.0004269184813332388,
+          0.00021868434536821801,
+          0.0005803745138849241
+        ],
+        "ordered_deltas": [
+          -0.025575752593979928,
+          0.01309983303150375,
+          0.03475296836972319
+        ],
+        "range_fraction": [
+          -0.0004269184813332388,
+          0.0005803745138849241
+        ],
+        "baseline_first_to_last": -0.027567618778185476,
+        "candidate_first_to_last": 0.03276110218551764,
+        "threshold": {
+          "fraction": 0.02,
+          "absolute": 0
+        },
+        "performance_delta": "NO_CLEAR_CHANGE"
+      },
+      "frame_age_us": {
+        "median_fraction": -0.017637083097795363,
+        "median_delta": -312,
+        "ordered_fractions": [
+          -0.017637083097795363,
+          -0.7265464973371569,
+          0.14175242746671318
+        ],
+        "ordered_deltas": [
+          -312,
+          -17735,
+          2438
+        ],
+        "range_fraction": [
+          -0.7265464973371569,
+          0.14175242746671318
+        ],
+        "baseline_first_to_last": -491,
+        "candidate_first_to_last": 2259,
+        "threshold": {
+          "fraction": 0.1,
+          "absolute": 8044
+        },
+        "performance_delta": "NO_CLEAR_CHANGE"
+      },
+      "callback_to_ready_us": {
+        "median_fraction": -0.00441222817522849,
+        "median_delta": -14,
+        "ordered_fractions": [
+          -0.00441222817522849,
+          -0.03443996276760782,
+          0.07529262891490035
+        ],
+        "ordered_deltas": [
+          -14,
+          -111,
+          238
+        ],
+        "range_fraction": [
+          -0.03443996276760782,
+          0.07529262891490035
+        ],
+        "baseline_first_to_last": -12,
+        "candidate_first_to_last": 240,
+        "threshold": {
+          "fraction": 0.1,
+          "absolute": 1280
+        },
+        "performance_delta": "NO_CLEAR_CHANGE"
+      }
+    },
+    "screening": {
+      "minimum_pairs": 3,
+      "fps_drop_fraction": 0.02,
+      "latency_increase_fraction": 0.1,
+      "latency_increase_us": 1000,
+      "metric_thresholds": {
+        "frame_age_us": {
+          "fraction": 0.1,
+          "absolute": 8044
+        },
+        "callback_to_ready_us": {
+          "fraction": 0.1,
+          "absolute": 1280
+        }
+      }
+    },
+    "pairs": [
+      {
+        "baseline": "663fa527-c0d2-4a6c-8af1-78355d2bab93",
+        "candidate": "ccf6c843-8213-4c56-b89e-58487968bdbd",
+        "metrics": {
+          "unique_presented_fps": {
+            "baseline": 59.90781311249048,
+            "candidate": 59.8822373598965,
+            "delta": -0.025575752593979928,
+            "fraction": -0.0004269184813332388
+          },
+          "frame_age_us": {
+            "baseline": 17690,
+            "candidate": 17378,
+            "delta": -312,
+            "fraction": -0.017637083097795363
+          },
+          "callback_to_ready_us": {
+            "baseline": 3173,
+            "candidate": 3159,
+            "delta": -14,
+            "fraction": -0.00441222817522849
+          }
+        },
+        "baseline_identity": {
+          "source_sha": "8773a184082ead066da851859a0f2ad479bdd408",
+          "build_label": "test-lab-8773a184082e",
+          "eboot_sha256": "0096eb6ed8baa33c02f3f048ddb1bcb2b2584c83797130a0d74891e6b0aa7638"
+        },
+        "candidate_identity": {
+          "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+          "build_label": "test-lab-37659f691513",
+          "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f"
+        }
+      },
+      {
+        "baseline": "61f746ac-f36f-4a54-bda5-05d98ea1bb9c",
+        "candidate": "5d646b45-7672-4e33-8d51-fdfba9985c8c",
+        "metrics": {
+          "unique_presented_fps": {
+            "baseline": 59.9029299945838,
+            "candidate": 59.916029827615304,
+            "delta": 0.01309983303150375,
+            "fraction": 0.00021868434536821801
+          },
+          "frame_age_us": {
+            "baseline": 24410,
+            "candidate": 6675,
+            "delta": -17735,
+            "fraction": -0.7265464973371569
+          },
+          "callback_to_ready_us": {
+            "baseline": 3223,
+            "candidate": 3112,
+            "delta": -111,
+            "fraction": -0.03443996276760782
+          }
+        },
+        "baseline_identity": {
+          "source_sha": "8773a184082ead066da851859a0f2ad479bdd408",
+          "build_label": "test-lab-8773a184082e",
+          "eboot_sha256": "0096eb6ed8baa33c02f3f048ddb1bcb2b2584c83797130a0d74891e6b0aa7638"
+        },
+        "candidate_identity": {
+          "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+          "build_label": "test-lab-37659f691513",
+          "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f"
+        }
+      },
+      {
+        "baseline": "5e2f706b-c9d6-4db6-b23b-94aeff31c35d",
+        "candidate": "02d3abd8-684d-4ee0-a5ba-bb6c74cb0746",
+        "metrics": {
+          "unique_presented_fps": {
+            "baseline": 59.880245493712295,
+            "candidate": 59.91499846208202,
+            "delta": 0.03475296836972319,
+            "fraction": 0.0005803745138849241
+          },
+          "frame_age_us": {
+            "baseline": 17199,
+            "candidate": 19637,
+            "delta": 2438,
+            "fraction": 0.14175242746671318
+          },
+          "callback_to_ready_us": {
+            "baseline": 3161,
+            "candidate": 3399,
+            "delta": 238,
+            "fraction": 0.07529262891490035
+          }
+        },
+        "baseline_identity": {
+          "source_sha": "8773a184082ead066da851859a0f2ad479bdd408",
+          "build_label": "test-lab-8773a184082e",
+          "eboot_sha256": "0096eb6ed8baa33c02f3f048ddb1bcb2b2584c83797130a0d74891e6b0aa7638"
+        },
+        "candidate_identity": {
+          "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+          "build_label": "test-lab-37659f691513",
+          "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f"
+        }
+      }
+    ]
+  },
+  "calibration": {
+    "pairs": [
+      [
+        "1f7dbc58-381d-460b-86bd-14df1cc76048",
+        "20a9464e-55aa-4ec1-a4de-a7d8f8beec44"
+      ],
+      [
+        "b150f7cc-1338-4eff-8613-587197b2bbcd",
+        "9ad8a3fe-dfe8-4242-b45c-2c5b7b58d774"
+      ],
+      [
+        "718ca04b-2646-4fb5-a116-e69c336399cf",
+        "97fceb96-f19b-411c-9acf-8d4e78e1bc14"
+      ]
+    ],
+    "noise_floor_fraction": {
+      "unique_presented_fps": 0.00043817407202047324,
+      "frame_age_us": 0.595385005494041,
+      "callback_to_ready_us": 0.09026434558349453
+    },
+    "method": "maximum absolute observed A/A paired p95 latency difference plus initial 1000us margin; FPS initial 2% unchanged",
+    "population_confidence_bound": false
+  },
+  "verified_archives": [
+    {
+      "run_id": "1f7dbc58-381d-460b-86bd-14df1cc76048",
+      "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+      "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.922752492975945,
+      "actual_mbps": 15.184108286628705,
+      "verified_archive_files": 51,
+      "manifest_sha256": "a5f17134c1ed58a8f92a52b0cdeea9e34aeeb8b6e024fb0c9a79a126d4c4f8e6",
+      "title_exit_verified": true
+    },
+    {
+      "run_id": "20a9464e-55aa-4ec1-a4de-a7d8f8beec44",
+      "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+      "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.92287397681194,
+      "actual_mbps": 15.195480479251382,
+      "verified_archive_files": 51,
+      "manifest_sha256": "dbcfd507facfaba7fd255ff3588c4635d3890a052457af0824cdaf6146bcefb9",
+      "title_exit_verified": true
+    },
+    {
+      "run_id": "b150f7cc-1338-4eff-8613-587197b2bbcd",
+      "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+      "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.885582645676585,
+      "actual_mbps": 15.18457610595162,
+      "verified_archive_files": 51,
+      "manifest_sha256": "4319a908aff3eb3fe38670fd1804fe4be15602af90f4eb293689bc38a9063582",
+      "title_exit_verified": true
+    },
+    {
+      "run_id": "9ad8a3fe-dfe8-4242-b45c-2c5b7b58d774",
+      "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+      "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.91182295527976,
+      "actual_mbps": 15.176217817457148,
+      "verified_archive_files": 51,
+      "manifest_sha256": "79d617fe7d324c7fc8df6ad493fdf4549f55807ad404207efe028a60fbc3bb0c",
+      "title_exit_verified": true
+    },
+    {
+      "run_id": "718ca04b-2646-4fb5-a116-e69c336399cf",
+      "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+      "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.91926551941379,
+      "actual_mbps": 15.146275888038907,
+      "verified_archive_files": 51,
+      "manifest_sha256": "51a080ea3978c04ca91c23b09fb8b8f50c55db19b17c1a660734f591dd1a2d5b",
+      "title_exit_verified": true
+    },
+    {
+      "run_id": "97fceb96-f19b-411c-9acf-8d4e78e1bc14",
+      "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+      "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.92112943651905,
+      "actual_mbps": 15.172721774896424,
+      "verified_archive_files": 51,
+      "manifest_sha256": "e41e6845011cdff92d7b9954c15382d2935e38c7d4153c638b4fe7d52d21610c",
+      "title_exit_verified": true
+    },
+    {
+      "run_id": "663fa527-c0d2-4a6c-8af1-78355d2bab93",
+      "source_sha": "8773a184082ead066da851859a0f2ad479bdd408",
+      "eboot_sha256": "0096eb6ed8baa33c02f3f048ddb1bcb2b2584c83797130a0d74891e6b0aa7638",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.90781311249048,
+      "actual_mbps": 15.159106009202466,
+      "verified_archive_files": 51,
+      "manifest_sha256": "9475cff3e001c67bdb0e42c1397ea969efdf19a733c2d0afbeb741891284375f",
+      "title_exit_verified": true
+    },
+    {
+      "run_id": "ccf6c843-8213-4c56-b89e-58487968bdbd",
+      "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+      "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.8822373598965,
+      "actual_mbps": 15.188481236256495,
+      "verified_archive_files": 51,
+      "manifest_sha256": "543f6edc1f4f664f0e35b97e15765325c1c7684365d6a2b2e52ad11c97d8077d",
+      "title_exit_verified": true
+    },
+    {
+      "run_id": "61f746ac-f36f-4a54-bda5-05d98ea1bb9c",
+      "source_sha": "8773a184082ead066da851859a0f2ad479bdd408",
+      "eboot_sha256": "0096eb6ed8baa33c02f3f048ddb1bcb2b2584c83797130a0d74891e6b0aa7638",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.9029299945838,
+      "actual_mbps": 15.210930682436983,
+      "verified_archive_files": 51,
+      "manifest_sha256": "e14f2a2e0644caacb1abd56862c2a7d75a80773e0f856a0ab65bb5496daedd49",
+      "title_exit_verified": true
+    },
+    {
+      "run_id": "5d646b45-7672-4e33-8d51-fdfba9985c8c",
+      "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+      "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.916029827615304,
+      "actual_mbps": 15.15643227989898,
+      "verified_archive_files": 51,
+      "manifest_sha256": "35860fdad31ab187afaea1ad28f410fa5b2334a54a55871fcefd14e770541473",
+      "title_exit_verified": true
+    },
+    {
+      "run_id": "5e2f706b-c9d6-4db6-b23b-94aeff31c35d",
+      "source_sha": "8773a184082ead066da851859a0f2ad479bdd408",
+      "eboot_sha256": "0096eb6ed8baa33c02f3f048ddb1bcb2b2584c83797130a0d74891e6b0aa7638",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.880245493712295,
+      "actual_mbps": 15.170793521642354,
+      "verified_archive_files": 51,
+      "manifest_sha256": "31738e54cd5cdede84e8f0c93cbc4e27a586bd53c7a3517a09f2111b5d1cae17",
+      "title_exit_verified": true
+    },
+    {
+      "run_id": "02d3abd8-684d-4ee0-a5ba-bb6c74cb0746",
+      "source_sha": "37659f691513cea8deb2ec070ce79f2378b5c68f",
+      "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f",
+      "overall_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "unique_presented_fps": 59.91499846208202,
+      "actual_mbps": 15.208481331908754,
+      "verified_archive_files": 51,
+      "manifest_sha256": "1386faad69b380182ce66440c7500feeb3b918c651282715288a8b8c8543468d",
+      "title_exit_verified": true
+    }
+  ],
+  "raw_artifacts": "build/test-lab-hardening/calibrated-final/coordinator/runs (retained locally, ignored by Git)",
+  "limitations": [
+    "NO_CLEAR_CHANGE is a calibrated screening result for this workload, not proof of absence of all regressions.",
+    "Three pairs are independent observations, not a population confidence interval.",
+    "4K120 and HDR mode acceptance are separate single-build evidence, not cross-build performance comparisons.",
+    "Software timestamps do not establish physical HDMI scanout or input-to-photon latency."
+  ]
+}

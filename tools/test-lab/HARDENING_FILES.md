@@ -79,4 +79,4 @@ Operational and hardware acceptance boundaries, with exact identities and retain
 
 - `tools/test-lab/HARDENING.md`
 
-This index additionally introduces `tools/test-lab/HARDENING_FILES.md`. Ignored build artifacts, machine-local scripts and credentials are outside the Git change set.
+This index additionally introduces `tools/test-lab/HARDENING_FILES.md` and the sanitized machine-readable acceptance index `tools/test-lab/evidence/hardening-2026-10-14.json`. Ignored build artifacts, machine-local scripts and credentials are outside the Git change set.

@@ -43,8 +43,9 @@ single-command three-pair cross-build A/B are recorded below with identities.
 Implementation includes telemetry, progress, alignment, benchmark plans, A/A,
 safe deployment, authenticated ownership checks and immutable export.
 
-A/A calibration and advanced mode acceptance are still being executed. Generated
-4K120/HDR/chroma/pacing/soak plans are implementation evidence, not hardware PASS.
+Fresh A/A calibration, calibrated cross-build A/B and physical
+4K120/HDR/chroma/pacing/soak acceptance are recorded in the dated sections below.
+Generated plans alone are never hardware PASS.
 Unavailable capture/encode timestamps, encoder GPU identity and physical scanout
 remain explicit missing evidence rather than inferred measurements.
 
@@ -557,3 +558,103 @@ was released; evidence is `bitrate-sweep-final/reconciliation.json`.
 Config and pairing hashes still matched the original baseline on 2026-10-14.
 A temporary Windows IP change was reverted by the operator. No endpoint override
 was retained in source and no saved PS5 configuration was changed.
+
+## Fresh matched calibration, 2026-10-14
+
+A single six-run A/A command completed with every individual run PASS/VALID,
+using source C and worker `04e65ec`. Independent pairs were:
+
+- `1f7dbc58-381d-460b-86bd-14df1cc76048` / `20a9464e-55aa-4ec1-a4de-a7d8f8beec44`
+- `b150f7cc-1338-4eff-8613-587197b2bbcd` / `9ad8a3fe-dfe8-4242-b45c-2c5b7b58d774`
+- `718ca04b-2646-4fb5-a116-e69c336399cf` / `97fceb96-f19b-411c-9acf-8d4e78e1bc14`
+
+The initial screening was not usable for frame age; its immutable CLI result is
+exit 3 / AA_NOISE_CALIBRATION. FPS noise was 0.0438174%, so the initial 2%
+threshold is unchanged. The calibrated latency absolute margin is maximum
+observed absolute paired A/A p95 difference plus the initial 1000 µs margin:
+8044 µs for frame age, 1280 µs for callback-to-ready, each with the initial 10%
+fraction retained. Measurement-validity gates were not changed. The three-pair
+calibration is usable under these explicit screening thresholds; it is an
+empirical sample noise floor, not a population confidence bound. Presentation
+changes smaller than the floor remain unresolved.
+
+Commands, pairs, screening parameters and their provenance are retained under
+`build/test-lab-hardening/calibrated-final/` (`aa-command.json`, `aa-pairs.json`,
+`observed-noise-screening.json`, `screening-provenance.json`, `aa-calibrated.json`).
+The subsequent A/B must match this exact environment, use independent run IDs and
+include the verified calibration reference; otherwise comparison is rejected.
+
+## Final calibrated cross-build acceptance, 2026-10-14
+
+A fresh **single paired command**, following the independent six-run calibration,
+completed A1/B1/A2/B2/A3/B3 without manual PS5 operation. Baseline source was
+`8773a184082ead066da851859a0f2ad479bdd408`, eboot
+`0096eb6ed8baa33c02f3f048ddb1bcb2b2584c83797130a0d74891e6b0aa7638`.
+Candidate source was `37659f691513cea8deb2ec070ce79f2378b5c68f`, eboot
+`d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f`.
+Full manifests, build flags, effective settings and a common environment were
+verified for every run. This comparison used HEVC SDR 420 1080p60, 20 Mbps
+configured ceiling, GPU entropy, ten-second warmup and thirty-second measurement.
+
+| Pair | Baseline run | Candidate run | FPS baseline / candidate |
+| --- | --- | --- | --- |
+| 1 | `663fa527-c0d2-4a6c-8af1-78355d2bab93` | `ccf6c843-8213-4c56-b89e-58487968bdbd` | 59.9078 / 59.8822 |
+| 2 | `61f746ac-f36f-4a54-bda5-05d98ea1bb9c` | `5d646b45-7672-4e33-8d51-fdfba9985c8c` | 59.9029 / 59.9160 |
+| 3 | `5e2f706b-c9d6-4db6-b23b-94aeff31c35d` | `02d3abd8-684d-4ee0-a5ba-bb6c74cb0746` | 59.8802 / 59.9150 |
+
+All six runs were PASS/VALID with verified title exit. Final CLI exit was **0**:
+`overall_verdict=PASS`, `measurement_validity=VALID`,
+`performance_delta=NO_CLEAR_CHANGE`, `calibration_status=VERIFIED`, three pairs.
+Median FPS delta was +0.0219%; frame-age deltas were -312/-17735/+2438 µs and
+callback-to-ready deltas -14/-111/+238 µs. No metric had a consistent change
+exceeding its calibrated threshold across the three pairs. Ordered deltas and
+first-to-last drift remain in the result rather than being hidden by an average.
+
+The exact paired invocation (against the coordinator retaining the calibration
+runs in `calibrated-final/coordinator`) is:
+
+```sh
+ROOT="$PWD/build/test-lab-hardening"
+pltest paired --manifest-root "$ROOT/variants" --repetitions 3 --allow-deploy \
+  --baseline "$ROOT/variants/candidate-native.json" \
+  --candidate "$ROOT/variants/phase-native.json" \
+  --calibration-pairs "$ROOT/calibrated-final/aa-pairs.json" \
+  --screening "$ROOT/calibrated-final/observed-noise-screening.json"
+```
+
+The canonical machine-readable result is `calibrated-final/acceptance.json`;
+`acceptance-verification.json` independently checks all twelve A/A + A/B archive
+manifests, each installed identity, clean title exit and lack of stale artifacts.
+A compact public evidence index, including every archive digest, is checked in as
+[evidence/hardening-2026-10-14.json](evidence/hardening-2026-10-14.json).
+Raw archives remain local ignored artifacts. They were not rewritten by analysis.
+
+This demonstrates trustworthy automatic cross-source regression **screening for
+the exercised profile**. NO_CLEAR_CHANGE does not prove absence of smaller
+presentation changes, regressions at other resolutions, or universal performance
+non-regression. The separate 4K120/HDR runs prove mode acceptance on source C;
+they are not an A/B comparison at those modes.
+
+## Remaining boundaries
+
+- **Implementation gaps, optional backends:** video-file playback and a native
+  Windows workload renderer are not implemented. Deterministic WebGL2 entropy,
+  Canvas compatibility scenes and an independent test-pattern scenario exist.
+  No identified mandatory implementation blocker remains for the demonstrated
+  prepared-build A/B workflow.
+- **Unavailable evidence:** the installed host exposes no trustworthy per-frame
+  capture timestamps or isolated GPU encode completion timestamps. Capture FPS
+  and GPU encode latency remain null. RTSP sender rates and processing-through-
+  packetization latency are separately labelled. Explicit NVML GPU selection
+  proves which GPU was sampled, not which adapter the encoder actually used.
+- **Hardware measurement limits:** software VideoOut/HDR/VRR state cannot prove
+  physical TV scanout, color accuracy, VRR cadence or input-to-photon latency.
+  Additional external measurement equipment would be needed.
+- **Statistical limits:** three paired samples support threshold screening, not
+  a universal causal guarantee. The observed frame-age noise floor prevents
+  conclusions about smaller changes. Other profiles require their own matched
+  calibration and paired execution; the tooling accepts them without assuming
+  compatibility with this profile.
+- **Deployment state:** the last developer variant remains installed. Production
+  restoration was not requested and is not claimed. Persistent pairing and
+  settings are protected and independently hash-checked.
