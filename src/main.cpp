@@ -343,8 +343,8 @@ int main(int argc, char **argv)
                 reject("NOT_SAVED_HOST");
             }
             prosperolight_test_logs_override(1);
-            if (!prosperolight::test_lab::context().begin(
-                    prosperolight::test_lab::active_profile(), &error))
+            if (!prosperolight::test_lab::context().begin(prosperolight::test_lab::active_profile(),
+                                                          &error))
             {
                 prosperolight::test_lab::write_profile_status(launch.test_run, "failed", 1, nullptr,
                                                               error);
