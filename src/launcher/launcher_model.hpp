@@ -16,6 +16,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -59,8 +61,9 @@ struct ArtworkImage
     std::vector<unsigned char> rgba;
 };
 
-// Turns the PNG Sunshine sent into pixels. It runs on the worker thread.
-using ArtworkDecoder = bool (*)(const unsigned char *png, std::size_t size, ArtworkImage *image);
+// Turns the picture the host sent (PNG, JPEG or WebP) into pixels. It runs on the worker thread.
+using ArtworkDecoder = bool (*)(const unsigned char *picture, std::size_t size,
+                                ArtworkImage *image);
 
 // The job the player is waiting for, if any.
 enum class Busy
@@ -261,6 +264,7 @@ class Model
         artwork,
         update, // is there a newer version: once, when idle
     };
+    using Picture = std::shared_ptr<const std::vector<unsigned char>>;
     struct Job
     {
         JobKind kind = JobKind::none;
@@ -270,6 +274,7 @@ class Model
         int app_id = 0;
         bool announce = false;     // tell the player when the PC does not answer
         bool catalog_only = false; // box art for the forwarder catalog: saved, not shown
+        Picture picture;           // box art already fetched: decoded, not asked for again
     };
     struct JobResult
     {
@@ -280,6 +285,7 @@ class Model
         moonlight_discovered_host_t found[MOONLIGHT_DISCOVERY_MAX_HOSTS]{};
         std::uint32_t found_count = 0;
         ArtworkImage image;
+        Picture picture;
     };
     struct StatusEntry
     {
@@ -331,6 +337,12 @@ class Model
     std::deque<int> artwork_wanted_;
     std::vector<int> artwork_asked_;
     std::deque<ArtworkImage> artwork_ready_;
+    // The selected PC's box art as it sent it, oldest first, so a poster the view let go of is
+    // decoded again rather than fetched. Bounded in bytes: the whole app shares a 128 MiB heap.
+    std::map<int, Picture> pictures_;
+    std::deque<int> picture_order_;
+    std::size_t picture_bytes_ = 0;
+    void KeepPicture(int app_id, Picture picture);
     // Box art the forwarder catalog lacks, fetched when nothing else waits.
     std::deque<int> catalog_wanted_;
     std::vector<int> catalog_asked_;

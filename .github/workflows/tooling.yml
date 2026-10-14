@@ -66,7 +66,7 @@ jobs:
       - name: Install native toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install --yes clang-18 clang-format-18 clang-tidy-18 llvm-18-dev cmake lld-18 make ccache pkg-config tar unzip wget ninja-build bison flex libclang-18-dev libclang-cpp18-dev libclc-18-dev libclc-18 libllvmspirvlib-18-dev spirv-tools glslang-tools libegl-dev libgl-dev libgl1-mesa-dri libpng-dev
+          sudo apt-get install --yes clang-18 clang-format-18 clang-tidy-18 llvm-18-dev cmake lld-18 make ccache pkg-config tar unzip wget ninja-build bison flex libclang-18-dev libclang-cpp18-dev libclc-18-dev libclc-18 libllvmspirvlib-18-dev spirv-tools glslang-tools libegl-dev libgl-dev libgl1-mesa-dri libpng-dev libturbojpeg0-dev libwebp-dev
 
       - name: Restore compiler cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4

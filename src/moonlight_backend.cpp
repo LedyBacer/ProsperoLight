@@ -336,7 +336,6 @@ const unsigned char *moonlight_backend_find_app_artwork(int app_id, size_t *size
 
 int moonlight_backend_fetch_app_artwork(const char *host, uint16_t https_port, int app_id)
 {
-    static const unsigned char png_signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
     client_identity_t identity;
     http_response_t response = {};
     char path[128];
@@ -370,11 +369,14 @@ int moonlight_backend_fetch_app_artwork(const char *host, uint16_t https_port, i
     identity_free(&identity);
     if (result != GS_OK)
         return result;
-    if (response.length < sizeof(png_signature) ||
-        memcmp(response.body, png_signature, sizeof(png_signature)) != 0)
+    // Sunshine sends PNG; Punktfunk sends a library's JPEG or WebP as it is.
+    const unsigned char *body = (const unsigned char *)response.body;
+    if (response.length < 12 ||
+        (memcmp(body, "\x89PNG\r\n\x1a\n", 8) != 0 && memcmp(body, "\xff\xd8\xff", 3) != 0 &&
+         (memcmp(body, "RIFF", 4) != 0 || memcmp(body + 8, "WEBP", 4) != 0)))
     {
         http_response_free(&response);
-        gs_error = "Sunshine app artwork is not a PNG";
+        gs_error = "Sunshine app artwork is not a PNG, JPEG or WebP picture";
         return GS_INVALID;
     }
 

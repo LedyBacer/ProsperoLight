@@ -27,7 +27,8 @@
 #include <unistd.h>
 
 #define HTTP_TIMEOUT_DEFAULT_MS 7000u
-#define HTTP_MAX_RESPONSE (1024u * 1024u)
+/* Box art is the largest response: a library's 600x900 PNG cover often passes 1 MiB. */
+#define HTTP_MAX_RESPONSE (8u * 1024u * 1024u)
 #define HTTP_REQUEST_CAPACITY 12288u
 
 typedef struct

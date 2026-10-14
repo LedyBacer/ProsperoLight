@@ -25,6 +25,8 @@ namespace
 constexpr std::size_t kWorkerStackBytes = 1u << 20;
 // How long the notice of a newer version stays on screen.
 constexpr float kUpdateNoticeSeconds = 10.0f;
+// Box art kept as it was sent: about a hundred covers of a few hundred KB.
+constexpr std::size_t kPictureBudget = 32u * 1024u * 1024u;
 } // namespace
 
 namespace
@@ -195,6 +197,9 @@ void Model::ResetSelected()
     artwork_wanted_.clear();
     artwork_asked_.clear();
     artwork_ready_.clear();
+    pictures_.clear();
+    picture_order_.clear();
+    picture_bytes_ = 0;
     catalog_wanted_.clear();
     catalog_asked_.clear();
     if (const moonlight_config_host_t *host = selected_host())
@@ -501,6 +506,22 @@ void Model::ForgetArtwork(int app_id)
     std::erase(artwork_asked_, app_id);
 }
 
+void Model::KeepPicture(int app_id, Picture picture)
+{
+    if (!picture || picture->size() > kPictureBudget || pictures_.count(app_id))
+        return;
+    picture_bytes_ += picture->size();
+    pictures_[app_id] = std::move(picture);
+    picture_order_.push_back(app_id);
+    while (picture_bytes_ > kPictureBudget)
+    {
+        const auto oldest = pictures_.find(picture_order_.front());
+        picture_bytes_ -= oldest->second->size();
+        pictures_.erase(oldest);
+        picture_order_.pop_front();
+    }
+}
+
 bool Model::TakeArtwork(ArtworkImage *image)
 {
     if (artwork_ready_.empty())
@@ -577,14 +598,25 @@ void Model::Run(const Job &job, JobResult *result)
         break;
     case JobKind::artwork:
     {
+        if (job.picture)
+        {
+            if (artwork_decoder_ &&
+                artwork_decoder_(job.picture->data(), job.picture->size(), &result->image))
+                result->image.app_id = job.app_id;
+            break;
+        }
         // The backend keeps a few pictures; this is the only thread that
         // touches them, and each one is taken out as soon as it arrives.
         result->result = moonlight_backend_fetch_app_artwork(job.host, job.https_port, job.app_id);
         std::size_t size = 0;
         const unsigned char *png = moonlight_backend_find_app_artwork(job.app_id, &size);
-        if (png && size && !session_only_)
-            (void)prosperolight::forwarder_catalog::save_poster(job.host, job.port, job.app_id, png,
-                                                                size);
+        if (png && size)
+        {
+            if (!session_only_)
+                (void)prosperolight::forwarder_catalog::save_poster(job.host, job.port, job.app_id,
+                                                                    png, size);
+            result->picture = std::make_shared<const std::vector<unsigned char>>(png, png + size);
+        }
         if (png && size && !job.catalog_only && artwork_decoder_ &&
             artwork_decoder_(png, size, &result->image))
             result->image.app_id = job.app_id;
@@ -625,6 +657,8 @@ bool Model::StartNext()
         next.https_port = backend_.https_port;
         next.app_id = artwork_wanted_.front();
         artwork_wanted_.pop_front();
+        if (const auto kept = pictures_.find(next.app_id); kept != pictures_.end())
+            next.picture = kept->second;
     }
     else if (!catalog_wanted_.empty() && selected_host() && backend_.online && backend_.paired)
     {
@@ -943,7 +977,10 @@ void Model::Apply(const Job &job, JobResult &result)
         return;
     }
     case JobKind::artwork:
-        if (IsSelected(job.host, job.port) && !result.image.rgba.empty())
+        if (!IsSelected(job.host, job.port))
+            return;
+        KeepPicture(job.app_id, std::move(result.picture));
+        if (!result.image.rgba.empty())
             artwork_ready_.push_back(std::move(result.image));
         return;
     case JobKind::update:

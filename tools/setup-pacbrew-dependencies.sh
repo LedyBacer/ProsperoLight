@@ -130,7 +130,8 @@ except subprocess.CalledProcessError:
 
 libs = []
 for flag in raw_libs:
-    if flag == "-pthread":
+    # libwebp's Libs.private carries -D_THREAD_SAFE, which ld.lld rejects.
+    if flag == "-pthread" or flag.startswith("-D"):
         if flag not in cflags:
             cflags.append(flag)
     elif flag.startswith("-Wl,"):

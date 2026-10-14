@@ -418,6 +418,8 @@ cp "$root/LICENSE" "$app/licenses/ProsperoLight-GPL.txt"
 cp "$root/THIRD_PARTY_NOTICES.md" "$app/licenses/THIRD_PARTY_NOTICES.md"
 cp "$root/build/lapy-owned-helper/LICENSE.Lapy" "$app/licenses/Lapy-MIT.txt"
 cp "$root/third_party/licenses/libpng.txt" "$app/licenses/libpng.txt"
+cp "$root/third_party/licenses/libjpeg-turbo.txt" "$app/licenses/libjpeg-turbo.txt"
+cp "$root/third_party/licenses/libwebp.txt" "$app/licenses/libwebp.txt"
 cp "$root/third_party/licenses/miniz.txt" "$app/licenses/miniz.txt"
 cp "$root/third_party/moonlight-common-c/LICENSE.txt" "$app/licenses/moonlight-common-c-LICENSE.txt"
 if [[ ${PYROWAVE:-0} == 1 ]]; then

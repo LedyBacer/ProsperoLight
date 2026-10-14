@@ -83,7 +83,7 @@ APP_IMPORT_STUBS ?= .deps/ps5-opengl/current/lib/libSceAgc.so build/stubs/libSce
 PS5_OPENGL_PREFIX ?=
 APP_RUNTIME_MODULES ?=
 # The update check asks homebrew.page through libcurl (third_party/update-check).
-PACBREW_PACKAGES ?= libcurl libpng
+PACBREW_PACKAGES ?= libcurl libpng libturbojpeg libwebp
 PACBREW_INCLUDE_PATHS ?=
 PACBREW_STATIC_ARCHIVES ?=
 PS5_HOST ?=

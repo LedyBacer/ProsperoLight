@@ -121,11 +121,17 @@ v0.40.2 and links statically with its dependencies. Their licence texts are in
 
 ## Launcher artwork
 
-PNG box art is decoded by static libpng 1.6.43 from the pinned PacBrew v0.40.2
-sysroot. It uses the PNG Reference Library License; see
-`third_party/licenses/libpng.txt`. This avoids unavailable system PNG imports
-on some PS5 launch environments. Scaling and the 64 MiB pixel allocation limit
-remain in the application worker.
+Box art is decoded by static libraries from the pinned PacBrew v0.40.2 sysroot.
+This avoids unavailable system image imports on some PS5 launch environments.
+Their licence texts are in `third_party/licenses/` and ship with the app:
+
+| Library | Version | Licence | File |
+| --- | --- | --- | --- |
+| libpng | 1.6.43 | PNG Reference Library License | `libpng.txt` |
+| libjpeg-turbo | 3.0.2 | IJG License, BSD-3-Clause and zlib licence | `libjpeg-turbo.txt` |
+| libwebp (with libsharpyuv) | 1.4.0 | BSD-3-Clause, Copyright (C) Google Inc. | `libwebp.txt` |
+
+Scaling and the 64 MiB pixel allocation limit remain in the application worker.
 
 ## Launcher
 

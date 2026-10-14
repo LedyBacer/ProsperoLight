@@ -6,39 +6,93 @@
 #include "launcher/launcher_artwork.hpp"
 #include "launcher/launcher_model.hpp"
 #include <png.h>
+#include <turbojpeg.h>
+#include <webp/decode.h>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 namespace launcher
 {
 constexpr int kPosterHeight = 672;
 constexpr std::uint64_t kLargestPicture = 64u * 1024u * 1024u;
-bool DecodePoster(const unsigned char *png, std::size_t size, ArtworkImage *image)
+
+namespace
 {
-    if (!png || !image || !size || size > kLargestPicture)
-        return false;
-    // Static libpng avoids firmware-dependent system imports for box art.
+bool Fits(std::uint64_t width, std::uint64_t height)
+{
+    return width && height && width <= kLargestPicture / 4 / height;
+}
+
+bool DecodePng(const unsigned char *data, std::size_t size, std::vector<unsigned char> *bgra,
+               int *width, int *height)
+{
     png_image info{};
     info.version = PNG_IMAGE_VERSION;
-    if (!png_image_begin_read_from_memory(&info, png, size))
+    if (!png_image_begin_read_from_memory(&info, data, size) || !Fits(info.width, info.height))
     {
         png_image_free(&info);
         return false;
     }
-    if (!info.width || !info.height || info.width > kLargestPicture / 4 / info.height)
-    {
-        png_image_free(&info);
-        return false;
-    }
-    const std::uint64_t bytes = static_cast<std::uint64_t>(info.width) * info.height * 4;
     info.format = PNG_FORMAT_BGRA;
-    std::vector<unsigned char> decoded(static_cast<std::size_t>(bytes));
-    const bool success = png_image_finish_read(&info, nullptr, decoded.data(), 0, nullptr) != 0;
+    bgra->resize(static_cast<std::size_t>(info.width) * info.height * 4);
+    const bool success = png_image_finish_read(&info, nullptr, bgra->data(), 0, nullptr) != 0;
     png_image_free(&info);
+    *width = static_cast<int>(info.width);
+    *height = static_cast<int>(info.height);
+    return success;
+}
+
+bool DecodeJpeg(const unsigned char *data, std::size_t size, std::vector<unsigned char> *bgra,
+                int *width, int *height)
+{
+    // The TurboJPEG 2 API: PacBrew ships 3.0, the host tests' distributions still 2.1.
+    tjhandle handle = tjInitDecompress();
+    if (!handle)
+        return false;
+    int subsampling = 0;
+    int colorspace = 0;
+    bool success = tjDecompressHeader3(handle, data, static_cast<unsigned long>(size), width,
+                                       height, &subsampling, &colorspace) == 0 &&
+                   *width > 0 && *height > 0 && Fits(*width, *height);
+    if (success)
+    {
+        bgra->resize(static_cast<std::size_t>(*width) * *height * 4);
+        success = tjDecompress2(handle, data, static_cast<unsigned long>(size), bgra->data(),
+                                *width, 0, *height, TJPF_BGRA, 0) == 0;
+    }
+    tjDestroy(handle);
+    return success;
+}
+
+bool DecodeWebp(const unsigned char *data, std::size_t size, std::vector<unsigned char> *bgra,
+                int *width, int *height)
+{
+    if (!WebPGetInfo(data, size, width, height) || !Fits(*width, *height))
+        return false;
+    bgra->resize(static_cast<std::size_t>(*width) * *height * 4);
+    return WebPDecodeBGRAInto(data, size, bgra->data(), bgra->size(), *width * 4) != nullptr;
+}
+} // namespace
+
+bool DecodePoster(const unsigned char *picture, std::size_t size, ArtworkImage *image)
+{
+    if (!picture || !image || size < 12 || size > kLargestPicture)
+        return false;
+    // Static decoders avoid firmware-dependent system imports for box art. Sunshine sends PNG;
+    // other hosts send the library's own JPEG or WebP.
+    std::vector<unsigned char> decoded;
+    int source_width = 0;
+    int source_height = 0;
+    bool success = false;
+    if (std::memcmp(picture, "\x89PNG\r\n\x1a\n", 8) == 0)
+        success = DecodePng(picture, size, &decoded, &source_width, &source_height);
+    else if (std::memcmp(picture, "\xff\xd8\xff", 3) == 0)
+        success = DecodeJpeg(picture, size, &decoded, &source_width, &source_height);
+    else if (std::memcmp(picture, "RIFF", 4) == 0 && std::memcmp(picture + 8, "WEBP", 4) == 0)
+        success = DecodeWebp(picture, size, &decoded, &source_width, &source_height);
     if (!success)
         return false;
     // Each output pixel is the average of the block of source pixels it covers.
-    const int source_width = static_cast<int>(info.width);
-    const int source_height = static_cast<int>(info.height);
     int height = source_height > kPosterHeight ? kPosterHeight : source_height;
     int width = static_cast<int>(static_cast<std::int64_t>(source_width) * height / source_height);
     if (width < 1)

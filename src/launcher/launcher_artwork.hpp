@@ -8,5 +8,5 @@
 namespace launcher
 {
 struct ArtworkImage;
-bool DecodePoster(const unsigned char *png, std::size_t size, ArtworkImage *image);
+bool DecodePoster(const unsigned char *picture, std::size_t size, ArtworkImage *image);
 } // namespace launcher
