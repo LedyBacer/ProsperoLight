@@ -130,9 +130,9 @@ remain in the application worker.
 ## Launcher
 
 The launcher is drawn with OpenGL through the
-[ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) SDK 1.0.0
+[ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) SDK 1.0.2
 (GPL-3.0-or-later), which the build downloads after verifying SHA-256
-`f93643c04c843d56143b00951df1f8042ea7706ae9f19e4e9abf158e1ead77c5` and links
+`30d8e51dd062739b629346102be5932728ba714bc50b1bdcdf08306c8843d9a4` and links
 statically. The SDK contains Mesa 26.2.0 (primarily MIT, with file-specific
 licences), OpenGNM and OpenGNM PSBC (MIT), SPIRV-Headers and Vulkan-Headers;
 its own `LICENSE`, `LICENSES/` and `THIRD_PARTY_NOTICES.md` are unpacked beside
