@@ -26,8 +26,10 @@ Context &context()
     static Context value;
     return value;
 }
-bool Context::begin(const TestProfile &profile)
+bool Context::begin(const TestProfile &profile, std::string *error)
 {
+    if (error)
+        error->clear();
     join();
     timeline_ = Timeline(profile, now_us());
     sequence_ = 2;
@@ -71,6 +73,8 @@ bool Context::begin(const TestProfile &profile)
     {
         running_.store(false);
         timeline_.stop("RUN_ID_REPLAY");
+        if (error)
+            *error = "RUN_ID_REPLAY";
         stopping_.store(true);
         return false;
     }
@@ -79,6 +83,8 @@ bool Context::begin(const TestProfile &profile)
     {
         running_.store(false);
         timeline_.stop("CONTROL_THREAD_FAILED");
+        if (error)
+            *error = "CONTROL_THREAD_FAILED";
         stopping_.store(true);
     }
     return started_;

@@ -31,6 +31,13 @@ class FakeFtp:
     def cwd(self, path):
         if path not in self.dirs: raise error_perm('550 missing')
     def nlst(self, path): return [name for name in self.files if name.startswith(path + '/')]
+    def mlsd(self, path):
+        entries={}
+        for item in self.files.keys() | self.dirs:
+            if item.startswith(path+'/'):
+                relative=item[len(path)+1:]; name=relative.split('/')[0]
+                entries[name]={'type':'dir' if '/' in relative or item in self.dirs else 'file'}
+        return list(entries.items())
     def retrbinary(self, cmd, append):
         path = cmd.removeprefix('RETR ')
         if path not in self.files: raise error_perm('550 missing')
@@ -124,6 +131,36 @@ class ExecutorTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 adapter.deploy(directory, hashlib.sha256(b'app').hexdigest())
         self.assertEqual(ftp.writes, [])
+
+    def test_final_installation_readback_and_unknown_files_fail_closed(self):
+        from pltest.ps5.adapter import INSTALL
+        ftp=FakeFtp();adapter=Ps5Adapter('fake','probe','launch',connect=lambda:ftp)
+        adapter.lease_held=True;adapter.idle=lambda:None
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'eboot.bin').write_bytes(b'app');(root/'z.asset').write_bytes(b'asset')
+            digest=hashlib.sha256(b'app').hexdigest()
+            index=adapter.deploy(root,digest)
+            self.assertEqual(index['eboot.bin']['sha256'],digest)
+            ftp.files[INSTALL+'/old.asset']=b'old'
+            before=list(ftp.writes)
+            with self.assertRaisesRegex(RuntimeError,'INSTALL_UNEXPECTED_FILE'):
+                adapter.deploy(root,digest)
+            self.assertEqual(ftp.writes,before);self.assertIn(INSTALL+'/old.asset',ftp.files)
+            del ftp.files[INSTALL+'/old.asset']
+            original=ftp.rename
+            def corrupt_after_last(src,dst):
+                original(src,dst)
+                if dst.endswith('/z.asset'):ftp.files[INSTALL+'/eboot.bin']=b'bad'
+            ftp.rename=corrupt_after_last
+            with self.assertRaisesRegex(RuntimeError,'INSTALL_FINAL_MANIFEST_MISMATCH'):
+                adapter.deploy(root,digest)
+        ftp=FakeFtp();adapter.connect=lambda:ftp
+        def corrupt_destination(src,dst):ftp.files[dst]=b'bad';del ftp.files[src]
+        ftp.rename=corrupt_destination
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory)/'eboot.bin').write_bytes(b'new')
+            with self.assertRaisesRegex(RuntimeError,'INSTALL_FINAL_MANIFEST_MISMATCH'):
+                adapter.deploy(directory,hashlib.sha256(b'new').hexdigest())
 
     def test_archive_allowlist_verified_upload_and_route_before_execution(self):
         ftp = FakeFtp()

@@ -342,10 +342,18 @@ int main(int argc, char **argv)
             {
                 reject("NOT_SAVED_HOST");
             }
-            prosperolight::test_lab::active() = true;
-            (void)prosperolight::test_lab::context().begin(
-                prosperolight::test_lab::active_profile());
             prosperolight_test_logs_override(1);
+            if (!prosperolight::test_lab::context().begin(
+                    prosperolight::test_lab::active_profile(), &error))
+            {
+                prosperolight::test_lab::write_profile_status(launch.test_run, "failed", 1, nullptr,
+                                                              error);
+                prosperolight_debug_line("test-lab", "initialization failed: %s", error.c_str());
+                prosperolight_debug_flush();
+                (void)sceSystemServiceLoadExec("exit", nullptr);
+                KeepProcessAlive();
+            }
+            prosperolight::test_lab::active() = true;
             prosperolight_debug_line("test-lab", "run=%s profile validated",
                                      launch.test_run.c_str());
             prosperolight::test_lab::write_profile_status(launch.test_run, "profile_validated", 1,

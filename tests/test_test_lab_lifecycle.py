@@ -131,7 +131,7 @@ int main(int,char **argv) {
  std::ifstream f(std::string(argv[1])+"/receipts/complete.json");
  std::string receipt((std::istreambuf_iterator<char>(f)),{});assert(receipt.find("PASS")!=std::string::npos);
  assert(receipt.find("\"paired_host_cleanup_confirmed\":true")!=std::string::npos);
- assert(!context.begin(p));assert(context.stop_requested());
+ std::string begin_error;assert(!context.begin(p,&begin_error));assert(begin_error=="RUN_ID_REPLAY");assert(context.stop_requested());
  p.run_id="pyrowave";assert(context.begin(p));options.video_codec=MOONLIGHT_VIDEO_CODEC_PYROWAVE;
  context.attach(ready,stop,nullptr,options);start_measure_after_ready(argv[1],"pyrowave");await_stop(context);
  std::ofstream(std::string(argv[1])+"/logs/debug-trace.txt")<<"pyrowave completed";

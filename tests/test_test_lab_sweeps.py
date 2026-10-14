@@ -57,12 +57,39 @@ class SweepTests(unittest.TestCase):
                 return {'state':'COMPLETED'}
             with patch('pltest.coordinator.cli.request',side_effect=api):
                 result=CliRunner().invoke(app,['sweep','--profile',str(path),'--bitrates','20,40,60'])
-            self.assertEqual(result.exit_code,0,result.output)
+            self.assertEqual(result.exit_code,3,result.output)
             self.assertEqual(len(created),2)
             summary=json.loads(result.output.splitlines()[-1])
             self.assertEqual(summary['reason_code'],'THROUGHPUT_PLATEAU_WITH_FPS_DROP')
             self.assertEqual(summary['performance_delta'],'NOT_COMPARABLE')
+            self.assertEqual(summary['overall_verdict'],'INCONCLUSIVE')
+            self.assertEqual(summary['sweep_outcome'],'SATURATION_DETECTED')
+            self.assertEqual((summary['requested_points'],summary['completed_points']),(3,2))
+            self.assertEqual(summary['completed_mbps'],[20,40])
+            self.assertTrue(all(json.loads(line)['overall_verdict']=='PASS' for line in result.output.splitlines()[:-1]))
             self.assertEqual(summary['requested_mbps'],[20,40,60])
+
+    def test_sweep_api_failure_preserves_completed_count_and_exit_contract(self):
+        import typer
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'profile.json';path.write_text(json.dumps(BASE))
+            created=[]
+            def api(method,path,**kwargs):
+                if path.endswith('/capabilities'):return {'api_mode':'real'}
+                if path=='/api/v1/runs':
+                    if created:raise typer.Exit(2)
+                    created.append(True);return {'run_id':'first'}
+                if path.endswith('/start'):return {}
+                if path.endswith('/report'):return {'run_id':'first','overall_verdict':'PASS',
+                    'analysis':{'metrics':{'actual_mbps':20,'unique_presented_fps':60}}}
+                return {'state':'COMPLETED'}
+            with patch('pltest.coordinator.cli.request',side_effect=api):
+                result=CliRunner().invoke(app,['sweep','--profile',str(path),'--bitrates','20,40'])
+            self.assertEqual(result.exit_code,2,result.output)
+            summary=json.loads(result.output.splitlines()[-1])
+            self.assertEqual(summary['sweep_outcome'],'INFRASTRUCTURE_FAILURE')
+            self.assertEqual((summary['requested_points'],summary['completed_points']),(2,1))
+            self.assertEqual(summary['overall_verdict'],'INCONCLUSIVE')
 
     def test_paired_calibration_is_explicit_and_interleaves_six_independent_runs(self):
         with tempfile.TemporaryDirectory() as directory:

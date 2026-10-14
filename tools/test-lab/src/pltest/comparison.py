@@ -137,8 +137,17 @@ def _compare_pairs(pairs, calibration=False, screening=None):
             analysis = report.get('analysis') or {}
             if analysis.get('functional_verdict') == 'FAIL':
                 result.update(verdict='FAIL', functional_verdict='FAIL', reason_code='FUNCTIONAL_FAILURE'); return result
+            if run.get('state') != 'COMPLETED' or report.get('execution_state') != 'COMPLETED':
+                result['reason_code'] = 'RUN_EXECUTION_NOT_COMPLETED'; return result
+            if report.get('cleanup_errors'):
+                result['reason_code'] = 'RUN_CLEANUP_FAILED'; return result
+            if report.get('overall_verdict') != 'PASS':
+                result['reason_code'] = 'RUN_OVERALL_NOT_PASS'; return result
             if report.get('execution_mode') != 'real' or analysis.get('measurement_validity') != 'VALID':
                 result['reason_code'] = 'INVALID_MEASUREMENT'; return result
+            ps5 = report.get('ps5_measurement') or {}
+            if ps5.get('title_exit_verified') is not True or ps5.get('stale_artifacts'):
+                result['reason_code'] = 'RUN_HARDWARE_STATE_UNCERTAIN'; return result
             try:
                 identity = build_identity(profile, report)
             except ValueError as exc:

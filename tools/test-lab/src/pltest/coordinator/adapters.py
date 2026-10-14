@@ -291,7 +291,10 @@ class RealPs5CoordinatorAdapter:
         return {'receipt': receipt, 'artifact_index': index, 'title_exit_verified': exited,
                 'stale_artifacts': stale, 'installed': current['state'].get('installed'),
                 'installed_identity_verified': True, 'installed_identity_source': 'leased FTP eboot and label readback before launch',
-                'build_variant': current['state'].get('build_variant')}
+                'build_variant': current['state'].get('build_variant'),
+                'verified_installation_inventory': current['state'].get('deployed_files'),
+                'installation_inventory_source': 'leased final-destination MLSD and SHA256/size readback'
+                    if current['state'].get('deployed_files') else None}
 
     async def cleanup(self, profile):
         current = self.runs.get(profile.get('run_id'))

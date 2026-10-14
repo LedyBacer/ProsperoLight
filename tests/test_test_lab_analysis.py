@@ -17,13 +17,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run_fixture(fps=60, age=3000, ready=1500, variant='a'):
-    value = {'run_id': str(uuid.uuid4()), 'profile': {'profile': {
+    value = {'state':'COMPLETED','run_id': str(uuid.uuid4()), 'profile': {'profile': {
         'source_sha': variant*40, 'build_label': 'test-lab-fixture-' + variant,
         'client': {'codec': 'hevc', 'fps': 60},
         'analysis_environment': dict(verified=True, firmware='x', host_version='v1',
             encoder_settings={'codec':'hevc'}, network_class='wired', build_flags={'TEST_LAB':1}, renderer='native')}},
-        'report': {'execution_mode':'real', 'ps5_measurement': {
-            'installed_identity_verified':True,
+        'report': {'execution_state':'COMPLETED','overall_verdict':'PASS','execution_mode':'real', 'ps5_measurement': {
+            'installed_identity_verified':True,'title_exit_verified':True,
             'installed':{'build_label':'test-lab-fixture-' + variant,'eboot_sha256':variant*64},
             'build_variant':{'source_sha':variant*40,'build_label':'test-lab-fixture-' + variant,'eboot_sha256':variant*64}},
             'host_measurement': {
@@ -300,6 +300,18 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(compare_pairs(pairs)['measurement_validity'],'VALID')
         pairs[1][1]['report']['host_measurement']['worker_runtime_identity']['files']['worker.py']='b'*64
         self.assertEqual(compare_pairs(pairs)['reason_code'],'ENVIRONMENT_MISMATCH')
+
+    def test_terminal_failure_cannot_reuse_valid_measurement(self):
+        for state in ('CANCELLED','FAILED','INCONCLUSIVE','PREFLIGHT'):
+            pairs=self.pairs();pairs[0][1]['state']=state
+            self.assertEqual(compare_pairs(pairs)['reason_code'],'RUN_EXECUTION_NOT_COMPLETED')
+        pairs=self.pairs();pairs[0][1]['report']['cleanup_errors']=['TITLE_EXIT_UNVERIFIED']
+        self.assertEqual(compare_pairs(pairs)['reason_code'],'RUN_CLEANUP_FAILED')
+        pairs=self.pairs();pairs[0][1]['report']['overall_verdict']='INCONCLUSIVE'
+        self.assertEqual(compare_pairs(pairs)['reason_code'],'RUN_OVERALL_NOT_PASS')
+
+        pairs=self.pairs();pairs[0][1]['report']['ps5_measurement']['title_exit_verified']=False
+        self.assertEqual(compare_pairs(pairs)['reason_code'],'RUN_HARDWARE_STATE_UNCERTAIN')
 
     def test_duplicate_pairs_and_insufficient_samples(self):
         pairs=self.pairs()

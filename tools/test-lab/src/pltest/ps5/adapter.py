@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from collect_run import title_exit
 from control_run import command
 from launch_spike import request_bytes, read_receipt
-from .ftp import retrieve, upload, archive_logs
+from .ftp import retrieve, upload, archive_logs, installation_inventory
 from .elfldr import ElfLoader
 from .launcher import helper, launch
 from .collector import collect_reconnecting
@@ -111,8 +111,10 @@ class Ps5Adapter:
         if hashlib.sha256((directory / 'eboot.bin').read_bytes()).hexdigest() != expected_eboot_sha256:
             raise ValueError('build artifact hash mismatch')
         self.idle()
-        index = {}
+        index = {p.relative_to(directory).as_posix(): {'bytes':p.stat().st_size,
+                 'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in files}
         with self.connect() as ftp:
+            installation_inventory(ftp, INSTALL, index, readback=False)
             for source in files:
                 name = source.relative_to(directory).as_posix()
                 if any(not part or part in ('.', '..') for part in PurePosixPath(name).parts):
@@ -132,8 +134,7 @@ class Ps5Adapter:
                     ftp.cwd(str(parent))
                 data = source.read_bytes()
                 upload(ftp, path, data)
-                index[name] = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
-        return index
+            return installation_inventory(ftp, INSTALL, index)
 
     def run(self, profile, output, expected_eboot_sha256, deploy_directory=None):
         if not re.fullmatch(r'[0-9a-f]{64}', expected_eboot_sha256):

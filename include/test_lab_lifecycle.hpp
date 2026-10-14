@@ -205,7 +205,7 @@ struct Timeline
 class Context
 {
   public:
-    bool begin(const TestProfile &profile);
+    bool begin(const TestProfile &profile, std::string *error = nullptr);
     void attach(Observation (*sample)(void *), void (*stop)(void *), void *data,
                 const moonlight_stream_options_t &options);
     bool stop_requested() const

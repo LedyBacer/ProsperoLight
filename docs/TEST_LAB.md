@@ -162,25 +162,30 @@ Longer than 240s full-trace profiles are rejected; there is no hidden ring overf
 Run interleaved A/B rather than all A then all B:
 
 ```sh
-pltest paired --baseline build/A.json --candidate build/B.json --repetitions 3
+pltest paired --baseline build/A.json --candidate build/B.json \
+  --manifest-root build --repetitions 3 --allow-deploy
 pltest compare --pairs build/pairs.json
 ```
 
 Pairs JSON is `[["A1_UUID","B1_UUID"],["A2_UUID","B2_UUID"],["A3_UUID","B3_UUID"]]`.
 Two single UUIDs still return INCONCLUSIVE/INSUFFICIENT_REPEAT_PAIRS. Each pair
 requires distinct completed real runs, valid measurements, matching fingerprints
-and explicit verified environmental facts in `analysis_environment`: firmware,
-host_version, encoder_settings, network_class, build_flags, renderer and verified.
-This is an operator attestation; do not mark unknown observations verified.
+and verified environmental facts in `analysis.environment`: firmware,
+host version, encoder settings, network class, build flags and renderer.
+Firmware, host version, encoder settings and build flags come from observed
+evidence/provenance; network topology remains an explicit operator attestation.
 Missing negotiated settings cannot be repaired by that attestation. Screening
 reports pair distributions and drift; it is not statistical proof.
 
 Reports separate functional PASS/FAIL, measurement VALID/INCONCLUSIVE/UNSUPPORTED
 and delta IMPROVED/REGRESSED/NO_CLEAR_CHANGE/NOT_COMPARABLE. Exit codes: 0 summary
 PASS, 1 FAIL, 2 infrastructure/API error, 3 INCONCLUSIVE, 4 CANCELLED. A functional
-hardware PASS may still exit 3 for invalid comparative measurement. Current
-PS5 receipts deliberately expose `negotiated:null`, so comparison remains
-inconclusive until independently verified negotiated settings are available.
+hardware PASS may still exit 3 for invalid comparative measurement. Receipt schema
+`prosperolight-test-receipt/2` records successful decoder setup. Analysis cross-checks
+independent host session and backend runtime evidence. Each analyzed negotiated/
+effective field includes its source and verification status; missing or mismatched
+required fields remain INCONCLUSIVE.
+Schema 1 receipts cannot establish verified negotiation.
 
 Local raw archives include profile/events/PS5/host/stimulus/analysis/JSON/HTML and
 SHA256 manifest. Exports default to private-address and credential-field redaction;
@@ -241,3 +246,17 @@ To provision the optional token, use Vibepollo Web UI API Tokens with GET
 Never pass an RTSP history UUID as a paired client UUID. Without this adapter,
 reports retain HOST_SESSION_EXCLUSIVITY_UNVERIFIED, even when paired cancel
 is acknowledged. This guard covers Moonlight RTSP, not WebRTC or all remote roles.
+
+
+Final deploy checks read the destination inventory and hashes, not just upload
+temporary files. Unexpected files/directories fail with `INSTALL_UNEXPECTED_*`:
+inspect them manually while TITLE_IDLE; the executor never deletes unknown data.
+The lease is retained after uncertain deployment. Verified inventory is archived
+with each deployed run. Comparison requires COMPLETED execution, overall PASS,
+clean cleanup and VALID measurement; calibrated noise remains workload-specific.
+An early saturation stop is INCONCLUSIVE / SATURATION_DETECTED, not a completed
+sweep; individual point reports keep their independent verdicts.
+
+Upstream `136ac41` (OpenGL SDK 1.0.2 and shader-cache version) is not integrated
+in this focused hardening change. It needs separate SDK/runtime validation;
+existing physical acceptance evidence retains its original SDK identity.
