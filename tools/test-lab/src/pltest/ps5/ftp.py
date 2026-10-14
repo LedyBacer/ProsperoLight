@@ -22,8 +22,10 @@ def raw_transfer(ftp):
     # drakmor toggles SELF extraction per connection; hashes must cover stored bytes.
     if not getattr(ftp, '_pltest_raw_transfer', False) and 'Welcome to ftpsrv.elf' in getattr(ftp, 'getwelcome', lambda:'')():
         response=ftp.sendcmd('SELF')
-        if response=='226 SELF transfer mode enabled':response=ftp.sendcmd('SELF')
-        if response!='226 SELF transfer mode disabled':raise RuntimeError('FTP_RAW_TRANSFER_UNCONFIRMED')
+        if response in ('200 SELF transfer mode enabled','226 SELF transfer mode enabled'):
+            response=ftp.sendcmd('SELF')
+        if response not in ('200 SELF transfer mode disabled','226 SELF transfer mode disabled'):
+            raise RuntimeError('FTP_RAW_TRANSFER_UNCONFIRMED')
         ftp._pltest_raw_transfer=True
         ftp._pltest_listing_backend='LIST'
 
@@ -94,7 +96,7 @@ def directory_entries(ftp, path, evidence=None):
                 facts[key]=value
         else:
             match=re.fullmatch(r'([bcdlps-][r-][w-][xSs-][r-][w-][xSs-][r-][w-][xTt-]) ([1-9][0-9]*) ([0-9]+) ([0-9]+) ([0-9]+) '
-                r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (0[1-9]|[12][0-9]|3[01]) '
+                r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([ 0][1-9]|[12][0-9]|3[01]) '
                 r'([01][0-9]|2[0-3]):([0-5][0-9]) (.+)',line)
             if not match:raise RuntimeError('FTP_MALFORMED_LIST')
             mode=match[1][0];name=match[10]

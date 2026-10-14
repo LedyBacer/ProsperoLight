@@ -64,12 +64,12 @@ class FakeFtp:
 class DrakmorFtp(FakeFtp):
     """Actual command set/format: conveniences fail if accidentally called."""
     def __init__(self):
-        super().__init__();self.self2elf=True;self.self_calls=0;self.list_commands=[]
+        super().__init__();self.self2elf=True;self.self_calls=0;self.list_commands=[];self.self_reply_code='200'
     def getwelcome(self):return '220-Welcome to ftpsrv.elf running on pid 123'
     def sendcmd(self, command):
         if command=='SELF':
             self.self_calls+=1;self.self2elf=not self.self2elf
-            return '226 SELF transfer mode '+('enabled' if self.self2elf else 'disabled')
+            return self.self_reply_code+' SELF transfer mode '+('enabled' if self.self2elf else 'disabled')
         raise error_perm('502 Command not recognized')
     def mlsd(self, *args):raise AssertionError('MLSD convenience is unsupported')
     def nlst(self, *args):raise AssertionError('NLST is unsupported')
@@ -82,7 +82,7 @@ class DrakmorFtp(FakeFtp):
         callback('drwxr-xr-x 2 0 0 4096 Oct 14 12:34 ..')
         for name,facts in entries:
             directory=facts['type']=='dir';size=4096 if directory else len(self.files[path+'/'+name])
-            callback(('drwxr-xr-x' if directory else '-rw-r--r--')+' 1 0 0 '+str(size)+' Oct 14 12:34 '+name)
+            callback(('drwxr-xr-x' if directory else '-rw-r--r--')+' 1 0 0 '+str(size)+' Oct  4 12:34 '+name)
 
 
 class ExecutorTests(unittest.TestCase):
@@ -238,6 +238,21 @@ class ExecutorTests(unittest.TestCase):
             self.assertEqual((root/'collected/debug-trace.txt').read_bytes(),b'trace')
             self.assertFalse(ftp.self2elf);self.assertEqual(ftp.self_calls,1)
             self.assertTrue(all(command.startswith('LIST ') for command in ftp.list_commands))
+
+    def test_drakmor_raw_self_reply_codes_and_unknown_state(self):
+        from pltest.ps5.ftp import raw_transfer
+        for code in ('200','226'):
+            for initial in (False,True):
+                with self.subTest(code=code,initial=initial):
+                    ftp=DrakmorFtp();ftp.self_reply_code=code;ftp.self2elf=initial
+                    raw_transfer(ftp)
+                    self.assertFalse(ftp.self2elf)
+                    calls=ftp.self_calls;raw_transfer(ftp)
+                    self.assertEqual(ftp.self_calls,calls)
+        ftp=DrakmorFtp();ftp.self_reply_code='250'
+        with self.assertRaisesRegex(RuntimeError,'FTP_RAW_TRANSFER_UNCONFIRMED'):
+            raw_transfer(ftp)
+        self.assertFalse(getattr(ftp,'_pltest_raw_transfer',False))
 
     def test_list_rejects_malformed_ambiguous_and_unbounded_entries(self):
         from pltest.ps5.ftp import directory_entries
