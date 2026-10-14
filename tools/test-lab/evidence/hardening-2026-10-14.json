@@ -386,5 +386,81 @@
     "Three pairs are independent observations, not a population confidence interval.",
     "4K120 and HDR mode acceptance are separate single-build evidence, not cross-build performance comparisons.",
     "Software timestamps do not establish physical HDMI scanout or input-to-photon latency."
-  ]
+  ],
+  "bitrate_sweep": {
+    "summary": {
+      "schema": "prosperolight-bitrate-sweep/1",
+      "overall_verdict": "PASS",
+      "verdict": "PASS",
+      "summary_verdict": "PASS",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "reason_code": "ALL_POINTS_COMPLETED",
+      "run_ids": [
+        "31775d83-22b9-4694-b8e2-b51e238c2b82",
+        "19733d59-e77b-40be-b9a9-a24387d85e88",
+        "d40945b9-dc7b-41ba-b3ea-716766264625"
+      ],
+      "requested_mbps": [
+        20,
+        40,
+        80
+      ],
+      "completed_points": 3,
+      "performance_delta": "NOT_COMPARABLE",
+      "limitations": [
+        "plateau is screening evidence, not proof of encoder saturation; each point retains its own report"
+      ]
+    },
+    "points": [
+      {
+        "run_id": "31775d83-22b9-4694-b8e2-b51e238c2b82",
+        "requested_mbps": 20,
+        "actual_mbps": 15.174883766585673,
+        "unique_presented_fps": 59.87910335927419,
+        "overall_verdict": "PASS",
+        "verified_archive_files": 51,
+        "manifest_sha256": "4333159a4aad3912a8ab91604552dd8d986195c4b34736d49bee1ee360800fc1"
+      },
+      {
+        "run_id": "19733d59-e77b-40be-b9a9-a24387d85e88",
+        "requested_mbps": 40,
+        "actual_mbps": 31.463423594018174,
+        "unique_presented_fps": 59.88540353107868,
+        "overall_verdict": "PASS",
+        "verified_archive_files": 51,
+        "manifest_sha256": "6091815b443629d630df527afc39dbc09f8988fbe2dc90bbf3c72cf1ccf43fb9"
+      },
+      {
+        "run_id": "d40945b9-dc7b-41ba-b3ea-716766264625",
+        "requested_mbps": 80,
+        "actual_mbps": 62.55906785206397,
+        "unique_presented_fps": 59.91274471348948,
+        "overall_verdict": "PASS",
+        "verified_archive_files": 51,
+        "manifest_sha256": "70cbb00a546a739e60c13e05c6d50a6c5f44f35bafaf9a82c9cafdb4e057c901"
+      }
+    ]
+  },
+  "final_cleanup": {
+    "schema": "prosperolight-final-cleanup/1",
+    "ps5_state": "TITLE_IDLE",
+    "installed": {
+      "eboot_sha256": "d4d7d6d8524c5f9d1920336b8ab6399bf397e9e5c799682fdbd7464bebff9a5f",
+      "build_label": "test-lab-37659f691513"
+    },
+    "remote_lease_absent": true,
+    "host_idle": {
+      "connected_clients": 0,
+      "rtsp_sessions": 0
+    },
+    "config_pairing_unchanged": true,
+    "worker_shutdown_acknowledged": true,
+    "production_restored": false,
+    "forced_ps5_termination": false,
+    "worker_task_state": "Ready",
+    "worker_last_result": 0,
+    "worker_listeners": 0
+  }
 }

@@ -658,3 +658,28 @@ they are not an A/B comparison at those modes.
 - **Deployment state:** the last developer variant remains installed. Production
   restoration was not requested and is not claimed. Persistent pairing and
   settings are protected and independently hash-checked.
+
+## Completed sweep and final resource verification, 2026-10-14
+
+The fresh single-command sweep (`pltest sweep --profile profile.json --bitrates
+20,40,80`) completed all three points, exit 0 / ALL_POINTS_COMPLETED, PASS/VALID:
+
+| Requested ceiling Mbps | Received Mbps | Unique FPS | Run ID |
+| --- | --- | --- | --- |
+| 20 | 15.1749 | 59.8791 | `31775d83-22b9-4694-b8e2-b51e238c2b82` |
+| 40 | 31.4634 | 59.8854 | `19733d59-e77b-40be-b9a9-a24387d85e88` |
+| 80 | 62.5591 | 59.9127 | `d40945b9-dc7b-41ba-b3ea-716766264625` |
+
+All three 51-file archive manifests were independently hash-verified. No plateau
+with FPS loss triggered an early stop; this is not proof of an encoder's maximum
+capacity. The original interrupted sweep remains INCONCLUSIVE, separately
+retained. Fresh evidence is under `build/test-lab-hardening/bitrate-sweep-resumed`;
+summary, point metrics and archive digests are also in the public evidence index.
+
+Final verification confirmed TITLE_IDLE, zero connected host clients and RTSP
+sessions, no remote executor lease, and unchanged original config/pairing hashes.
+Installed C label and eboot were independently read back. The owned worker was
+shut down cooperatively; scheduled task Ready, exit result 0, no listener on
+8096. The coordinator and temporary Mac sleep inhibition were stopped. No forced
+PS5 termination/reboot or production restoration occurred. The complete local
+record is `build/test-lab-hardening/final-cleanup.json`.
