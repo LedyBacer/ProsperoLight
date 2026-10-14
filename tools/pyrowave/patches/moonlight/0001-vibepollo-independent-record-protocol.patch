@@ -701,7 +701,7 @@ index e958101..af28252 100644
  bool parseSdpAttributeToUInt(const char* payload, const char* name, uint32_t* val) {
      // Find the entry for the specified attribute name
      char* attribute = strstr(payload, name);
-@@ -1087,7 +1117,38 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
+@@ -1087,7 +1117,41 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
              goto Exit;
          }
  
@@ -732,7 +732,10 @@ index e958101..af28252 100644
 +                Limelog("Selected PyroWave profile is unsupported by host\n");
 +                ret = -1; goto Exit;
 +            }
-+            if (strcmp(hostPyroWaveBitstreamId, PYROWAVE_BITSTREAM_ID) != 0) {
++            // Other IDs listed here have shaders and bitstream code identical to
++            // PYROWAVE_BITSTREAM_ID's; add one only after diffing those.
++            if (strcmp(hostPyroWaveBitstreamId, PYROWAVE_BITSTREAM_ID) != 0 &&
++                strcmp(hostPyroWaveBitstreamId, "c0b997f8") != 0) {
 +                Limelog("Incompatible PyroWave bitstream: host '%s', expected '%s'\n", hostPyroWaveBitstreamId, PYROWAVE_BITSTREAM_ID);
 +                ret = -1; goto Exit;
 +            }

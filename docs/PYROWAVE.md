@@ -39,9 +39,11 @@ metadata and partial-frame timeout/recovery. References: Nonary
 are excluded; upstream H.264/HEVC IDR-drop behavior is retained.
 
 Each PyroWave profile requires its exact host capability bit. Only its single
-VIDEO_FORMAT is offered. An absent or mismatched DESCRIBE bitstream ID is an error,
-not a fallback or warning. The required decoder revision remains
-`186f0393b77f7755953b5ecde994bb1cec2e4155` (ID `186f0393`).
+VIDEO_FORMAT is offered. An absent or unknown DESCRIBE bitstream ID is an error,
+not a fallback or warning. The decoder revision remains
+`186f0393b77f7755953b5ecde994bb1cec2e4155` (ID `186f0393`). The check also accepts
+`c0b997f8` (punktfunk's vendored revision): the commits between the two touch only
+the Metal backend, the C API and build files, not shaders or bitstream code.
 
 ANNOUNCE uses bitStreamFormat=3, stock chroma/dynamic-range attributes,
 pyrowaveAdaptiveFec=0, pyrowaveAdaptiveBitrate=0 and pyrowaveFeatures=1.
