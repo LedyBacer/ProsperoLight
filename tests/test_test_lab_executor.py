@@ -32,6 +32,8 @@ class FakeFtp:
         if path not in self.dirs: raise error_perm('550 missing')
     def nlst(self, path): return [name for name in self.files if name.startswith(path + '/')]
     def mlsd(self, path):
+        if path!='/' and path not in self.dirs and not any(p.startswith(path+'/') for p in self.files.keys() | self.dirs):
+            raise error_perm('550 missing')
         entries={}
         for item in self.files.keys() | self.dirs:
             if item.startswith(path+'/'):
@@ -131,6 +133,29 @@ class ExecutorTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 adapter.deploy(directory, hashlib.sha256(b'app').hexdigest())
         self.assertEqual(ftp.writes, [])
+
+    def test_missing_install_and_no_mlsd_capability_are_prewrite(self):
+        from pltest.ps5.adapter import INSTALL, DeploymentPreflightError
+        ftp=FakeFtp();adapter=Ps5Adapter('fake','probe','launch',connect=lambda:ftp)
+        adapter.idle=lambda:None
+        self.assertIsNone(adapter.installed())
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory)/'eboot.bin').write_bytes(b'app')
+            with adapter.lease('clean') as owner:
+                adapter.deploy(directory,hashlib.sha256(b'app').hexdigest())
+                owner['safe_to_release']=True
+            self.assertIn(INSTALL+'/eboot.bin',ftp.files)
+            ftp.writes.clear()
+            def unsupported(path):raise error_perm('502 MLSD not implemented')
+            ftp.mlsd=unsupported
+            with adapter.lease('unsupported') as owner:
+                try:adapter.deploy(directory,hashlib.sha256(b'app').hexdigest())
+                except DeploymentPreflightError as exc:
+                    owner['safe_to_release']=True
+                    self.assertIn('INSTALL_INVENTORY_CAPABILITY_REQUIRED',str(exc))
+                else:self.fail('unsupported inventory accepted')
+            self.assertFalse(any(p.startswith(INSTALL+'/') for p in ftp.writes))
+            self.assertNotIn('/data/prosperolight/test-lab/executor-lease',ftp.dirs)
 
     def test_final_installation_readback_and_unknown_files_fail_closed(self):
         from pltest.ps5.adapter import INSTALL

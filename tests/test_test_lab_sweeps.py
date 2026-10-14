@@ -69,6 +69,25 @@ class SweepTests(unittest.TestCase):
             self.assertTrue(all(json.loads(line)['overall_verdict']=='PASS' for line in result.output.splitlines()[:-1]))
             self.assertEqual(summary['requested_mbps'],[20,40,60])
 
+    def test_sweep_functional_failure_is_fail_not_invalid_measurement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'profile.json';path.write_text(json.dumps(BASE))
+            def api(method,path,**kwargs):
+                if path.endswith('/capabilities'):return {'api_mode':'real'}
+                if path=='/api/v1/runs':return {'run_id':'failed'}
+                if path.endswith('/start'):return {}
+                if path.endswith('/report'):return {'run_id':'failed','overall_verdict':'FAIL',
+                    'execution_state':'FAILED','functional_verdict':'FAIL'}
+                return {'state':'FAILED'}
+            with patch('pltest.coordinator.cli.request',side_effect=api):
+                result=CliRunner().invoke(app,['sweep','--profile',str(path),'--bitrates','20,40'])
+            self.assertEqual(result.exit_code,1,result.output)
+            summary=json.loads(result.output.splitlines()[-1])
+            self.assertEqual(summary['sweep_outcome'],'FUNCTIONAL_FAILURE')
+            self.assertEqual(summary['overall_verdict'],'FAIL')
+            self.assertEqual(summary['execution_state'],'FAILED')
+            self.assertEqual(summary['completed_points'],1)
+
     def test_sweep_api_failure_preserves_completed_count_and_exit_contract(self):
         import typer
         with tempfile.TemporaryDirectory() as directory:

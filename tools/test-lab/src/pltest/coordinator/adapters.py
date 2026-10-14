@@ -11,9 +11,9 @@ from ftplib import Error, error_perm
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from ..ps5.adapter import Ps5Adapter
+from ..ps5.adapter import Ps5Adapter, DeploymentPreflightError, INSTALL
 from ..ps5.collector import collect
-from ..ps5.ftp import archive_logs
+from ..ps5.ftp import archive_logs, installation_exists
 from ..ps5.launcher import launch
 from ..host.client import HostWorkerAdapter
 import collect_run
@@ -87,7 +87,7 @@ class RealPs5CoordinatorAdapter:
             try:
                 state['preflight'] = await _blocking(self.ps5.idle, profile['client']['host'])
                 state['previous_artifacts'], installed_image = await _blocking(
-                    self._archive_and_inspect, directory / 'prelaunch')
+                    self._archive_and_inspect, directory / 'prelaunch', bool(variant))
                 current = self._run(profile)
                 expected = self.expected
                 if variant:
@@ -101,7 +101,11 @@ class RealPs5CoordinatorAdapter:
                         raise asyncio.CancelledError
                     state['deployment_attempted'] = True
                     self._save(current)
-                    state['deployed_files'] = await _blocking(self.ps5.deploy, variant['directory'], expected)
+                    try:
+                        state['deployed_files'] = await _blocking(self.ps5.deploy, variant['directory'], expected)
+                    except DeploymentPreflightError:
+                        current['safe'] = True
+                        raise
                     if state['deployed_files'] != variant['files']:
                         raise RuntimeError('DEPLOY_READBACK_MANIFEST_MISMATCH')
                     installed_image = await _blocking(self.ps5.installed)
@@ -183,8 +187,10 @@ class RealPs5CoordinatorAdapter:
         temporary.write_text(json.dumps(current['state'], indent=2) + '\n', encoding='utf-8')
         temporary.replace(path)
 
-    def _archive_and_inspect(self, destination):
+    def _archive_and_inspect(self, destination, deploying=False):
         with self.ps5.connect() as ftp:
+            if deploying:
+                installation_exists(ftp,INSTALL)
             previous = archive_logs(ftp, destination)
         return previous, self.ps5.installed()
 

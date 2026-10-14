@@ -207,7 +207,7 @@ def _compare_pairs(pairs, calibration=False, screening=None):
         metric['performance_delta'] = directions[key]
     # Noise in an unrelated metric must not erase a consistent FPS regression.
     regression = 'REGRESSED' in directions.values(); improved = 'IMPROVED' in directions.values()
-    delta = 'NO_CLEAR_CHANGE' if regression and improved else 'REGRESSED' if regression else 'IMPROVED' if improved else 'NO_CLEAR_CHANGE'
+    delta = 'REGRESSED' if regression else 'IMPROVED' if improved else 'NO_CLEAR_CHANGE'
     result.update(verdict='FAIL' if delta == 'REGRESSED' else 'PASS', functional_verdict='PASS',
                   measurement_validity='VALID', performance_delta=delta, reason_code='PAIRED_SCREENING',
                   metrics=summaries, fingerprint_sha256=expected, sample_pairs=len(pairs))

@@ -348,7 +348,12 @@ def sweep(profile: Path = typer.Option(..., exists=True, readable=True),
                 reason='SWEEP_POINT_TIMEOUT';break
             report=request('GET','/api/v1/runs/'+rid+'/report');reports.append(report);active_run_id=None;emit(report)
             if report.get('overall_verdict') != 'PASS':
-                reason='POINT_INFRASTRUCTURE_FAILURE' if report.get('execution_state')=='INCONCLUSIVE' or report.get('cleanup_errors') else 'POINT_NOT_VALID'
+                if report.get('execution_state')=='INCONCLUSIVE' or report.get('cleanup_errors'):
+                    reason='POINT_INFRASTRUCTURE_FAILURE'
+                elif report.get('functional_verdict',(report.get('analysis') or {}).get('functional_verdict'))=='FAIL':
+                    reason='POINT_FUNCTIONAL_FAILURE'
+                else:
+                    reason='POINT_NOT_VALID'
                 break
             plateau=saturation(reports[-2] if len(reports)>1 else report,report)
             if plateau is None:reason='THROUGHPUT_METRIC_UNAVAILABLE';break
@@ -360,13 +365,13 @@ def sweep(profile: Path = typer.Option(..., exists=True, readable=True),
     verdict=last.get('overall_verdict','INCONCLUSIVE')
     if reason!='ALL_POINTS_COMPLETED' and verdict=='PASS':verdict='INCONCLUSIVE'
     emit({'schema':'prosperolight-bitrate-sweep/1','overall_verdict':verdict,'verdict':verdict,'summary_verdict':verdict,
-          'execution_state':'COMPLETED' if verdict=='PASS' else 'INCONCLUSIVE',
+          'execution_state':'COMPLETED' if verdict=='PASS' else 'FAILED' if verdict=='FAIL' else 'INCONCLUSIVE',
           'functional_verdict':last.get('functional_verdict',(last.get('analysis') or {}).get('functional_verdict','INCONCLUSIVE')),
           'measurement_validity':'VALID' if verdict=='PASS' else 'INCONCLUSIVE','reason_code':reason,
           'run_ids':[r['run_id'] for r in reports],'requested_mbps':[v['client']['bitrate_mbps'] for v in values],
           'requested_points':len(values),'completed_points':len(reports),'active_run_id':active_run_id,
           'completed_mbps':[v['client']['bitrate_mbps'] for v in values[:len(reports)]],
-          'sweep_outcome':('COMPLETED' if reason=='ALL_POINTS_COMPLETED' else 'SATURATION_DETECTED' if reason=='THROUGHPUT_PLATEAU_WITH_FPS_DROP' else 'INFRASTRUCTURE_FAILURE' if reason in ('POINT_INFRASTRUCTURE_FAILURE','SWEEP_POINT_TIMEOUT','SWEEP_API_FAILURE') else 'INVALID_MEASUREMENT'),
+          'sweep_outcome':('COMPLETED' if reason=='ALL_POINTS_COMPLETED' else 'SATURATION_DETECTED' if reason=='THROUGHPUT_PLATEAU_WITH_FPS_DROP' else 'INFRASTRUCTURE_FAILURE' if reason in ('POINT_INFRASTRUCTURE_FAILURE','SWEEP_POINT_TIMEOUT','SWEEP_API_FAILURE') else 'FUNCTIONAL_FAILURE' if reason=='POINT_FUNCTIONAL_FAILURE' else 'INVALID_MEASUREMENT'),
           'performance_delta':'NOT_COMPARABLE',
           'limitations':['plateau is screening evidence, not proof of encoder saturation; each point retains its own report']})
     raise typer.Exit(2 if infrastructure_error else exit_code(verdict))

@@ -49,7 +49,7 @@ class CoordinatorTests(unittest.TestCase):
                        directory='/prepared/A', files={'eboot.bin':{'sha256':'b'*64,'bytes':1}})
         value = profile(run_id='variant-run', source_sha='a'*40, build_label='test-lab-A',
                         build_variant={'manifest':'A.json','sha256':'c'*64}, allow_deploy=True)
-        for fails in (False, True):
+        for fails in (False, True, 'prewrite', 'clean'):
             with tempfile.TemporaryDirectory() as folder:
                 (Path(folder)/'variant-run').mkdir()
                 adapter = RealPs5CoordinatorAdapter('fake','probe','launch','d'*64,folder,build_root=folder)
@@ -60,17 +60,24 @@ class CoordinatorTests(unittest.TestCase):
                     yield owner
                 adapter.ps5.lease = lease
                 adapter.ps5.idle = lambda host: {'state':'TITLE_IDLE'}
-                adapter._archive_and_inspect = lambda destination: ({}, {'eboot_sha256':'d'*64,'build_label':'test-lab-old'})
+                adapter._archive_and_inspect = lambda destination, deploying=False: ({}, None if fails=='clean' else {'eboot_sha256':'d'*64,'build_label':'test-lab-old'})
                 calls = []
                 def deploy(directory, digest):
                     calls.append((directory,digest))
-                    if fails: raise TimeoutError('lost FTP acknowledgement')
+                    if fails=='prewrite':
+                        from pltest.ps5.adapter import DeploymentPreflightError
+                        raise DeploymentPreflightError('INSTALL_INVENTORY_CAPABILITY_REQUIRED')
+                    if fails is True: raise TimeoutError('lost FTP acknowledgement')
                     return variant['files']
                 adapter.ps5.deploy = deploy
                 adapter.ps5.installed = lambda: {'eboot_sha256':'b'*64,'build_label':'test-lab-A'}
                 async def exercise():
                     with patch('pltest.build.load_variant',return_value=variant):
-                        if fails:
+                        if fails=='prewrite':
+                            from pltest.ps5.adapter import DeploymentPreflightError
+                            with self.assertRaises(DeploymentPreflightError):
+                                await adapter.stage('PREFLIGHT',value,asyncio.Event())
+                        elif fails is True:
                             with self.assertRaisesRegex(RuntimeError,'REMOTE_LEASE_RETAINED'):
                                 await adapter.stage('PREFLIGHT',value,asyncio.Event())
                         else:
@@ -79,7 +86,7 @@ class CoordinatorTests(unittest.TestCase):
                             await adapter._release_if_safe(value)
                 asyncio.run(exercise())
                 self.assertEqual(calls,[('/prepared/A','b'*64)])
-                self.assertEqual(owners[0]['safe_to_release'],not fails)
+                self.assertEqual(owners[0]['safe_to_release'],fails is not True)
 
     def test_cli_main_preserves_classification_exit_codes(self):
         import io

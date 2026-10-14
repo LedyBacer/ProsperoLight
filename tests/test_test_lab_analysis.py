@@ -301,6 +301,15 @@ class AnalysisTests(unittest.TestCase):
         pairs[1][1]['report']['host_measurement']['worker_runtime_identity']['files']['worker.py']='b'*64
         self.assertEqual(compare_pairs(pairs)['reason_code'],'ENVIRONMENT_MISMATCH')
 
+    def test_fps_regression_dominates_latency_improvement(self):
+        result=compare_pairs(self.pairs(57,1000))
+        self.assertEqual(result['performance_delta'],'REGRESSED')
+        self.assertEqual(result['overall_verdict'],'FAIL')
+        self.assertEqual(result['metrics']['frame_age_us']['performance_delta'],'IMPROVED')
+        result=compare_pairs(self.pairs(63,1000))
+        self.assertEqual(result['performance_delta'],'IMPROVED')
+        self.assertEqual(result['overall_verdict'],'PASS')
+
     def test_terminal_failure_cannot_reuse_valid_measurement(self):
         for state in ('CANCELLED','FAILED','INCONCLUSIVE','PREFLIGHT'):
             pairs=self.pairs();pairs[0][1]['state']=state

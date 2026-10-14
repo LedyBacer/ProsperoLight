@@ -12,13 +12,17 @@ from pathlib import Path, PurePosixPath
 from collect_run import title_exit
 from control_run import command
 from launch_spike import request_bytes, read_receipt
-from .ftp import retrieve, upload, archive_logs, installation_inventory
+from .ftp import retrieve, upload, archive_logs, installation_inventory, installation_exists
 from .elfldr import ElfLoader
 from .launcher import helper, launch
 from .collector import collect_reconnecting
 
 ROOT = '/data/prosperolight/test-lab'
 INSTALL = '/data/homebrew/PPSA99002'
+
+
+class DeploymentPreflightError(RuntimeError):
+    """No installation mutation has been attempted; lease may be released."""
 
 
 def save(path, value):
@@ -97,24 +101,37 @@ class Ps5Adapter:
 
     def installed(self):
         with self.connect() as ftp:
-            image = retrieve(ftp, INSTALL + '/eboot.bin')
+            try:
+                image = retrieve(ftp, INSTALL + '/eboot.bin')
+            except error_perm as exc:
+                if str(exc).startswith('550') and not installation_exists(ftp,INSTALL):
+                    return None
+                raise
             label = retrieve(ftp, INSTALL + '/build-label.txt', 256).decode('ascii').strip()
         return {'eboot_sha256': hashlib.sha256(image).hexdigest(), 'build_label': label}
 
     def deploy(self, directory, expected_eboot_sha256):
         if not self.lease_held:
             raise RuntimeError('deployment requires executor lease')
-        directory = Path(directory)
-        files = sorted(p for p in directory.rglob('*') if p.is_file())
-        if not files or len(files) > 512 or any(p.is_symlink() for p in directory.rglob('*')):
-            raise ValueError('invalid or unbounded app folder')
-        if hashlib.sha256((directory / 'eboot.bin').read_bytes()).hexdigest() != expected_eboot_sha256:
-            raise ValueError('build artifact hash mismatch')
-        self.idle()
-        index = {p.relative_to(directory).as_posix(): {'bytes':p.stat().st_size,
-                 'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in files}
-        with self.connect() as ftp:
-            installation_inventory(ftp, INSTALL, index, readback=False)
+        try:
+            directory = Path(directory)
+            files = sorted(p for p in directory.rglob('*') if p.is_file())
+            if not files or len(files) > 512 or any(p.is_symlink() for p in directory.rglob('*')):
+                raise ValueError('invalid or unbounded app folder')
+            if hashlib.sha256((directory / 'eboot.bin').read_bytes()).hexdigest() != expected_eboot_sha256:
+                raise ValueError('build artifact hash mismatch')
+            self.idle()
+            index = {p.relative_to(directory).as_posix(): {'bytes':p.stat().st_size,
+                     'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in files}
+            with self.connect() as ftp:
+                installation_inventory(ftp, INSTALL, index, readback=False)
+        except Exception as exc:
+            raise DeploymentPreflightError(str(exc)) from exc
+        try:
+            ftp_connection = self.connect()
+        except Exception as exc:
+            raise DeploymentPreflightError(str(exc)) from exc
+        with ftp_connection as ftp:
             for source in files:
                 name = source.relative_to(directory).as_posix()
                 if any(not part or part in ('.', '..') for part in PurePosixPath(name).parts):
@@ -161,12 +178,18 @@ class Ps5Adapter:
                 state['preflight'] = self.idle(profile['client']['host'])
                 ownership['safe_to_release'] = True
                 with self.connect() as ftp:
+                    if deploy_directory:
+                        installation_exists(ftp,INSTALL)
                     state['previous_artifacts'] = archive_logs(ftp, output / 'prelaunch')
                 if deploy_directory:
                     ownership['safe_to_release'] = False
                     state['stage'] = 'DEPLOY'
                     save(output / 'executor.json', state)
-                    state['deployed'] = self.deploy(deploy_directory, expected_eboot_sha256)
+                    try:
+                        state['deployed'] = self.deploy(deploy_directory, expected_eboot_sha256)
+                    except DeploymentPreflightError:
+                        ownership['safe_to_release'] = True
+                        raise
                     ownership['safe_to_release'] = True
                 actual = self.installed()
                 state['installed'] = actual

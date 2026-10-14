@@ -58,20 +58,54 @@ def archive_logs(ftp, destination):
     return index
 
 
+def directory_entries(ftp, path):
+    """Validate and cap MLSD entries; stat-based LIST cannot identify symlinks."""
+    entries=[];seen=set()
+    try:
+        for name,facts in ftp.mlsd(path):
+            if facts.get('type') in ('cdir','pdir') and name in ('.','..'):
+                continue
+            if (not name or name in ('.','..') or '/' in name or '\\' in name or
+                    any(ord(c)<32 for c in name) or name in seen):
+                raise RuntimeError('INSTALL_UNSAFE_ENTRY')
+            seen.add(name);entries.append((name,facts))
+            if len(entries)>1024:raise RuntimeError('INSTALL_INVENTORY_LIMIT')
+    except error_perm as exc:
+        if str(exc)[:3] in ('500','501','502','504'):
+            raise RuntimeError('INSTALL_INVENTORY_CAPABILITY_REQUIRED: use a server with MLSD; '
+                               'stat-based LIST cannot verify symlinks or omitted entries') from exc
+        raise
+    return entries
+
+
+def installation_exists(ftp, root):
+    """Prove absence from a readable parent, never infer it from a 550 alone."""
+    parent=str(PurePosixPath(root).parent)
+    try:
+        entries=directory_entries(ftp,parent)
+    except error_perm as exc:
+        if str(exc).startswith('550') and parent!='/' and not installation_exists(ftp,parent):
+            return False
+        raise
+    for name,facts in entries:
+        if name==PurePosixPath(root).name:
+            if facts.get('type')!='dir':raise RuntimeError('INSTALL_UNSAFE_ROOT')
+            return True
+    return False
+
+
 def installation_inventory(ftp, root, expected, readback=True):
-    """MLSD is required: unknown files/links fail closed; never delete them."""
+    """Read typed inventory; callers preflight capabilities before mutation."""
+    if not installation_exists(ftp,root):
+        if readback:raise RuntimeError('INSTALL_DIRECTORY_MISSING')
+        return {}
     actual, directories = {}, set()
     allowed_dirs = {str(parent) for name in expected for parent in PurePosixPath(name).parents if str(parent) != '.'}
     pending = [('', root)]
     total = 0
     while pending:
         prefix, path = pending.pop()
-        try:
-            entries = list(ftp.mlsd(path))
-        except Exception as exc:
-            raise RuntimeError('INSTALL_INVENTORY_UNAVAILABLE: require MLSD for ' + path) from exc
-        if len(entries) > 1024:
-            raise RuntimeError('INSTALL_INVENTORY_LIMIT')
+        entries = directory_entries(ftp,path)
         for name, facts in entries:
             kind = facts.get('type')
             if kind in ('cdir', 'pdir') and name in ('.', '..'):
