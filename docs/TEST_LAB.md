@@ -267,6 +267,7 @@ clean cleanup and VALID measurement; calibrated noise remains workload-specific.
 An early saturation stop is INCONCLUSIVE / SATURATION_DETECTED, not a completed
 sweep; individual point reports keep their independent verdicts.
 
-Upstream `136ac41` (OpenGL SDK 1.0.2 and shader-cache version) is not integrated
-in this focused hardening change. It needs separate SDK/runtime validation;
-existing physical acceptance evidence retains its original SDK identity.
+Upstream `136ac41` is integrated by a normal merge: OpenGL SDK 1.0.2 and
+`opengl-1.0.2` shader-cache versioning. Existing physical acceptance evidence
+retains its original SDK identity. See [integration smoke](TEST_LAB_SMOKE.md)
+for the bounded new-build acceptance procedure and recovery commands.
