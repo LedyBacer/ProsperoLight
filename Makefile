@@ -35,8 +35,8 @@ INPUT_POLL_US ?= 2000
 GPU_TIMESTAMPS ?= 0
 CATCHUP_QUEUE_FRAMES ?= 0
 REFERENCE_FRAME_INVALIDATION ?= 0
-# Six-picture decoder slot. Off by default; Punktfunk's GameStream encoder needs it.
-EXPERIMENTAL_HOST_DPB ?= 0
+# Six-picture decoder slot. Punktfunk's GameStream encoder needs it; 0 restores four.
+EXPERIMENTAL_HOST_DPB ?= 1
 # Milliseconds the display is left alone after a stream above 60 Hz or in HDR.
 HFR_SETTLE_MS ?= 100
 APP_DEFINITIONS ?= GL_GLEXT_PROTOTYPES=1

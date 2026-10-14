@@ -123,9 +123,9 @@ static_assert(PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES >= 0 && PROSPEROLIGHT_CATCHUP_Q
 static_assert(PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION == 0 ||
               PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION == 1);
 // Punktfunk's NVENC GameStream path reserves five reference frames. A four-deep
-// slot returns OVERSIZE_DECODE. Off unless that host is the one under test.
+// slot returns OVERSIZE_DECODE. Six slots also fit streams with fewer references.
 #ifndef PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB
-#define PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB 0
+#define PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB 1
 #endif
 static_assert(PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB == 0 || PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB == 1);
 static_assert(FRAME_SLOT_COUNT >= moonlight::kMaxDecoderDepth + 4u &&
