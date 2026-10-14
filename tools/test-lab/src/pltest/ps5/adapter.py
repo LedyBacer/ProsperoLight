@@ -120,13 +120,14 @@ class Ps5Adapter:
                 raise ValueError('invalid or unbounded app folder')
             if hashlib.sha256((directory / 'eboot.bin').read_bytes()).hexdigest() != expected_eboot_sha256:
                 raise ValueError('build artifact hash mismatch')
-            self.idle()
             index = {p.relative_to(directory).as_posix(): {'bytes':p.stat().st_size,
                      'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in files}
             with self.connect() as ftp:
                 installation_inventory(ftp, INSTALL, index, readback=False)
         except Exception as exc:
             raise DeploymentPreflightError(str(exc)) from exc
+        # ELF execution is outside the provably safe read-only preflight.
+        self.idle()
         try:
             ftp_connection = self.connect()
         except Exception as exc:
@@ -151,7 +152,11 @@ class Ps5Adapter:
                     ftp.cwd(str(parent))
                 data = source.read_bytes()
                 upload(ftp, path, data)
-            return installation_inventory(ftp, INSTALL, index)
+            evidence={}
+            actual=installation_inventory(ftp, INSTALL, index, evidence=evidence)
+            evidence.update(expected_file_hashes_verified=True,expected_file_count=len(actual))
+            self.installation_inventory_evidence=evidence
+            return actual
 
     def run(self, profile, output, expected_eboot_sha256, deploy_directory=None):
         if not re.fullmatch(r'[0-9a-f]{64}', expected_eboot_sha256):
@@ -175,6 +180,7 @@ class Ps5Adapter:
             save(output / 'executor.json', state)
             started = False
             try:
+                ownership['safe_to_release'] = False
                 state['preflight'] = self.idle(profile['client']['host'])
                 ownership['safe_to_release'] = True
                 with self.connect() as ftp:
@@ -187,6 +193,7 @@ class Ps5Adapter:
                     save(output / 'executor.json', state)
                     try:
                         state['deployed'] = self.deploy(deploy_directory, expected_eboot_sha256)
+                        state['installation_inventory_evidence']=self.installation_inventory_evidence
                     except DeploymentPreflightError:
                         ownership['safe_to_release'] = True
                         raise

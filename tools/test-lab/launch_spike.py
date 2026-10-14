@@ -17,6 +17,12 @@ from urllib.parse import quote
 from ftplib import FTP, error_perm
 from pathlib import Path
 
+# Keep direct source-tree execution working without an editable installation.
+_source = Path(__file__).resolve().parent / 'src'
+if _source.is_dir() and str(_source) not in sys.path:
+    sys.path.insert(0, str(_source))
+from pltest.ps5.ftp import directory_entries
+
 ROOT = '/data/prosperolight/test-lab/pr0'
 
 
@@ -52,7 +58,7 @@ def stage(ftp, data):
             ftp.mkd(directory)
         except error_perm:
             ftp.cwd(directory)  # verify existing directory; do not swallow failure
-    if 'request.bin' in [Path(p).name for p in ftp.nlst(ROOT)]:
+    if 'request.bin' in [name for name,facts in directory_entries(ftp,ROOT)]:
         raise RuntimeError('unconsumed PR0 request exists; refusing overwrite')
     ftp.storbinary('STOR ' + ROOT + '/request.tmp', io.BytesIO(data))
     check = bytearray()
@@ -87,7 +93,7 @@ def stage_profile(ftp, profile, request_id):
         except error_perm:
             ftp.cwd(directory)
     name = request_id + '.json'
-    if name in [Path(p).name for p in ftp.nlst(root)]:
+    if name in [item for item,facts in directory_entries(ftp,root)]:
         raise RuntimeError('profile already exists; refusing replay')
     temporary = root + '/' + request_id + '.tmp'
     ftp.storbinary('STOR ' + temporary, io.BytesIO(data))

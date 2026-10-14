@@ -251,8 +251,18 @@ is acknowledged. This guard covers Moonlight RTSP, not WebRTC or all remote role
 Final deploy checks read the destination inventory and hashes, not just upload
 temporary files. Unexpected files/directories fail with `INSTALL_UNEXPECTED_*`:
 inspect them manually while TITLE_IDLE; the executor never deletes unknown data.
-The lease is retained after uncertain deployment. Verified inventory is archived
-with each deployed run. Comparison requires COMPLETED execution, overall PASS,
+Unmodified drakmor/ftpsrv is supported automatically through bounded Unix LIST;
+MLSD-capable servers retain typed MLSD inventory. Requests/profiles and diagnostic
+archiving use the same helper, without NLST/FEAT. Final expected-file SIZE and
+SHA256 readback are verified separately from enumeration. Reports identify
+`LIST_READBACK` or `MLSD_READBACK` and retain enumeration limitations: drakmor LIST
+uses stat(), follows symlinks and may omit dangling/unstatable entries. LIST is
+visible-entry verification for a trusted managed installation, not complete
+filesystem attestation. Signed SELF extraction is disabled only on the known
+ftpsrv connection so readback hashes cover stored bytes.
+The lease is retained after uncertain helper execution, deployment or launch;
+provably read-only/local pre-write failures may release it. Verified inventory
+and its source/limitations are archived with each deployed run. Comparison requires COMPLETED execution, overall PASS,
 clean cleanup and VALID measurement; calibrated noise remains workload-specific.
 An early saturation stop is INCONCLUSIVE / SATURATION_DETECTED, not a completed
 sweep; individual point reports keep their independent verdicts.

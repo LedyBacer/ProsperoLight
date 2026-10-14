@@ -49,7 +49,7 @@ return 0; }
     def test_stage_refuses_existing_request(self):
         class Fake:
             def mkd(self, path): pass
-            def nlst(self, path): return ['request.bin']
+            def retrlines(self, command, callback): callback('type=file; request.bin')
             def storbinary(self, *args): raise AssertionError('must not upload')
         with self.assertRaises(RuntimeError):
             spike.stage(Fake(), spike.request_bytes('safe', 'PC'))
@@ -65,7 +65,8 @@ return 0; }
         class Fake:
             def __init__(self): self.data = b''; self.existing = []; self.renamed = False
             def mkd(self, path): pass
-            def nlst(self, path): return self.existing
+            def retrlines(self, command, callback):
+                for name in self.existing:callback('type=file; '+name)
             def storbinary(self, command, stream): self.data = stream.read()
             def retrbinary(self, command, append): append(self.data)
             def rename(self, source, target): self.renamed = True

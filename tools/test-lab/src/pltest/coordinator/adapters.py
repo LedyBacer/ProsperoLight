@@ -85,7 +85,9 @@ class RealPs5CoordinatorAdapter:
             await _blocking(self._acquire_lease, profile, directory)
             state = self._run(profile)['state']
             try:
+                self._run(profile)['safe'] = False
                 state['preflight'] = await _blocking(self.ps5.idle, profile['client']['host'])
+                self._run(profile)['safe'] = True
                 state['previous_artifacts'], installed_image = await _blocking(
                     self._archive_and_inspect, directory / 'prelaunch', bool(variant))
                 current = self._run(profile)
@@ -106,6 +108,7 @@ class RealPs5CoordinatorAdapter:
                     except DeploymentPreflightError:
                         current['safe'] = True
                         raise
+                    state['installation_inventory_evidence']=getattr(self.ps5,'installation_inventory_evidence',None)
                     if state['deployed_files'] != variant['files']:
                         raise RuntimeError('DEPLOY_READBACK_MANIFEST_MISMATCH')
                     installed_image = await _blocking(self.ps5.installed)
@@ -299,8 +302,8 @@ class RealPs5CoordinatorAdapter:
                 'installed_identity_verified': True, 'installed_identity_source': 'leased FTP eboot and label readback before launch',
                 'build_variant': current['state'].get('build_variant'),
                 'verified_installation_inventory': current['state'].get('deployed_files'),
-                'installation_inventory_source': 'leased final-destination MLSD and SHA256/size readback'
-                    if current['state'].get('deployed_files') else None}
+                'installation_inventory_source': (current['state'].get('installation_inventory_evidence') or {}).get('source'),
+                'installation_inventory_evidence': current['state'].get('installation_inventory_evidence')}
 
     async def cleanup(self, profile):
         current = self.runs.get(profile.get('run_id'))

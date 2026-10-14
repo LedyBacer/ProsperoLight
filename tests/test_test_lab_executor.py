@@ -29,7 +29,7 @@ class FakeFtp:
         if path in self.dirs: raise error_perm('550 exists')
         self.dirs.add(path)
     def cwd(self, path):
-        if path not in self.dirs: raise error_perm('550 missing')
+        if path!='/' and path not in self.dirs and not any(p.startswith(path+'/') for p in self.files.keys() | self.dirs): raise error_perm('550 missing')
     def nlst(self, path): return [name for name in self.files if name.startswith(path + '/')]
     def mlsd(self, path):
         if path!='/' and path not in self.dirs and not any(p.startswith(path+'/') for p in self.files.keys() | self.dirs):
@@ -40,6 +40,16 @@ class FakeFtp:
                 relative=item[len(path)+1:]; name=relative.split('/')[0]
                 entries[name]={'type':'dir' if '/' in relative or item in self.dirs else 'file'}
         return list(entries.items())
+    def retrlines(self, command, callback):
+        if not command.startswith('MLSD '):raise error_perm('502 unsupported')
+        for name,facts in self.mlsd(command[5:]):
+            callback(';'.join(k+'='+v for k,v in facts.items())+'; '+name)
+    def voidcmd(self, command):
+        if command!='TYPE I':raise AssertionError(command)
+        return '200 Type set to I'
+    def size(self, path):
+        if path not in self.files:raise error_perm('550 missing')
+        return len(self.files[path])
     def retrbinary(self, cmd, append):
         path = cmd.removeprefix('RETR ')
         if path not in self.files: raise error_perm('550 missing')
@@ -49,6 +59,30 @@ class FakeFtp:
     def rename(self, src, dst): self.files[dst] = self.files.pop(src)
     def delete(self, path): del self.files[path]
     def rmd(self, path): self.dirs.remove(path)
+
+
+class DrakmorFtp(FakeFtp):
+    """Actual command set/format: conveniences fail if accidentally called."""
+    def __init__(self):
+        super().__init__();self.self2elf=True;self.self_calls=0;self.list_commands=[]
+    def getwelcome(self):return '220-Welcome to ftpsrv.elf running on pid 123'
+    def sendcmd(self, command):
+        if command=='SELF':
+            self.self_calls+=1;self.self2elf=not self.self2elf
+            return '226 SELF transfer mode '+('enabled' if self.self2elf else 'disabled')
+        raise error_perm('502 Command not recognized')
+    def mlsd(self, *args):raise AssertionError('MLSD convenience is unsupported')
+    def nlst(self, *args):raise AssertionError('NLST is unsupported')
+    def retrlines(self, command, callback):
+        if command.startswith('MLSD '):raise error_perm('502 Command not recognized')
+        if not command.startswith('LIST '):raise AssertionError(command)
+        self.list_commands.append(command)
+        path=command[5:];entries=FakeFtp.mlsd(self,path)
+        callback('drwxr-xr-x 2 0 0 4096 Oct 14 12:34 .')
+        callback('drwxr-xr-x 2 0 0 4096 Oct 14 12:34 ..')
+        for name,facts in entries:
+            directory=facts['type']=='dir';size=4096 if directory else len(self.files[path+'/'+name])
+            callback(('drwxr-xr-x' if directory else '-rw-r--r--')+' 1 0 0 '+str(size)+' Oct 14 12:34 '+name)
 
 
 class ExecutorTests(unittest.TestCase):
@@ -152,10 +186,71 @@ class ExecutorTests(unittest.TestCase):
                 try:adapter.deploy(directory,hashlib.sha256(b'app').hexdigest())
                 except DeploymentPreflightError as exc:
                     owner['safe_to_release']=True
-                    self.assertIn('INSTALL_INVENTORY_CAPABILITY_REQUIRED',str(exc))
+                    self.assertIn('FTP_LISTING_CAPABILITY_REQUIRED',str(exc))
                 else:self.fail('unsupported inventory accepted')
             self.assertFalse(any(p.startswith(INSTALL+'/') for p in ftp.writes))
             self.assertNotIn('/data/prosperolight/test-lab/executor-lease',ftp.dirs)
+
+    def test_drakmor_list_install_replay_archive_and_collection(self):
+        import launch_spike
+        from pltest.ps5.adapter import INSTALL
+        from pltest.ps5.ftp import directory_entries
+        ftp=DrakmorFtp();adapter=Ps5Adapter('fake','probe','launch',connect=lambda:ftp);adapter.idle=lambda:None
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);app=root/'app';app.mkdir();(app/'eboot.bin').write_bytes(b'app')
+            (app/'build-label.txt').write_bytes(b'test-lab-A')
+            (app/'assets').mkdir();(app/'assets'/'with spaces.bin').write_bytes(b'asset')
+            digest=hashlib.sha256(b'app').hexdigest()
+            for label in ('clean','same','different'):
+                if label=='different':(app/'eboot.bin').write_bytes(b'new');digest=hashlib.sha256(b'new').hexdigest()
+                with adapter.lease(label) as owner:
+                    index=adapter.deploy(app,digest);owner['safe_to_release']=True
+                self.assertEqual(index['eboot.bin']['sha256'],digest)
+                self.assertEqual(adapter.installation_inventory_evidence['source'],'LIST_READBACK')
+                self.assertTrue(adapter.installation_inventory_evidence['enumeration_limitations'])
+            ftp.files[INSTALL+'/unknown']=b'keep'
+            with adapter.lease('unknown'):
+                from pltest.ps5.adapter import DeploymentPreflightError
+                with self.assertRaises(DeploymentPreflightError):adapter.deploy(app,digest)
+            self.assertIn(INSTALL+'/unknown',ftp.files)
+            owner=json.loads(ftp.files['/data/prosperolight/test-lab/executor-lease/owner.json'])
+            adapter.release_lease('unknown',owner['owner']);del ftp.files[INSTALL+'/unknown']
+            original=ftp.rename
+            def corrupt(src,dst):
+                original(src,dst)
+                if dst.endswith('/eboot.bin'):ftp.files[dst]=b'bad'
+            ftp.rename=corrupt
+            with adapter.lease('corrupt'):
+                with self.assertRaisesRegex(RuntimeError,'FINAL_MANIFEST_MISMATCH'):adapter.deploy(app,digest)
+            self.assertIn('/data/prosperolight/test-lab/executor-lease',ftp.dirs)
+            ftp.rename=original
+            launch_spike.stage(ftp,launch_spike.request_bytes('r','PC'))
+            with self.assertRaisesRegex(RuntimeError,'unconsumed'):launch_spike.stage(ftp,launch_spike.request_bytes('r','PC'))
+            profile={'schema':'prosperolight-test/1','run_id':'r','client':{'host':'PC'}}
+            launch_spike.stage_profile(ftp,profile,'r')
+            with self.assertRaisesRegex(RuntimeError,'replay'):launch_spike.stage_profile(ftp,profile,'r')
+            self.assertEqual(list(archive_logs(ftp,root/'logs')),['performance-last.json'])
+            ftp.files['/data/prosperolight/logs/debug-trace.txt']=b'trace'
+            ftp.files['/data/prosperolight/test-lab/receipts/r.json']=json.dumps({
+                'schema':'prosperolight-test-receipt/2','run_id':'r','artifacts_complete':True,
+                'artifacts':[{'name':'debug-trace.txt','bytes':5}]}).encode()
+            collect_reconnecting(lambda:ftp,'r',root/'collected',1)
+            self.assertEqual((root/'collected/debug-trace.txt').read_bytes(),b'trace')
+            self.assertFalse(ftp.self2elf);self.assertEqual(ftp.self_calls,1)
+            self.assertTrue(all(command.startswith('LIST ') for command in ftp.list_commands))
+
+    def test_list_rejects_malformed_ambiguous_and_unbounded_entries(self):
+        from pltest.ps5.ftp import directory_entries
+        prefix='-rw-r--r-- 1 0 0 1 Oct 14 12:34 '
+        for lines in ([prefix+'../bad'],[prefix+'x',prefix+'x'],['total 3'],
+                      ['-rrrrrrrrr 1 0 0 1 Oct 14 12:34 bad'],[prefix+' bad'],[prefix+'x\tbad'],[prefix+'x'*4097],
+                      ['lrwxrwxrwx 1 0 0 1 Oct 14 12:34 link -> target'],[prefix+str(i) for i in range(1025)]):
+            class Invalid(DrakmorFtp):
+                def retrlines(self,command,callback):
+                    if command.startswith('MLSD '):raise error_perm('502 unsupported')
+                    for line in lines:callback(line)
+            with self.assertRaises(RuntimeError):directory_entries(Invalid(),'/data')
+        with self.assertRaises(ValueError):directory_entries(DrakmorFtp(),'/'+ '/'.join(['deep']*18))
 
     def test_final_installation_readback_and_unknown_files_fail_closed(self):
         from pltest.ps5.adapter import INSTALL
@@ -166,6 +261,7 @@ class ExecutorTests(unittest.TestCase):
             digest=hashlib.sha256(b'app').hexdigest()
             index=adapter.deploy(root,digest)
             self.assertEqual(index['eboot.bin']['sha256'],digest)
+            self.assertEqual(adapter.installation_inventory_evidence['source'],'MLSD_READBACK')
             ftp.files[INSTALL+'/old.asset']=b'old'
             before=list(ftp.writes)
             with self.assertRaisesRegex(RuntimeError,'INSTALL_UNEXPECTED_FILE'):

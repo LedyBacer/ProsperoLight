@@ -88,6 +88,56 @@ class CoordinatorTests(unittest.TestCase):
                 self.assertEqual(calls,[('/prepared/A','b'*64)])
                 self.assertEqual(owners[0]['safe_to_release'],fails is not True)
 
+    def test_drakmor_preflight_lease_boundaries(self):
+        import asyncio,hashlib
+        from test_test_lab_executor import DrakmorFtp
+        from pltest.ps5.adapter import INSTALL
+        for failure in ('initial-helper','deploy-helper','write','inventory','none'):
+            with tempfile.TemporaryDirectory() as folder:
+                root=Path(folder);app=root/'app';app.mkdir()
+                (app/'eboot.bin').write_bytes(b'app');(app/'build-label.txt').write_bytes(b'test-lab-A')
+                variant={'source_sha':'a'*40,'build_label':'test-lab-A','directory':str(app),
+                    'eboot_sha256':hashlib.sha256(b'app').hexdigest(),
+                    'files':{p.name:{'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in app.iterdir()}}
+                value=profile(run_id='lease-run',source_sha='a'*40,build_label='test-lab-A',
+                    build_variant={'manifest':'A.json','sha256':'c'*64},allow_deploy=True)
+                (root/'lease-run').mkdir();ftp=DrakmorFtp()
+                adapter=RealPs5CoordinatorAdapter('fake','probe','launch','d'*64,root,build_root=root)
+                adapter.ps5.connect=lambda:ftp;calls=[]
+                def idle(*args):
+                    calls.append(True)
+                    if failure=='initial-helper' or failure=='deploy-helper' and len(calls)==2:
+                        raise TimeoutError('ELF acknowledgement lost')
+                    return {'state':'TITLE_IDLE'}
+                adapter.ps5.idle=idle
+                if failure=='inventory':
+                    ftp.files[INSTALL+'/eboot.bin']=b'old';ftp.files[INSTALL+'/build-label.txt']=b'old'
+                    ftp.files[INSTALL+'/unknown']=b'keep'
+                if failure=='write':
+                    original=ftp.storbinary
+                    def uncertain(command,stream):
+                        original(command,stream)
+                        if command.startswith('STOR '+INSTALL):raise TimeoutError('write acknowledgement lost')
+                    ftp.storbinary=uncertain
+                async def exercise():
+                    with patch('pltest.build.load_variant',return_value=variant):
+                        if failure=='none':
+                            await adapter.stage('PREFLIGHT',value,asyncio.Event())
+                            evidence=adapter._run(value)['state']['installation_inventory_evidence']
+                            self.assertEqual(evidence['source'],'LIST_READBACK')
+                            await adapter._release_if_safe(value)
+                        elif failure=='inventory':
+                            with self.assertRaisesRegex(RuntimeError,'INSTALL_UNEXPECTED_FILE'):
+                                await adapter.stage('PREFLIGHT',value,asyncio.Event())
+                        else:
+                            with self.assertRaisesRegex(RuntimeError,'REMOTE_LEASE_RETAINED'):
+                                await adapter.stage('PREFLIGHT',value,asyncio.Event())
+                asyncio.run(exercise())
+                retained='/data/prosperolight/test-lab/executor-lease' in ftp.dirs
+                self.assertEqual(retained,failure in ('initial-helper','deploy-helper','write'))
+                if failure in ('initial-helper','deploy-helper','inventory'):
+                    self.assertFalse(any(p.startswith(INSTALL+'/') for p in ftp.writes))
+
     def test_cli_main_preserves_classification_exit_codes(self):
         import io
         from contextlib import redirect_stdout
