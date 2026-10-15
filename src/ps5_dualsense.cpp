@@ -84,7 +84,7 @@ struct Slot
     uint32_t pcm_sequence = 0;
     bool pcm_sequence_valid = false;
     uint8_t pcm_amplitude[2]{};
-    uint64_t pcm_packets = 0, input_events = 0, output_errors = 0;
+    uint64_t input_events = 0, output_errors = 0;
     uint64_t rumble_requests = 0, trigger_requests = 0, led_requests = 0;
     bool failure_logged = false;
 };
@@ -649,26 +649,31 @@ void Poll()
             const Slot &slot = slots[i];
             if (!slot.connected)
                 continue;
-            char line[320];
+            char line[640];
             snprintf(line, sizeof(line),
                      "DualSense slot=%u mask=%x rumble=%llu triggers=%llu led=%llu accel_hz=%u "
                      "gyro_hz=%u pcm_packets=%llu errors=%llu",
                      i, active_mask, (unsigned long long)slot.rumble_requests,
                      (unsigned long long)slot.trigger_requests,
                      (unsigned long long)slot.led_requests, slot.motion_rate[0],
-                     slot.motion_rate[1], (unsigned long long)slot.pcm_packets,
+                     slot.motion_rate[1], (unsigned long long)waveform::GetStatistics(i).received,
                      (unsigned long long)slot.output_errors);
             lan_http_report_text(line);
             const auto pcm = waveform::GetStatistics(i);
             snprintf(line, sizeof(line),
                      "DualSense waveform slot=%u ready=%d active=%d open=%08x state=%08x "
                      "channels=%u rx=%llu drop=%llu duplicate=%llu reorder=%llu gaps=%llu "
-                     "underrun=%llu contention=%llu errors=%llu",
+                     "underrun=%llu contention=%llu errors=%llu overflow=%llu inbox_full=%llu "
+                     "stale=%llu rejected=%llu stalls=%llu padded=%llu outputs=%llu",
                      i, pcm.ready, pcm.active, pcm.open_result, pcm.state_result, pcm.port_channels,
                      (unsigned long long)pcm.received, (unsigned long long)pcm.dropped,
                      (unsigned long long)pcm.duplicate, (unsigned long long)pcm.out_of_order,
                      (unsigned long long)pcm.gaps, (unsigned long long)pcm.underruns,
-                     (unsigned long long)pcm.contention, (unsigned long long)pcm.output_errors);
+                     (unsigned long long)pcm.contention, (unsigned long long)pcm.output_errors,
+                     (unsigned long long)pcm.overflow, (unsigned long long)pcm.inbox_full,
+                     (unsigned long long)pcm.stale, (unsigned long long)pcm.rejected,
+                     (unsigned long long)pcm.output_stalls, (unsigned long long)pcm.padded_frames,
+                     (unsigned long long)pcm.output_calls);
             lan_http_report_text(line);
         }
         next_report = now + 10000000;
@@ -788,7 +793,8 @@ int Stop()
             result = removal;
         char line[192];
         snprintf(line, sizeof(line), "DualSense slot=%u inputs=%llu pcm=%llu output_errors=%llu", i,
-                 (unsigned long long)slot.input_events, (unsigned long long)slot.pcm_packets,
+                 (unsigned long long)slot.input_events,
+                 (unsigned long long)waveform::GetStatistics(i).received,
                  (unsigned long long)slot.output_errors);
         lan_http_report_text(line);
     }
@@ -892,17 +898,8 @@ void Haptics(uint16_t index, uint32_t sequence, const uint8_t *pcm, uint16_t fra
 {
     if (index >= MaxControllers || !pcm || !frames || frames > ML_HAPTICS_MAX_FRAMES)
         return;
-    // Never wait for pad polling, AudioOut, or queue ownership on the receive thread.
-    if (pthread_mutex_trylock(&mutex) != 0)
-    {
-        waveform::Contended(index);
-        return;
-    }
-    if (initialized && live && slots[index].connected && !slots[index].intercepted)
-    {
-        waveform::Push(index, sequence, pcm, frames);
-        ++slots[index].pcm_packets;
-    }
-    pthread_mutex_unlock(&mutex);
+    // Native readiness/epochs already gate disconnect, suppression and shutdown.
+    // Do not contend with pad polling or diagnostics on the receive thread.
+    waveform::Push(index, sequence, pcm, frames);
 }
 } // namespace prosperolight::dualsense

@@ -55,6 +55,7 @@ bool Buffer::Push(uint32_t next, const uint8_t *pcm, unsigned frames)
     if (count + frames > Capacity)
     {
         ++dropped;
+        ++overflow;
         head = count = 0;
     }
     for (unsigned f = 0; f < frames; ++f)
@@ -78,7 +79,10 @@ unsigned Buffer::Pop(int16_t *output)
     head = (head + n) % Capacity;
     count -= n;
     if (n < Grain)
+    {
         ++underruns;
+        padded_frames += Grain - n;
+    }
     return n;
 }
 namespace
@@ -93,14 +97,30 @@ struct PortState
     uint64_t flags, unused[2];
 };
 static_assert(sizeof(PortState) == 32);
+// ControlStream serializes callbacks, but the guard also bounds accidental concurrent
+// producers. Only the worker consumes; epochs are carried in every owned packet.
+struct Inbox
+{
+    static constexpr unsigned Size = 16;
+    struct Packet
+    {
+        uint64_t epoch, arrival;
+        uint32_t sequence;
+        unsigned frames;
+        uint8_t pcm[PacketFrames * Channels * 2];
+    } packets[Size]{};
+    std::atomic<uint32_t> read{0}, write{0};
+    std::atomic_flag producer = ATOMIC_FLAG_INIT;
+};
 struct Sink
 {
     pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
     Buffer buffer{};
+    Inbox inbox{};
     int32_t user = -1;
     uint64_t epoch = 0;
     std::atomic<uint64_t> ready_epoch{0}, active_epoch{0}, contention{0}, rejected{0},
-        permitted_epoch{0};
+        permitted_epoch{0}, inbox_full{0};
     Statistics statistics{};
     bool started = false;
     uint64_t last_packet = 0;
@@ -122,7 +142,8 @@ void Sleep(uint64_t us)
 void *Worker(void *argument)
 {
     auto &sink = *static_cast<Sink *>(argument);
-    uint64_t owned_epoch = 0, last_output = 0;
+    uint64_t owned_epoch = 0, deadline = 0, clock_remainder = 0, first_packet = 0;
+    bool primed = false;
     int handle = -1;
     bool failed = false;
     alignas(64) int16_t output[Grain * Channels]{};
@@ -145,6 +166,8 @@ void *Worker(void *argument)
             sink.active_epoch.store(0);
             handle = -1;
             owned_epoch = epoch;
+            deadline = clock_remainder = first_packet = 0;
+            primed = false;
             failed = false;
             if (user >= 0)
             {
@@ -182,9 +205,31 @@ void *Worker(void *argument)
         const uint64_t now = Now();
         if (sink.epoch == owned_epoch)
         {
-            if (sink.buffer.count >= Grain ||
-                (sink.active_epoch.load() && sink.last_packet && now - sink.last_packet < 60000) ||
-                (sink.buffer.count && now - sink.last_packet >= 10000))
+            uint32_t read = sink.inbox.read.load(std::memory_order_relaxed);
+            const uint32_t write = sink.inbox.write.load(std::memory_order_acquire);
+            while (read != write)
+            {
+                const auto &packet = sink.inbox.packets[read % Inbox::Size];
+                if (packet.epoch == owned_epoch && now - packet.arrival < 60000)
+                {
+                    if (sink.buffer.Push(packet.sequence, packet.pcm, packet.frames))
+                    {
+                        if (!first_packet)
+                            first_packet = packet.arrival;
+                        sink.last_packet = packet.arrival;
+                    }
+                }
+                else
+                    ++sink.statistics.stale;
+                ++read;
+            }
+            sink.inbox.read.store(read, std::memory_order_release);
+            const unsigned target = PrimeFrames < Capacity ? PrimeFrames : Capacity;
+            if (!primed && (sink.buffer.count >= target ||
+                            (sink.buffer.count && first_packet && now - first_packet >= 20000)))
+                primed = true;
+            if (primed &&
+                (sink.buffer.count || (sink.last_packet && now - sink.last_packet < 60000)))
             {
                 sink.active_epoch.store(owned_epoch);
                 if (sink.permitted_epoch.load() == owned_epoch)
@@ -195,18 +240,27 @@ void *Worker(void *argument)
             }
             else if (sink.active_epoch.load())
             {
-                // Last zero grain before restoring host's remembered legacy state.
                 std::memset(output, 0, sizeof(output));
                 render = true;
                 ending = true;
+                primed = false;
+                first_packet = 0;
             }
         }
         pthread_mutex_unlock(&sink.mutex);
         if (!render)
         {
-            Sleep(2000);
+            deadline = clock_remainder = 0;
+            Sleep(1000);
             continue;
         }
+        // Absolute sample clock: a blocking driver call consumes this budget;
+        // subsequent immediate calls catch up instead of adding a second delay.
+        const uint64_t before = Now();
+        if (!deadline)
+            deadline = before;
+        if (before < deadline)
+            Sleep(deadline - before);
         const uint64_t start = Now();
         const int result = sceAudioOutOutput(handle, output);
         int closed = 0;
@@ -217,6 +271,7 @@ void *Worker(void *argument)
         }
         pthread_mutex_lock(&sink.mutex);
         sink.statistics.output_result = result;
+        ++sink.statistics.output_calls;
         if (ending)
         {
             sink.active_epoch.store(0);
@@ -232,16 +287,21 @@ void *Worker(void *argument)
             failed = true;
         }
         // A stalled port must not play its accumulated backlog on returning.
-        if (Now() - start > 20000)
+        if (Now() - start > 60000)
         {
             sink.buffer.Clear();
-            ++sink.buffer.dropped;
+            ++sink.statistics.output_stalls;
+            primed = false;
+            first_packet = 0;
+            deadline = clock_remainder = 0;
         }
         pthread_mutex_unlock(&sink.mutex);
-        // Some implementations return immediately: never busy-loop AudioOut.
-        last_output = Now() - start;
-        if (last_output < 5333)
-            Sleep(5333 - last_output);
+        clock_remainder += uint64_t(Grain) * 1000000;
+        deadline += clock_remainder / 48000;
+        clock_remainder %= 48000;
+        // Never issue an unbounded catch-up burst after scheduling/driver stalls.
+        if (Now() > deadline + 60000)
+            deadline = clock_remainder = 0;
     }
     return nullptr;
 }
@@ -306,19 +366,32 @@ void Push(unsigned slot, uint32_t sequence, const uint8_t *pcm, unsigned frames)
     if (slot >= Slots)
         return;
     Sink &s = sinks[slot];
-    if (!Ready(slot))
+    const uint64_t epoch = s.ready_epoch.load();
+    if (!epoch || !pcm || !frames || frames > PacketFrames)
     {
         ++s.rejected;
         return;
     }
-    if (pthread_mutex_trylock(&s.mutex) != 0)
+    if (s.inbox.producer.test_and_set(std::memory_order_acquire))
     {
         ++s.contention;
         return;
     }
-    if (s.ready_epoch.load() == s.epoch && s.buffer.Push(sequence, pcm, frames))
-        s.last_packet = Now();
-    pthread_mutex_unlock(&s.mutex);
+    const uint32_t write = s.inbox.write.load(std::memory_order_relaxed);
+    const uint32_t read = s.inbox.read.load(std::memory_order_acquire);
+    if (write - read == Inbox::Size)
+        ++s.inbox_full;
+    else
+    {
+        auto &packet = s.inbox.packets[write % Inbox::Size];
+        packet.epoch = epoch;
+        packet.arrival = Now();
+        packet.sequence = sequence;
+        packet.frames = frames;
+        std::memcpy(packet.pcm, pcm, frames * Channels * 2);
+        s.inbox.write.store(write + 1, std::memory_order_release);
+    }
+    s.inbox.producer.clear(std::memory_order_release);
 }
 void Contended(unsigned slot)
 {
@@ -333,7 +406,12 @@ Statistics GetStatistics(unsigned slot)
     pthread_mutex_lock(&s.mutex);
     Statistics r = s.statistics;
     r.received = s.buffer.received;
-    r.dropped = s.buffer.dropped + s.rejected.load();
+    r.overflow = s.buffer.overflow;
+    r.padded_frames = s.buffer.padded_frames;
+    r.inbox_full = s.inbox_full.load();
+    r.rejected = s.rejected.load();
+    r.dropped = s.buffer.dropped + r.rejected + r.inbox_full + r.stale + r.output_stalls +
+                s.contention.load();
     r.duplicate = s.buffer.duplicate;
     r.out_of_order = s.buffer.out_of_order;
     r.gaps = s.buffer.gaps;

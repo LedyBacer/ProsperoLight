@@ -15,7 +15,8 @@
 #include <cstdio>
 using namespace prosperolight::waveform;
 static std::atomic<bool> fail_open{false}, fail_output{false}, stalled{false}, entered{false};
-static std::atomic<int> opens{0}, closes{0};
+static std::atomic<int> opens{0}, closes{0}, burst_calls{0};
+static std::atomic<bool> batch_driver{false};
 static std::atomic<int> channels{2};
 static std::mutex records_mutex;
 struct Record
@@ -53,6 +54,8 @@ extern "C"
         Record record{};
         record.user = handle - 100;
         std::memcpy(record.samples.data(), pcm, sizeof(record.samples));
+        if (batch_driver && (++burst_calls % 4) == 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
         entered = true;
         while (stalled)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -193,6 +196,33 @@ int main()
     Wait([] { return GetStatistics(0).output_errors > 0; });
     assert(!Ready(0));
     fail_output = false;
+    // A host sends four 5ms packets together; AudioOut blocks in batches rather
+    // than once per grain. Relative sleeps would double-pace this workload.
+    Configure(2, 4);
+    Wait([] { return Ready(2); });
+    Allow(2);
+    batch_driver = true;
+    burst_calls = 0;
+    const auto initial = GetStatistics(2);
+    const auto epoch = std::chrono::steady_clock::now();
+    uint32_t sequence = 0;
+    for (unsigned burst = 0; burst < 50; ++burst)
+    {
+        std::this_thread::sleep_until(epoch + std::chrono::milliseconds(burst * 20));
+        for (unsigned packet_index = 0; packet_index < 4; ++packet_index)
+            Push(2, sequence++, packet.data(), 240);
+        if (Active(2))
+            Allow(2);
+    }
+    Wait([] { return !Active(2) && GetStatistics(2).received == 200; });
+    batch_driver = false;
+    const auto final = GetStatistics(2);
+    assert(final.received - initial.received == 200);
+    assert(final.overflow == initial.overflow && final.inbox_full == initial.inbox_full);
+    assert(final.contention == initial.contention && final.gaps == initial.gaps);
+    assert(final.output_stalls == initial.output_stalls);
+    // Only the final partial grain / bounded silence tail may need padding.
+    assert(final.padded_frames - initial.padded_frames < 4800);
     int before = closes.load();
     DisableAll();
     Wait([&] { return closes.load() > before; });

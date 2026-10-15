@@ -9,8 +9,9 @@ namespace prosperolight::waveform
 {
 constexpr unsigned Channels = 2, Grain = 256, PacketFrames = 240;
 #ifndef PROSPEROLIGHT_HAPTICS_QUEUE_FRAMES
-#define PROSPEROLIGHT_HAPTICS_QUEUE_FRAMES 768
+#define PROSPEROLIGHT_HAPTICS_QUEUE_FRAMES 2048
 #endif
+constexpr unsigned PrimeFrames = 768;
 constexpr unsigned Capacity = PROSPEROLIGHT_HAPTICS_QUEUE_FRAMES;
 static_assert(Capacity >= Grain && Capacity <= 2048);
 // No allocation. A discontinuity discards stale queued data, never repeats it.
@@ -20,6 +21,7 @@ struct Buffer
     unsigned head = 0, count = 0;
     uint32_t sequence = 0;
     bool sequenced = false;
+    uint64_t overflow = 0, padded_frames = 0;
     uint64_t received = 0, dropped = 0, duplicate = 0, out_of_order = 0, gaps = 0, underruns = 0;
     void Clear();
     bool Push(uint32_t next, const uint8_t *pcm, unsigned frames);
@@ -27,6 +29,7 @@ struct Buffer
 };
 struct Statistics
 {
+    uint64_t overflow, inbox_full, stale, rejected, output_stalls, padded_frames, output_calls;
     uint64_t received, dropped, duplicate, out_of_order, gaps, underruns, contention, output_errors;
     int open_result, state_result, output_result, close_result;
     uint16_t port_output;
