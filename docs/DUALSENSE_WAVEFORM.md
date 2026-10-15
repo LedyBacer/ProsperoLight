@@ -1,5 +1,8 @@
 # Native DualSense waveform validation — 2026-10-15
 
+This records the original MVP. See the [buffering follow-up](DUALSENSE_WAVEFORM_BUFFERING.md)
+for subsequent fixes, counters and final validation status.
+
 ## Build and scope
 
 Branch `codex/dualsense-waveform` starts at main `ca3f25f` (01.000.110).

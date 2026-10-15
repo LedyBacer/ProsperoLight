@@ -57,12 +57,16 @@ original input path.
 ## PCM ownership, buffering and interruption
 
 Each controller has a process-lifetime worker and preallocated queue, default
-**768 stereo frames (16ms)**. `PROSPEROLIGHT_HAPTICS_QUEUE_FRAMES` permits 256..2048
-frames at compile time; at 48kHz the default startup target is one 256-frame grain
-(5.33ms), usually collected from two incoming 240-frame/5ms packets. Incomplete
+**3072 stereo frames (64ms)**. `PROSPEROLIGHT_HAPTICS_QUEUE_FRAMES` permits 256..4096
+frames at compile time; at 48kHz the default startup target is 768 frames
+(16ms), with at least 16ms of initial accumulation (20ms timeout for a short
+fragment). A bounded packet inbox
+keeps reception independent of pad/diagnostic mutexes. Incomplete
 initial/final blocks are zero-filled after a bounded wait. The target is not a
 measured end-to-end latency guarantee. Overflow discards queued backlog; an output
-call stalled over 20ms clears accumulated samples on return. There is no resampling,
+call stalled over 60ms clears accumulated samples on return. An absolute sample
+clock accounts for time blocked in AudioOut and avoids adding a second delay
+after batched driver calls. There is no resampling,
 amplitude conversion, stale repeat, unbounded allocation or network-thread I/O.
 
 Sequence arithmetic uses unsigned modular differences: duplicates/backwards packets
@@ -72,7 +76,8 @@ ownership before the worker's first waveform; adaptive triggers and RGB stay liv
 On native completion it restores the most recent host-requested ordinary rumble.
 Public duaLib identifies haptics mode 1 and legacy rumble mode 2. The pad owner
 selects mode 1 before native preflight/ownership and restores mode 2 for ordinary
-rumble. The effect of these modes with AudioOut still requires physical validation.
+rumble. Physical vibration and distinct sides were operator-confirmed; native/legacy
+coexistence under game workloads still needs hardware acceptance.
 
 Disconnect, suppression/system overlays, stream stop, user logout and slot reuse
 invalidate an ownership epoch and clear PCM. Workers finish/close old ports before
@@ -81,7 +86,8 @@ Stop/disconnect do not wait for blocking AudioOut. A stuck driver can retain its
 old port until it returns or the process exits; that slot cannot claim readiness
 for a replacement device in the meantime. Counters and port return codes are logged
 at the existing ten-second diagnostic cadence (RX/drop/duplicate/reorder/gap,
-underrun/contention/output errors), not on each packet. Counters are app-lifetime.
+underrun/contention/output errors, separate overflow/inbox/stale/rejected/stall
+counters, padded frames, input/dequeued frame totals, resumed-stream starvation frames and output calls), not on each packet. Counters are app-lifetime.
 
 ## Current scope
 
