@@ -279,8 +279,6 @@ class Model
     struct JobResult
     {
         int result = 0;
-        bool update_available = false;
-        UpdateOffer update_offer;
         moonlight_backend_snapshot_t snapshot{};
         moonlight_discovered_host_t found[MOONLIGHT_DISCOVERY_MAX_HOSTS]{};
         std::uint32_t found_count = 0;
@@ -350,6 +348,21 @@ class Model
     WorkerStart worker_start_ = nullptr;
     UpdateCheck update_check_ = nullptr;
     bool update_checked_ = false;
+    // The update check runs on a thread of its own: when the catalog cannot be
+    // reached its network wait lasts a minute, and nothing (a stream starting,
+    // the launcher closing) waits for it. The thread keeps its own reference.
+    struct UpdateTask
+    {
+        UpdateCheck check = nullptr;
+        WorkerStart start = nullptr;
+        bool available = false;
+        UpdateOffer offer;
+        int done = 0; // set, with release, once available and offer are written
+    };
+    static void *UpdateWorker(void *held);
+    void StartUpdateCheck();
+    void ApplyUpdate(bool available, const UpdateOffer &offer);
+    std::shared_ptr<UpdateTask> update_task_;
     UpdateOffer update_offer_;
     bool update_offered_ = false;
 

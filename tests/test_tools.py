@@ -800,10 +800,16 @@ class ToolTests(unittest.TestCase):
         self.assertNotIn("update_check_run_self", platform)
         next_job = model[model.index("bool Model::StartNext()") :]
         self.assertLess(next_job.index("next.kind = JobKind::artwork;"),
-                        next_job.index("next.kind = JobKind::update;"))
+                        next_job.index("StartUpdateCheck();"))
+        # On a thread of its own that nothing waits for: a catalog that cannot be
+        # reached held the launcher, and so the stream, for a minute.
+        start = model[model.index("void Model::StartUpdateCheck()") :]
+        self.assertIn("PTHREAD_CREATE_DETACHED", start[: start.index("\n}\n")])
+        shutdown = model[model.index("void Model::Shutdown()") :]
+        self.assertIn("update_task_.reset();", shutdown[: shutdown.index("\n}\n")])
         # Only an available update is shown, for ten seconds.
         self.assertIn("constexpr float kUpdateNoticeSeconds = 10.0f;", model)
-        self.assertIn("if (result.update_available)", model)
+        self.assertIn("else if (available)", model)
         self.assertCodeContains("notice.seconds > 0.0f", view)
         # Shipping libcurl means shipping its notices.
         for name in ("libcurl", "OpenSSL", "zlib", "zstd", "libpsl"):

@@ -70,6 +70,8 @@ void Model::Initialize(std::uint64_t now_ms)
 
 void Model::Shutdown()
 {
+    // An update check still waiting on the network is left to finish on its own.
+    update_task_.reset();
     if (worker_active_)
     {
         (void)pthread_join(worker_, nullptr);
@@ -593,9 +595,6 @@ void Model::Run(const Job &job, JobResult *result)
         std::printf("[PL] launcher: stop answered %d (online=%u running=%d)\n", result->result,
                     result->snapshot.online, result->snapshot.current_app_id);
         break;
-    case JobKind::update:
-        result->update_available = update_check_ && update_check_(&result->update_offer);
-        break;
     case JobKind::artwork:
     {
         if (job.picture)
@@ -674,7 +673,8 @@ bool Model::StartNext()
     {
         // Last of all, once: nothing the player asked for waits behind it.
         update_checked_ = true;
-        next.kind = JobKind::update;
+        StartUpdateCheck();
+        return false;
     }
     else
     {
@@ -703,6 +703,54 @@ bool Model::StartNext()
     return true;
 }
 
+void *Model::UpdateWorker(void *held)
+{
+    const std::shared_ptr<UpdateTask> task =
+        std::move(*static_cast<std::shared_ptr<UpdateTask> *>(held));
+    delete static_cast<std::shared_ptr<UpdateTask> *>(held);
+    if (task->start)
+        task->start();
+    task->available = task->check(&task->offer);
+    __atomic_store_n(&task->done, 1, __ATOMIC_RELEASE);
+    return nullptr;
+}
+
+void Model::StartUpdateCheck()
+{
+    update_task_ = std::make_shared<UpdateTask>();
+    update_task_->check = update_check_;
+    update_task_->start = worker_start_;
+    auto *held = new std::shared_ptr<UpdateTask>(update_task_);
+    pthread_attr_t attributes;
+    pthread_attr_init(&attributes);
+    // A TLS request needs more than a thread's default stack, as on the worker.
+    pthread_attr_setstacksize(&attributes, kWorkerStackBytes);
+    pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+    pthread_t thread;
+    const int created = pthread_create(&thread, &attributes, UpdateWorker, held);
+    pthread_attr_destroy(&attributes);
+    if (created != 0)
+    {
+        delete held;
+        update_task_.reset();
+    }
+}
+
+void Model::ApplyUpdate(bool available, const UpdateOffer &offer)
+{
+    // Only good news is shown; no network or "not listed" is silence.
+    if (available && offer.installable)
+    {
+        update_offer_ = offer;
+        update_offered_ = true;
+    }
+    else if (available)
+        Notify(NoticeKind::info, i18n::tr("Update available"),
+               std::string(i18n::tr("ProsperoLight ")) + offer.version +
+                   i18n::tr(" is out. Get it from homebrew.page."),
+               kUpdateNoticeSeconds);
+}
+
 void Model::Poll(std::uint64_t now_ms)
 {
     now_ms_ = now_ms;
@@ -712,6 +760,11 @@ void Model::Poll(std::uint64_t now_ms)
         worker_active_ = false;
         Apply(job_, result_);
         result_ = {};
+    }
+    if (update_task_ && __atomic_load_n(&update_task_->done, __ATOMIC_ACQUIRE) != 0)
+    {
+        ApplyUpdate(update_task_->available, update_task_->offer);
+        update_task_.reset();
     }
 
     // Pairing uses the same connection state as the worker: one at a time.
@@ -982,19 +1035,6 @@ void Model::Apply(const Job &job, JobResult &result)
         KeepPicture(job.app_id, std::move(result.picture));
         if (!result.image.rgba.empty())
             artwork_ready_.push_back(std::move(result.image));
-        return;
-    case JobKind::update:
-        // Only good news is shown; no network or "not listed" is silence.
-        if (result.update_available && result.update_offer.installable)
-        {
-            update_offer_ = result.update_offer;
-            update_offered_ = true;
-        }
-        else if (result.update_available)
-            Notify(NoticeKind::info, i18n::tr("Update available"),
-                   std::string(i18n::tr("ProsperoLight ")) + result.update_offer.version +
-                       i18n::tr(" is out. Get it from homebrew.page."),
-                   kUpdateNoticeSeconds);
         return;
     default:
         break;
