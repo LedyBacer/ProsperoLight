@@ -1,5 +1,25 @@
 # Changelog
 
+## 01.000.110
+
+### Stable: Punktfunk hosts, more box art, no wait before the stream
+
+### New
+
+- **Punktfunk hosts:** the decoder now reserves six pictures by default, so Punktfunk's GameStream stream (five reference frames) decodes on a release build. Before, it showed no picture. Streams from other hosts are unaffected.
+- **JPEG and WebP box art:** covers that hosts such as Punktfunk pass through as JPEG or WebP now appear, as PNG covers always did.
+- **PyroWave from punktfunk:** punktfunk's PyroWave revision is accepted; its shaders and bitstream code are the same as the supported one.
+
+### Changed
+
+- **No wait before the stream:** the check for a newer version runs on its own. When homebrew.page could not be reached, starting a stream, a home-screen forwarder included, waited about a minute for that check to give up.
+- **Box art:** covers over 1 MiB load, and covers already fetched are kept in memory, so scrolling back through a large library does not download them again.
+- Built on ps5-opengl SDK 1.0.2.
+
+### Installation / update
+
+Title ID remains `PPSA99002`; saved PCs, settings and pairing are kept. Close the app before updating. Extract `PPSA99002.zip` and copy the complete `PPSA99002/` folder to `/data/homebrew/`. Keep only one installation for this title. `SHA256SUMS` verifies the download.
+
 ## 01.000.100
 
 ### Stable: a home-screen tile for each PC game
