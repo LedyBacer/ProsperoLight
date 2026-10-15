@@ -271,6 +271,9 @@ test-performance-guards: | transport-deps
 		-Ithird_party/opus/include -Ithird_party/mbedtls/include -Ithird_party/moonlight-common-c/src \
 		tests/test_controllers.cpp $(HOST_TEST_LDFLAGS) -o build/tests/controllers
 	@build/tests/controllers
+	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Iinclude \
+		tests/test_waveform.cpp src/ps5_waveform.cpp $(HOST_TEST_LDFLAGS) -o build/tests/waveform
+	@build/tests/waveform
 	@clang -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fvisibility=hidden \
 		tests/test_socket_metrics.c -Wl,--gc-sections -o build/tests/socket_metrics
 	@build/tests/socket_metrics

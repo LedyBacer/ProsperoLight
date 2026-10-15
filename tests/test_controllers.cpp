@@ -8,6 +8,51 @@
 #include <iterator>
 #include <vector>
 
+// Legacy/input tests isolate the unavailable native renderer; waveform workers have
+// their own mocked AudioOut integration suite.
+namespace prosperolight::waveform
+{
+bool mock_ready = false, mock_active = false;
+unsigned permits = 0;
+void Configure(unsigned, int32_t)
+{
+}
+void Disable(unsigned)
+{
+}
+void DisableAll()
+{
+}
+void Contended(unsigned)
+{
+}
+void Allow(unsigned)
+{
+    ++permits;
+}
+bool Ready(unsigned)
+{
+    return mock_ready;
+}
+bool Active(unsigned)
+{
+    return mock_active;
+}
+bool AnyReady()
+{
+    return mock_ready;
+}
+void Push(unsigned, uint32_t, const uint8_t *, unsigned)
+{
+}
+Statistics GetStatistics(unsigned)
+{
+    Statistics s{};
+    s.open_result = -1;
+    return s;
+}
+} // namespace prosperolight::waveform
+namespace waveform = prosperolight::waveform;
 using namespace prosperolight::dualsense;
 struct MockPad
 {
@@ -119,8 +164,9 @@ extern "C"
         return 0;
     }
     int LiSendControllerArrivalEvent(uint8_t number, uint16_t mask, uint8_t type, uint32_t,
-                                     uint16_t)
+                                     uint16_t caps)
     {
+        assert(bool(caps & LI_CCAP_HAPTICS_PCM) == waveform::mock_ready);
         if (fail_arrival)
             return -1;
         assert(type == LI_CTYPE_PS);
@@ -274,5 +320,22 @@ int main()
     poll();
     assert(GetStatistics().scan_errors == 1 && ActiveMask() == 3 && closes == 0);
     finish();
+    waveform::mock_ready = true;
+    begin({1});
+    poll();
+    const unsigned before_pcm = rumble_writes;
+    waveform::mock_active = true;
+    Rumble(0, 10000, 20000);
+    RumbleTriggers(0, 1000, 2000);
+    Led(0, 1, 2, 3);
+    poll();
+    assert(rumble_writes == before_pcm + 1 && waveform::permits > 0);
+    poll();
+    assert(rumble_writes == before_pcm + 1);
+    waveform::mock_active = false;
+    poll();
+    assert(rumble_writes == before_pcm + 2);
+    finish();
+    waveform::mock_ready = false;
     printf("DualSense / multiple controller lifecycle checks PASS\n");
 }

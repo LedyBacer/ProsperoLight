@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "ps5_dualsense.hpp"
+#include "ps5_waveform.hpp"
+#include <unistd.h>
 #include "lan_http_report.hpp"
 #include <Limelight.h>
 #include <ControllerHaptics.h>
@@ -34,8 +36,8 @@ namespace prosperolight::dualsense
 namespace
 {
 // These compact ABI descriptions are derived from public duaLib/OpenOrbis
-// sources, not proprietary SDK headers. Native waveform output is intentionally
-// not guessed: PCM is rendered as a bounded actuator envelope via scePad.
+// sources, not proprietary SDK headers. AudioOut PCM ownership is isolated
+// on per-controller workers in ps5_waveform.cpp.
 struct TriggerCommand
 {
     uint32_t mode;
@@ -77,7 +79,8 @@ struct Slot
     bool rumble_dirty = false, led_dirty = false, trigger_dirty = false;
     TriggerParam triggers{};
     bool sensor_enabled = false, sensor_dirty = false;
-    uint64_t pcm_until = 0;
+    bool native_active = false, native_mode = false;
+    uint64_t native_pending_until = 0;
     uint32_t pcm_sequence = 0;
     bool pcm_sequence_valid = false;
     uint8_t pcm_amplitude[2]{};
@@ -139,7 +142,7 @@ uint32_t SupportedButtons()
 }
 constexpr uint16_t Capabilities = LI_CCAP_ANALOG_TRIGGERS | LI_CCAP_RUMBLE |
                                   LI_CCAP_TRIGGER_RUMBLE | LI_CCAP_TOUCHPAD | LI_CCAP_ACCEL |
-                                  LI_CCAP_GYRO | LI_CCAP_RGB_LED | LI_CCAP_HAPTICS_PCM;
+                                  LI_CCAP_GYRO | LI_CCAP_RGB_LED;
 void CancelTouches(unsigned index)
 {
     Slot &slot = slots[index];
@@ -155,13 +158,18 @@ void ResetOutput(Slot &slot)
     uint8_t vibration[2]{};
     TriggerParam off{};
     off.mask = 3;
-    OutputResult(slot, "reset rumble", scePadSetVibration(slot.handle, vibration));
+    if (!waveform::Active(static_cast<unsigned>(&slot - slots)))
+    {
+        OutputResult(slot, "restore rumble mode", scePadSetVibrationMode(slot.handle, 2));
+        slot.native_mode = false;
+        OutputResult(slot, "reset rumble", scePadSetVibration(slot.handle, vibration));
+    }
     OutputResult(slot, "reset triggers", scePadSetTriggerEffect(slot.handle, &off));
     OutputResult(slot, "reset lightbar", scePadResetLightBar(slot.handle));
     OutputResult(slot, "stop motion", scePadSetMotionSensorState(slot.handle, false));
     slot.rumble_dirty = slot.led_dirty = slot.trigger_dirty = slot.sensor_dirty = false;
     slot.motion_rate[0] = slot.motion_rate[1] = 0;
-    slot.pcm_until = 0;
+    slot.native_active = false;
     slot.pcm_sequence_valid = false;
     slot.sensor_enabled = false;
 }
@@ -179,6 +187,7 @@ int Disconnect(unsigned index)
         if (result != 0)
             ++statistics.send_errors;
     }
+    waveform::Disable(index);
     ResetOutput(slot);
     slot.connected = slot.announced = slot.sent_valid = false;
     slot.last_input = 0;
@@ -201,8 +210,15 @@ void SetConnection(unsigned index, const PadSample &sample)
     if (!slot.connected)
     {
         slot.connected = true;
-        // Select legacy motor emulation explicitly for scePadSetVibration.
-        OutputResult(slot, "enable rumble mode", scePadSetVibrationMode(slot.handle, 2));
+        // Public duaLib constants: haptics mode 1, legacy motor emulation 2.
+        const int mode = scePadSetVibrationMode(slot.handle, 1);
+        OutputResult(slot, "prepare native haptics mode", mode);
+        slot.native_mode = mode >= 0;
+        if (slot.native_mode)
+            waveform::Configure(index, slot.user);
+        else
+            waveform::Disable(index);
+        slot.native_pending_until = Now() + 50000;
         active_mask |= 1u << index;
         const unsigned count = __builtin_popcount(active_mask);
         if (count > statistics.peak)
@@ -229,8 +245,12 @@ int Announce(unsigned index)
         return -1;
     if (slot.announced)
         return 0;
-    const int result = LiSendControllerArrivalEvent(index, WireMask() | (1u << index), LI_CTYPE_PS,
-                                                    SupportedButtons(), Capabilities);
+    if (!waveform::Ready(index) && waveform::GetStatistics(index).open_result == 0 &&
+        Now() < slot.native_pending_until)
+        return -1;
+    const int result = LiSendControllerArrivalEvent(
+        index, WireMask() | (1u << index), LI_CTYPE_PS, SupportedButtons(),
+        Capabilities | (waveform::Ready(index) ? LI_CCAP_HAPTICS_PCM : 0));
     if (result == 0)
     {
         slot.announced = true;
@@ -258,16 +278,35 @@ void ApplyOutput(Slot &slot)
             scePadSetAngularVelocityDeadbandState(slot.handle, false);
         slot.sensor_dirty = false;
     }
-    const uint64_t now = Now();
-    if (slot.pcm_until && now >= slot.pcm_until)
+    const unsigned index = static_cast<unsigned>(&slot - slots);
+    const bool native = waveform::Active(index);
+    if (native != slot.native_active)
     {
-        slot.pcm_until = 0;
+        slot.native_active = native;
         slot.rumble_dirty = true;
+        if (native)
+        {
+            const uint8_t off[2]{};
+            const int rc = scePadSetVibration(slot.handle, off);
+            OutputResult(slot, "yield rumble to waveform", rc);
+            const int mode = rc >= 0 ? scePadSetVibrationMode(slot.handle, 1) : rc;
+            OutputResult(slot, "native haptics mode", mode);
+            slot.native_mode = mode >= 0;
+            if (mode >= 0)
+                waveform::Allow(index);
+            else
+                waveform::Disable(index);
+        }
     }
-    if (slot.rumble_dirty)
+    if (slot.rumble_dirty && !native &&
+        (waveform::Ready(index) || waveform::GetStatistics(index).open_result != 0))
     {
-        const uint8_t *motors = slot.pcm_until ? slot.pcm_amplitude : slot.rumble;
-        OutputResult(slot, "rumble", scePadSetVibration(slot.handle, motors));
+        if (slot.native_mode)
+        {
+            OutputResult(slot, "legacy rumble mode", scePadSetVibrationMode(slot.handle, 2));
+            slot.native_mode = false;
+        }
+        OutputResult(slot, "rumble", scePadSetVibration(slot.handle, slot.rumble));
         slot.rumble_dirty = false;
     }
     if (slot.led_dirty)
@@ -305,12 +344,21 @@ void ExtendedInput(unsigned index, const PadSample &sample, bool suppressed)
             scePadSetVibration(slot.handle, off);
             scePadSetTriggerEffect(slot.handle, &triggers);
         }
+        if (!slot.intercepted)
+            waveform::Disable(index);
         slot.intercepted = true;
         return;
     }
     if (slot.intercepted)
     {
         slot.intercepted = false;
+        const int mode = scePadSetVibrationMode(slot.handle, 1);
+        OutputResult(slot, "resume native haptics mode", mode);
+        slot.native_mode = mode >= 0;
+        if (mode >= 0)
+            waveform::Configure(index, slot.user);
+        else
+            waveform::Disable(index);
         slot.triggers.mask = 3;
         slot.rumble_dirty = slot.led_dirty = slot.trigger_dirty = slot.sensor_dirty = true;
     }
@@ -396,6 +444,11 @@ void Discover()
         ++statistics.scan_errors;
         return;
     }
+    bool primary_present = false;
+    for (int32_t user : users)
+        primary_present |= slots[0].user == user;
+    if (slots[0].connected && !primary_present)
+        Disconnect(0);
     for (unsigned i = 1; i < MaxControllers; ++i)
     {
         Slot &slot = slots[i];
@@ -522,6 +575,7 @@ int RemoteShortcuts(uint32_t raw, int mapped)
 }
 void Init(int32_t user, int32_t handle)
 {
+    waveform::DisableAll();
     Lock lock;
     for (Slot &slot : slots)
         slot = Slot{};
@@ -538,6 +592,9 @@ void Init(int32_t user, int32_t handle)
     Discover();
     next_discovery = Now() + 1000000;
     next_report = 0;
+    // Open is asynchronous; cap startup cost at 50ms, never delay network callbacks.
+    for (unsigned wait = 0; wait < 25 && !waveform::AnyReady(); ++wait)
+        usleep(2000);
 }
 uint16_t ActiveMask()
 {
@@ -595,12 +652,23 @@ void Poll()
             char line[320];
             snprintf(line, sizeof(line),
                      "DualSense slot=%u mask=%x rumble=%llu triggers=%llu led=%llu accel_hz=%u "
-                     "gyro_hz=%u pcm_envelope=%llu errors=%llu",
+                     "gyro_hz=%u pcm_packets=%llu errors=%llu",
                      i, active_mask, (unsigned long long)slot.rumble_requests,
                      (unsigned long long)slot.trigger_requests,
                      (unsigned long long)slot.led_requests, slot.motion_rate[0],
                      slot.motion_rate[1], (unsigned long long)slot.pcm_packets,
                      (unsigned long long)slot.output_errors);
+            lan_http_report_text(line);
+            const auto pcm = waveform::GetStatistics(i);
+            snprintf(line, sizeof(line),
+                     "DualSense waveform slot=%u ready=%d active=%d open=%08x state=%08x "
+                     "channels=%u rx=%llu drop=%llu duplicate=%llu reorder=%llu gaps=%llu "
+                     "underrun=%llu contention=%llu errors=%llu",
+                     i, pcm.ready, pcm.active, pcm.open_result, pcm.state_result, pcm.port_channels,
+                     (unsigned long long)pcm.received, (unsigned long long)pcm.dropped,
+                     (unsigned long long)pcm.duplicate, (unsigned long long)pcm.out_of_order,
+                     (unsigned long long)pcm.gaps, (unsigned long long)pcm.underruns,
+                     (unsigned long long)pcm.contention, (unsigned long long)pcm.output_errors);
             lan_http_report_text(line);
         }
         next_report = now + 10000000;
@@ -700,6 +768,17 @@ int Stop()
     Lock lock;
     if (!initialized)
         return 0;
+    waveform::DisableAll();
+    // Bounded grace for ordinary grain completion, never join a stalled AudioOut.
+    for (unsigned wait = 0; wait < 5; ++wait)
+    {
+        bool pending = false;
+        for (unsigned i = 0; i < MaxControllers; ++i)
+            pending |= waveform::Active(i);
+        if (!pending)
+            break;
+        usleep(2000);
+    }
     int result = 0;
     for (unsigned i = 0; i < MaxControllers; ++i)
     {
@@ -718,6 +797,7 @@ int Stop()
 }
 void Shutdown()
 {
+    waveform::DisableAll();
     Lock lock;
     if (!initialized)
         return;
@@ -812,29 +892,16 @@ void Haptics(uint16_t index, uint32_t sequence, const uint8_t *pcm, uint16_t fra
 {
     if (index >= MaxControllers || !pcm || !frames || frames > ML_HAPTICS_MAX_FRAMES)
         return;
-    // Never wait on hardware from the network control receive thread.
+    // Never wait for pad polling, AudioOut, or queue ownership on the receive thread.
     if (pthread_mutex_trylock(&mutex) != 0)
-        return;
-    Slot &slot = slots[index];
-    if (initialized && slot.connected &&
-        (!slot.pcm_sequence_valid || static_cast<int32_t>(sequence - slot.pcm_sequence) > 0))
     {
-        uint64_t energy[2]{};
-        for (unsigned frame = 0; frame < frames; ++frame)
-            for (unsigned channel = 0; channel < 2; ++channel)
-            {
-                const int32_t value =
-                    static_cast<int16_t>(MlHapticsRead16(pcm + frame * 4 + channel * 2));
-                energy[channel] += static_cast<uint64_t>(static_cast<int64_t>(value) * value);
-            }
-        for (unsigned channel = 0; channel < 2; ++channel)
-            slot.pcm_amplitude[channel] = static_cast<uint8_t>(
-                std::sqrt(static_cast<double>(energy[channel]) / frames) * 255 / 32768);
-        slot.pcm_sequence = sequence;
-        slot.pcm_sequence_valid = true;
-        slot.pcm_until = Now() + 60000;
-        slot.rumble_dirty = true;
-        ++slot.pcm_packets;
+        waveform::Contended(index);
+        return;
+    }
+    if (initialized && live && slots[index].connected && !slots[index].intercepted)
+    {
+        waveform::Push(index, sequence, pcm, frames);
+        ++slots[index].pcm_packets;
     }
     pthread_mutex_unlock(&mutex);
 }

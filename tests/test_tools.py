@@ -1055,7 +1055,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("controller_ready ? prosperolight::dualsense::ActiveMask() : 0", stream)
         self.assertIn("sceUserServiceGetLoginUserIdList(users)", controller)
         # A packet names only the controllers the host has already been told about.
-        self.assertIn("LiSendControllerArrivalEvent(index, WireMask() | (1u << index)", controller)
+        self.assertCodeContains("LiSendControllerArrivalEvent(index, WireMask() | (1u << index)", controller)
         self.assertNotIn("LiSendMultiControllerEvent(i, active_mask", controller)
         self.assertNotIn("LiSendMultiControllerEvent(0, 1,", stream + controller)
         self.assertNotIn("ps5_controller_launch_mask", stream)

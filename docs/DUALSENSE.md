@@ -17,7 +17,8 @@ retains all local chords. Additional pads send game input without controlling
 local UI. PS5 users must assign each extra pad to a different logged-in user or
 guest; unassigned pads are not normal application input devices.
 
-The stream thread is the only pad-output writer. Network callbacks update
+The stream thread is the only scePad-output writer. Dedicated per-controller workers
+own blocking AudioOut calls. Network callbacks update
 bounded per-slot state under a mutex; PCM uses try-lock and drops contended
 packets rather than delaying the control channel. Teardown clears vibration,
 trigger resistance, motion reporting and host lightbar color before closing
@@ -40,22 +41,65 @@ original input path.
   vibration (`0x26`) effects into native PS5 commands, including all ten zones.
   Legacy `0x01/0x02/0x06/0x11/0x12` effects use a conservative approximation.
   Firmware debug/unofficial effects are reset to off and logged.
-- Vibepollo's versioned haptic PCM control packet is validated and routed by
-  controller number. **Current output is an RMS actuator envelope through
-  `scePadSetVibration`, not native waveform playback.** Out-of-order packets
-  are dropped, feedback expires after 60 ms, and ordinary rumble is restored.
-- Feedback receipt counters and native API failures in session logs.
+- Vibepollo's validated `0x5601` version-1/format-1 PCM is copied into an
+  owned bounded queue and rendered as native S16LE stereo on AudioOut vibration
+  port **10**, index **0**, **48000 Hz**, **256-frame grains**. Left/right samples,
+  polarity and order are preserved; no RMS/envelope conversion remains.
+- Connection-level PCM support is advertised only if a native sink is ready at
+  connection startup; each controller additionally advertises `LI_CCAP_HAPTICS_PCM`
+  only when its own port opened and the state query reports two channels. Late
+  startup beyond the 50ms preflight budget needs a stream reconnect to renegotiate.
+- Native output failures withdraw local readiness, clear pending PCM and return
+  to the host's remembered ordinary rumble after worker cleanup. Ordinary Sunshine,
+  Apollo and non-PCM virtual controllers retain existing rumble/triggers/LED paths.
+  Host protocol support is not a claim of physically verified waveform fidelity.
 
-## Explicit limits
+## PCM ownership, buffering and interruption
 
-Native high-fidelity haptic waveform playback still needs a verified public PS5
-output ABI. This build does not claim parity with a PC client's direct DualSense
-HID waveform path. No undocumented audio-port numbers or raw output-report ABI
-are guessed. Battery percentage is not present in the verified normal pad ABI;
-battery capability is not advertised and unknown state is sent on arrival.
-The PS button and microphone mute remain owned by PS5 system software.
-Microphone capture/controller-speaker routing is not part of Moonlight's
-controller event protocol and is not implemented here.
+Each controller has a process-lifetime worker and preallocated queue, default
+**768 stereo frames (16ms)**. `PROSPEROLIGHT_HAPTICS_QUEUE_FRAMES` permits 256..2048
+frames at compile time; at 48kHz the default startup target is one 256-frame grain
+(5.33ms), usually collected from two incoming 240-frame/5ms packets. Incomplete
+initial/final blocks are zero-filled after a bounded wait. The target is not a
+measured end-to-end latency guarantee. Overflow discards queued backlog; an output
+call stalled over 20ms clears accumulated samples on return. There is no resampling,
+amplitude conversion, stale repeat, unbounded allocation or network-thread I/O.
+
+Sequence arithmetic uses unsigned modular differences: duplicates/backwards packets
+are discarded, forward gaps clear prior queued samples. After 60ms without fresh
+PCM, silence ends native ownership. The pad thread zeros legacy motors and grants
+ownership before the worker's first waveform; adaptive triggers and RGB stay live.
+On native completion it restores the most recent host-requested ordinary rumble.
+Public duaLib identifies haptics mode 1 and legacy rumble mode 2. The pad owner
+selects mode 1 before native preflight/ownership and restores mode 2 for ordinary
+rumble. The effect of these modes with AudioOut still requires physical validation.
+
+Disconnect, suppression/system overlays, stream stop, user logout and slot reuse
+invalidate an ownership epoch and clear PCM. Workers finish/close old ports before
+opening a new user's port; a stalled old port never consumes the new epoch's queue.
+Stop/disconnect do not wait for blocking AudioOut. A stuck driver can retain its
+old port until it returns or the process exits; that slot cannot claim readiness
+for a replacement device in the meantime. Counters and port return codes are logged
+at the existing ten-second diagnostic cadence (RX/drop/duplicate/reorder/gap,
+underrun/contention/output errors), not on each packet. Counters are app-lifetime.
+
+## Current scope
+
+Only HD rumble is implemented in this change. Controller speaker and microphone
+work is deferred. Vibepollo 2.0.1's actuator-only extension is not repurposed for
+other audio; ordinary stereo/5.1 Opus output is unchanged.
+
+## Native API provenance and licensing
+
+The new renderer/probe are original code using public ABI descriptions, not copied
+emulator DSP or HID implementations. SDK imports already include Open/Output/Close/
+GetPortState; no proprietary headers, kernel modifications or extra import stubs.
+
+- [SharpProspero AudioOut ABI](https://github.com/SvenGDK/SharpProspero/blob/main/src/SharpProspero/Interop/Audio/AudioOut.cs)
+- [Porpoise speaker (case-sensitive Main branch)](https://github.com/elripalda/Porpoise-Dolphin-Emulator-for-PS5/blob/Main/src/porpoise_speaker.cpp)
+- [Kyty audio reference](https://github.com/KytyPS5/KytyPS5/blob/9e41d8320a2774b303fbad344c2347e8d0292e83/src/libs/audio.cpp)
+- [Kyty haptics reference](https://github.com/KytyPS5/KytyPS5/blob/9e41d8320a2774b303fbad344c2347e8d0292e83/src/libs/dualSenseHaptics.cpp)
+- [Vibepollo 2.0.1 waveform contract](https://github.com/Nonary/Vibepollo/blob/2.0.1/docs/windows-dualsense-haptics.md)
 
 ## Protocol provenance
 
@@ -75,8 +119,9 @@ not a linked dependency. No PC HID driver or third-party native code is bundled.
 
 ## Hardware review
 
-No per-feature hardware tests were performed during implementation. Compilation
-and packaging do not establish pad API permissions or effect fidelity on PS5.
+Historical per-feature observations below describe the older controller implementation.
+For the new waveform path, see the dated validation report; compile/API success alone
+does not establish physical effect fidelity.
 
 1. Start a stream with one DualSense. Check every button, both sticks and analog
    triggers; verify that Touchpad + L3 sends Back and Touchpad + R3 sends Guide to
@@ -98,8 +143,9 @@ and packaging do not establish pad API permissions or effect fidelity on PS5.
    trigger resistance: vibration and resistance must stop, LEDs reset.
 8. Switch PyroWave → HEVC → PyroWave and repeat with two controllers. Reconnect
    to the host without restarting the client; no stale feedback should replay.
-9. Check a native-haptics game separately. `pcm_envelope` should increase, but
-   assess this as approximate vibration, not waveform-fidelity validation.
+9. Check a native-haptics game separately. `DualSense waveform` RX/ready counters
+   must increase; separately confirm physical left/right waveform effects. API
+   acceptance and counters alone are insufficient for waveform-fidelity acceptance.
 
 ## Review fixes
 

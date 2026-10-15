@@ -14,6 +14,7 @@
 #include "test_lab_lifecycle.hpp"
 #endif
 #include "ps5_dualsense.hpp"
+#include "ps5_waveform.hpp"
 
 #include <limits.h>
 #include <math.h>
@@ -4546,6 +4547,8 @@ configure_stream:
 #endif
     controller_ready = controller_result == 0;
     prosperolight::dualsense::Init(controller.user_id, controller.handle);
+    moonlight_connection_callbacks.controllerHaptics =
+        prosperolight::waveform::AnyReady() ? prosperolight::dualsense::Haptics : nullptr;
     if (controller_ready && controller.user_id >= 0)
         physical_input_ready = ps5_physical_input_init(&physical_input, controller.user_id) == 0;
     // Discovery in Init() has already populated the connected controller mask.
