@@ -664,7 +664,8 @@ void Poll()
                      "DualSense waveform slot=%u ready=%d active=%d open=%08x state=%08x "
                      "channels=%u rx=%llu drop=%llu duplicate=%llu reorder=%llu gaps=%llu "
                      "underrun=%llu contention=%llu errors=%llu overflow=%llu inbox_full=%llu "
-                     "stale=%llu rejected=%llu stalls=%llu padded=%llu outputs=%llu",
+                     "stale=%llu rejected=%llu stalls=%llu padded=%llu outputs=%llu "
+                     "inputs=%llu dequeued=%llu starvation=%llu",
                      i, pcm.ready, pcm.active, pcm.open_result, pcm.state_result, pcm.port_channels,
                      (unsigned long long)pcm.received, (unsigned long long)pcm.dropped,
                      (unsigned long long)pcm.duplicate, (unsigned long long)pcm.out_of_order,
@@ -673,7 +674,9 @@ void Poll()
                      (unsigned long long)pcm.overflow, (unsigned long long)pcm.inbox_full,
                      (unsigned long long)pcm.stale, (unsigned long long)pcm.rejected,
                      (unsigned long long)pcm.output_stalls, (unsigned long long)pcm.padded_frames,
-                     (unsigned long long)pcm.output_calls);
+                     (unsigned long long)pcm.output_calls, (unsigned long long)pcm.input_frames,
+                     (unsigned long long)pcm.dequeued_frames,
+                     (unsigned long long)pcm.starvation_frames);
             lan_http_report_text(line);
         }
         next_report = now + 10000000;

@@ -52,6 +52,7 @@ bool Buffer::Push(uint32_t next, const uint8_t *pcm, unsigned frames)
     sequenced = true;
     sequence = next;
     ++received;
+    input_frames += frames;
     if (count + frames > Capacity)
     {
         ++dropped;
@@ -78,6 +79,7 @@ unsigned Buffer::Pop(int16_t *output)
     std::memset(output + n * Channels, 0, (Grain - n) * Channels * sizeof(int16_t));
     head = (head + n) % Capacity;
     count -= n;
+    dequeued_frames += n;
     if (n < Grain)
     {
         ++underruns;
@@ -142,7 +144,7 @@ void Sleep(uint64_t us)
 void *Worker(void *argument)
 {
     auto &sink = *static_cast<Sink *>(argument);
-    uint64_t owned_epoch = 0, deadline = 0, clock_remainder = 0, first_packet = 0;
+    uint64_t owned_epoch = 0, deadline = 0, clock_remainder = 0, first_packet = 0, pending_pad = 0;
     bool primed = false;
     int handle = -1;
     bool failed = false;
@@ -166,7 +168,7 @@ void *Worker(void *argument)
             sink.active_epoch.store(0);
             handle = -1;
             owned_epoch = epoch;
-            deadline = clock_remainder = first_packet = 0;
+            deadline = clock_remainder = first_packet = pending_pad = 0;
             primed = false;
             failed = false;
             if (user >= 0)
@@ -202,11 +204,13 @@ void *Worker(void *argument)
         }
         bool render = false, ending = false;
         pthread_mutex_lock(&sink.mutex);
-        const uint64_t now = Now();
         if (sink.epoch == owned_epoch)
         {
             uint32_t read = sink.inbox.read.load(std::memory_order_relaxed);
             const uint32_t write = sink.inbox.write.load(std::memory_order_acquire);
+            // Take time after acquiring the published packets: their arrival cannot be in the
+            // future.
+            const uint64_t now = Now();
             while (read != write)
             {
                 const auto &packet = sink.inbox.packets[read % Inbox::Size];
@@ -214,6 +218,8 @@ void *Worker(void *argument)
                 {
                     if (sink.buffer.Push(packet.sequence, packet.pcm, packet.frames))
                     {
+                        sink.statistics.starvation_frames += pending_pad;
+                        pending_pad = 0;
                         if (!first_packet)
                             first_packet = packet.arrival;
                         sink.last_packet = packet.arrival;
@@ -225,8 +231,9 @@ void *Worker(void *argument)
             }
             sink.inbox.read.store(read, std::memory_order_release);
             const unsigned target = PrimeFrames < Capacity ? PrimeFrames : Capacity;
-            if (!primed && (sink.buffer.count >= target ||
-                            (sink.buffer.count && first_packet && now - first_packet >= 20000)))
+            if (!primed &&
+                ((sink.buffer.count >= target && first_packet && now - first_packet >= 16000) ||
+                 (sink.buffer.count && first_packet && now - first_packet >= 20000)))
                 primed = true;
             if (primed &&
                 (sink.buffer.count || (sink.last_packet && now - sink.last_packet < 60000)))
@@ -234,7 +241,7 @@ void *Worker(void *argument)
                 sink.active_epoch.store(owned_epoch);
                 if (sink.permitted_epoch.load() == owned_epoch)
                 {
-                    sink.buffer.Pop(output);
+                    pending_pad += Grain - sink.buffer.Pop(output);
                     render = true;
                 }
             }
@@ -244,7 +251,7 @@ void *Worker(void *argument)
                 render = true;
                 ending = true;
                 primed = false;
-                first_packet = 0;
+                first_packet = pending_pad = 0;
             }
         }
         pthread_mutex_unlock(&sink.mutex);
@@ -408,6 +415,8 @@ Statistics GetStatistics(unsigned slot)
     r.received = s.buffer.received;
     r.overflow = s.buffer.overflow;
     r.padded_frames = s.buffer.padded_frames;
+    r.input_frames = s.buffer.input_frames;
+    r.dequeued_frames = s.buffer.dequeued_frames;
     r.inbox_full = s.inbox_full.load();
     r.rejected = s.rejected.load();
     r.dropped = s.buffer.dropped + r.rejected + r.inbox_full + r.stale + r.output_stalls +

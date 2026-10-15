@@ -223,6 +223,9 @@ int main()
     assert(final.output_stalls == initial.output_stalls);
     // Only the final partial grain / bounded silence tail may need padding.
     assert(final.padded_frames - initial.padded_frames < 4800);
+    assert(final.starvation_frames == initial.starvation_frames);
+    assert(final.input_frames - initial.input_frames == 48000);
+    assert(final.dequeued_frames - initial.dequeued_frames == 48000);
     int before = closes.load();
     DisableAll();
     Wait([&] { return closes.load() > before; });
