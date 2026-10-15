@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "ps5_waveform.hpp"
+#include <ControllerHaptics.h>
 #include <cassert>
 #include <atomic>
 #include <chrono>
@@ -74,6 +75,29 @@ template <class Predicate> void Wait(Predicate predicate)
 }
 int main()
 {
+    std::array<uint8_t, ML_HAPTICS_MAX_PAYLOAD> wire{};
+    wire[0] = wire[1] = 1;
+    MlHapticsWrite16(wire.data() + 8, 240);
+    assert(MlHapticsValidate(wire.data(), wire.size()));
+    for (unsigned field : {0u, 1u})
+    {
+        wire[field] = 2;
+        assert(!MlHapticsValidate(wire.data(), wire.size()));
+        wire[field] = 1;
+    }
+    assert(!MlHapticsValidate(wire.data(), 11));
+    assert(!MlHapticsValidate(wire.data(), wire.size() - 1));
+    for (unsigned frames : {0u, 241u})
+    {
+        MlHapticsWrite16(wire.data() + 8, frames);
+        assert(!MlHapticsValidate(wire.data(), wire.size()));
+    }
+    MlHapticsWrite16(wire.data() + 8, 240);
+    MlHapticsWrite16(wire.data() + 2, 16);
+    assert(!MlHapticsValidate(wire.data(), wire.size()));
+    MlHapticsWrite16(wire.data() + 2, 0);
+    MlHapticsWrite16(wire.data() + 10, 1);
+    assert(!MlHapticsValidate(wire.data(), wire.size()));
     Buffer b{};
     std::array<uint8_t, PacketFrames * 4> packet{};
     for (unsigned f = 0; f < PacketFrames; ++f)

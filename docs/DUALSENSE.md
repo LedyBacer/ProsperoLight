@@ -120,7 +120,7 @@ not a linked dependency. No PC HID driver or third-party native code is bundled.
 ## Hardware review
 
 Historical per-feature observations below describe the older controller implementation.
-For the new waveform path, see the dated validation report; compile/API success alone
+For the new waveform path, see the [dated validation report](DUALSENSE_WAVEFORM.md); compile/API success alone
 does not establish physical effect fidelity.
 
 1. Start a stream with one DualSense. Check every button, both sticks and analog
