@@ -28,7 +28,7 @@ PERFORMANCE_DETAIL ?= 0
 # Developer-only PR0 argv receipt; never enabled in ordinary releases.
 LAUNCH_PROOF ?= 0
 TEST_LAB ?= 0
-# Experimental waveform policies: 0 baseline (production), 1 balanced, 2 low latency.
+# Waveform policies: 0 baseline, 1 Balanced (production), 2 low latency (experimental).
 HAPTICS_PROFILE ?= 1
 HAPTICS_PRIME_FRAMES ?=
 HAPTICS_MIN_US ?=

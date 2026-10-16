@@ -81,9 +81,6 @@ struct Slot
     bool sensor_enabled = false, sensor_dirty = false;
     bool native_active = false, native_mode = false;
     uint64_t native_pending_until = 0;
-    uint32_t pcm_sequence = 0;
-    bool pcm_sequence_valid = false;
-    uint8_t pcm_amplitude[2]{};
     uint64_t input_events = 0, output_errors = 0;
     uint64_t rumble_requests = 0, trigger_requests = 0, led_requests = 0;
     bool failure_logged = false;
@@ -170,7 +167,6 @@ void ResetOutput(Slot &slot)
     slot.rumble_dirty = slot.led_dirty = slot.trigger_dirty = slot.sensor_dirty = false;
     slot.motion_rate[0] = slot.motion_rate[1] = 0;
     slot.native_active = false;
-    slot.pcm_sequence_valid = false;
     slot.sensor_enabled = false;
 }
 int Disconnect(unsigned index)
@@ -279,7 +275,8 @@ void ApplyOutput(Slot &slot)
         slot.sensor_dirty = false;
     }
     const unsigned index = static_cast<unsigned>(&slot - slots);
-    const bool native = waveform::Active(index);
+    const uint64_t token = waveform::ActiveToken(index);
+    const bool native = token != 0;
     if (native != slot.native_active)
     {
         slot.native_active = native;
@@ -300,17 +297,25 @@ void ApplyOutput(Slot &slot)
     // epoch acknowledgement without repeating native API calls or relying on
     // observing every Active() transition.
     if (native && slot.native_mode)
-        waveform::Allow(index);
+        waveform::Allow(index, token);
     if (slot.rumble_dirty && !native &&
         (waveform::Ready(index) || waveform::GetStatistics(index).open_result != 0))
     {
         if (slot.native_mode)
         {
-            OutputResult(slot, "legacy rumble mode", scePadSetVibrationMode(slot.handle, 2));
-            slot.native_mode = false;
+            const int mode = scePadSetVibrationMode(slot.handle, 2);
+            OutputResult(slot, "legacy rumble mode", mode);
+            if (mode >= 0)
+                slot.native_mode = false;
         }
-        OutputResult(slot, "rumble", scePadSetVibration(slot.handle, slot.rumble));
-        slot.rumble_dirty = false;
+        // A failed mode switch or motor write must remain dirty for a later pad
+        // poll; do not permanently lose the latest host-requested rumble.
+        if (!slot.native_mode)
+        {
+            const int result = scePadSetVibration(slot.handle, slot.rumble);
+            OutputResult(slot, "rumble", result);
+            slot.rumble_dirty = result < 0;
+        }
     }
     if (slot.led_dirty)
     {

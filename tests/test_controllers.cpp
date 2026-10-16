@@ -26,8 +26,9 @@ void DisableAll()
 void Contended(unsigned)
 {
 }
-void Allow(unsigned)
+void Allow(unsigned, uint64_t observed_token)
 {
+    assert(observed_token == (mock_active ? 1u : 0u));
     ++permits;
 }
 bool Ready(unsigned)
@@ -37,6 +38,10 @@ bool Ready(unsigned)
 bool Active(unsigned)
 {
     return mock_active;
+}
+uint64_t ActiveToken(unsigned)
+{
+    return mock_active ? 1 : 0;
 }
 bool AnyReady()
 {
@@ -65,7 +70,9 @@ static int32_t users[4];
 static int scan_result;
 static uint64_t clock_us;
 static bool fail_arrival;
-static unsigned closes, led_writes, rumble_writes;
+static unsigned closes, led_writes, rumble_writes, trigger_writes;
+static int vibration_mode = 0, fail_legacy = 0, fail_rumble = 0;
+static uint8_t last_rumble[2]{};
 struct Sent
 {
     bool arrival;
@@ -125,13 +132,25 @@ extern "C"
     {
         return scePadRead(handle, output, 1) > 0 ? 0 : -1;
     }
-    int32_t scePadSetVibration(int32_t, const void *)
+    int32_t scePadSetVibration(int32_t, const void *motors)
     {
         ++rumble_writes;
+        if (fail_rumble)
+        {
+            --fail_rumble;
+            return -9;
+        }
+        memcpy(last_rumble, motors, sizeof(last_rumble));
         return 0;
     }
-    int32_t scePadSetVibrationMode(int32_t, int32_t)
+    int32_t scePadSetVibrationMode(int32_t, int32_t mode)
     {
+        if (mode == 2 && fail_legacy)
+        {
+            --fail_legacy;
+            return -8;
+        }
+        vibration_mode = mode;
         return 0;
     }
     int32_t scePadSetLightBar(int32_t, const void *)
@@ -157,6 +176,7 @@ extern "C"
     }
     int32_t scePadSetTriggerEffect(int32_t, const void *)
     {
+        ++trigger_writes;
         return 0;
     }
     uint32_t LiGetHostFeatureFlags(void)
@@ -338,6 +358,33 @@ int main()
     waveform::mock_active = false;
     poll();
     assert(rumble_writes == before_pcm + 2);
+    assert(last_rumble[0] == (10000 + 256) / 257 && last_rumble[1] == (20000 + 256) / 257);
+    waveform::mock_active = true;
+    poll();
+    assert(vibration_mode == 1);
+    const unsigned yielded = rumble_writes;
+    Rumble(0, 65535, 32768); // keep the latest legacy request while PCM owns output
+    poll();
+    assert(rumble_writes == yielded);
+    waveform::mock_active = false;
+    fail_legacy = 1;
+    const unsigned triggers_before = trigger_writes, leds_before = led_writes;
+    RumbleTriggers(0, 1234, 2345);
+    Led(0, 4, 5, 6);
+    poll();
+    assert(vibration_mode == 1 && rumble_writes == yielded);
+    assert(trigger_writes == triggers_before + 1 && led_writes == leds_before + 1);
+    fail_rumble = 1;
+    poll();
+    assert(vibration_mode == 2 && rumble_writes == yielded + 1);
+    poll(); // failed output remains pending without another host request
+    assert(rumble_writes == yielded + 2 && last_rumble[0] == 255 && last_rumble[1] == 128);
+    waveform::mock_active = true;
+    poll();
+    assert(vibration_mode == 1);
+    waveform::mock_ready = waveform::mock_active = false; // native output failure
+    poll();
+    assert(vibration_mode == 2 && last_rumble[0] == 255 && last_rumble[1] == 128);
     finish();
     waveform::mock_ready = false;
     printf("DualSense / multiple controller lifecycle checks PASS\n");

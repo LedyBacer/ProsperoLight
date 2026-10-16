@@ -17,7 +17,7 @@ using namespace prosperolight::waveform;
 static std::atomic<bool> fail_open{false}, fail_output{false}, stalled{false}, entered{false};
 static std::atomic<int> opens{0}, closes{0}, burst_calls{0};
 static std::atomic<bool> batch_driver{false};
-static std::atomic<int> channels{2};
+static std::atomic<int> channels{2}, stall_handle{0}, blocked_handle{0};
 static std::mutex records_mutex;
 struct Record
 {
@@ -57,8 +57,13 @@ extern "C"
         if (batch_driver && handle == 104 && (++burst_calls % 4) == 0)
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         entered = true;
-        while (stalled)
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (stalled && (!stall_handle || stall_handle == handle))
+        {
+            blocked_handle = handle;
+            while (stalled)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            blocked_handle = 0;
+        }
         {
             std::lock_guard<std::mutex> lock(records_mutex);
             records.push_back(record);
@@ -162,7 +167,7 @@ int main()
     Push(0, 0, packet.data(), 240);
     Push(0, 1, packet.data(), 240);
     Wait([] { return Active(0); });
-    Allow(0);
+    Allow(0, ActiveToken(0));
     Wait([] { return entered.load(); });
     auto start = std::chrono::steady_clock::now();
     for (unsigned n = 2; n < 10000; ++n)
@@ -186,13 +191,13 @@ int main()
     Push(1, 0, packet.data(), 240);
     Push(1, 1, packet.data(), 240);
     Wait([] { return Active(1); });
-    Allow(1);
+    Allow(1, ActiveToken(1));
     Wait([] { return entered.load(); });
     fail_output = true;
     Push(0, 0, packet.data(), 240);
     Push(0, 1, packet.data(), 240);
     Wait([] { return Active(0); });
-    Allow(0);
+    Allow(0, ActiveToken(0));
     Wait([] { return GetStatistics(0).output_errors > 0; });
     assert(!Ready(0));
     fail_output = false;
@@ -207,7 +212,7 @@ int main()
     for (uint32_t sequence = 0; sequence < 4; ++sequence)
         Push(2, sequence, packet.data(), 240);
     Wait([] { return Active(2); });
-    Allow(2);
+    Allow(2, ActiveToken(2));
     Wait([] { return !Active(2) && GetStatistics(2).received == 4; });
     batch_driver = false;
     const auto final = GetStatistics(2);
@@ -230,14 +235,71 @@ int main()
     Push(2, 11, packet.data(), 240); // older nonzero cannot restart after silence
     Wait([&] { return GetStatistics(2).duplicate > idle.duplicate; });
     assert(!Active(2));
-    Allow(2); // acknowledging idle must not authorize the next effect
+    Allow(2, ActiveToken(2)); // acknowledging idle must not authorize the next effect
     Push(2, 12, packet.data(), 240);
     Push(2, 13, packet.data(), 240);
     Wait([] { return Active(2); });
     assert(GetStatistics(2).dequeued_frames == final.dequeued_frames);
-    Allow(2);
+    Allow(2, ActiveToken(2));
     Wait([] { return !Active(2) && GetStatistics(2).received == 14; });
     assert(GetStatistics(2).dequeued_frames - final.dequeued_frames == 480);
+    // A >60ms call retires authorization as well as the playout queue.
+    // Packets published near its return are still pre-reset backlog, not a
+    // replacement effect. No global driver stall is imposed on the other slots.
+    Configure(3, 5);
+    Wait([] { return Ready(3); });
+    stall_handle = 105;
+    stalled = true;
+    for (unsigned n = 0; n < 4; ++n)
+        Push(3, n, packet.data(), 240);
+    Wait([] { return Active(3); });
+    const auto old_token = ActiveToken(3);
+    Allow(3, old_token);
+    Wait([] { return blocked_handle == 105; });
+    const auto held = GetStatistics(3);
+    std::this_thread::sleep_for(std::chrono::milliseconds(70));
+    Push(3, 4, packet.data(), 240);
+    Push(3, 5, packet.data(), 240);
+    stalled = false;
+    Wait([&] { return GetStatistics(3).output_stalls > held.output_stalls; });
+    assert(Ready(3) && !Active(3));
+    const auto reset_frames = GetStatistics(3).dequeued_frames;
+    for (unsigned n = 6; n < 10; ++n)
+        Push(3, n, packet.data(), 240);
+    Wait([] { return Active(3); });
+    const auto fresh_token = ActiveToken(3);
+    assert(fresh_token && fresh_token != old_token);
+    Allow(3, old_token); // delayed acknowledgement from the retired effect
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    assert(GetStatistics(3).dequeued_frames == reset_frames);
+    Allow(3, fresh_token); // only the fresh pad-owner acknowledgement releases PCM
+    Allow(3, old_token);   // a late obsolete acknowledgement cannot revoke it
+    Wait([] { return !Active(3); });
+    assert(GetStatistics(3).dequeued_frames - reset_frames == 960);
+
+    // Rapid user reuse followed by shutdown while the old port is blocked must
+    // not open/authorize a superseded user or submit fresh PCM to the old user.
+    stalled = true;
+    for (unsigned n = 10; n < 14; ++n)
+        Push(3, n, packet.data(), 240);
+    Wait([] { return Active(3); });
+    Allow(3, ActiveToken(3));
+    Wait([] { return blocked_handle == 105; });
+    start = std::chrono::steady_clock::now();
+    Configure(3, 6);
+    Disable(3);
+    assert(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(100));
+    assert(!Ready(3));
+    Push(3, 0, packet.data(), 240);
+    std::this_thread::sleep_for(std::chrono::milliseconds(70));
+    stalled = false;
+    Wait([] { return !Active(3); });
+    {
+        std::lock_guard<std::mutex> lock(records_mutex);
+        for (const auto &record : records)
+            assert(record.user != 6);
+    }
+    stall_handle = 0;
     int before = closes.load();
     DisableAll();
     Wait([&] { return closes.load() > before; });

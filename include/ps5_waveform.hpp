@@ -119,9 +119,11 @@ void Disable(unsigned slot);
 void DisableAll();
 bool Ready(unsigned slot);
 bool Active(unsigned slot);
+uint64_t ActiveToken(unsigned slot);
 // The pad owner zeros legacy motors and acknowledges the current effect token.
-// Idle acknowledgements cannot pre-authorize a later effect or a new connection epoch.
-void Allow(unsigned slot);
+// Acknowledgements name the observed token: a delayed pad poll cannot authorize
+// a replacement effect, stall recovery or a new connection epoch.
+void Allow(unsigned slot, uint64_t observed_token);
 bool AnyReady();
 void Push(unsigned slot, uint32_t sequence, const uint8_t *pcm, unsigned frames);
 void Contended(unsigned slot);

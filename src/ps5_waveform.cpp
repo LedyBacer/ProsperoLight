@@ -74,7 +74,7 @@ void Sleep(uint64_t us)
 void *Worker(void *argument)
 {
     auto &sink = *static_cast<Sink *>(argument);
-    uint64_t owned_epoch = 0, deadline = 0, clock_remainder = 0;
+    uint64_t owned_epoch = 0, deadline = 0, clock_remainder = 0, accept_after = 0;
     int handle = -1;
     bool failed = false;
     alignas(64) int16_t output[Grain * Channels]{};
@@ -97,6 +97,7 @@ void *Worker(void *argument)
             sink.active_token.store(0);
             handle = -1;
             owned_epoch = epoch;
+            accept_after = 0;
             deadline = clock_remainder = 0;
             failed = false;
             if (user >= 0)
@@ -148,7 +149,8 @@ void *Worker(void *argument)
             while (read != write)
             {
                 const auto &packet = sink.inbox.packets[read % Inbox::Size];
-                if (packet.epoch == owned_epoch && now - packet.arrival < 60000)
+                if (packet.epoch == owned_epoch && packet.arrival > accept_after &&
+                    now - packet.arrival < 60000)
                 {
                     sink.playout.Receive(packet.sequence, packet.pcm, packet.frames,
                                          packet.arrival);
@@ -208,7 +210,7 @@ void *Worker(void *argument)
             sink.playout.RecordOutput(start, blocked_us, output, metadata, result >= 0);
         else
             sink.playout.blocking.Observe(blocked_us);
-        if (ending)
+        if (ending && sink.epoch == owned_epoch)
         {
             sink.active_token.store(0);
             sink.permitted_token.store(0);
@@ -217,15 +219,33 @@ void *Worker(void *argument)
         {
             ++sink.statistics.output_errors;
             sink.statistics.close_result = closed;
-            sink.ready_epoch.store(0);
-            sink.active_token.store(0);
-            sink.playout.Reset(false);
+            if (sink.epoch == owned_epoch)
+            {
+                sink.ready_epoch.store(0);
+                sink.active_token.store(0);
+                sink.permitted_token.store(0);
+                sink.playout.Reset(false);
+            }
             failed = true;
         }
         // A stalled port must not play its accumulated backlog on returning.
         if (blocked_us > 60000)
         {
-            sink.playout.Reset(false);
+            if (sink.epoch == owned_epoch)
+            {
+                // Retire this effect before accepting another. Tokens never reset
+                // across effects/epochs, so late pad acknowledgements cannot match
+                // its replacement. Keep the port ready for fresh ownership.
+                sink.active_token.store(0);
+                sink.permitted_token.store(0);
+                sink.playout.Reset(false);
+                // Drop published in-flight backlog. A producer currently copying
+                // an older packet can publish later; its arrival cutoff also
+                // prevents that packet from becoming a new effect.
+                accept_after = Now();
+                sink.inbox.read.store(sink.inbox.write.load(std::memory_order_acquire),
+                                      std::memory_order_release);
+            }
             ++sink.statistics.output_stalls;
             deadline = clock_remainder = 0;
         }
@@ -280,12 +300,18 @@ bool Ready(unsigned slot)
 }
 bool Active(unsigned slot)
 {
-    return slot < Slots && sinks[slot].active_token.load() != 0;
+    return ActiveToken(slot) != 0;
 }
-void Allow(unsigned slot)
+uint64_t ActiveToken(unsigned slot)
 {
-    if (slot < Slots)
-        sinks[slot].permitted_token.store(Ready(slot) ? sinks[slot].active_token.load() : 0);
+    return slot < Slots ? sinks[slot].active_token.load() : 0;
+}
+void Allow(unsigned slot, uint64_t observed_token)
+{
+    // A reset can race this store, but an old immutable token never authorizes
+    // the new effect: the worker compares it with its fresh monotonic token.
+    if (slot < Slots && observed_token && Ready(slot) && ActiveToken(slot) == observed_token)
+        sinks[slot].permitted_token.store(observed_token);
 }
 bool AnyReady()
 {
