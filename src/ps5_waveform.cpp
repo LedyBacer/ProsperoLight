@@ -130,6 +130,11 @@ void *Worker(void *argument)
             Sleep(2000);
             continue;
         }
+        // Wait before consuming the queue so packets arriving before the output
+        // deadline can still fill this grain. No callback/queue lock is held.
+        const uint64_t before = Now();
+        if (deadline && before < deadline)
+            Sleep(deadline - before);
         bool render = false, ending = false;
         RenderMetadata metadata{};
         pthread_mutex_lock(&sink.mutex);
@@ -185,12 +190,9 @@ void *Worker(void *argument)
         }
         // Absolute sample clock: a blocking driver call consumes this budget;
         // subsequent immediate calls catch up instead of adding a second delay.
-        const uint64_t before = Now();
-        if (!deadline)
-            deadline = before;
-        if (before < deadline)
-            Sleep(deadline - before);
         const uint64_t start = Now();
+        if (!deadline)
+            deadline = start;
         const int result = sceAudioOutOutput(handle, output);
         const uint64_t blocked_us = Now() - start;
         int closed = 0;
