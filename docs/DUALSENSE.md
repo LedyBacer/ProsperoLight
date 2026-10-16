@@ -95,7 +95,8 @@ counters, padded frames, input/dequeued frame totals, resumed-stream starvation 
 The [latency/coexistence follow-up](DUALSENSE_WAVEFORM_LATENCY.md) documents
 compile-time baseline/experimental profiles, software histograms and the real-PS5
 comparison. Balanced reduced software call-start age in the matched smoke; Low
-latency recorded resumed-stream starvation. Profile 0 remains the production default.
+latency recorded resumed-stream starvation. Balanced/profile 1 is now the production default; baseline/profile 0 remains
+available as an explicit compile-time override.
 
 Only HD rumble is implemented in this change. Controller speaker and microphone
 work is deferred. Vibepollo 2.0.1's actuator-only extension is not repurposed for

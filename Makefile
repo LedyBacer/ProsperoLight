@@ -29,7 +29,7 @@ PERFORMANCE_DETAIL ?= 0
 LAUNCH_PROOF ?= 0
 TEST_LAB ?= 0
 # Experimental waveform policies: 0 baseline (production), 1 balanced, 2 low latency.
-HAPTICS_PROFILE ?= 0
+HAPTICS_PROFILE ?= 1
 HAPTICS_PRIME_FRAMES ?=
 HAPTICS_MIN_US ?=
 HAPTICS_FRAGMENT_US ?=

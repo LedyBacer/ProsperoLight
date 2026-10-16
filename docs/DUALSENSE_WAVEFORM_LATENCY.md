@@ -5,7 +5,7 @@
 The operator reported that gameplay generally works well on the previously
 installed native backend and subsequently authorized real-PS5 latency comparisons.
 That gameplay feedback does not verify the new latency profiles. The current
-comparison status is recorded below. **Production remains baseline/profile 0.**
+comparison status is recorded below. **Production now defaults to Balanced/profile 1 by operator decision after this comparison.**
 Speaker and microphone work remains deferred.
 
 ## Comparison with the requested reference
@@ -47,8 +47,8 @@ remain separate.
 
 | HAPTICS_PROFILE | Name | Target frames | Minimum accumulation | Short fragment timeout | Sample storage |
 |---|---|---:|---:|---:|---:|
-| **0 (default)** | Baseline | 768 | 16ms | 20ms | 3072 frames / 64ms |
-| 1 | Balanced, experimental | 720 | 12ms | 16ms | 3072 frames / 64ms |
+| 0 | Baseline | 768 | 16ms | 20ms | 3072 frames / 64ms |
+| **1 (default)** | Balanced | 720 | 12ms | 16ms | 3072 frames / 64ms |
 | 2 | Low latency, experimental | 720 | 10ms | 15ms | 3072 frames / 64ms |
 
 `HAPTICS_PRIME_FRAMES`, `HAPTICS_MIN_US` and `HAPTICS_FRAGMENT_US` provide explicit
@@ -150,7 +150,9 @@ Real PS5, controller slot 0, Vibepollo 2.0.1, native HEVC / SDR / 1080p60,
 30-second measurement. Each fresh title process received the same explicit
 336,000-frame / seven-second Windows four-channel source (actuator channels only):
 1.5s left, 1s silence, 1.5s right, 1s silence, 1.5s both, 0.5s tail. Execution order
-was Balanced, Low latency, Baseline; baseline was left installed. This is one run
+was Balanced, Low latency, Baseline; baseline was left installed at the end of
+the comparison. The subsequent default-selection change does not deploy another
+image to the console. This is one run
 per profile, not a repeated/randomized performance study.
 
 All native images use source `7f02cea173da1e2f53307abca29d74985ae13979` and
@@ -167,7 +169,9 @@ native application code. No retry follows a timeout or other ambiguous failure.
 All three generic integration runs completed **PASS / VALID**. That verdict does
 not enforce waveform-specific starvation acceptance. Balanced had zero drops,
 gaps and resumed-stream starvation, with receive-to-call p50/p95/p99 lower by
-3/4/5ms than baseline in this single comparison. Low latency recorded 64 starvation frames
+3/4/5ms than baseline in this single comparison. On that evidence, the operator
+requested promotion of Balanced to the production default; baseline remains
+available with `HAPTICS_PROFILE=0`. Low latency recorded 64 starvation frames
 (1.33ms): its physical impulses worked, but it **does not pass the strict zero-
 starvation gate** and is not recommended for promotion. The counter detects
 padding followed by resumed PCM within ownership; it does not locate an audible
@@ -212,7 +216,7 @@ its terminal report and TITLE_IDLE; the cache was preserved without deleting
 its six files and restored afterward, with its original file set/sizes verified.
 None of these attempts is counted as hardware PASS.
 
-**Production remains baseline/profile 0.** These software observations do not
+**Production now defaults to Balanced/profile 1 by operator decision after this comparison.** These software observations do not
 establish physical actuator latency, an across-game/network improvement, older-
 host runtime compatibility, all-four-controller hardware behavior, reconnect/
 adaptive-trigger hardware behavior, ordinary rumble during continuous exact-zero
