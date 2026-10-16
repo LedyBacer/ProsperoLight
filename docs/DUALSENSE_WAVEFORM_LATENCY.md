@@ -233,3 +233,36 @@ python3 tools/controllers/waveform_report.py --baseline baseline-debug.txt \
   --balanced balanced-debug.txt --low-latency low-debug.txt --slot 0 \
   --output comparison.md
 ```
+
+## Final concurrency and rumble review
+
+Native correctness fixes in `cab1ecc` leave Balanced's timing parameters unchanged:
+
+- A call blocked for more than 60ms retires the active effect and its permission,
+  flushes published in-flight packets and sets an arrival cutoff for a producer
+  that was still copying at reset. Sequence history is preserved. Fresh PCM gets
+  a new monotonic token and cannot reach AudioOut until acknowledged again.
+- The pad owner passes the exact token observed in its output poll. A delayed
+  acknowledgement cannot authorize a replacement effect or a different connection
+  epoch; permission still has to equal the worker's current token. The atomics
+  retain sequentially consistent ordering. Reset, inbox retirement and playout
+  changes happen under the worker mutex; driver I/O remains outside it.
+- Completion/error/stall handling only mutates the playout of its matching epoch.
+  An old port finishes/closes before the worker opens another user's port.
+- Failed legacy-mode transitions and motor writes retain the latest host request
+  for retry on a later pad poll. Trigger and LED output is not skipped while a
+  rumble retry is pending. Obsolete envelope-only fields were removed.
+
+Targeted native-worker and controller tests pass, including a held >60ms driver
+call, packets published during the stall, stale/fresh acknowledgements, a user
+change followed by shutdown while blocked, latest-rumble restoration, failed
+mode/write retries and native-failure fallback. The native-worker suite also
+passed Linux ThreadSanitizer without reported data races. These are automated
+software checks, not physical acceptance of a driver stall or a motor waveform.
+
+The earlier three-profile hardware comparison above tested `7f02cea`, before
+these correctness fixes; it must not be relabelled as final-binary validation.
+See [PR #57's final validation record](https://github.com/blackbearreloaded/ProsperoLight/pull/57)
+for the final full checks, production build, pushed-commit CI and subsequent smoke
+identities/results. A source-generated silent interval is not proof of exact-zero
+PCM at PS5 ingress unless received-zero counters establish that independently.

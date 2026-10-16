@@ -19,8 +19,8 @@ guest; unassigned pads are not normal application input devices.
 
 The stream thread is the only scePad-output writer. Dedicated per-controller workers
 own blocking AudioOut calls. Network callbacks update
-bounded per-slot state under a mutex; PCM uses try-lock and drops contended
-packets rather than delaying the control channel. Teardown clears vibration,
+bounded per-slot state under a mutex; PCM uses a separate bounded packet inbox
+and an atomic producer guard, without acquiring the pad or worker mutex. Teardown clears vibration,
 trigger resistance, motion reporting and host lightbar color before closing
 owned secondary handles. The existing primary handle remains owned by its
 original input path.
@@ -58,13 +58,13 @@ original input path.
 
 Each controller has a process-lifetime worker and preallocated queue, default
 **3072 stereo frames (64ms)**. `PROSPEROLIGHT_HAPTICS_QUEUE_FRAMES` permits 256..4096
-frames at compile time; at 48kHz the default startup target is 768 frames
-(16ms), with at least 16ms of initial accumulation (20ms timeout for a short
-fragment). A bounded packet inbox
+frames at compile time; the Balanced default starts with a 720-frame target,
+at least 12ms of initial accumulation and a 16ms short-fragment timeout. A bounded packet inbox
 keeps reception independent of pad/diagnostic mutexes. Incomplete
 initial/final blocks are zero-filled after a bounded wait. The target is not a
 measured end-to-end latency guarantee. Overflow discards queued backlog; an output
-call stalled over 60ms clears accumulated samples on return. An absolute sample
+call stalled over 60ms clears accumulated samples and in-flight backlog on return,
+retires its effect token and requires a fresh pad-owner acknowledgement. An absolute sample
 clock accounts for time blocked in AudioOut and avoids adding a second delay
 after batched driver calls. There is no resampling,
 amplitude conversion, stale repeat, unbounded allocation or network-thread I/O.
@@ -74,7 +74,8 @@ are discarded, forward gaps clear prior queued samples. After the nonzero effect
 native ownership ends. Incoming zeros cannot extend it or restart native output;
 the input sequence stays valid across idle silence. The pad thread zeros legacy motors and grants
 ownership before the worker's first waveform; adaptive triggers and RGB stay live.
-On native completion it restores the most recent host-requested ordinary rumble.
+On native completion it restores the most recent host-requested ordinary rumble;
+failed mode switches or motor writes remain pending for a later pad poll.
 Public duaLib identifies haptics mode 1 and legacy rumble mode 2. The pad owner
 selects mode 1 before native preflight/ownership and restores mode 2 for ordinary
 rumble. Physical vibration and distinct sides were operator-confirmed; native/legacy
