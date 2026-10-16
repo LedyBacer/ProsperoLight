@@ -54,7 +54,7 @@ extern "C"
         Record record{};
         record.user = handle - 100;
         std::memcpy(record.samples.data(), pcm, sizeof(record.samples));
-        if (batch_driver && (++burst_calls % 4) == 0)
+        if (batch_driver && handle == 104 && (++burst_calls % 4) == 0)
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         entered = true;
         while (stalled)
@@ -196,36 +196,48 @@ int main()
     Wait([] { return GetStatistics(0).output_errors > 0; });
     assert(!Ready(0));
     fail_output = false;
-    // A host sends four 5ms packets together; AudioOut blocks in batches rather
-    // than once per grain. Relative sleeps would double-pace this workload.
+    // Worker integration for one owned four-packet burst and a blocking driver.
+    // Continuous 5/10/20ms cadence lives in the virtual-clock policy suite: OS
+    // sleep_for(20ms) can take substantially longer and is not a sample clock.
     Configure(2, 4);
     Wait([] { return Ready(2); });
-    Allow(2);
     batch_driver = true;
     burst_calls = 0;
     const auto initial = GetStatistics(2);
-    const auto epoch = std::chrono::steady_clock::now();
-    uint32_t sequence = 0;
-    for (unsigned burst = 0; burst < 50; ++burst)
-    {
-        std::this_thread::sleep_until(epoch + std::chrono::milliseconds(burst * 20));
-        for (unsigned packet_index = 0; packet_index < 4; ++packet_index)
-            Push(2, sequence++, packet.data(), 240);
-        if (Active(2))
-            Allow(2);
-    }
-    Wait([] { return !Active(2) && GetStatistics(2).received == 200; });
+    for (uint32_t sequence = 0; sequence < 4; ++sequence)
+        Push(2, sequence, packet.data(), 240);
+    Wait([] { return Active(2); });
+    Allow(2);
+    Wait([] { return !Active(2) && GetStatistics(2).received == 4; });
     batch_driver = false;
     const auto final = GetStatistics(2);
-    assert(final.received - initial.received == 200);
+    assert(final.received - initial.received == 4);
     assert(final.overflow == initial.overflow && final.inbox_full == initial.inbox_full);
     assert(final.contention == initial.contention && final.gaps == initial.gaps);
-    assert(final.output_stalls == initial.output_stalls);
-    // Only the final partial grain / bounded silence tail may need padding.
-    assert(final.padded_frames - initial.padded_frames < 4800);
+    assert(final.input_frames - initial.input_frames == 960);
+    assert(final.dequeued_frames - initial.dequeued_frames == 960);
     assert(final.starvation_frames == initial.starvation_frames);
-    assert(final.input_frames - initial.input_frames == 48000);
-    assert(final.dequeued_frames - initial.dequeued_frames == 48000);
+
+    // A permanently open host endpoint sends zeros without reacquiring native
+    // ownership or losing the input sequence. A fresh nonzero effect still works.
+    std::array<uint8_t, PacketFrames * 4> zero{};
+    for (uint32_t sequence = 4; sequence < 12; ++sequence)
+        Push(2, sequence, zero.data(), 240);
+    Wait([] { return GetStatistics(2).received == 12; });
+    assert(!Active(2) && Ready(2));
+    const auto idle = GetStatistics(2);
+    assert(idle.ignored_silent_frames - final.ignored_silent_frames == 8 * 240);
+    Push(2, 11, packet.data(), 240); // older nonzero cannot restart after silence
+    Wait([&] { return GetStatistics(2).duplicate > idle.duplicate; });
+    assert(!Active(2));
+    Allow(2); // acknowledging idle must not authorize the next effect
+    Push(2, 12, packet.data(), 240);
+    Push(2, 13, packet.data(), 240);
+    Wait([] { return Active(2); });
+    assert(GetStatistics(2).dequeued_frames == final.dequeued_frames);
+    Allow(2);
+    Wait([] { return !Active(2) && GetStatistics(2).received == 14; });
+    assert(GetStatistics(2).dequeued_frames - final.dequeued_frames == 480);
     int before = closes.load();
     DisableAll();
     Wait([&] { return closes.load() > before; });

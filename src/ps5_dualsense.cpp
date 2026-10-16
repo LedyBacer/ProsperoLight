@@ -292,12 +292,15 @@ void ApplyOutput(Slot &slot)
             const int mode = rc >= 0 ? scePadSetVibrationMode(slot.handle, 1) : rc;
             OutputResult(slot, "native haptics mode", mode);
             slot.native_mode = mode >= 0;
-            if (mode >= 0)
-                waveform::Allow(index);
-            else
+            if (mode < 0)
                 waveform::Disable(index);
         }
     }
+    // An idle/reacquire cycle may complete between two pad polls. Refresh the
+    // epoch acknowledgement without repeating native API calls or relying on
+    // observing every Active() transition.
+    if (native && slot.native_mode)
+        waveform::Allow(index);
     if (slot.rumble_dirty && !native &&
         (waveform::Ready(index) || waveform::GetStatistics(index).open_result != 0))
     {
@@ -665,7 +668,7 @@ void Poll()
                      "channels=%u rx=%llu drop=%llu duplicate=%llu reorder=%llu gaps=%llu "
                      "underrun=%llu contention=%llu errors=%llu overflow=%llu inbox_full=%llu "
                      "stale=%llu rejected=%llu stalls=%llu padded=%llu outputs=%llu "
-                     "inputs=%llu dequeued=%llu starvation=%llu",
+                     "inputs=%llu dequeued=%llu starvation=%llu ignored_silent=%llu",
                      i, pcm.ready, pcm.active, pcm.open_result, pcm.state_result, pcm.port_channels,
                      (unsigned long long)pcm.received, (unsigned long long)pcm.dropped,
                      (unsigned long long)pcm.duplicate, (unsigned long long)pcm.out_of_order,
@@ -676,8 +679,34 @@ void Poll()
                      (unsigned long long)pcm.output_stalls, (unsigned long long)pcm.padded_frames,
                      (unsigned long long)pcm.output_calls, (unsigned long long)pcm.input_frames,
                      (unsigned long long)pcm.dequeued_frames,
-                     (unsigned long long)pcm.starvation_frames);
+                     (unsigned long long)pcm.starvation_frames,
+                     (unsigned long long)pcm.ignored_silent_frames);
             lan_http_report_text(line);
+            snprintf(line, sizeof(line),
+                     "DualSense waveform policy slot=%u profile=%d frames=%u min_us=%llu "
+                     "fragment_us=%llu "
+                     "capacity=%u grain=%u",
+                     i, PROSPEROLIGHT_HAPTICS_PROFILE, waveform::SelectedPolicy.frames,
+                     (unsigned long long)waveform::SelectedPolicy.minimum_us,
+                     (unsigned long long)waveform::SelectedPolicy.fragment_us, waveform::Capacity,
+                     waveform::Grain);
+            lan_http_report_text(line);
+            const char *names[] = {"receive_to_audioout", "audioout_blocking", "first_nonzero",
+                                   "queue_depth"};
+            const waveform::DistributionSummary *distributions[] = {
+                &pcm.receive_to_output, &pcm.blocking, &pcm.first_nonzero_delay, &pcm.queue_depth};
+            for (unsigned metric = 0; metric < 4; ++metric)
+            {
+                const auto &d = *distributions[metric];
+                snprintf(line, sizeof(line),
+                         "DualSense waveform timing slot=%u metric=%s unit=%s software=1 n=%llu "
+                         "p50=%llu p95=%llu p99=%llu max=%llu",
+                         i, names[metric], metric == 3 ? "frames" : "us",
+                         (unsigned long long)d.samples, (unsigned long long)d.p50,
+                         (unsigned long long)d.p95, (unsigned long long)d.p99,
+                         (unsigned long long)d.maximum);
+                lan_http_report_text(line);
+            }
         }
         next_report = now + 10000000;
     }

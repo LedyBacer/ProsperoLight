@@ -18,75 +18,6 @@ extern "C"
 }
 namespace prosperolight::waveform
 {
-void Buffer::Clear()
-{
-    head = count = 0;
-    sequenced = false;
-}
-bool Buffer::Push(uint32_t next, const uint8_t *pcm, unsigned frames)
-{
-    if (!pcm || !frames || frames > PacketFrames)
-    {
-        ++dropped;
-        return false;
-    }
-    if (sequenced)
-    {
-        const uint32_t delta = next - sequence;
-        if (delta == 0)
-        {
-            ++duplicate;
-            return false;
-        }
-        if (delta >= 0x80000000u)
-        {
-            ++out_of_order;
-            return false;
-        }
-        if (delta != 1)
-        {
-            ++gaps;
-            head = count = 0;
-        }
-    }
-    sequenced = true;
-    sequence = next;
-    ++received;
-    input_frames += frames;
-    if (count + frames > Capacity)
-    {
-        ++dropped;
-        ++overflow;
-        head = count = 0;
-    }
-    for (unsigned f = 0; f < frames; ++f)
-        for (unsigned c = 0; c < Channels; ++c)
-        {
-            const unsigned p = (f * Channels + c) * 2;
-            const uint16_t bits = uint16_t(pcm[p]) | (uint16_t(pcm[p + 1]) << 8);
-            // Preserve every signed sample bit, including -32768.
-            std::memcpy(&samples[((head + count + f) % Capacity) * Channels + c], &bits, 2);
-        }
-    count += frames;
-    return true;
-}
-unsigned Buffer::Pop(int16_t *output)
-{
-    const unsigned n = count < Grain ? count : Grain;
-    for (unsigned f = 0; f < n; ++f)
-        for (unsigned c = 0; c < Channels; ++c)
-            output[f * Channels + c] = samples[((head + f) % Capacity) * Channels + c];
-    std::memset(output + n * Channels, 0, (Grain - n) * Channels * sizeof(int16_t));
-    head = (head + n) % Capacity;
-    count -= n;
-    dequeued_frames += n;
-    if (n < Grain)
-    {
-        ++underruns;
-        padded_frames += Grain - n;
-    }
-    return n;
-}
 namespace
 {
 constexpr unsigned Slots = 4;
@@ -117,15 +48,14 @@ struct Inbox
 struct Sink
 {
     pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-    Buffer buffer{};
+    Playout playout{};
     Inbox inbox{};
     int32_t user = -1;
-    uint64_t epoch = 0;
-    std::atomic<uint64_t> ready_epoch{0}, active_epoch{0}, contention{0}, rejected{0},
-        permitted_epoch{0}, inbox_full{0};
+    uint64_t epoch = 0, next_token = 0;
+    std::atomic<uint64_t> ready_epoch{0}, active_token{0}, contention{0}, rejected{0},
+        permitted_token{0}, inbox_full{0};
     Statistics statistics{};
     bool started = false;
-    uint64_t last_packet = 0;
 };
 // Process lifetime storage: even a stalled driver cannot leave a dangling queue.
 // Teardown invalidates epochs asynchronously; no driver I/O is joined on an input thread.
@@ -144,8 +74,7 @@ void Sleep(uint64_t us)
 void *Worker(void *argument)
 {
     auto &sink = *static_cast<Sink *>(argument);
-    uint64_t owned_epoch = 0, deadline = 0, clock_remainder = 0, first_packet = 0, pending_pad = 0;
-    bool primed = false;
+    uint64_t owned_epoch = 0, deadline = 0, clock_remainder = 0;
     int handle = -1;
     bool failed = false;
     alignas(64) int16_t output[Grain * Channels]{};
@@ -165,11 +94,10 @@ void *Worker(void *argument)
                 (void)sceAudioOutOutput(handle, output);
                 closed = sceAudioOutClose(handle);
             }
-            sink.active_epoch.store(0);
+            sink.active_token.store(0);
             handle = -1;
             owned_epoch = epoch;
-            deadline = clock_remainder = first_packet = pending_pad = 0;
-            primed = false;
+            deadline = clock_remainder = 0;
             failed = false;
             if (user >= 0)
             {
@@ -203,6 +131,7 @@ void *Worker(void *argument)
             continue;
         }
         bool render = false, ending = false;
+        RenderMetadata metadata{};
         pthread_mutex_lock(&sink.mutex);
         if (sink.epoch == owned_epoch)
         {
@@ -216,42 +145,35 @@ void *Worker(void *argument)
                 const auto &packet = sink.inbox.packets[read % Inbox::Size];
                 if (packet.epoch == owned_epoch && now - packet.arrival < 60000)
                 {
-                    if (sink.buffer.Push(packet.sequence, packet.pcm, packet.frames))
-                    {
-                        sink.statistics.starvation_frames += pending_pad;
-                        pending_pad = 0;
-                        if (!first_packet)
-                            first_packet = packet.arrival;
-                        sink.last_packet = packet.arrival;
-                    }
+                    sink.playout.Receive(packet.sequence, packet.pcm, packet.frames,
+                                         packet.arrival);
                 }
                 else
                     ++sink.statistics.stale;
                 ++read;
             }
             sink.inbox.read.store(read, std::memory_order_release);
-            const unsigned target = PrimeFrames < Capacity ? PrimeFrames : Capacity;
-            if (!primed &&
-                ((sink.buffer.count >= target && first_packet && now - first_packet >= 16000) ||
-                 (sink.buffer.count && first_packet && now - first_packet >= 20000)))
-                primed = true;
-            if (primed &&
-                (sink.buffer.count || (sink.last_packet && now - sink.last_packet < 60000)))
+            if (sink.playout.WantsOutput(now))
             {
-                sink.active_epoch.store(owned_epoch);
-                if (sink.permitted_epoch.load() == owned_epoch)
+                uint64_t token = sink.active_token.load();
+                if (!token)
                 {
-                    pending_pad += Grain - sink.buffer.Pop(output);
+                    if (++sink.next_token == 0)
+                        ++sink.next_token;
+                    token = sink.next_token;
+                    sink.active_token.store(token);
+                }
+                if (sink.permitted_token.load() == token)
+                {
+                    sink.playout.Pop(output, &metadata);
                     render = true;
                 }
             }
-            else if (sink.active_epoch.load())
+            else if (sink.active_token.load())
             {
                 std::memset(output, 0, sizeof(output));
                 render = true;
                 ending = true;
-                primed = false;
-                first_packet = pending_pad = 0;
             }
         }
         pthread_mutex_unlock(&sink.mutex);
@@ -270,6 +192,7 @@ void *Worker(void *argument)
             Sleep(deadline - before);
         const uint64_t start = Now();
         const int result = sceAudioOutOutput(handle, output);
+        const uint64_t blocked_us = Now() - start;
         int closed = 0;
         if (result < 0)
         {
@@ -279,27 +202,29 @@ void *Worker(void *argument)
         pthread_mutex_lock(&sink.mutex);
         sink.statistics.output_result = result;
         ++sink.statistics.output_calls;
+        if (sink.epoch == owned_epoch)
+            sink.playout.RecordOutput(start, blocked_us, output, metadata, result >= 0);
+        else
+            sink.playout.blocking.Observe(blocked_us);
         if (ending)
         {
-            sink.active_epoch.store(0);
-            sink.permitted_epoch.store(0);
+            sink.active_token.store(0);
+            sink.permitted_token.store(0);
         }
         if (result < 0)
         {
             ++sink.statistics.output_errors;
             sink.statistics.close_result = closed;
             sink.ready_epoch.store(0);
-            sink.active_epoch.store(0);
-            sink.buffer.Clear();
+            sink.active_token.store(0);
+            sink.playout.Reset(false);
             failed = true;
         }
         // A stalled port must not play its accumulated backlog on returning.
-        if (Now() - start > 60000)
+        if (blocked_us > 60000)
         {
-            sink.buffer.Clear();
+            sink.playout.Reset(false);
             ++sink.statistics.output_stalls;
-            primed = false;
-            first_packet = 0;
             deadline = clock_remainder = 0;
         }
         pthread_mutex_unlock(&sink.mutex);
@@ -323,9 +248,8 @@ void Configure(unsigned slot, int32_t user)
     s.user = user;
     s.statistics.open_result = user >= 0 ? 0 : -1;
     s.ready_epoch.store(0);
-    s.permitted_epoch.store(0);
-    s.buffer.Clear();
-    s.last_packet = 0;
+    s.permitted_token.store(0);
+    s.playout.Reset(true);
     if (!s.started && user >= 0)
     {
         pthread_t thread{};
@@ -354,12 +278,12 @@ bool Ready(unsigned slot)
 }
 bool Active(unsigned slot)
 {
-    return slot < Slots && sinks[slot].active_epoch.load() != 0;
+    return slot < Slots && sinks[slot].active_token.load() != 0;
 }
 void Allow(unsigned slot)
 {
     if (slot < Slots)
-        sinks[slot].permitted_epoch.store(sinks[slot].ready_epoch.load());
+        sinks[slot].permitted_token.store(Ready(slot) ? sinks[slot].active_token.load() : 0);
 }
 bool AnyReady()
 {
@@ -412,19 +336,25 @@ Statistics GetStatistics(unsigned slot)
     Sink &s = sinks[slot];
     pthread_mutex_lock(&s.mutex);
     Statistics r = s.statistics;
-    r.received = s.buffer.received;
-    r.overflow = s.buffer.overflow;
-    r.padded_frames = s.buffer.padded_frames;
-    r.input_frames = s.buffer.input_frames;
-    r.dequeued_frames = s.buffer.dequeued_frames;
+    r.starvation_frames = s.playout.starvation_frames;
+    r.ignored_silent_frames = s.playout.buffer.ignored_silent_frames;
+    r.receive_to_output = s.playout.receive_to_output.Summary();
+    r.blocking = s.playout.blocking.Summary();
+    r.first_nonzero_delay = s.playout.first_nonzero_delay.Summary();
+    r.queue_depth = s.playout.queue_depth.Summary();
+    r.received = s.playout.buffer.received;
+    r.overflow = s.playout.buffer.overflow;
+    r.padded_frames = s.playout.buffer.padded_frames;
+    r.input_frames = s.playout.buffer.input_frames;
+    r.dequeued_frames = s.playout.buffer.dequeued_frames;
     r.inbox_full = s.inbox_full.load();
     r.rejected = s.rejected.load();
-    r.dropped = s.buffer.dropped + r.rejected + r.inbox_full + r.stale + r.output_stalls +
+    r.dropped = s.playout.buffer.dropped + r.rejected + r.inbox_full + r.stale + r.output_stalls +
                 s.contention.load();
-    r.duplicate = s.buffer.duplicate;
-    r.out_of_order = s.buffer.out_of_order;
-    r.gaps = s.buffer.gaps;
-    r.underruns = s.buffer.underruns;
+    r.duplicate = s.playout.buffer.duplicate;
+    r.out_of_order = s.playout.buffer.out_of_order;
+    r.gaps = s.playout.buffer.gaps;
+    r.underruns = s.playout.buffer.underruns;
     r.contention = s.contention.load();
     r.ready = Ready(slot);
     r.active = Active(slot);

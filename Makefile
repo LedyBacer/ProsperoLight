@@ -28,6 +28,11 @@ PERFORMANCE_DETAIL ?= 0
 # Developer-only PR0 argv receipt; never enabled in ordinary releases.
 LAUNCH_PROOF ?= 0
 TEST_LAB ?= 0
+# Experimental waveform policies: 0 baseline (production), 1 balanced, 2 low latency.
+HAPTICS_PROFILE ?= 0
+HAPTICS_PRIME_FRAMES ?=
+HAPTICS_MIN_US ?=
+HAPTICS_FRAGMENT_US ?=
 ifeq ($(TEST_LAB),1)
 override PERFORMANCE_DETAIL := 1
 override LAN_TELEMETRY := 0
@@ -67,6 +72,16 @@ APP_DEFINITIONS += PROSPEROLIGHT_FLIP_POLL_US=$(FLIP_POLL_US)
 APP_DEFINITIONS += PROSPEROLIGHT_PERFORMANCE_DETAIL=$(PERFORMANCE_DETAIL)
 APP_DEFINITIONS += PROSPEROLIGHT_LAUNCH_PROOF=$(LAUNCH_PROOF)
 APP_DEFINITIONS += PROSPEROLIGHT_TEST_LAB=$(TEST_LAB)
+APP_DEFINITIONS += PROSPEROLIGHT_HAPTICS_PROFILE=$(HAPTICS_PROFILE)
+ifneq ($(HAPTICS_PRIME_FRAMES),)
+APP_DEFINITIONS += PROSPEROLIGHT_HAPTICS_PRIME_FRAMES=$(HAPTICS_PRIME_FRAMES)
+endif
+ifneq ($(HAPTICS_MIN_US),)
+APP_DEFINITIONS += PROSPEROLIGHT_HAPTICS_MIN_US=$(HAPTICS_MIN_US)
+endif
+ifneq ($(HAPTICS_FRAGMENT_US),)
+APP_DEFINITIONS += PROSPEROLIGHT_HAPTICS_FRAGMENT_US=$(HAPTICS_FRAGMENT_US)
+endif
 APP_DEFINITIONS += VIDEO_SLICES_PER_FRAME=$(VIDEO_SLICES_PER_FRAME)
 APP_DEFINITIONS += DECODER_PIPELINE_DEPTH=$(DECODER_PIPELINE_DEPTH)
 APP_DEFINITIONS += DECODER_CPU_PRIORITY=$(DECODER_CPU_PRIORITY)
@@ -272,8 +287,14 @@ test-performance-guards: | transport-deps
 		tests/test_controllers.cpp $(HOST_TEST_LDFLAGS) -o build/tests/controllers
 	@build/tests/controllers
 	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Iinclude -Ithird_party/moonlight-common-c/src \
-		tests/test_waveform.cpp src/ps5_waveform.cpp $(HOST_TEST_LDFLAGS) -o build/tests/waveform
+		tests/test_waveform.cpp src/ps5_waveform.cpp src/ps5_waveform_policy.cpp $(HOST_TEST_LDFLAGS) -o build/tests/waveform
 	@build/tests/waveform
+	@for profile in 0 1 2; do \
+		$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -pthread -Iinclude \
+			-DPROSPEROLIGHT_HAPTICS_PROFILE=$$profile tests/test_waveform_policy.cpp \
+			src/ps5_waveform_policy.cpp $(HOST_TEST_LDFLAGS) -o build/tests/waveform-policy-$$profile && \
+			build/tests/waveform-policy-$$profile || exit 1; \
+	done
 	@clang -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fvisibility=hidden \
 		tests/test_socket_metrics.c -Wl,--gc-sections -o build/tests/socket_metrics
 	@build/tests/socket_metrics

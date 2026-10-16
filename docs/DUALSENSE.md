@@ -70,8 +70,9 @@ after batched driver calls. There is no resampling,
 amplitude conversion, stale repeat, unbounded allocation or network-thread I/O.
 
 Sequence arithmetic uses unsigned modular differences: duplicates/backwards packets
-are discarded, forward gaps clear prior queued samples. After 60ms without fresh
-PCM, silence ends native ownership. The pad thread zeros legacy motors and grants
+are discarded, forward gaps clear prior queued samples. After the nonzero effect drains and 60ms of nonzero inactivity elapses,
+native ownership ends. Incoming zeros cannot extend it or restart native output;
+the input sequence stays valid across idle silence. The pad thread zeros legacy motors and grants
 ownership before the worker's first waveform; adaptive triggers and RGB stay live.
 On native completion it restores the most recent host-requested ordinary rumble.
 Public duaLib identifies haptics mode 1 and legacy rumble mode 2. The pad owner
@@ -90,6 +91,10 @@ underrun/contention/output errors, separate overflow/inbox/stale/rejected/stall
 counters, padded frames, input/dequeued frame totals, resumed-stream starvation frames and output calls), not on each packet. Counters are app-lifetime.
 
 ## Current scope
+
+The [latency/coexistence follow-up](DUALSENSE_WAVEFORM_LATENCY.md) documents
+compile-time baseline/experimental profiles, software histograms and the stopped
+hardware comparison. Profile 0 remains the production default.
 
 Only HD rumble is implemented in this change. Controller speaker and microphone
 work is deferred. Vibepollo 2.0.1's actuator-only extension is not repurposed for

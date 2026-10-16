@@ -330,8 +330,11 @@ int main()
     Led(0, 1, 2, 3);
     poll();
     assert(rumble_writes == before_pcm + 1 && waveform::permits > 0);
+    const auto prior_permits = waveform::permits;
     poll();
     assert(rumble_writes == before_pcm + 1);
+    assert(waveform::permits >
+           prior_permits); // re-acknowledge an idle transition missed by polling
     waveform::mock_active = false;
     poll();
     assert(rumble_writes == before_pcm + 2);
