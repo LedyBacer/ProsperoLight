@@ -249,6 +249,10 @@ Native correctness fixes in `cab1ecc` leave Balanced's timing parameters unchang
   changes happen under the worker mutex; driver I/O remains outside it.
 - Completion/error/stall handling only mutates the playout of its matching epoch.
   An old port finishes/closes before the worker opens another user's port.
+- Mode tracking distinguishes unknown, native and legacy states. Rejected mode 1
+  does not imply that mode 2 is already installed; legacy output explicitly
+  selects it before sending rumble. A regression reproduced the missing fallback
+  before the fix and passes with explicit mode tracking.
 - Failed legacy-mode transitions and motor writes retain the latest host request
   for retry on a later pad poll. Trigger and LED output is not skipped while a
   rumble retry is pending. Obsolete envelope-only fields were removed.

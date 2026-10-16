@@ -59,6 +59,12 @@ struct PadInfo
     uint8_t remaining[8];
 };
 static_assert(sizeof(PadInfo) == 28);
+enum class VibrationMode
+{
+    Unknown,
+    Native,
+    Legacy
+};
 struct Slot
 {
     int32_t user = -1, handle = -1;
@@ -79,7 +85,8 @@ struct Slot
     bool rumble_dirty = false, led_dirty = false, trigger_dirty = false;
     TriggerParam triggers{};
     bool sensor_enabled = false, sensor_dirty = false;
-    bool native_active = false, native_mode = false;
+    bool native_active = false;
+    VibrationMode vibration_mode = VibrationMode::Unknown;
     uint64_t native_pending_until = 0;
     uint64_t input_events = 0, output_errors = 0;
     uint64_t rumble_requests = 0, trigger_requests = 0, led_requests = 0;
@@ -157,8 +164,9 @@ void ResetOutput(Slot &slot)
     off.mask = 3;
     if (!waveform::Active(static_cast<unsigned>(&slot - slots)))
     {
-        OutputResult(slot, "restore rumble mode", scePadSetVibrationMode(slot.handle, 2));
-        slot.native_mode = false;
+        const int mode = scePadSetVibrationMode(slot.handle, 2);
+        OutputResult(slot, "restore rumble mode", mode);
+        slot.vibration_mode = mode >= 0 ? VibrationMode::Legacy : VibrationMode::Unknown;
         OutputResult(slot, "reset rumble", scePadSetVibration(slot.handle, vibration));
     }
     OutputResult(slot, "reset triggers", scePadSetTriggerEffect(slot.handle, &off));
@@ -209,8 +217,8 @@ void SetConnection(unsigned index, const PadSample &sample)
         // Public duaLib constants: haptics mode 1, legacy motor emulation 2.
         const int mode = scePadSetVibrationMode(slot.handle, 1);
         OutputResult(slot, "prepare native haptics mode", mode);
-        slot.native_mode = mode >= 0;
-        if (slot.native_mode)
+        slot.vibration_mode = mode >= 0 ? VibrationMode::Native : VibrationMode::Unknown;
+        if (mode >= 0)
             waveform::Configure(index, slot.user);
         else
             waveform::Disable(index);
@@ -288,7 +296,7 @@ void ApplyOutput(Slot &slot)
             OutputResult(slot, "yield rumble to waveform", rc);
             const int mode = rc >= 0 ? scePadSetVibrationMode(slot.handle, 1) : rc;
             OutputResult(slot, "native haptics mode", mode);
-            slot.native_mode = mode >= 0;
+            slot.vibration_mode = mode >= 0 ? VibrationMode::Native : VibrationMode::Unknown;
             if (mode < 0)
                 waveform::Disable(index);
         }
@@ -296,21 +304,20 @@ void ApplyOutput(Slot &slot)
     // An idle/reacquire cycle may complete between two pad polls. Refresh the
     // epoch acknowledgement without repeating native API calls or relying on
     // observing every Active() transition.
-    if (native && slot.native_mode)
+    if (native && slot.vibration_mode == VibrationMode::Native)
         waveform::Allow(index, token);
     if (slot.rumble_dirty && !native &&
         (waveform::Ready(index) || waveform::GetStatistics(index).open_result != 0))
     {
-        if (slot.native_mode)
+        if (slot.vibration_mode != VibrationMode::Legacy)
         {
             const int mode = scePadSetVibrationMode(slot.handle, 2);
             OutputResult(slot, "legacy rumble mode", mode);
-            if (mode >= 0)
-                slot.native_mode = false;
+            slot.vibration_mode = mode >= 0 ? VibrationMode::Legacy : VibrationMode::Unknown;
         }
         // A failed mode switch or motor write must remain dirty for a later pad
         // poll; do not permanently lose the latest host-requested rumble.
-        if (!slot.native_mode)
+        if (slot.vibration_mode == VibrationMode::Legacy)
         {
             const int result = scePadSetVibration(slot.handle, slot.rumble);
             OutputResult(slot, "rumble", result);
@@ -362,7 +369,7 @@ void ExtendedInput(unsigned index, const PadSample &sample, bool suppressed)
         slot.intercepted = false;
         const int mode = scePadSetVibrationMode(slot.handle, 1);
         OutputResult(slot, "resume native haptics mode", mode);
-        slot.native_mode = mode >= 0;
+        slot.vibration_mode = mode >= 0 ? VibrationMode::Native : VibrationMode::Unknown;
         if (mode >= 0)
             waveform::Configure(index, slot.user);
         else

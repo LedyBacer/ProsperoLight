@@ -71,7 +71,7 @@ static int scan_result;
 static uint64_t clock_us;
 static bool fail_arrival;
 static unsigned closes, led_writes, rumble_writes, trigger_writes;
-static int vibration_mode = 0, fail_legacy = 0, fail_rumble = 0;
+static int vibration_mode = 0, fail_legacy = 0, fail_rumble = 0, fail_native = 0;
 static uint8_t last_rumble[2]{};
 struct Sent
 {
@@ -145,6 +145,11 @@ extern "C"
     }
     int32_t scePadSetVibrationMode(int32_t, int32_t mode)
     {
+        if (mode == 1 && fail_native)
+        {
+            --fail_native;
+            return -7;
+        }
         if (mode == 2 && fail_legacy)
         {
             --fail_legacy;
@@ -387,5 +392,12 @@ int main()
     assert(vibration_mode == 2 && last_rumble[0] == 255 && last_rumble[1] == 128);
     finish();
     waveform::mock_ready = false;
+    fail_native = 1;
+    vibration_mode = 0; // mode 1 failed; the device has no confirmed legacy mode
+    begin({1});
+    Rumble(0, 65535, 32768);
+    poll();
+    assert(vibration_mode == 2 && last_rumble[0] == 255 && last_rumble[1] == 128);
+    finish();
     printf("DualSense / multiple controller lifecycle checks PASS\n");
 }
