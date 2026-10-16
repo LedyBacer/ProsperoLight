@@ -2,11 +2,11 @@
 
 ## Status and scope
 
-The operator stopped PS5 testing and reported that gameplay generally works well.
-That is operator feedback on the previously installed native backend, not a timing
-benchmark or verification of these new changes. No latency-profile build has been
-deployed or run on PS5. **Production remains baseline/profile 0.** Speaker and
-microphone work remains deferred.
+The operator reported that gameplay generally works well on the previously
+installed native backend and subsequently authorized real-PS5 latency comparisons.
+That gameplay feedback does not verify the new latency profiles. The current
+comparison status is recorded below. **Production remains baseline/profile 0.**
+Speaker and microphone work remains deferred.
 
 ## Comparison with the requested reference
 
@@ -55,7 +55,7 @@ remain separate.
 compile-time overrides; the standard comparison tool refuses to label custom
 parameters as one of these three profiles. No saved PS5 configuration is changed.
 
-Future developer builds, **only when hardware testing is resumed**:
+Developer comparison builds:
 
 ```sh
 make app TEST_LAB=1 HAPTICS_PROFILE=0 BUILD_LABEL=test-lab-haptics-baseline
@@ -115,9 +115,15 @@ continuous cadence tests use virtual time because OS sleep duration is not an
 exact audio clock. Initial wall-clock fixture failures and a Makefile flag typo
 were corrected; they are not counted as successful initial checks.
 
-These modeled reductions do not establish PS5 latency improvement. Build/CI
-validation results are recorded after the final host batch; hardware acceptance
-remains explicitly separate.
+These modeled reductions alone do not establish PS5 latency improvement. Linux
+`make check` (including the native SDK build), tidy and scalar/SIMD stream checks
+passed on `260c0ed`; controller/performance guards and the native profile builds
+passed after the pacing fix on `7f02cea`. The standalone native-worker tests and
+all fifteen virtual profile/scenario combinations passed. The loader tests
+verify legacy GET, definite-405 POST negotiation and no retry after uncertain
+errors. [CI for code commit ed5a0ab passed](https://github.com/blackbearreloaded/ProsperoLight/actions/runs/38869998407).
+The ARM macOS aggregate performance target cannot compile existing x86 intrinsics;
+its applicable Linux target passed. Hardware acceptance remains separate.
 
 ## Event-driven wakeup investigation
 
@@ -130,35 +136,96 @@ saturation, clock/timeout and epoch/permit wakeup behavior on PS5. It also canno
 interrupt an AudioOut call already blocked in the driver.
 
 The present change therefore retains nominal 1ms idle polling and the existing
-sample-clock pacing. Actual sleep can overshoot. Event wakeup is deferred rather
-than silently introducing an unverified driver/runtime path while hardware testing
-is stopped. The directly testable 4/6ms priming reductions are independently gated.
+sample-clock pacing. Actual sleep can overshoot. Event wakeup remains deferred
+until its synchronization and runtime behavior are independently validated.
+The 4/6ms priming reductions are independently gated. The worker waits for each
+absolute deadline before draining the inbox and preparing its grain, so packets
+arriving during that wait can fill the due output rather than an already-padded
+grain. Epoch and ownership are rechecked after the wait.
 
-## Real-PS5 comparison report — not run
+## Real-PS5 comparison — 2026-10-16
 
-| Profile | Exact new binary / run | Software timing | Active-effect fidelity | Hardware verdict |
-|---|---|---|---|---|
-| Baseline | NOT RUN | NOT MEASURED | NOT CHECKED | NOT ESTABLISHED |
-| Balanced | NOT RUN | NOT MEASURED | NOT CHECKED | NOT ESTABLISHED |
-| Low latency | NOT RUN | NOT MEASURED | NOT CHECKED | NOT ESTABLISHED |
+Real PS5, controller slot 0, Vibepollo 2.0.1, native HEVC / SDR / 1080p60,
+20 Mbps configured ceiling, operator-confirmed Ethernet on both machines, 10-second warmup and
+30-second measurement. Each fresh title process received the same explicit
+336,000-frame / seven-second Windows four-channel source (actuator channels only):
+1.5s left, 1s silence, 1.5s right, 1s silence, 1.5s both, 0.5s tail. Execution order
+was Balanced, Low latency, Baseline; baseline was left installed. This is one run
+per profile, not a repeated/randomized performance study.
 
-When authorized to resume, compare fresh processes and identical source/build
-flags, host/gamepad mode, HEVC/PyroWave selection, network, stimulus and duration.
-Keep distinct immutable build/run identities. Exercise each slot, reconnect,
-silence while ordinary rumble is requested, adaptive triggers/RGB and normal exit.
-Reject any additional drops/gaps, active-effect starvation, stale replay or legacy
-rumble regression. Confirm artifact integrity, frame balance, native exit, host
-session/lease cleanup and unchanged pairing/config separately. Older hosts and
-4K120 need their own compatibility evidence.
+All native images use source `7f02cea173da1e2f53307abca29d74985ae13979` and
+OpenGL SDK **1.0.2**. Later `ed5a0ab` changes the host-side loader only, adding
+Payload Manager 0.6 POST negotiation after an explicit HTTP 405; it changes no
+native application code. No retry follows a timeout or other ambiguous failure.
 
-The offline helper reads archived traces only:
+| Profile | Status | RX / first samples | RX → call p50/p95/p99 ms | First effect p50/p95/p99 ms | API duration p50/p95/p99 ms | Queue p50/p95/p99 frames | Drop / gaps / starvation |
+|---|---|---|---|---|---|---|---|
+| Baseline | COUNTERS ONLY | 336480 / 1 | 19/26/28 | 19/19/19 | 1/1/1 | 1024/1312/1376 | 0 / 0 / 0 |
+| Balanced | COUNTERS ONLY | 336480 / 1 | 16/22/23 | 14/14/14 | 1/1/1 | 864/1120/1152 | 0 / 0 / 0 |
+| Low latency | COUNTERS SHOW ISSUES | 336480 / 1 | 14/21/23 | 12/12/12 | 1/1/1 | 800/1120/1184 | 0 / 0 / 64 |
+
+All three generic integration runs completed **PASS / VALID**. That verdict does
+not enforce waveform-specific starvation acceptance. Balanced had zero drops,
+gaps and resumed-stream starvation, with receive-to-call p50/p95/p99 lower by
+3/4/5ms than baseline in this single comparison. Low latency recorded 64 starvation frames
+(1.33ms): its physical impulses worked, but it **does not pass the strict zero-
+starvation gate** and is not recommended for promotion. The counter detects
+padding followed by resumed PCM within ownership; it does not locate an audible
+defect or prove those 64 frames overlapped nonzero source content.
+
+Each first-effect histogram contains **one ownership observation**, despite three
+physical pulse segments. Treat its displayed percentiles as that one observation,
+not a statistically established tail latency. The host PCM samples were not
+captured, so do not infer exact silent-sample content from source pauses alone.
+
+Exact identities and independently checked report/export hashes:
+
+| Profile | Run ID | Build label / eboot SHA256 | Raw report / redacted export SHA256 |
+|---|---|---|---|
+| Baseline | `53739f2e-08c3-4632-8aba-059c3f09a3c1` | `test-lab-waveform-latency-p0-7f02cea`<br>`8f59c82a0dfb0413ff210c3787f92f55b76b7696275c5623d20ffe3f4de9675b` | `ac71e94c9e32236d681aacea1a0334c3566b1283fededac9b344ecdf5698fa2c`<br>`932ea7e2991e307939b3a00a24b40275bf311a83804a5b79a0ffd2e022b95004` |
+| Balanced | `36e083bb-a0ea-4000-a26b-a89acbefd4fc` | `test-lab-waveform-latency-p1-7f02cea`<br>`eaeb37c20f1e2c0f592446e643ae16d18c9fb88edae129f4c3dee61321950abf` | `06f8f62932a118248436f3937308a9a2092fc67eb2c62af3de78d8a8f5989253`<br>`df2c33c546af30d24e520d10486bad0b27fc18629abb647bea9c8140afe71c1e` |
+| Low latency | `d6b4c7b3-6eb2-40b8-a8c2-fba05ac57a45` | `test-lab-waveform-latency-p2-7f02cea`<br>`9cee27f926e29f1e96412c847f926423e6b0ee1c1bc0194563961ddcfc96cd49` | `a6f8c4385ac7a867fb01d4c94c9365b6081e6f4c27ca87996784c3206b25f04e`<br>`1bd27e9769df7356e5a01c5240c7f5345f104d63892d38d324456c4f210f67fa` |
+
+| Profile | Input = dequeued + ignored silence | API blocking exact maximum | First-effect exact observation |
+|---|---|---|---|
+| Baseline | 336960 = 336480 + 480 | 18 us | 18381 us |
+| Balanced | 336960 = 336480 + 480 | 28 us | 13296 us |
+| Low latency | 336960 = 336480 + 480 | 26 us | 11382 us |
+
+Every run verified 133 installation files by final-destination SIZE/SHA256
+readback (native LIST inventory; trusted managed-installation limitation retained),
+matching run receipt, raw and redacted artifact manifests, normal title exit,
+released remote lease, zero active clients/RTSP sessions and unchanged saved
+configuration/pairing. Final snapshots show native ownership inactive. Tail
+padding is separate from resumed-stream starvation; nonzero sample fidelity is
+established by deterministic host tests, not a physical waveform capture.
+
+The operator explicitly confirmed all three impulses and distinguishable left/
+right sides on **Low latency**. Balanced was not physically observed; do not
+relabel the earlier original-backend observations as validation of this image.
+
+Preparatory failures remain archived as INCONCLUSIVE: one stale lease from the
+previous stopped run and two preflights blocked by a runtime RADV cache. They
+did not launch a stream. A separate read-only doctor request exceeded the local
+HTTP timeout before run creation. The exact old lease was reconciled against
+its terminal report and TITLE_IDLE; the cache was preserved without deleting
+its six files and restored afterward, with its original file set/sizes verified.
+None of these attempts is counted as hardware PASS.
+
+**Production remains baseline/profile 0.** These software observations do not
+establish physical actuator latency, an across-game/network improvement, older-
+host runtime compatibility, all-four-controller hardware behavior, reconnect/
+adaptive-trigger hardware behavior, ordinary rumble during continuous exact-zero
+PCM on hardware, PyroWave runtime compatibility, HDR/VRR correctness or 4K120
+stability. Those paths retain deterministic/compatibility coverage where present;
+broader hardware acceptance remains separate.
+
+Reproduction and normal recovery: [Test Lab smoke instructions](TEST_LAB_SMOKE.md).
+The offline helper reads archived traces only and never establishes hardware
+acceptance from counters alone:
 
 ```sh
-python3 tools/controllers/waveform_report.py --output comparison.md
-# Later, add --baseline baseline-debug.txt --balanced balanced-debug.txt \
-# --low-latency low-debug.txt --slot 0
+python3 tools/controllers/waveform_report.py --baseline baseline-debug.txt \
+  --balanced balanced-debug.txt --low-latency low-debug.txt --slot 0 \
+  --output comparison.md
 ```
-
-Without files it produces NOT RUN rows. It rejects missing/mixed/custom policies,
-incomplete timing snapshots, wrong units and empty effects. Even complete trace
-counters do not establish physical acceptance or matching run settings/receipts.

@@ -49,7 +49,8 @@ ownership ends; final silence is kept in `padded` without becoming starvation.
 
 ## Final hardware validation status
 
-Final native source is `18b9c274280dec14451b50f2fb638453a81959df`.
+The final native source at this buffering stage was
+`18b9c274280dec14451b50f2fb638453a81959df`.
 Its additional priming reserve, frame accounting and packet-clock ordering fix
 passed host checks. The final image SHA256 was
 `0623f6056cd9d5e721a9e416a7b9369d7cd5b9f0c85a44e6819f4131ff0bd631`.
@@ -60,9 +61,11 @@ no-deploy run `fb1095c9-6040-4fae-aaf4-0ad0b1b9d3b3` timed out during preflight.
 Neither run is a final-binary hardware PASS.
 
 On 2026-10-16 the operator reported that gameplay generally works and explicitly
-stopped hardware testing. The [new latency/coexistence follow-up](DUALSENSE_WAVEFORM_LATENCY.md)
-therefore uses host checks only; its experimental profiles have not been deployed.
-The intermediate run above must not be represented as verification of later code.
+stopped hardware testing, then explicitly authorized latency-profile comparisons.
+The [latency/coexistence follow-up](DUALSENSE_WAVEFORM_LATENCY.md) now records
+three independently identified real-PS5 runs on the newer native source, including
+Balanced's improvement and Low latency's starvation counter. The intermediate run
+above must not be represented as verification of later code.
 
 Private/raw evidence stays in ignored local build directories. No claim is made
 about frequency response, physical input-to-photon latency, native-game fidelity,
