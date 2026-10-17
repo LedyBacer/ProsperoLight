@@ -112,6 +112,8 @@ Contributions and testing across different TVs, firmwares and network setups are
 
 ## Credits
 
+Thanks to ProsperoLight contributors: Nikita Dybov, KrisEnigma.
+
 Built with the [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk) by John Törnblom (ps5-payload-dev).
 Third-party components, authors and licenses are listed in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

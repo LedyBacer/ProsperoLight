@@ -2431,7 +2431,7 @@ void View::draw_about(ui::Canvas &canvas, ui::Painter &paint) const
                            "BlackBearReloaded."),
                   left.x, left.y + 496.0f, 22.0f, left.w, 30.0f, t.text, 2);
     ui::paragraph(list, regular,
-                  i18n::tr("Thanks to ProsperoLight contributors: Nikita Dybov, Kris Escobar."),
+                  i18n::tr("Thanks to ProsperoLight contributors: Nikita Dybov, KrisEnigma."),
                   left.x, left.y + 562.0f, 21.0f, left.w, 28.0f, t.text, 2);
     paint.body(i18n::tr("Menu sound effects made with ElevenLabs."), left.x, bottom, 20.0f,
                t.text_muted);
