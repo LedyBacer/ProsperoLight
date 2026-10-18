@@ -216,6 +216,9 @@ fi
 # Sources are compiled side by side, as many at once as BUILD_JOBS allows.
 max_jobs=${BUILD_JOBS:-$(nproc 2>/dev/null || printf '2')}
 [[ $max_jobs =~ ^[1-9][0-9]*$ ]] || { echo "BUILD_JOBS must be positive" >&2; exit 2; }
+if [[ ${FWCOMPAT_DIAGNOSTICS:-0} == 1 ]]; then
+    python3 "$root/tools/fwcompat-instrument-ui.py" "$root"
+fi
 compile_failed=0
 objects=()
 for source in "${sources[@]}"; do
@@ -225,6 +228,12 @@ for source in "${sources[@]}"; do
     object="$build/obj/${source//\//_}.o"
     if [[ $source == *.c ]]; then standard=-std=c11; else standard=-std=c++20; fi
     args=("$standard" -O2 -Wall -Wextra -ffunction-sections -fdata-sections)
+    [[ ${FWCOMPAT_DIAGNOSTICS:-0} != 1 ]] || args+=(-g)
+    compile_source="$root/$source"
+    if [[ ${FWCOMPAT_DIAGNOSTICS:-0} == 1 && $source == third_party/ps5-homebrew-ui/* ]]; then
+        generated="$build/fwcompat-ui/${source#third_party/ps5-homebrew-ui/}"
+        [[ ! -f $generated ]] || compile_source="$generated"
+    fi
     # Neither the app nor the UI kit throws or asks for a type at run time.
     if [[ $source == src/pyrowave/* ]]; then
         args+=(-fexceptions -frtti)
@@ -248,7 +257,7 @@ for source in "${sources[@]}"; do
         wait -n || compile_failed=1
     done
     PS5_PAYLOAD_SDK="$sdk_root" sh "$root/tooling/prospero-clang18" \
-        "${args[@]}" -c "$root/$source" -o "$object" &
+        "${args[@]}" -c "$compile_source" -o "$object" &
     objects+=("$object")
 done
 while (( $(jobs -rp | wc -l) > 0 )); do

@@ -1,0 +1,70 @@
+/* Diagnostic experiment only; production defaults preserve the existing startup. */
+#pragma once
+#ifndef FWCOMPAT_DIAGNOSTICS
+#define FWCOMPAT_DIAGNOSTICS 0
+#endif
+#ifndef FWCOMPAT_SKIP_DECODER_WARMUP
+#define FWCOMPAT_SKIP_DECODER_WARMUP 0
+#endif
+#ifndef FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD
+#define FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD 0
+#endif
+#ifndef FWCOMPAT_DISABLE_SHADER_CACHE
+#define FWCOMPAT_DISABLE_SHADER_CACHE 0
+#endif
+#ifndef FWCOMPAT_FORCE_1080P
+#define FWCOMPAT_FORCE_1080P 0
+#endif
+#ifndef FWCOMPAT_VARIANT_ID
+#define FWCOMPAT_VARIANT_ID production
+#endif
+#define FWCOMPAT_STRING_(x) #x
+#define FWCOMPAT_STRING(x) FWCOMPAT_STRING_(x)
+#if !FWCOMPAT_DIAGNOSTICS &&                                                                       \
+    (FWCOMPAT_SKIP_DECODER_WARMUP || FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD ||                         \
+     FWCOMPAT_DISABLE_SHADER_CACHE || FWCOMPAT_FORCE_1080P)
+#error Firmware compatibility switches require diagnostic mode
+#endif
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+#if FWCOMPAT_DIAGNOSTICS
+    void fwcompat_checkpoint(const char *stage, long long value);
+    void fwcompat_operation(const char *stage, int begin, long long value);
+    void fwcompat_start(void);
+    void fwcompat_gpu_failure(void);
+    int fwcompat_gpu_failed(void);
+    void fwcompat_attach(int fd, const char *folder);
+#define FWCOMPAT_POINT(stage, value) fwcompat_checkpoint(stage, value)
+#else
+#define FWCOMPAT_POINT(stage, value) ((void)0)
+#define fwcompat_start() ((void)0)
+#define fwcompat_attach(fd, folder) ((void)0)
+#endif
+#ifdef __cplusplus
+}
+#if FWCOMPAT_DIAGNOSTICS
+#include <type_traits>
+#include <cstdint>
+namespace fwcompat
+{
+template <class F> auto call(const char *stage, F fn)
+{
+    fwcompat_operation(stage, 1, 0);
+    if constexpr (std::is_void_v<decltype(fn())>)
+    {
+        fn();
+        fwcompat_operation(stage, 0, 0);
+    }
+    else
+    {
+        auto result = fn();
+        fwcompat_operation(stage, 0, (long long)(intptr_t)result);
+        return result;
+    }
+}
+} // namespace fwcompat
+#define FWCOMPAT_CALL(stage, ...) ::fwcompat::call(stage, [&] { return (__VA_ARGS__); })
+#endif
+#endif

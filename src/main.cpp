@@ -1,3 +1,4 @@
+#include "fwcompat.h"
 /*
  * ps5-native-app-boilerplate - ProsperoLight component.
  * Copyright (C) 2026 BlackBearReloaded
@@ -260,6 +261,8 @@ void RunVideoOutputSelfTest()
 
 int main(int argc, char **argv)
 {
+    fwcompat_start();
+    FWCOMPAT_POINT("process.entry", 0);
     // Where the time before the first frame goes, for the diagnostic log.
     const auto entered = std::chrono::steady_clock::now();
     const auto since_entry = [entered]
@@ -269,13 +272,23 @@ int main(int argc, char **argv)
                                           .count());
     };
     // Resolve process-owned system modules before storage grants filesystem access.
+    FWCOMPAT_POINT("modules.begin", 0);
     prosperolight::native_modules::PrepareBeforeStorage();
+    FWCOMPAT_POINT("modules.end", 0);
     const long long modules_ms = since_entry();
     int decoder_warmup[4] = {-1, -1, -1, -1};
-    if (prosperolight::native_modules::Result(prosperolight::native_modules::video_decoder) == 0)
+    if (!FWCOMPAT_SKIP_DECODER_WARMUP &&
+        prosperolight::native_modules::Result(prosperolight::native_modules::video_decoder) == 0)
+    {
+        FWCOMPAT_POINT("decoder.warmup.begin", 0);
         moonlight_native_decoder_warmup(decoder_warmup);
+        FWCOMPAT_POINT("decoder.warmup.end", 0);
+    }
     const long long warmup_ms = since_entry();
+    FWCOMPAT_POINT("storage.elevation.begin", 0);
     storage::Initialize();
+    fwcompat_attach(storage::log_descriptor(), storage::paths().logs);
+    FWCOMPAT_POINT("storage.elevation.end", storage::paths().status);
 #if PROSPEROLIGHT_LAUNCH_PROOF
     (void)prosperolight::write_launch_proof(argc, argv);
 #endif
@@ -376,6 +389,8 @@ int main(int argc, char **argv)
     char stream_error[192]{};
     bool first_start = true;
     unsigned streams = 0;
+    if (FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD)
+        prosperolight::pending_forwarded_launch() = {};
     unsigned launcher_failures = 0;
     bool awaiting_display_handoff = false;
     for (;;)
@@ -420,6 +435,11 @@ int main(int argc, char **argv)
             }
             Log("[PL] main: the launcher could not run; waiting to be closed");
             KeepProcessAlive();
+        }
+        if (FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD)
+        {
+            FWCOMPAT_POINT("stream.unsupported_launcher_only", 0);
+            continue;
         }
         launcher_failures = 0;
         awaiting_display_handoff = false;

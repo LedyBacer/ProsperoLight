@@ -1,3 +1,4 @@
+#include "fwcompat.h"
 /*
  * ps5-native-app-boilerplate / ProsperoLight - Process-owned native modules.
  * Copyright (C) 2026 BlackBearReloaded
@@ -29,7 +30,13 @@ void PrepareBeforeStorage()
     // references across reconnects. The helper must also preserve root/jail:
     // VideoDec2 lazily loads VdecCore and codec PRXs after this initial load.
     for (Module &module : modules)
+    {
+        if (FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD && module.id == video_decoder)
+            continue;
+        FWCOMPAT_POINT("module.load.begin", module.id);
         module.result = sceSysmoduleLoadModule(module.id);
+        FWCOMPAT_POINT("module.load.end", module.result);
+    }
     prepared = true;
 }
 

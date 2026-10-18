@@ -1,0 +1,98 @@
+name: Legacy firmware startup experiments
+on:
+  workflow_call:
+    inputs:
+      variant:
+        type: string
+        default: all
+        required: false
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'One variant ID, or all (no release or deployment)'
+        default: all
+        type: choice
+        options: [all, 00-control, 01-no-warmup, 02-no-videodec2, 03-no-shader-cache, 04-force-1080p, 05-no-pyrowave, 06-combined]
+permissions:
+  contents: read
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      variants: ${{ steps.select.outputs.variants }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - id: select
+        env:
+          VARIANT: ${{ inputs.variant }}
+        run: |
+          python3 - <<'PY'
+          import json,os
+          ids=[v['id'] for v in json.load(open('tools/fwcompat/variants.json'))]
+          if os.environ['VARIANT']!='all':
+              assert os.environ['VARIANT'] in ids
+              ids=[os.environ['VARIANT']]
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('variants='+json.dumps(ids)+'\n')
+          PY
+  build:
+    needs: matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.matrix.outputs.variants) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      BUILD_JOBS: '2'
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      USE_CCACHE: '1'
+      CCACHE_DIR: ${{ github.workspace }}/.deps/ccache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18-dev cmake lld-18 make ccache pkg-config tar unzip wget ninja-build bison flex libclang-18-dev libclang-cpp18-dev libclc-18-dev libclc-18 libllvmspirvlib-18-dev spirv-tools glslang-tools
+          python -m pip install Jinja2==3.1.6 jsonschema==4.25.1 Mako==1.3.10 PyYAML==6.0.2 meson==1.7.0 packaging==25.0
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .deps/ccache
+          key: fwcompat-${{ runner.os }}-${{ github.sha }}-${{ matrix.variant }}
+          restore-keys: |
+            fwcompat-${{ runner.os }}-
+            ccache-${{ runner.os }}-${{ runner.arch }}-clang18-
+      - name: Focused host regressions
+        run: python3 -m unittest discover -s tests -p test_fwcompat.py -v
+      - name: Build isolated variant and symbols
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: bash tools/build-fw-compat-matrix.sh "$VARIANT"
+      - name: Upload installable ZIP only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ProsperoLight-FWCompat-${{ matrix.variant }}-${{ github.sha }}
+          path: results/fwcompat-*/*/ProsperoLight-FWCompat-*.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Retain exact symbols, checksums, logs and SDK provenance separately
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: FWCompat-symbols-evidence-${{ matrix.variant }}-${{ github.sha }}
+          path: |
+            results/fwcompat-*/source-sha.txt
+            results/fwcompat-*/*/llvm-pie.elf
+            results/fwcompat-*/*/options.txt
+            results/fwcompat-*/*/build.log
+            results/fwcompat-*/*/build-provenance.json
+            results/fwcompat-*/*/artifact-receipt.json
+            results/fwcompat-*/*/fwcompat-sdk.json
+            results/fwcompat-*/*/SHA256SUMS
+            results/fwcompat-*/*.log
+          if-no-files-found: warn
+          retention-days: 90

@@ -1,3 +1,4 @@
+#include "fwcompat.h"
 /*
  * ps5-native-app-boilerplate - ProsperoLight component.
  * Copyright (C) 2026 BlackBearReloaded
@@ -287,8 +288,11 @@ void storage::Initialize()
     mkdir(shaders, 0777);
     std::snprintf(shaders, sizeof(shaders), "%s/cache/%s", base, kShaderCache);
     mkdir(shaders, 0777);
-    const bool cache_ready =
-        is_directory(shaders) && setenv("PS5_SHADER_CACHE_DIR", shaders, 1) == 0;
+    const bool cache_ready = !FWCOMPAT_DISABLE_SHADER_CACHE && is_directory(shaders) &&
+                             setenv("PS5_SHADER_CACHE_DIR", shaders, 1) == 0;
+    if (FWCOMPAT_DISABLE_SHADER_CACHE)
+        (void)unsetenv("PS5_SHADER_CACHE_DIR");
+    FWCOMPAT_POINT("shader_cache.effective", cache_ready);
     char line[400];
     std::snprintf(
         line, sizeof(line),

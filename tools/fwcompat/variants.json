@@ -1,0 +1,9 @@
+[
+  {"id":"00-control","warmup":1,"preload":1,"cache":1,"force_1080p":0,"pyrowave":1},
+  {"id":"01-no-warmup","warmup":0,"preload":1,"cache":1,"force_1080p":0,"pyrowave":1},
+  {"id":"02-no-videodec2","warmup":0,"preload":0,"cache":1,"force_1080p":0,"pyrowave":1},
+  {"id":"03-no-shader-cache","warmup":1,"preload":1,"cache":0,"force_1080p":0,"pyrowave":1},
+  {"id":"04-force-1080p","warmup":1,"preload":1,"cache":1,"force_1080p":1,"pyrowave":1},
+  {"id":"05-no-pyrowave","warmup":1,"preload":1,"cache":1,"force_1080p":0,"pyrowave":0},
+  {"id":"06-combined","warmup":0,"preload":0,"cache":0,"force_1080p":1,"pyrowave":0}
+]

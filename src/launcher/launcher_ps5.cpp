@@ -1,3 +1,4 @@
+#include "fwcompat.h"
 /*
  * ps5-native-app-boilerplate - ProsperoLight component.
  * Copyright (C) 2026 BlackBearReloaded
@@ -372,6 +373,8 @@ bool DevelopmentOffer(self_update_offer *out)
 // Blocks on the network; it runs on the model's worker.
 bool CheckForUpdate(UpdateOffer *offer)
 {
+    if (FWCOMPAT_DIAGNOSTICS)
+        return false;
     static const char *const kNames[] = {"available", "up-to-date", "unknown", "untrusted",
                                          "not-installable"};
     const std::int64_t started = sys::monotonic_us();
@@ -408,6 +411,8 @@ bool CheckForUpdate(UpdateOffer *offer)
 
 bool BeginUpdate()
 {
+    if (FWCOMPAT_DIAGNOSTICS)
+        return false;
     const std::lock_guard<std::mutex> guard(g_update_lock);
     if (g_update_answer != SELF_UPDATE_AVAILABLE)
         return false;
@@ -531,12 +536,16 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
 #endif
     // 4K when the television takes it, else 1080p.
     ps5::Display display;
-    if (!(ps5::Display::supports_display_modes() && display.open(3840, 2160)) &&
+    FWCOMPAT_POINT("display.open.begin", FWCOMPAT_FORCE_1080P);
+    if (!(!FWCOMPAT_FORCE_1080P && ps5::Display::supports_display_modes() &&
+          display.open(3840, 2160)) &&
         !display.open(1920, 1080))
     {
         PL_LOG("[PL] launcher: display open failed");
         return Result::failed;
     }
+    FWCOMPAT_POINT("display.open.end", display.width());
+    FWCOMPAT_POINT("display.height", display.height());
     PL_LOG("[PL] launcher: display %dx%d after %lld ms", display.width(), display.height(),
            elapsed());
     // After the display: the graphics runtime's own threads keep the full mask.
@@ -553,7 +562,10 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
         gfx::Font headline;
         gfx::Font mono;
         ui::Fonts fonts;
+        FWCOMPAT_POINT("renderer.init.begin", elapsed());
         bool ready = renderer.init();
+        FWCOMPAT_POINT("renderer.init.end", ready);
+        FWCOMPAT_POINT("renderer.init.elapsed_ms", elapsed());
         PL_LOG("[PL] launcher: renderer after %lld ms", elapsed());
         ready = ready && LoadFont(renderer, "inter-regular.huifont", &regular, &fonts.regular) &&
                 LoadFont(renderer, "inter-semibold.huifont", &semibold, &fonts.semibold);
@@ -738,12 +750,34 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                 renderer.draw(frame.scene);
                 renderer.glass();
                 renderer.draw(frame.overlay);
+                if (frames == 0)
+                    FWCOMPAT_POINT("first_render.begin", 0);
                 glBindFramebuffer(GL_FRAMEBUFFER, 0);
                 glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                if (frames == 0)
+                    FWCOMPAT_POINT("first_render.glClear.begin", 0);
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+                if (frames == 0)
+                    FWCOMPAT_POINT("first_render.glClear.end", 0);
                 renderer.present(0, display.width(), display.height());
                 lap(parts[4]);
+#if FWCOMPAT_DIAGNOSTICS
+                if (frames == 0)
+                {
+                    const auto error = glGetError();
+                    FWCOMPAT_POINT("first_render.end", error);
+                    if (error != GL_NO_ERROR || fwcompat_gpu_failed())
+                    {
+                        FWCOMPAT_POINT("RESULT=GRAPHICS_FAILURE", error);
+                        break;
+                    }
+                }
+#endif
+                if (frames == 0)
+                    FWCOMPAT_POINT("first_swap.begin", 0);
                 const bool swapped = display.swap();
+                if (frames == 0)
+                    FWCOMPAT_POINT("first_swap.end", swapped);
                 lap(parts[5]);
                 if (parts[0] + parts[1] + parts[2] + parts[3] + parts[4] + parts[5] > 50000 &&
                     slow_frames < 60)
@@ -763,6 +797,7 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
                 }
                 if (++frames == 1)
                 {
+                    FWCOMPAT_POINT("RESULT=LAUNCHER_READY", 1);
                     // The console's splash picture has covered the wait.
                     prosperolight_release_splash();
                     const bool hidden = sys::hide_splash_screen();

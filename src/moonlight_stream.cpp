@@ -1,3 +1,4 @@
+#include "fwcompat.h"
 /*
  * ps5-native-app-boilerplate - ProsperoLight component.
  * Copyright (C) 2026 BlackBearReloaded
@@ -529,7 +530,9 @@ extern "C" void moonlight_native_decoder_warmup(int results[4])
 {
     videodec2_compute_memory_t compute{};
     compute.size = sizeof(compute);
+    FWCOMPAT_POINT("decoder.query_compute.begin", 0);
     results[0] = sceVideodec2QueryComputeMemoryInfo(&compute);
+    FWCOMPAT_POINT("decoder.query_compute.end", results[0]);
     for (unsigned index = 0; index < 3; ++index)
     {
         const native_video_mode_t *mode =
@@ -550,7 +553,9 @@ extern "C" void moonlight_native_decoder_warmup(int results[4])
         config.cpu_priority = DECODER_CPU_PRIORITY;
         config.optimize_progressive = 1;
         memory.size = sizeof(memory);
+        FWCOMPAT_POINT("decoder.query_memory.begin", index);
         results[index + 1] = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
+        FWCOMPAT_POINT("decoder.query_memory.end", results[index + 1]);
     }
 }
 

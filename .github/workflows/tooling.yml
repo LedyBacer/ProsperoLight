@@ -17,6 +17,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      firmware_compat:
+        description: "Build the seven legacy-firmware startup experiments instead of a release build"
+        type: boolean
+        default: false
       snapshot:
         description: "Also upload this run's compiler cache as the next build-cache snapshot (run it on main)"
         type: boolean
@@ -30,7 +34,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  firmware-compat:
+    if: github.event_name == 'workflow_dispatch' && inputs.firmware_compat
+    uses: ./.github/workflows/fw-compat.yml
+    with:
+      variant: all
   build:
+    if: github.event_name != 'workflow_dispatch' || !inputs.firmware_compat
     name: Lint, test, and build release artifacts
     runs-on: ubuntu-24.04
     # The attest step signs with this run's identity and stores the attestation.
