@@ -1,7 +1,7 @@
 /*
- * ps5-native-app-boilerplate / ProsperoLight - Stream-aware native video
- * decoding. Copyright (C) 2026 BlackBearReloaded SPDX-License-Identifier:
- * GPL-3.0-or-later
+ * ps5-native-app-boilerplate - Native video lifecycle.
+ * Copyright (C) 2026 BlackBearReloaded
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "video_decoder_lifecycle.hpp"
 #include <cassert>
@@ -62,6 +62,19 @@ int main()
             Requirements scratch{};
             assert(parse_sps(Codec::Hevc, nal.data(), n, scratch) != ParseResult::Valid);
         }
+    }
+    // Deterministic bounded mutation corpus: malformed UE fields must never
+    // escape their bounds into dimension arithmetic or syntax loop counts.
+    uint32_t seed = 137;
+    for (unsigned trial = 0; trial < 4000; ++trial)
+    {
+        auto mutated = trial & 1 ? vaapi : hevc(3840, 2160, 10, 5);
+        seed = seed * 1664525u + 1013904223u;
+        const auto at = 5 + seed % (mutated.size() - 5);
+        mutated[at] ^= uint8_t(seed >> 24);
+        Requirements scratch{};
+        (void)parse_sps(trial & 1 ? Codec::H264 : Codec::Hevc, mutated.data(), mutated.size(),
+                        scratch);
     }
     Lifecycle life;
     life.wait(100);

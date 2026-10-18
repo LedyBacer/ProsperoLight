@@ -1,7 +1,7 @@
 /*
- * ps5-native-app-boilerplate / ProsperoLight - Stream-aware native video
- * decoding. Copyright (C) 2026 BlackBearReloaded SPDX-License-Identifier:
- * GPL-3.0-or-later
+ * ps5-native-app-boilerplate - Native video lifecycle.
+ * Copyright (C) 2026 BlackBearReloaded
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #pragma once
 #include <algorithm>
@@ -101,7 +101,10 @@ class Bits
         }
         const uint32_t v = ((uint32_t(1) << zeros) - 1) + read(zeros);
         if (v > maximum)
+        {
             ok = false;
+            return 0;
+        }
         return v;
     }
     void trailing()

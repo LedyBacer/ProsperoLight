@@ -650,7 +650,10 @@ static void every_connection_of_a_process_is_accepted()
         const uint32_t slices = connection == 1 ? 4u : 8u;
         prepare_video_callbacks(slices, false);
         assert(moonlight_video_callbacks.capabilities ==
-               (CAPABILITY_PULL_RENDERER | CAPABILITY_SLICES_PER_FRAME(slices)));
+               (CAPABILITY_PULL_RENDERER | CAPABILITY_SLICES_PER_FRAME(slices) |
+                (PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION
+                     ? CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC
+                     : 0)));
         assert(library_accepts_video_callbacks());
         // The library has now filled the empty submit slot in our struct: left
         // like this, the next connection would be refused.
@@ -658,6 +661,9 @@ static void every_connection_of_a_process_is_accepted()
         assert(!library_accepts_video_callbacks());
     }
     prepare_video_callbacks(8, true);
+    assert(bool(moonlight_video_callbacks.capabilities &
+                CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC) ==
+           bool(PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION));
     assert(moonlight_video_callbacks.submitDecodeUnit == nullptr);
     assert(moonlight_video_callbacks.setup == moonlight_renderer_setup);
 }
