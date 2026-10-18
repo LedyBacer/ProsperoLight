@@ -1,4 +1,5 @@
-# ProsperoLight - decoder lifecycle evidence in the existing Test Lab report.
+# ps5-native-app-boilerplate - decoder lifecycle evidence.
+# Copyright (C) 2026 BlackBearReloaded
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 def decoder_lifecycle(performance):

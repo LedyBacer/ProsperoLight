@@ -1,3 +1,5 @@
+# ps5-native-app-boilerplate - decoder lifecycle evidence.
+# Copyright (C) 2026 BlackBearReloaded
 # SPDX-License-Identifier: GPL-3.0-or-later
 import unittest
 from pltest.decoder_lifecycle import decoder_lifecycle

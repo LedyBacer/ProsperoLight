@@ -1,17 +1,17 @@
 /*
- * ps5-native-app-boilerplate / ProsperoLight - Decode and presentation worker checks.
- * Copyright (C) 2026 BlackBearReloaded
- * SPDX-License-Identifier: GPL-3.0-or-later
+ * ps5-native-app-boilerplate / ProsperoLight - Decode and presentation worker
+ * checks. Copyright (C) 2026 BlackBearReloaded SPDX-License-Identifier:
+ * GPL-3.0-or-later
  */
 #define PROSPEROLIGHT_LAN_TELEMETRY 0
 #define PROSPEROLIGHT_PERFORMANCE_DETAIL 1
 #include "../src/moonlight_stream.cpp"
+#include "video_sps_fixtures.hpp"
 #include <atomic>
 #include <cassert>
 #include <chrono>
 #include <deque>
 #include <thread>
-#include "video_sps_fixtures.hpp"
 
 // Videodec2 stand-in. Two buffer models are plausible on hardware and both
 // must work: the decoder keeps the frame buffer offered with each access unit
@@ -31,6 +31,8 @@ static bool fail_decode, fail_reset, fail_flush, fail_create, orphan_flush;
 // Seen on hardware: once a flush has returned a picture while others are still
 // held, the decoder refuses to decode until the rest are flushed too.
 static bool flushing;
+static bool cancel_query, cancel_create, fail_source_idle;
+static unsigned native_allocations;
 static int pending_after_flush = -1; // A frame arriving while a flush blocks.
 static std::atomic<int> pending_frames;
 static int decoder_token, classic_token;
@@ -202,16 +204,62 @@ extern "C"
         flushing = internal_pictures != 0;
         return 0;
     }
-    int32_t sceVideodec2QueryDecoderMemoryInfo(const videodec2_decoder_config_t *, videodec2_decoder_memory_t *m)
-    { m->cpu_size = m->gpu_size = 16384; m->max_frame_size = 64; return 0; }
-    int32_t sceKernelAvailableFlexibleMemorySize(size_t *size) { *size = 1024 * 1024; return 0; }
-    int32_t sceKernelMapNamedFlexibleMemory(void **p, size_t n, int, int, const char *) { *p = malloc(n); return *p ? 0 : -1; }
-    int32_t sceKernelReleaseFlexibleMemory(void *, size_t) { return 0; }
-    int32_t sceKernelVirtualQuery(void *, int, void *p, size_t n) { memset(p,0,n); return 0; }
-    int32_t sceKernelAllocateDirectMemory(int64_t, int64_t, size_t, size_t, int, int64_t *start) { *start = 1; return 0; }
-    int32_t sceKernelMapDirectMemory(void **p, size_t n, int, int, int64_t, size_t) { *p = malloc(n); return *p ? 0 : -1; }
-    int32_t sceKernelMunmap(void *p, size_t) { free(p); return 0; }
-    int32_t sceKernelReleaseDirectMemory(int64_t, size_t) { return 0; }
+    int32_t sceVideodec2QueryDecoderMemoryInfo(const videodec2_decoder_config_t *,
+                                               videodec2_decoder_memory_t *m)
+    {
+        m->cpu_size = m->gpu_size = 16384;
+        m->max_frame_size = 64;
+        if (cancel_query)
+            mock_state->running = 0;
+        return 0;
+    }
+    int32_t sceKernelAvailableFlexibleMemorySize(size_t *size)
+    {
+        *size = 1024 * 1024;
+        return 0;
+    }
+    int32_t sceKernelMapNamedFlexibleMemory(void **p, size_t n, int, int, const char *)
+    {
+        *p = malloc(n);
+        if (*p)
+            ++native_allocations;
+        return *p ? 0 : -1;
+    }
+    int32_t sceKernelReleaseFlexibleMemory(void *, size_t)
+    {
+        return 0;
+    }
+    int32_t sceKernelVirtualQuery(void *, int, void *p, size_t n)
+    {
+        memset(p, 0, n);
+        return 0;
+    }
+    int32_t sceKernelAllocateDirectMemory(int64_t, int64_t, size_t, size_t, int, int64_t *start)
+    {
+        *start = 1;
+        return 0;
+    }
+    int32_t sceKernelMapDirectMemory(void **p, size_t n, int, int, int64_t, size_t)
+    {
+        *p = malloc(n);
+        if (*p)
+            ++native_allocations;
+        return *p ? 0 : -1;
+    }
+    int32_t sceKernelMunmap(void *p, size_t)
+    {
+        if (p)
+        {
+            assert(native_allocations);
+            --native_allocations;
+        }
+        free(p);
+        return 0;
+    }
+    int32_t sceKernelReleaseDirectMemory(int64_t, size_t)
+    {
+        return 0;
+    }
     int32_t sceVideodec2DeleteDecoder(void *)
     {
         ++deletes;
@@ -221,6 +269,8 @@ extern "C"
                                       const videodec2_decoder_memory_t *, void **decoder)
     {
         ++creates;
+        if (cancel_create)
+            mock_state->running = 0;
         if (fail_create)
             return -95;
         assert(config->pipeline_depth == 1);
@@ -238,7 +288,7 @@ void native_agc_reset_performance()
 }
 int native_agc_finish_frame(void)
 {
-    return 0;
+    return fail_source_idle ? -97 : 0;
 }
 static uint64_t repeat_submits;
 int native_agc_repeat_frame(void)
@@ -632,33 +682,69 @@ static void paced_ready_queue_retains_surface_ownership()
     delete state;
 }
 
-static void stream_aware_owner()
+static native_renderer_state_t *uninitialized_owner()
 {
-    using namespace moonlight::video;
     auto *state = make_state(1, Model::SameCall, 1);
-    // The manual fixture's borrowed static buffers are not native allocations.
-    state->decoder = nullptr; state->input_memory = state->frame_memory = nullptr;
+    state->decoder = nullptr;
+    state->input_memory = state->frame_memory = nullptr;
     state->stream_aware = true;
     state->owned_resources = make_decoder_resources();
     state->owned_input_start = state->owned_frame_start = -1;
-    state->input_size = 64; state->requested_depth = 1;
+    state->input_size = 64;
     state->requested_cpu_mask = moonlight::kClassicDecoderCpuMask;
     state->lifecycle.wait(monotonic_us());
-    auto sps = fixture::h264(1920,1080,1,42,true,2);
-    LENTRY parameters{}; parameters.bufferType = BUFFER_TYPE_SPS;
-    parameters.data = reinterpret_cast<char *>(sps.data()); parameters.length = sps.size();
-    DECODE_UNIT unit{}; unit.bufferList = &parameters; unit.frameType = FRAME_TYPE_IDR;
-    assert(prepare_stream_decoder(state,&unit));
+    return state;
+}
+static void stream_aware_owner()
+{
+    using namespace moonlight::video;
+    auto *state = uninitialized_owner();
+    auto sps = fixture::h264(1920, 1080, 1, 42, true, 2);
+    LENTRY parameters{};
+    parameters.bufferType = BUFFER_TYPE_SPS;
+    parameters.data = reinterpret_cast<char *>(sps.data());
+    parameters.length = sps.size();
+    DECODE_UNIT unit{};
+    unit.bufferList = &parameters;
+    unit.frameType = FRAME_TYPE_IDR;
+    unit.fullLength = sps.size();
+    assert(prepare_stream_decoder(state, &unit));
     assert(state->decoder && state->lifecycle.generation == 1 && creates == 1);
-    assert(prepare_stream_decoder(state,&unit)); assert(creates == 1);
-    sps = fixture::h264(1920,1080,2,42,true,3);
-    parameters.data = reinterpret_cast<char *>(sps.data()); parameters.length = sps.size();
-    assert(prepare_stream_decoder(state,&unit));
+    assert(prepare_stream_decoder(state, &unit));
+    assert(creates == 1);
+    sps = fixture::h264(1920, 1080, 2, 42, true, 3);
+    parameters.data = reinterpret_cast<char *>(sps.data());
+    parameters.length = sps.size();
+    assert(prepare_stream_decoder(state, &unit));
     assert(creates == 2 && deletes == 1 && state->lifecycle.generation == 2);
-    assert(recover_stream_capacity(state)); assert(creates == 3 && state->decoder_config.max_dpb_frames == 5);
-    assert(!recover_stream_capacity(state)); assert(!state->running && creates == 3);
+    assert(recover_stream_capacity(state));
+    assert(creates == 3 && state->decoder_config.max_dpb_frames == 5);
+    assert(!recover_stream_capacity(state));
+    assert(!state->running && creates == 3);
+    fail_source_idle = true;
+    const auto retained = native_allocations;
+    assert(retained > 0 && !retire_stream_decoder(state));
+    assert(native_allocations == retained && state->decoder);
+    fail_source_idle = false;
     assert(retire_stream_decoder(state));
-    renderer_sync_destroy(state); delete state;
+    assert(native_allocations == 0);
+    renderer_sync_destroy(state);
+    delete state;
+    for (unsigned stage = 0; stage < 2; ++stage)
+    {
+        state = uninitialized_owner();
+        cancel_query = stage == 0;
+        cancel_create = stage == 1;
+        Requirements r{};
+        assert(parse_sps(Codec::H264, sps.data(), sps.size(), r) == ParseResult::Valid);
+        assert(!configure_stream_decoder(state, r, plan(r, {})));
+        assert(state->lifecycle.generation == 0 && !state->present_started);
+        cancel_query = cancel_create = false;
+        assert(retire_stream_decoder(state));
+        assert(native_allocations == 0);
+        renderer_sync_destroy(state);
+        delete state;
+    }
 }
 
 int main()
