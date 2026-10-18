@@ -144,6 +144,13 @@ def _analyze_run(profile, report, directory):
                       performance.get('decoder_recovery_successes', 0) != 1):
             result['functional_verdict'] = 'FAIL'
             issues.append('DECODER_PROBE_NOT_RECOVERED')
+        if profile.get('capture', {}).get('decoder_capacity_probe_first') and (
+                type(performance.get('decoder_test_capacity_decoded_before')) is not int or
+                type(performance.get('decoder_test_capacity_presented_before')) is not int or
+                performance.get('decoder_test_capacity_decoded_before') != 0 or
+                performance.get('decoder_test_capacity_presented_before') != 0):
+            result['functional_verdict'] = 'FAIL'
+            issues.append('DECODER_PROBE_NOT_BEFORE_FIRST_OUTPUT')
         if lifecycle['available'] and not lifecycle.get('valid'):
             if result['functional_verdict'] == 'PASS':
                 result['functional_verdict'] = 'FAIL'

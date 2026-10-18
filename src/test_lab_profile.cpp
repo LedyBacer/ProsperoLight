@@ -315,8 +315,8 @@ bool parse_profile(std::string_view json, std::string_view expected_id, TestProf
     }
     if (auto capture = field(root, "capture"))
     {
-        if (!known(*capture,
-                   {"detailed_frame_trace", "host_logs", "gpu_metrics", "decoder_capacity_probe"}))
+        if (!known(*capture, {"detailed_frame_trace", "host_logs", "gpu_metrics",
+                              "decoder_capacity_probe", "decoder_capacity_probe_first"}))
             return false;
         for (const auto &[key, val] : capture->fields)
         {
@@ -324,7 +324,11 @@ bool parse_profile(std::string_view json, std::string_view expected_id, TestProf
                 return false;
             if (key == "decoder_capacity_probe")
                 p.decoder_capacity_probe = val.flag;
+            if (key == "decoder_capacity_probe_first")
+                p.decoder_capacity_probe_first = val.flag;
         }
+        if (p.decoder_capacity_probe_first && !p.decoder_capacity_probe)
+            return false;
         if (p.decoder_capacity_probe && (!p.codec || *p.codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE))
             return false;
     }

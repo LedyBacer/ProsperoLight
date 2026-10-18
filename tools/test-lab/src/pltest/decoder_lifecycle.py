@@ -20,6 +20,13 @@ def decoder_lifecycle(performance):
     if type(injected) is not int or injected < 0:
         return {'available': True, 'valid': False, 'reason': 'invalid developer probe counter'}
     values['decoder_test_capacity_errors'] = injected
+    for key in ('decoder_test_capacity_decoded_before', 'decoder_test_capacity_presented_before',
+                'decoder_parameter_transition_waits'):
+        if key in performance:
+            if type(performance[key]) is not int or performance[key] < 0:
+                return {'available': True, 'valid': False, 'reason': 'invalid transition/probe counter'}
+            values[key] = performance[key]
+
     ready, decoded, presented = (values[key] for key in (
         'decoder_ready_us', 'decoder_first_decoded_us', 'decoder_first_presented_us'))
     valid = bool(performance.get('stream_parameters_verified') == 1 and

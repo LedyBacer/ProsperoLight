@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "video_decoder_lifecycle.hpp"
+#include "video_parameter_sets.hpp"
 #include <cassert>
 #include <vector>
 using namespace moonlight::video;
@@ -75,6 +76,46 @@ int main()
         Requirements scratch{};
         (void)parse_sps(trial & 1 ? Codec::H264 : Codec::Hevc, mutated.data(), mutated.size(),
                         scratch);
+    }
+    const auto baseline = parsed(Codec::H264, encoded_h264_baseline_1ref);
+    const auto high8 = parsed(Codec::H264, encoded_h264_high_8refs);
+    assert(baseline.profile == 66 && baseline.references == 1 && baseline.buffering == 1 &&
+           baseline.reorder == 0);
+    assert(plan(baseline, {}).dpb == 2);
+    assert(high8.profile == 100 && high8.references == 8 && high8.buffering == 8 &&
+           high8.reorder == 2);
+    assert(high8.visible_height == 1080 && high8.standard_dpb == 16 && plan(high8, {}).dpb == 9);
+    for (Codec codec : {Codec::H264, Codec::Hevc})
+    {
+        fixture::Writer pp;
+        pp.ue(3);
+        pp.ue(1);
+        auto pps = pp.nal(codec);
+        pps[4] = codec == Codec::H264 ? 0x68 : 0x44;
+        uint32_t id{}, parent{};
+        assert(parameter_ids(codec, pps.data(), pps.size(), false, id, parent) && id == 3 &&
+               parent == 1);
+        fixture::Writer slice;
+        if (codec == Codec::H264)
+        {
+            slice.ue(0);
+            slice.ue(2);
+        }
+        else
+        {
+            slice.put(1);
+            slice.put(0);
+        }
+        slice.ue(3);
+        auto picture = slice.nal(codec);
+        picture[4] = codec == Codec::H264 ? 0x65 : 0x26;
+        assert(parameter_ids(codec, picture.data(), picture.size(), true, id, parent) && id == 3);
+        fixture::Writer invalid;
+        invalid.ue(256);
+        invalid.ue(0);
+        auto bad = invalid.nal(codec);
+        bad[4] = codec == Codec::H264 ? 0x68 : 0x44;
+        assert(!parameter_ids(codec, bad.data(), bad.size(), false, id, parent));
     }
     const auto encoded = parsed(Codec::H264, encoded_h264_9refs);
     assert(encoded.references == 9 && encoded.buffering == 9 && encoded.reorder == 2);

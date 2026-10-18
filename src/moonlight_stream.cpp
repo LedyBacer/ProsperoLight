@@ -46,6 +46,7 @@
 #include "moonlight_performance.hpp"
 #include "moonlight_pipeline.hpp"
 #include "video_decoder_lifecycle.hpp"
+#include "video_parameter_sets.hpp"
 #include "moonlight_tuning.hpp"
 #include "../platform/ps5/ps5_network_metrics.h"
 #include "../platform/ps5/ps5_fec_cpu.h"
@@ -633,9 +634,10 @@ typedef struct native_renderer_state
     bool recovery_pending;
     bool parameters_requested;
     uint32_t test_capacity_errors;
-    uint64_t cached_sps_identity;
-    std::array<uint8_t, 16390> cached_sps;
-    size_t cached_sps_size;
+    moonlight::video::ParameterSets parameter_sets;
+    uint64_t transition_wait_since;
+    uint64_t parameter_transition_waits;
+    uint32_t test_capacity_decoded_before, test_capacity_presented_before;
     void *decoder;
     uint32_t pipeline_depth; // effective; one after a fallback
     bool drain_enabled;
@@ -1002,6 +1004,14 @@ static void save_performance_summary(const native_renderer_state_t &state,
              state.decoder_config.max_dpb_frames, PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION,
              PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES, state.flush_calls, state.decoder_delayed,
              state.observed_slices_min, state.observed_slices_max, state.layout_samples);
+    ok = ok &&
+         report_append(report, sizeof(report), &length,
+                       "\"decoder_test_capacity_decoded_before\":%u,\"decoder_test_capacity_"
+                       "presented_before\":%u,\n",
+                       state.test_capacity_decoded_before, state.test_capacity_presented_before);
+    ok = ok && report_append(report, sizeof(report), &length,
+                             "\"decoder_parameter_transition_waits\":%llu,\n",
+                             (unsigned long long)state.parameter_transition_waits);
     const auto &life = state.lifecycle;
     ok = ok &&
          report_append(
@@ -1630,6 +1640,8 @@ static int32_t create_stream_decoder(decoder_resources_t *resources,
         return result;
     }
 
+    if (running && !running->load())
+        return -34;
     result = sceKernelVirtualQuery(memory->cpu, 0, mapping_info, sizeof(mapping_info));
     snprintf(notification.message, sizeof(notification.message),
              "Native flexible CPU query: rc=%08x protection=%x type=%x flags=%x", (uint32_t)result,
@@ -1647,6 +1659,8 @@ static int32_t create_stream_decoder(decoder_resources_t *resources,
     if (resources->cpu_gpu_size != 0)
         memory->cpu_gpu_size = resources->cpu_gpu_size;
     result = allocate_direct(resources->gpu_size, 0x32, limit, &resources->gpu_start, &memory->gpu);
+    if (result == 0 && running && !running->load())
+        return -34;
     if (result == 0 && resources->cpu_gpu_size != 0)
         result = allocate_direct(resources->cpu_gpu_size, 0x33, limit, &resources->cpu_gpu_start,
                                  &memory->cpu_gpu);
@@ -1860,6 +1874,8 @@ static void *video_present_thread(void *context);
 static void lifecycle_failure(native_renderer_state_t *state, moonlight::video::Error reason,
                               int32_t code)
 {
+    // A connection-level retry belongs to the session owner, never this worker.
+    // gs_start_app() is not an ownership-safe transport reconnect (see design).
     state->lifecycle.fail(reason);
     state->last_result = code;
     state->running = 0;
@@ -1984,6 +2000,18 @@ static bool configure_stream_decoder(native_renderer_state_t *state,
     state->pipeline_depth = config.pipeline_depth;
     state->decoder_cpu_mask = config.cpu_affinity;
     state->decoder_cores = __builtin_popcountll(config.cpu_affinity) / 2;
+    const auto stable = moonlight::plan_thread_layout(
+        state->process_cpu_mask, state->requested_cpu_mask | moonlight::kClassicDecoderCpuMask);
+    state->layout = moonlight::plan_thread_layout(state->process_cpu_mask, config.cpu_affinity);
+    state->layout.receive = stable.receive;
+    state->layout.other = stable.other;
+    state->decode_placement_result =
+        state->layout.decode ? ps5_thread_affinity_set(state->layout.decode) : -1;
+    if (state->decode_placement_result != 0)
+    {
+        lifecycle_failure(state, Error::Presentation, state->decode_placement_result);
+        return false;
+    }
     state->drain_enabled = config.pipeline_depth > 1;
     state->frame_size = align_16k(size_t(state->decoder_memory.max_frame_size));
     state->owned_input_bytes = state->input_size * INPUT_SLOT_COUNT;
@@ -2038,33 +2066,53 @@ static bool configure_stream_decoder(native_renderer_state_t *state,
     return true;
 }
 
+// A changed parameter advertisement is not an activation. PPS/slice IDs select
+// the stream facts; when a prefix is unavailable, only an unambiguous SPS in an
+// IDR may select a configuration. Never replay cached raw parameter NALs.
 static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT unit)
 {
     using namespace moonlight::video;
     const Codec codec = state->mode->codec_type == 1 ? Codec::H264 : Codec::Hevc;
-    unsigned fragments = 0;
+    unsigned fragments = 0, sps_count = 0;
+    Requirements sole{};
+    std::array<bool, 32> supplied{};
     for (auto *entry = unit->bufferList; entry; entry = entry->next)
     {
-        if (++fragments > 1024)
+        if (++fragments > 1024 || !entry->data || entry->length <= 0)
         {
             lifecycle_failure(state, Error::Parameters, -30);
             return false;
+        }
+        const auto *data = reinterpret_cast<const uint8_t *>(entry->data);
+        if (entry->bufferType == BUFFER_TYPE_PPS)
+        {
+            if (!state->parameter_sets.pps(codec, data, entry->length))
+            {
+                lifecycle_failure(state, Error::Parameters, -30);
+                return false;
+            }
+            uint32_t id{}, parent{};
+            if (parameter_ids(codec, data, entry->length, false, id, parent) &&
+                (!state->parameter_sets.sps[parent].verified ||
+                 state->lifecycle.changed(state->parameter_sets.sps[parent])))
+                state->parameter_sets.advertised_change = true;
         }
         if (entry->bufferType != BUFFER_TYPE_SPS)
             continue;
-        if (!entry->data || entry->length <= 0 || entry->length > 16390)
+        Requirements r{};
+        const auto parsed = parse_sps(codec, data, entry->length, r);
+        if (parsed == ParseResult::Unsupported && unit->frameType != FRAME_TYPE_IDR)
         {
-            lifecycle_failure(state, Error::Parameters, -30);
+            // Unsupported future advertisements are not active configurations.
+            // Retain the instance; a complete IDR resolves or rejects the change.
+            state->parameter_sets.advertised_change = true;
+            if (!state->transition_wait_since)
+            {
+                state->transition_wait_since = monotonic_us();
+                ++state->parameter_transition_waits;
+            }
             return false;
         }
-        const auto hash = identity(reinterpret_cast<const uint8_t *>(entry->data), entry->length);
-        if (hash == state->cached_sps_identity && state->decoder &&
-            state->cached_sps_size == size_t(entry->length) &&
-            !memcmp(entry->data, state->cached_sps.data(), state->cached_sps_size))
-            continue;
-        Requirements r{};
-        const auto parsed =
-            parse_sps(codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length, r);
         if (parsed != ParseResult::Valid)
         {
             lifecycle_failure(
@@ -2072,45 +2120,146 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
                 -30);
             return false;
         }
-        Limits limits{};
-        limits.width = state->mode->max_width;
-        limits.height = state->mode->max_height;
-        // Mode defaults were negotiation-era targets, not backend ceilings.
-        // Keep the highest limits already used by the native 4K120 path;
-        // Query/Create still verify acceptance for the exact stream config.
-        limits.level_h264 = 60;
-        limits.level_hevc = 156;
-        limits.bit_depth = state->mode->hdr ? 10 : 8;
-        limits.depth = state->requested_depth;
-        const auto selected = plan(r, limits);
-        if (!selected.supported || r.visible_width != state->mode->visible_width ||
-            r.visible_height != state->mode->visible_height)
-        {
-            state->lifecycle.stream = r;
-            lifecycle_failure(state, Error::Unsupported, -31);
-            return false;
-        }
-        if (state->lifecycle.changed(r) || !state->decoder)
-        {
-            if (unit->frameType != FRAME_TYPE_IDR)
-            {
-                lifecycle_failure(state, Error::Parameters, -30);
-                return false;
-            }
-            if (!configure_stream_decoder(state, r, selected))
-                return false;
-        }
-        state->cached_sps_identity = hash;
-        state->cached_sps_size = entry->length;
-        memcpy(state->cached_sps.data(), entry->data, state->cached_sps_size);
+        if (state->lifecycle.changed(r) || r.parameter_id != state->lifecycle.stream.parameter_id)
+            state->parameter_sets.advertised_change = true;
+        state->parameter_sets.remember(r);
+        supplied[r.parameter_id] = true;
+        sole = r;
+        ++sps_count;
     }
-    if (!state->decoder)
+    if (state->decoder && !state->await_keyframe && !state->parameter_sets.advertised_change &&
+        !state->transition_wait_since && !sps_count)
+        return true;
+    const Requirements *selected = nullptr;
+    for (auto *entry = unit->bufferList; entry; entry = entry->next)
+        if (entry->bufferType == BUFFER_TYPE_PICDATA)
+        {
+            auto *candidate = state->parameter_sets.picture(
+                codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length);
+            if (candidate)
+            {
+                if (selected && selected->parameter_id != candidate->parameter_id)
+                {
+                    lifecycle_failure(state, Error::Parameters, -30);
+                    return false;
+                }
+                selected = candidate;
+            }
+        }
+    if (!selected && unit->frameType == FRAME_TYPE_IDR && sps_count == 1)
+        selected = &sole;
+    if (!selected)
     {
-        if (state->lifecycle.expired(monotonic_us()))
-            lifecycle_failure(state, Error::Parameters, -32);
+        // A normal continuation without pending advertisements needs no parsing.
+        if (state->decoder && !state->await_keyframe && !state->transition_wait_since &&
+            !state->parameter_sets.advertised_change)
+            return true;
+    }
+    else if (!state->lifecycle.changed(*selected) && state->decoder &&
+             selected->parameter_id == state->lifecycle.stream.parameter_id)
+    {
+        state->lifecycle.stream = *selected;
+        if (state->await_keyframe && !supplied[selected->parameter_id])
+            return false;
+        if (!state->await_keyframe &&
+            (unit->frameType == FRAME_TYPE_IDR || !state->transition_wait_since))
+        {
+            state->transition_wait_since = 0;
+            state->parameters_requested = false;
+        }
+        state->parameter_sets.advertised_change = false;
+        for (const auto &r : state->parameter_sets.sps)
+            if (r.verified && (state->lifecycle.changed(r) ||
+                               r.parameter_id != state->lifecycle.stream.parameter_id))
+                state->parameter_sets.advertised_change = true;
+        for (size_t i = 0; i < state->parameter_sets.pps_valid.size(); ++i)
+            if (state->parameter_sets.pps_valid[i] &&
+                !state->parameter_sets.sps[state->parameter_sets.pps_sps[i]].verified)
+                state->parameter_sets.advertised_change = true;
+        return true;
+    }
+    if (!selected || unit->frameType != FRAME_TYPE_IDR || !supplied[selected->parameter_id])
+    {
+        // Unknown/reused identifiers or a newly active configuration outside an
+        // IDR cannot safely use the old references. Hold, request once, then fail
+        // on a decode-worker deadline even if no more packets arrive.
+        if (!state->transition_wait_since)
+        {
+            state->transition_wait_since = monotonic_us();
+            ++state->parameter_transition_waits;
+        }
         return false;
     }
+    Limits limits{};
+    limits.width = state->mode->max_width;
+    limits.height = state->mode->max_height;
+    limits.level_h264 = 60;
+    limits.level_hevc = 156;
+    limits.bit_depth = state->mode->hdr ? 10 : 8;
+    limits.depth = state->requested_depth;
+    const auto configuration = plan(*selected, limits);
+    if (!configuration.supported || selected->visible_width != state->mode->visible_width ||
+        selected->visible_height != state->mode->visible_height)
+    {
+        lifecycle_failure(state, Error::Unsupported, -31);
+        return false;
+    }
+    if (state->lifecycle.changed(*selected) || !state->decoder)
+    {
+        if (!configure_stream_decoder(state, *selected, configuration))
+            return false;
+    }
+    else
+        state->lifecycle.stream = *selected;
+    state->transition_wait_since = 0;
+    state->parameters_requested = false;
+    state->parameter_sets.advertised_change = false;
+    for (const auto &r : state->parameter_sets.sps)
+        if (r.verified &&
+            (state->lifecycle.changed(r) || r.parameter_id != state->lifecycle.stream.parameter_id))
+            state->parameter_sets.advertised_change = true;
+    for (size_t i = 0; i < state->parameter_sets.pps_valid.size(); ++i)
+        if (state->parameter_sets.pps_valid[i] &&
+            !state->parameter_sets.sps[state->parameter_sets.pps_sps[i]].verified)
+            state->parameter_sets.advertised_change = true;
     return true;
+}
+
+static bool decoder_deadline(native_renderer_state_t *state, uint64_t now)
+{
+    if (state->lifecycle.expired(now) ||
+        (state->transition_wait_since && now >= state->transition_wait_since &&
+         now - state->transition_wait_since >= moonlight::video::Lifecycle::startup_timeout_us))
+    {
+        lifecycle_failure(state, moonlight::video::Error::Parameters, -32);
+        return false;
+    }
+    return state->running;
+}
+
+// Do not pass future parameter advertisements to a native instance configured
+// for a different SPS. All picture bytes and active sets retain zero-copy decode.
+static bool future_parameter(native_renderer_state_t *state, PLENTRY entry)
+{
+    using namespace moonlight::video;
+    const Codec codec = state->mode->codec_type == 1 ? Codec::H264 : Codec::Hevc;
+    if (entry->bufferType == BUFFER_TYPE_SPS)
+    {
+        Requirements r{};
+        return parse_sps(codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length, r) ==
+                   ParseResult::Valid &&
+               (r.parameter_id != state->lifecycle.stream.parameter_id ||
+                state->lifecycle.changed(r));
+    }
+    if (entry->bufferType == BUFFER_TYPE_PPS)
+    {
+        uint32_t id{}, parent{};
+        return parameter_ids(codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length,
+                             false, id, parent) &&
+               (parent != state->lifecycle.stream.parameter_id ||
+                state->lifecycle.changed(state->parameter_sets.sps[parent]));
+    }
+    return false;
 }
 
 static bool recover_stream_capacity(native_renderer_state_t *state)
@@ -2129,6 +2278,10 @@ static bool recover_stream_capacity(native_renderer_state_t *state)
     if (!configure_stream_decoder(state, l.stream, next))
         return false;
     state->await_keyframe = true;
+    state->transition_wait_since = monotonic_us();
+    state->parameter_sets.clear();
+    state->parameter_sets.remember(state->lifecycle.stream);
+    state->parameters_requested = true;
     return true;
 }
 
@@ -2174,7 +2327,7 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     uint32_t fragment_count = 0;
     uint32_t hdr_active;
     uint32_t hdr_transitions;
-    size_t copied = 0;
+    size_t copied = 0, omitted_parameters = 0;
     uint64_t started;
     uint64_t completed_us;
     uint64_t elapsed;
@@ -2206,10 +2359,15 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     // The native quiescence, replacement, keyframe and subsequent output are real.
     if (state->stream_aware && prosperolight::test_lab::active() &&
         prosperolight::test_lab::active_profile().decoder_capacity_probe &&
-        state->test_capacity_errors == 0 && state->decoded >= 60 && state->presented.load() >= 30)
+        state->test_capacity_errors == 0 &&
+        (prosperolight::test_lab::active_profile().decoder_capacity_probe_first ||
+         (state->decoded >= 60 && state->presented.load() >= 30)))
     {
+        state->test_capacity_decoded_before = state->decoded;
+        state->test_capacity_presented_before = state->presented.load();
         ++state->test_capacity_errors;
-        (void)lan_http_report_text("Native decoder developer probe: synthetic capacity error once");
+        (void)lan_http_report_text("Native decoder developer probe: synthetic capacity error once "
+                                   "(first-AU or established mode)");
         return decode_refused(state, int32_t(0x811d0302u), nullptr);
     }
 #endif
@@ -2219,6 +2377,7 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
         if (decode_unit->frameType != FRAME_TYPE_IDR)
             return state->stream_aware ? DR_OK : DR_NEED_IDR;
         state->await_keyframe = false;
+        state->transition_wait_since = 0;
     }
     if (state->decoder_needs_reset)
     {
@@ -2349,6 +2508,11 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
         if (!entry->data || entry->length <= 0 ||
             (size_t)entry->length > state->input_size - copied)
             return decode_refused(state, -13, trace);
+        if (state->stream_aware && future_parameter(state, entry))
+        {
+            omitted_parameters += entry->length;
+            continue;
+        }
         memcpy(input_slot + copied, entry->data, (size_t)entry->length);
         copied += (size_t)entry->length;
         ++fragment_count;
@@ -2358,7 +2522,7 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     state->copy_timing.add(elapsed);
     if (elapsed > state->copy_max_us)
         state->copy_max_us = elapsed;
-    if (copied != (size_t)decode_unit->fullLength)
+    if (!copied || copied + omitted_parameters != (size_t)decode_unit->fullLength)
         return decode_refused(state, -14, trace);
 
     // A cheap header scan on the first frames and twice a second afterwards.
@@ -2495,6 +2659,10 @@ static void fallback_to_classic_decoder(native_renderer_state_t *state, int32_t 
         if (configure_stream_decoder(state, state->lifecycle.stream, next))
         {
             state->await_keyframe = true;
+            state->transition_wait_since = monotonic_us();
+            state->parameter_sets.clear();
+            state->parameter_sets.remember(state->lifecycle.stream);
+            state->parameters_requested = false;
         }
         return;
     }
@@ -2618,7 +2786,12 @@ static void *video_decode_thread(void *context)
         PDECODE_UNIT decode_unit = nullptr;
         uint64_t busy_us = 0;
 
-        if (!LiWaitForNextVideoFrame(&handle, &decode_unit))
+        if (state->stream_aware && !decoder_deadline(state, monotonic_us()))
+            break;
+        const bool bounded_wait =
+            state->stream_aware && (!state->decoder || state->transition_wait_since);
+        if (!(bounded_wait ? LiPollNextVideoFrame(&handle, &decode_unit)
+                           : LiWaitForNextVideoFrame(&handle, &decode_unit)))
         {
             // Shutdown or an explicit wake: `running` decides. Never spin.
             if (std::atomic_load_explicit(&state->running, std::memory_order_acquire))
@@ -3083,6 +3256,9 @@ static void join_video_workers(native_renderer_state_t *state)
         (void)pthread_join(state->present_thread, NULL);
         state->present_started = false;
     }
+    state->parameter_sets.clear();
+    state->transition_wait_since = 0;
+    state->parameters_requested = false;
     if (state->stream_aware && state->lifecycle.state != moonlight::video::State::Failed)
         state->lifecycle.state = moonlight::video::State::Stopping;
 }
@@ -4856,8 +5032,8 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     renderer.pipeline_depth = requested_depth;
     renderer.decoder_cpu_mask = renderer.requested_cpu_mask;
     renderer.decoder_cores = requested_cores;
-    renderer.layout =
-        moonlight::plan_thread_layout(renderer.process_cpu_mask, renderer.requested_cpu_mask);
+    renderer.layout = moonlight::plan_thread_layout(
+        renderer.process_cpu_mask, renderer.requested_cpu_mask | moonlight::kClassicDecoderCpuMask);
     renderer.mode = mode;
     renderer.stream_fps = stream_fps;
     renderer.input_size = INPUT_SLOT_BYTES;

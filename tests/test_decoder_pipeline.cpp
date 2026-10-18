@@ -32,6 +32,10 @@ static bool fail_decode, fail_reset, fail_flush, fail_create, orphan_flush;
 // held, the decoder refuses to decode until the rest are flushed too.
 static bool flushing;
 static bool cancel_query, cancel_create, fail_source_idle;
+static unsigned cancel_at, direct_maps;
+static uint64_t reject_affinity, accepted_affinity;
+static int32_t first_decode_error;
+
 static std::atomic<unsigned> native_allocations;
 static std::atomic<bool> hold_presentation, presentation_entered;
 static int pending_after_flush = -1; // A frame arriving while a flush blocks.
@@ -60,6 +64,12 @@ static std::atomic<bool> wake_requested;
 static uint8_t access_unit[] = {0, 0, 1, 0x65, 0x80};
 static LENTRY fragment;
 static DECODE_UNIT queued_unit;
+
+static void checkpoint(unsigned at)
+{
+    if (cancel_at == at)
+        mock_state->running = 0;
+}
 
 extern "C"
 {
@@ -112,6 +122,12 @@ extern "C"
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
     }
+    bool LiPollNextVideoFrame(VIDEO_FRAME_HANDLE *handle, PDECODE_UNIT *unit)
+    {
+        if (feed_next.load() >= feed_total.load())
+            return false;
+        return LiWaitForNextVideoFrame(handle, unit);
+    }
     void LiCompleteVideoFrame(VIDEO_FRAME_HANDLE, int status)
     {
         if (status == DR_NEED_IDR)
@@ -139,6 +155,7 @@ extern "C"
     int32_t sceVideodec2Reset(void *)
     {
         ++resets;
+        checkpoint(8);
         if (fail_reset)
             return -99;
         held.clear();
@@ -150,6 +167,12 @@ extern "C"
                                videodec2_output_t *output)
     {
         ++decodes;
+        if (first_decode_error)
+        {
+            auto e = first_decode_error;
+            first_decode_error = 0;
+            return e;
+        }
         if (fail_decode)
             return -98;
         if (flushing)
@@ -208,7 +231,8 @@ extern "C"
     int32_t sceVideodec2QueryDecoderMemoryInfo(const videodec2_decoder_config_t *,
                                                videodec2_decoder_memory_t *m)
     {
-        m->cpu_size = m->gpu_size = 16384;
+        checkpoint(1);
+        m->cpu_size = m->gpu_size = m->cpu_gpu_size = 16384;
         m->max_frame_size = 64;
         if (cancel_query)
             mock_state->running = 0;
@@ -221,6 +245,7 @@ extern "C"
     }
     int32_t sceKernelMapNamedFlexibleMemory(void **p, size_t n, int, int, const char *)
     {
+        checkpoint(2);
         *p = malloc(n);
         if (*p)
             ++native_allocations;
@@ -242,6 +267,8 @@ extern "C"
     }
     int32_t sceKernelMapDirectMemory(void **p, size_t n, int, int, int64_t, size_t)
     {
+        ++direct_maps;
+        checkpoint(direct_maps <= 2 ? direct_maps + 2 : direct_maps + 3);
         *p = malloc(n);
         if (*p)
             ++native_allocations;
@@ -270,6 +297,10 @@ extern "C"
                                       const videodec2_decoder_memory_t *, void **decoder)
     {
         ++creates;
+        checkpoint(5);
+        if (config->cpu_affinity == reject_affinity && reject_affinity)
+            return -95;
+        accepted_affinity = config->cpu_affinity;
         if (cancel_create)
             mock_state->running = 0;
         if (fail_create)
@@ -361,6 +392,9 @@ static native_renderer_state_t *make_state(unsigned depth, Model decoder_model,
     held.clear();
     internal_pictures = 0;
     resets = flushes = decodes = deletes = creates = submits = 0;
+    cancel_at = direct_maps = 0;
+    reject_affinity = accepted_affinity = 0;
+    first_decode_error = 0;
     fail_decode = fail_reset = fail_flush = fail_create = orphan_flush = flushing = false;
     pending_frames = 0;
     pending_after_flush = -1;
@@ -707,6 +741,9 @@ static native_renderer_state_t *uninitialized_owner()
     state->owned_input_start = state->owned_frame_start = -1;
     state->input_size = 64;
     state->requested_cpu_mask = moonlight::kClassicDecoderCpuMask;
+    state->process_cpu_mask = moonlight::kTitleCpuMask;
+    state->layout =
+        moonlight::plan_thread_layout(state->process_cpu_mask, state->requested_cpu_mask);
     state->lifecycle.wait(monotonic_us());
     return state;
 }
@@ -802,9 +839,170 @@ static void stream_aware_owner()
     }
 }
 
+static void dispose_owner(native_renderer_state_t *state)
+{
+    assert(retire_stream_decoder(state));
+    assert(native_allocations == 0);
+    renderer_sync_destroy(state);
+    delete state;
+}
+static std::vector<uint8_t> id_nal(bool pps, unsigned id, unsigned parent = 0)
+{
+    fixture::Writer w;
+    if (!pps)
+    {
+        w.ue(0);
+        w.ue(2);
+    }
+    w.ue(id);
+    if (pps)
+        w.ue(parent);
+    auto bytes = w.nal(moonlight::video::Codec::H264);
+    bytes[4] = pps ? 0x68 : 0x65;
+    return bytes;
+}
+static void pending_parameters_and_placement()
+{
+    auto *state = uninitialized_owner();
+    auto a = fixture::h264(1920, 1080, 1, 42, true, 2);
+    auto b = fixture::h264(1920, 1080, 2, 42, true, 3, 1);
+    auto p0 = id_nal(true, 0), p1 = id_nal(true, 1, 1), pic = id_nal(false, 0);
+    LENTRY sps{}, pps{}, picture{};
+    sps.bufferType = BUFFER_TYPE_SPS;
+    pps.bufferType = BUFFER_TYPE_PPS;
+    picture.bufferType = BUFFER_TYPE_PICDATA;
+    sps.next = &pps;
+    pps.next = &picture;
+    auto update = [&](std::vector<uint8_t> &sp, std::vector<uint8_t> &pp)
+    {
+        sps.data = reinterpret_cast<char *>(sp.data());
+        sps.length = sp.size();
+        pps.data = reinterpret_cast<char *>(pp.data());
+        pps.length = pp.size();
+        picture.data = reinterpret_cast<char *>(pic.data());
+        picture.length = pic.size();
+    };
+    DECODE_UNIT unit{};
+    unit.bufferList = &sps;
+    unit.frameType = FRAME_TYPE_IDR;
+    update(a, p0);
+    assert(prepare_stream_decoder(state, &unit));
+    assert(creates == 1);
+    unit.frameType = FRAME_TYPE_PFRAME;
+    update(b, p1);
+    // A future SPS/PPS is advertised while the picture still uses PPS0.
+    assert(prepare_stream_decoder(state, &unit));
+    assert(creates == 1 && state->running);
+    assert(future_parameter(state, &sps) && future_parameter(state, &pps));
+    pic = id_nal(false, 1);
+    update(b, p1);
+    assert(!prepare_stream_decoder(state, &unit));
+    assert(creates == 1 && state->running);
+    assert(state->transition_wait_since && !state->parameters_requested);
+    state->parameters_requested = true;
+    assert(!prepare_stream_decoder(state, &unit));
+    assert(state->parameter_transition_waits == 1);
+    unit.frameType = FRAME_TYPE_IDR;
+    assert(prepare_stream_decoder(state, &unit));
+    assert(creates == 2 && deletes == 1);
+    assert(state->lifecycle.stream.parameter_id == 1 && !state->transition_wait_since);
+    assert(prepare_stream_decoder(state, &unit));
+    assert(creates == 2);
+    // Same semantic facts, a different SPS identity: no recreation, forward sets.
+    b = fixture::h264(1920, 1080, 2, 42, true, 3, 2);
+    p1 = id_nal(true, 1, 2);
+    update(b, p1);
+    assert(prepare_stream_decoder(state, &unit));
+    assert(creates == 2);
+    assert(state->lifecycle.stream.parameter_id == 2 && !future_parameter(state, &sps));
+    // Cancel a new pending transition and clear it only after the worker joins.
+    b = fixture::h264(1920, 1080, 3, 42, true, 4, 2);
+    update(b, p1);
+    unit.frameType = FRAME_TYPE_PFRAME;
+    assert(!prepare_stream_decoder(state, &unit));
+    join_video_workers(state);
+    assert(!state->transition_wait_since && !state->parameter_sets.advertised_change);
+    dispose_owner(state);
+    // Requested 5-core layout and safe stable receive/audio reservation.
+    for (bool fallback : {false, true})
+    {
+        state = uninitialized_owner();
+        state->requested_cpu_mask = moonlight::decoder_cpu_mask(5, state->process_cpu_mask);
+        if (fallback)
+            reject_affinity = state->requested_cpu_mask;
+        moonlight::video::Requirements r{};
+        assert(moonlight::video::parse_sps(moonlight::video::Codec::H264, a.data(), a.size(), r) ==
+               moonlight::video::ParseResult::Valid);
+        assert(configure_stream_decoder(state, r, moonlight::video::plan(r, {})));
+        assert(state->decoder_cpu_mask ==
+               (fallback ? moonlight::kClassicDecoderCpuMask : state->requested_cpu_mask));
+        assert(accepted_affinity == state->decoder_cpu_mask && state->decode_placement_result == 0);
+        assert(!(state->decoder_cpu_mask & (state->layout.receive | state->layout.decode |
+                                            state->layout.present | state->layout.other)));
+        reject_affinity = 0;
+        assert(configure_stream_decoder(state, r, moonlight::video::plan(r, {})));
+        assert(state->decoder_cpu_mask == state->requested_cpu_mask);
+        dispose_owner(state);
+    }
+}
+static void first_access_unit_and_cancellation()
+{
+    using namespace moonlight::video;
+    auto sps = fixture::h264(1920, 1080, 1, 42, true, 2);
+    LENTRY parameter{};
+    parameter.data = reinterpret_cast<char *>(sps.data());
+    parameter.length = sps.size();
+    parameter.bufferType = BUFFER_TYPE_SPS;
+    DECODE_UNIT unit{};
+    unit.bufferList = &parameter;
+    unit.fullLength = sps.size();
+    unit.frameType = FRAME_TYPE_IDR;
+    auto *state = uninitialized_owner();
+    first_decode_error = int32_t(0x811d0302u);
+    assert(decode(state, &unit, 1, FRAME_TYPE_IDR) == DR_NEED_IDR);
+    assert(state->running && state->decoded == 0 && state->lifecycle.generation == 2 &&
+           creates == 2);
+    assert(state->lifecycle.attempts == 1 && state->await_keyframe);
+    assert(decode(state, &unit, 2, FRAME_TYPE_IDR) == DR_OK);
+    assert(state->decoded == 1 && state->lifecycle.successes == 1);
+    dispose_owner(state);
+    for (unsigned point = 1; point <= 8; ++point)
+    {
+        state = uninitialized_owner();
+        cancel_at = point;
+        Requirements r{};
+        assert(parse_sps(Codec::H264, sps.data(), sps.size(), r) == ParseResult::Valid);
+        assert(!configure_stream_decoder(state, r, plan(r, {})));
+        assert(!state->running && !state->present_started && state->lifecycle.generation == 0);
+        cancel_at = 0;
+        dispose_owner(state);
+    }
+    state = uninitialized_owner();
+    Requirements waiting{};
+    assert(parse_sps(Codec::H264, sps.data(), sps.size(), waiting) == ParseResult::Valid);
+    assert(configure_stream_decoder(state, waiting, plan(waiting, {})) && state->decoded == 0);
+    join_video_workers(state);
+    assert(!state->present_started);
+    dispose_owner(state);
+    state = uninitialized_owner();
+    state->lifecycle.wait(monotonic_us() - Lifecycle::startup_timeout_us - 1);
+    feed_total = feed_next = 0;
+    video_decode_thread(state); // no packet is needed to make the deadline fire
+    assert(!state->running && state->lifecycle.state == State::Failed && creates == 0);
+    dispose_owner(state);
+    state = uninitialized_owner();
+    feed_total = feed_next = 0;
+    std::thread waiting([&] { video_decode_thread(state); });
+    state->running = 0;
+    waiting.join();
+    dispose_owner(state);
+}
+
 int main()
 {
     stream_aware_owner();
+    pending_parameters_and_placement();
+    first_access_unit_and_cancellation();
     fragment.data = reinterpret_cast<char *>(access_unit);
     fragment.length = sizeof(access_unit);
     pipelined_then_drained(Model::Queued);
