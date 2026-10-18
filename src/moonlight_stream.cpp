@@ -45,6 +45,7 @@
 #include "moonlight_stream_keyboard.hpp"
 #include "moonlight_performance.hpp"
 #include "moonlight_pipeline.hpp"
+#include "video_decoder_lifecycle.hpp"
 #include "moonlight_tuning.hpp"
 #include "../platform/ps5/ps5_network_metrics.h"
 #include "../platform/ps5/ps5_fec_cpu.h"
@@ -129,10 +130,7 @@ static_assert(PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION == 0 ||
               PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION == 1);
 // Punktfunk's NVENC GameStream path reserves five reference frames. A four-deep
 // slot returns OVERSIZE_DECODE. Six slots also fit streams with fewer references.
-#ifndef PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB
-#define PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB 1
-#endif
-static_assert(PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB == 0 || PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB == 1);
+
 static_assert(FRAME_SLOT_COUNT >= moonlight::kMaxDecoderDepth + 4u &&
                   INPUT_SLOT_COUNT >= moonlight::kMaxDecoderDepth + 2u &&
                   SUBMISSION_QUEUE_CAPACITY > moonlight::kMaxDecoderDepth &&
@@ -623,7 +621,14 @@ typedef struct native_renderer_state
     uint32_t vsync_requested;
     int main_placement_result;
 
-    // Decode worker.
+    // Decode worker is the exclusive lifecycle/resource owner.
+    moonlight::video::Lifecycle lifecycle;
+    decoder_resources_t owned_resources;
+    int64_t direct_limit, owned_input_start, owned_frame_start;
+    size_t owned_input_bytes, owned_frame_bytes;
+    bool stream_aware;
+    bool recovery_pending;
+    uint64_t cached_sps_identity;
     void *decoder;
     uint32_t pipeline_depth; // effective; one after a fallback
     bool drain_enabled;
@@ -1546,6 +1551,13 @@ static int32_t create_stream_decoder(decoder_resources_t *resources,
     (void)lan_http_report_text(notification.message);
     if (result != 0)
         return result;
+    // Bound API-reported workspaces before alignment/multiplication. This is a
+    // resource policy, not a claim about native hardware DPB limits.
+    constexpr uint64_t workspace_limit = UINT64_C(1024) * 1024 * 1024;
+    if (!memory->cpu_size || !memory->gpu_size || !memory->max_frame_size ||
+        memory->cpu_size > workspace_limit || memory->gpu_size > workspace_limit ||
+        memory->cpu_gpu_size > workspace_limit || memory->max_frame_size > 64u * 1024u * 1024u)
+        return -33;
 
     resources->cpu_mapping_size = align_16k((size_t)memory->cpu_size);
     result = sceKernelAvailableFlexibleMemorySize(&flexible_available);
@@ -1753,6 +1765,12 @@ static int32_t settle_decoder_call(native_renderer_state_t *state, int offered,
         if (submission.trace)
             submission.trace->ready_us = elapsed;
         ++state->decoded;
+        state->lifecycle.corruptions = 0;
+        if (state->recovery_pending)
+        {
+            ++state->lifecycle.successes;
+            state->recovery_pending = false;
+        }
         state->decoded_rate.update(completed_us, state->decoded);
         if (++state->clean_outputs >= PIPELINE_CLEAN_OUTPUTS)
             state->pipeline_faults = 0;
@@ -1777,6 +1795,192 @@ static int32_t settle_decoder_call(native_renderer_state_t *state, int offered,
     return held > state->submission_count ? -21 : 0;
 }
 
+static void *video_present_thread(void *context);
+
+static void lifecycle_failure(native_renderer_state_t *state, moonlight::video::Error reason,
+                              int32_t code)
+{
+    state->lifecycle.fail(reason);
+    state->last_result = code;
+    state->running = 0;
+    char line[192];
+    snprintf(line, sizeof(line), "Native decoder failed: reason=%u code=%08x generation=%u",
+             unsigned(reason), uint32_t(code), state->lifecycle.generation);
+    (void)lan_http_report_text(line);
+    fail_stream(code);
+}
+
+// Decode is serialized by its sole owner. Join presentation before invalidating
+// any borrowed frame/trace, then retire GPU reads before deleting native memory.
+static bool retire_stream_decoder(native_renderer_state_t *state)
+{
+    if (state->present_started)
+    {
+        pthread_mutex_lock(&state->lock);
+        state->stop_presenting = true;
+        pthread_cond_broadcast(&state->wake);
+        pthread_mutex_unlock(&state->lock);
+        (void)pthread_join(state->present_thread, nullptr);
+        state->present_started = false;
+    }
+    const int idle = native_agc_finish_frame();
+    if (idle != 0) { lifecycle_failure(state, moonlight::video::Error::Presentation, idle); return false; }
+    if (state->decoder)
+    {
+        const int deleted = sceVideodec2DeleteDecoder(state->decoder);
+        if (deleted != 0) { lifecycle_failure(state, moonlight::video::Error::Reset, deleted); return false; }
+        state->decoder = nullptr;
+    }
+    abandon_decoder_pictures(state);
+    pthread_mutex_lock(&state->lock);
+    stream_ready_frame_t discarded{};
+    while (state->mailbox.take(&discarded))
+    {
+        if (discarded.trace) discarded.trace->outcome = 3;
+        ++state->not_displayed;
+    }
+    state->frames = {};
+    state->source_clock = {};
+    pthread_mutex_unlock(&state->lock);
+    release_direct(state->frame_memory, state->owned_frame_start, state->owned_frame_bytes);
+    release_direct(state->input_memory, state->owned_input_start, state->owned_input_bytes);
+    state->frame_memory = state->input_memory = nullptr;
+    state->owned_frame_start = state->owned_input_start = -1;
+    release_decoder_resources(&state->owned_resources);
+    return true;
+}
+
+static bool configure_stream_decoder(native_renderer_state_t *state,
+                                     const moonlight::video::Requirements &requirements,
+                                     moonlight::video::Plan plan)
+{
+    using namespace moonlight::video;
+    const uint64_t started = monotonic_us();
+    const bool replacement = state->decoder != nullptr;
+    const bool recovering = state->lifecycle.state == State::Recovering;
+    state->recovery_pending = recovering;
+    state->lifecycle.state = recovering ? State::Recovering : replacement ? State::Reconfiguring : State::Configuring;
+    if (replacement && !retire_stream_decoder(state)) return false;
+    if (!state->running) return false;
+    auto config = state->decoder_config;
+    config.max_width = requirements.width;
+    config.max_height = requirements.height;
+    config.max_level = requirements.level;
+    config.max_dpb_frames = plan.dpb;
+    // The native profile is an API enum, not an SPS profile_idc.
+    int32_t result = -1;
+    for (uint32_t depth = plan.depth; depth && !state->owned_resources.decoder && state->running; --depth)
+        for (unsigned attempt = 0; attempt < 2 && !state->owned_resources.decoder && state->running; ++attempt)
+        {
+            const uint64_t affinity = attempt ? moonlight::kClassicDecoderCpuMask : state->requested_cpu_mask;
+            if (attempt && affinity == state->requested_cpu_mask) continue;
+            config.pipeline_depth = depth;
+            config.cpu_affinity = affinity;
+            ++state->create_attempts;
+            result = create_stream_decoder(&state->owned_resources, &config, state->direct_limit);
+            if (result != 0) release_decoder_resources(&state->owned_resources);
+        }
+    if (!state->owned_resources.decoder)
+    {
+        if (state->running) lifecycle_failure(state, Error::Allocation, result);
+        return false;
+    }
+    state->decoder = state->owned_resources.decoder;
+    state->decoder_config = config;
+    state->decoder_memory = state->owned_resources.memory;
+    state->pipeline_depth = config.pipeline_depth;
+    state->decoder_cpu_mask = config.cpu_affinity;
+    state->decoder_cores = __builtin_popcountll(config.cpu_affinity) / 2;
+    state->drain_enabled = config.pipeline_depth > 1;
+    state->frame_size = align_16k(size_t(state->decoder_memory.max_frame_size));
+    state->owned_input_bytes = state->input_size * INPUT_SLOT_COUNT;
+    state->owned_frame_bytes = state->frame_size * FRAME_SLOT_COUNT;
+    if (!state->running) return false;
+    result = allocate_direct(state->owned_input_bytes, 0x32, state->direct_limit,
+                             &state->owned_input_start, &state->input_memory);
+    if (!result && state->running)
+        result = allocate_direct(state->owned_frame_bytes, 0x32, state->direct_limit,
+                                 &state->owned_frame_start, &state->frame_memory);
+    if (!result && state->running) result = sceVideodec2Reset(state->decoder);
+    if (!state->running) return false;
+    if (result != 0) { lifecycle_failure(state, Error::Allocation, result); return false; }
+    state->decoder_needs_reset = false;
+    state->decoder_lost = false;
+    state->pipeline_faults = 0;
+    state->clean_outputs = 0;
+    plan.depth = config.pipeline_depth;
+    state->lifecycle.configured(requirements, plan, monotonic_us(), monotonic_us() - started);
+    pthread_mutex_lock(&state->lock);
+    state->stop_presenting = false;
+    pthread_mutex_unlock(&state->lock);
+    if (!state->present_started)
+    {
+        result = pthread_create(&state->present_thread, nullptr, video_present_thread, state);
+        state->present_started = result == 0;
+        if (result != 0) { lifecycle_failure(state, Error::Presentation, result); return false; }
+    }
+    char line[256];
+    snprintf(line, sizeof(line), "Native decoder ready: generation=%u coded=%ux%u profile=%u level=%u stream_dpb=%u standard_dpb=%u capacity=%u depth=%u elapsed_us=%llu",
+             state->lifecycle.generation, requirements.width, requirements.height, requirements.profile,
+             requirements.level, requirements.buffering, requirements.standard_dpb, plan.dpb, plan.depth,
+             (unsigned long long)(monotonic_us() - started));
+    (void)lan_http_report_text(line);
+    return true;
+}
+
+static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT unit)
+{
+    using namespace moonlight::video;
+    const Codec codec = state->mode->codec_type == 1 ? Codec::H264 : Codec::Hevc;
+    unsigned fragments = 0;
+    for (auto *entry = unit->bufferList; entry; entry = entry->next)
+    {
+        if (++fragments > 1024) { lifecycle_failure(state, Error::Parameters, -30); return false; }
+        if (entry->bufferType != BUFFER_TYPE_SPS) continue;
+        if (entry->length <= 0 || entry->length > 16390) { lifecycle_failure(state, Error::Parameters, -30); return false; }
+        const auto hash = identity(reinterpret_cast<const uint8_t *>(entry->data), entry->length);
+        if (hash == state->cached_sps_identity && state->decoder) continue;
+        Requirements r{};
+        const auto parsed = parse_sps(codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length, r);
+        if (parsed != ParseResult::Valid) { lifecycle_failure(state, Error::Parameters, -30); return false; }
+        Limits limits{};
+        limits.width = state->mode->max_width; limits.height = state->mode->max_height;
+        limits.level_h264 = decoder_max_level(state->mode, state->stream_fps);
+        limits.level_hevc = limits.level_h264;
+        limits.bit_depth = state->mode->hdr ? 10 : 8; limits.depth = state->requested_depth;
+        const auto selected = plan(r, limits);
+        if (!selected.supported || r.visible_width != state->mode->visible_width || r.visible_height != state->mode->visible_height)
+        { lifecycle_failure(state, Error::Unsupported, -31); return false; }
+        if (state->lifecycle.changed(r) || !state->decoder)
+        {
+            if (unit->frameType != FRAME_TYPE_IDR)
+            { lifecycle_failure(state, Error::Parameters, -30); return false; }
+            if (!configure_stream_decoder(state, r, selected)) return false;
+        }
+        state->cached_sps_identity = hash;
+    }
+    if (!state->decoder)
+    {
+        if (state->lifecycle.expired(monotonic_us())) lifecycle_failure(state, Error::Parameters, -32);
+        return false;
+    }
+    return true;
+}
+
+static bool recover_stream_capacity(native_renderer_state_t *state)
+{
+    using namespace moonlight::video;
+    auto &l = state->lifecycle;
+    const uint32_t alternative = l.stream.standard_dpb + 1;
+    if (!l.stream.verified || alternative <= uint32_t(state->decoder_config.max_dpb_frames) ||
+        alternative > 17 || !l.recover(Error::Capacity))
+    { lifecycle_failure(state, Error::Capacity, int32_t(0x811d0302u)); return false; }
+    auto next = l.effective; next.dpb = alternative;
+    if (!configure_stream_decoder(state, l.stream, next)) return false;
+    state->await_keyframe = true;
+    return true;
+}
+
 static int decode_refused(native_renderer_state_t *state, int32_t code,
                           moonlight::FrameTrace::Sample *trace)
 {
@@ -1785,6 +1989,16 @@ static int decode_refused(native_renderer_state_t *state, int32_t code,
     ++state->decode_errors;
     if (trace)
         trace->outcome = 3;
+    if (state->stream_aware)
+    {
+        if (uint32_t(code) == 0x811d0302u)
+            return recover_stream_capacity(state) ? DR_NEED_IDR : DR_OK;
+        if (!state->lifecycle.corruption())
+        {
+            lifecycle_failure(state, moonlight::video::Error::Exhausted, code);
+            return DR_OK;
+        }
+    }
     if (state->pipeline_depth > 1u)
     {
         ++state->pipeline_faults;
@@ -1822,6 +2036,8 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
         return DR_NEED_IDR;
     if (!state->running)
         return DR_OK;
+    if (state->stream_aware && !prepare_stream_decoder(state, decode_unit))
+        return state->running ? DR_NEED_IDR : DR_OK;
     if (state->await_keyframe)
     {
         // The decoder was rebuilt outside a frame: resume only on a keyframe.
@@ -1833,7 +2049,11 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     {
         const int reset_result = sceVideodec2Reset(state->decoder);
         if (reset_result != 0)
+        {
+            if (state->stream_aware)
+            { lifecycle_failure(state, moonlight::video::Error::Reset, reset_result); return DR_OK; }
             return decode_refused(state, reset_result, nullptr);
+        }
         abandon_decoder_pictures(state);
     }
     // Every error exit requires reset before consuming the requested IDR.
@@ -2084,6 +2304,19 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
 // the same memory and resume from a keyframe.
 static void fallback_to_classic_decoder(native_renderer_state_t *state, int32_t cause)
 {
+    if (state->stream_aware)
+    {
+        if (!state->lifecycle.recover(moonlight::video::Error::Reset))
+        { lifecycle_failure(state, moonlight::video::Error::Exhausted, cause); return; }
+        auto next = state->lifecycle.effective;
+        next.depth = 1;
+        if (configure_stream_decoder(state, state->lifecycle.stream, next))
+        {
+            state->await_keyframe = true;
+            ++state->decoder_recreations;
+        }
+        return;
+    }
     videodec2_decoder_config_t config = state->decoder_config;
     const uint32_t previous_depth = state->pipeline_depth;
     void *decoder = nullptr;
@@ -2737,8 +2970,9 @@ static void moonlight_renderer_start(void)
     renderer_sync_init(state);
     state->stop_presenting = false;
     state->running = 1;
-    result = pthread_create(&state->present_thread, NULL, video_present_thread, state);
-    state->present_started = result == 0;
+    if (state->stream_aware) state->lifecycle.wait(monotonic_us());
+    result = state->stream_aware ? 0 : pthread_create(&state->present_thread, NULL, video_present_thread, state);
+    state->present_started = !state->stream_aware && result == 0;
     if (result == 0)
     {
         result = pthread_create(&state->decode_thread, NULL, video_decode_thread, state);
@@ -4146,7 +4380,6 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         return -5;
     }
     videodec2_decoder_config_t config;
-    decoder_resources_t resources = make_decoder_resources();
     ps5_thread_placement_t placement = {};
     videodec2_compute_config_t compute_config = {};
     videodec2_compute_memory_t compute_memory = {};
@@ -4158,17 +4391,9 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     gs_server_t gs_server;
     STREAM_CONFIGURATION stream_config;
     void *compute_queue = NULL;
-    void *input_memory = NULL;
-    void *frame_memory = NULL;
     int64_t compute_start = -1;
-    int64_t input_start = -1;
-    int64_t frame_start = -1;
     int64_t direct_memory_limit;
     size_t compute_size = 0;
-    size_t input_size = 0;
-    size_t frame_size = 0;
-    size_t input_pool_size = 0;
-    size_t frame_pool_size = 0;
     int32_t result;
     int32_t present_cleanup_result = -1;
     int32_t delete_result = -1;
@@ -4422,8 +4647,8 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     config.max_level = decoder_max_level(mode, stream_fps);
     config.max_width = (int32_t)mode->max_width;
     config.max_height = (int32_t)mode->max_height;
-    config.max_dpb_frames = moonlight::decoder_dpb_frames(
-        PROSPEROLIGHT_EXPERIMENTAL_HOST_DPB, PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION);
+    // DPB, dimensions and level are populated from the first validated SPS.
+    config.max_dpb_frames = 0;
     config.compute_queue = (uint64_t)compute_queue;
     config.cpu_priority = DECODER_CPU_PRIORITY;
     config.optimize_progressive = 1;
@@ -4434,70 +4659,22 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     renderer.process_cpu_mask = moonlight::kTitleCpuMask;
     renderer.requested_cpu_mask =
         moonlight::decoder_cpu_mask(requested_cores, renderer.process_cpu_mask);
-    // Videodec2 accepts or refuses a pipeline depth and a worker mask only at
-    // creation: walk towards the 01.000.062 configuration until one is taken.
-    result = -1;
-    for (uint32_t depth = requested_depth; depth >= 1u && !resources.decoder; --depth)
-        for (unsigned attempt = 0; attempt < 2u && !resources.decoder; ++attempt)
-        {
-            const uint64_t affinity =
-                attempt == 0 ? renderer.requested_cpu_mask : moonlight::kClassicDecoderCpuMask;
-            if (attempt != 0 && affinity == renderer.requested_cpu_mask)
-                continue;
-            config.pipeline_depth = depth;
-            config.cpu_affinity = affinity;
-            ++renderer.create_attempts;
-            result = create_stream_decoder(&resources, &config, direct_memory_limit);
-            if (result != 0)
-                release_decoder_resources(&resources);
-        }
-    if (!resources.decoder)
-    {
-        if (result == 0)
-            result = -1;
-        goto done;
-    }
-    renderer.decoder = resources.decoder;
+    config.pipeline_depth = requested_depth;
+    config.cpu_affinity = renderer.requested_cpu_mask;
     renderer.decoder_config = config;
-    renderer.decoder_memory = resources.memory;
-    renderer.pipeline_depth = config.pipeline_depth;
-    renderer.drain_enabled = config.pipeline_depth > 1u;
-    renderer.decoder_cpu_mask = config.cpu_affinity;
-    renderer.decoder_cores = (uint32_t)__builtin_popcountll(config.cpu_affinity) / 2u;
-    renderer.layout =
-        moonlight::plan_thread_layout(renderer.process_cpu_mask, renderer.decoder_cpu_mask);
-
-    input_size = INPUT_SLOT_BYTES;
-    frame_size = align_16k((size_t)resources.memory.max_frame_size);
-    input_pool_size = input_size * INPUT_SLOT_COUNT;
-    frame_pool_size = frame_size * FRAME_SLOT_COUNT;
-    result =
-        allocate_direct(input_pool_size, 0x32, direct_memory_limit, &input_start, &input_memory);
-    if (result == 0)
-        result = allocate_direct(frame_pool_size, 0x32, direct_memory_limit, &frame_start,
-                                 &frame_memory);
-    snprintf(notification.message, sizeof(notification.message),
-             "Native zero-copy stage 3: alloc=%08x input_pool=%p/%zx slots=%u/%zx "
-             "frame_pool=%p/%zx slots=%u/%zx",
-             (uint32_t)result, input_memory, input_pool_size, INPUT_SLOT_COUNT, input_size,
-             frame_memory, frame_pool_size, FRAME_SLOT_COUNT, frame_size);
-    (void)lan_http_report_text(notification.message);
-    if (result != 0)
-        goto done;
-
-    result = sceVideodec2Reset(renderer.decoder);
-    snprintf(notification.message, sizeof(notification.message),
-             "Native compute zero-copy stage 5: reset=%08x direct_maps=skipped", (uint32_t)result);
-    (void)lan_http_report_text(notification.message);
-    if (result != 0)
-        goto done;
-
+    renderer.pipeline_depth = requested_depth;
+    renderer.decoder_cpu_mask = renderer.requested_cpu_mask;
+    renderer.decoder_cores = requested_cores;
+    renderer.layout = moonlight::plan_thread_layout(renderer.process_cpu_mask,
+                                                   renderer.requested_cpu_mask);
     renderer.mode = mode;
     renderer.stream_fps = stream_fps;
-    renderer.input_memory = input_memory;
-    renderer.frame_memory = frame_memory;
-    renderer.input_size = input_size;
-    renderer.frame_size = frame_size;
+    renderer.input_size = INPUT_SLOT_BYTES;
+    renderer.owned_resources = make_decoder_resources();
+    renderer.owned_input_start = renderer.owned_frame_start = -1;
+    renderer.direct_limit = direct_memory_limit;
+    renderer.stream_aware = true;
+    renderer.lifecycle.wait(0);
     renderer.slices_requested = stream_slices;
     renderer.vsync_requested = vsync_enabled;
     renderer_sync_init(&renderer);
@@ -5110,9 +5287,10 @@ done:
     if (source_idle_result == 0 && delete_result == 0)
     {
         connecting_screen_release();
-        release_direct(frame_memory, frame_start, frame_pool_size);
-        release_direct(input_memory, input_start, input_pool_size);
-        release_decoder_resources(&resources);
+        release_direct(renderer.frame_memory, renderer.owned_frame_start, renderer.owned_frame_bytes);
+        release_direct(renderer.input_memory, renderer.owned_input_start, renderer.owned_input_bytes);
+        release_decoder_resources(&renderer.owned_resources);
+        renderer.lifecycle.state = moonlight::video::State::Stopped;
         if (compute_queue)
             release_compute_result = sceVideodec2ReleaseComputeQueue(compute_queue);
         release_direct(compute_memory.cpu_gpu, compute_start, compute_size);

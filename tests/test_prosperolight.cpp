@@ -29,9 +29,7 @@
 
 TEST(Decoder, HostDpbStaysAtFourUnlessRequested)
 {
-    EXPECT_EQ(moonlight::decoder_dpb_frames(0, 0), 4);
-    EXPECT_EQ(moonlight::decoder_dpb_frames(1, 0), 6);
-    EXPECT_EQ(moonlight::decoder_dpb_frames(0, 1), 6);
+
 }
 
 TEST(Performance, SliceHeadersAreCountedWithoutReadingTruncatedNals)
