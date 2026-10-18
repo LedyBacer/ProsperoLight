@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/blackbearreloaded/ProsperoLight/releases"><img src="https://img.shields.io/github/v/release/blackbearreloaded/ProsperoLight?include_prereleases&label=release" alt="Latest release"></a>
+  <a href="https://github.com/LedyBacer/ProsperoLight/releases"><img src="https://img.shields.io/github/v/release/LedyBacer/ProsperoLight?include_prereleases&label=release" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/platform-PS5%20homebrew-003791" alt="PS5 homebrew">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
 </br>
@@ -21,7 +21,7 @@
   <img src="docs/images/prosperolight.png" alt="ProsperoLight launcher showing a paired PC">
 </p>
 
-Features and fixes in the `main` branch may not be available in the [latest published release](https://github.com/blackbearreloaded/ProsperoLight/releases). Check the [changelog](CHANGELOG.md) and the release notes before updating.
+Features and fixes in the `main` branch may not be available in the [latest published release](https://github.com/LedyBacer/ProsperoLight/releases). Check the [changelog](CHANGELOG.md) and the release notes before updating.
 
 ## Features
 
@@ -39,7 +39,7 @@ Features and fixes in the `main` branch may not be available in the [latest publ
 ## Get started
 
 1. **Prepare your PS5.** You need a console with a compatible homebrew environment and title loader already configured. ProsperoLight does not install or provide an exploit.
-2. **Install ProsperoLight.** Get `PPSA99002.zip` from [Releases](https://github.com/blackbearreloaded/ProsperoLight/releases), extract it, and copy the complete `PPSA99002/` folder to `/data/homebrew/`. Close the app before replacing an older installation; refresh your homebrew loader's title registration.
+2. **Install ProsperoLight.** Get `PPSA99002.zip` from [Releases](https://github.com/LedyBacer/ProsperoLight/releases), extract it, and copy the complete `PPSA99002/` folder to `/data/homebrew/`. Close the app before replacing an older installation; refresh your homebrew loader's title registration.
 3. **Start Sunshine** (or a compatible host) on your PC. A wired local network is strongly recommended.
 4. **Pair and play.** Open ProsperoLight, select a discovered PC or add its address, and enter the pairing PIN in your host's web interface. Open **Games** and choose an app or Desktop.
 
@@ -102,7 +102,7 @@ The build produces a complete `dist/PPSA99002/` app directory. For the safe FTP 
 
 ## Support and contributions
 
-Found a bug? [Open an issue](https://github.com/blackbearreloaded/ProsperoLight/issues) with your PS5 firmware, host version, codec/settings and reproduction steps. For stream problems, enable **Diagnostic logs** and attach relevant logs after reviewing [Troubleshooting](docs/TROUBLESHOOTING.md). Logs can contain local host addresses and app names; review them before sharing.
+Found a bug? [Open an issue](https://github.com/LedyBacer/ProsperoLight/issues) with your PS5 firmware, host version, codec/settings and reproduction steps. For stream problems, enable **Diagnostic logs** and attach relevant logs after reviewing [Troubleshooting](docs/TROUBLESHOOTING.md). Logs can contain local host addresses and app names; review them before sharing.
 
 Contributions and testing across different TVs, firmwares and network setups are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -112,7 +112,13 @@ Contributions and testing across different TVs, firmwares and network setups are
 
 ## Credits
 
-Thanks to ProsperoLight contributors: Nikita Dybov, KrisEnigma.
+**Original creator and maintainer:** [BlackBearReloaded](https://github.com/blackbearreloaded).
+
+**Current maintainer (since October 2026):** [LedyBacer](https://github.com/LedyBacer).
+
+Special thanks to BlackBearReloaded for creating ProsperoLight, building its native PS5 foundation, and entrusting the project's continued development to a new maintainer. The original author's contributions remain credited throughout the repository.
+
+Thanks to ProsperoLight contributors, including Nikita Dybov, KrisEnigma, and everyone who has contributed code, testing, and feedback.
 
 Built with the [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk) by John Törnblom (ps5-payload-dev).
 Third-party components, authors and licenses are listed in
@@ -120,7 +126,7 @@ Third-party components, authors and licenses are listed in
 
 ## License
 
-Copyright © 2026 BlackBearReloaded. Licensed under GPL-3.0-or-later; see [LICENSE](LICENSE). Third-party components keep their own licenses. Binary releases are built from the tagged source in this repository.
+Copyright © 2026 BlackBearReloaded and respective contributors. Licensed under GPL-3.0-or-later; see [LICENSE](LICENSE). The repository transfer does not alter existing copyright or license notices. Third-party components keep their own licenses. Binary releases are built from the tagged source in this repository.
 
 ## Disclaimer
 

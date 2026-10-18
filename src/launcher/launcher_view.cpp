@@ -1381,7 +1381,7 @@ void View::update(const InputFrame &input, float dt, ui::Feedback &feedback)
         }
         if (!blocks.empty() && update_offer_.notes_truncated)
             blocks.push_back(ui::TextBlock::paragraph(
-                i18n::tr("The rest is on the app's page on homebrew.page.")));
+                i18n::tr("The rest is on the app's page on prosperostore.net.")));
         update_notes_.set_content(std::move(blocks));
         open_update_offer(feedback, false);
     }

@@ -97,7 +97,7 @@ APP_IMPORT_STUBS ?= .deps/ps5-opengl/current/lib/libSceAgc.so build/stubs/libSce
 # Empty selects the pinned ps5-opengl release (tools/fetch-opengl-sdk.sh).
 PS5_OPENGL_PREFIX ?=
 APP_RUNTIME_MODULES ?=
-# The update check asks homebrew.page through libcurl (third_party/update-check).
+# The update check asks prosperostore.net through libcurl (third_party/update-check).
 PACBREW_PACKAGES ?= libcurl libpng libturbojpeg libwebp
 PACBREW_INCLUDE_PATHS ?=
 PACBREW_STATIC_ARCHIVES ?=

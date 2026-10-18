@@ -306,7 +306,7 @@ void CaptureConnecting(gfx::Renderer &renderer, View &view, Frame &frame, Select
 }
 
 // Updates (third_party/update-check). Once per launch the worker asks the
-// homebrew.page catalog whether a newer ProsperoLight is listed: the kit
+// prosperostore.net catalog whether a newer ProsperoLight is listed: the kit
 // verifies the catalog's signature and the hashes before it believes the
 // answer. When the player says so, the release ZIP is downloaded from GitHub
 // and streamed to the self-update helper (self-updater.elf in the app's

@@ -121,7 +121,7 @@ passed on `260c0ed`; controller/performance guards and the native profile builds
 passed after the pacing fix on `7f02cea`. The standalone native-worker tests and
 all fifteen virtual profile/scenario combinations passed. The loader tests
 verify legacy GET, definite-405 POST negotiation and no retry after uncertain
-errors. [CI for code commit ed5a0ab passed](https://github.com/blackbearreloaded/ProsperoLight/actions/runs/38869998407).
+errors. [CI for code commit ed5a0ab passed](https://github.com/LedyBacer/ProsperoLight/actions/runs/38869998407).
 The ARM macOS aggregate performance target cannot compile existing x86 intrinsics;
 its applicable Linux target passed. Hardware acceptance remains separate.
 
@@ -266,7 +266,7 @@ software checks, not physical acceptance of a driver stall or a motor waveform.
 
 The earlier three-profile hardware comparison above tested `7f02cea`, before
 these correctness fixes; it must not be relabelled as final-binary validation.
-See [PR #57's final validation record](https://github.com/blackbearreloaded/ProsperoLight/pull/57)
+See [PR #57's final validation record](https://github.com/LedyBacer/ProsperoLight/pull/57)
 for the final full checks, production build, pushed-commit CI and subsequent smoke
 identities/results. A source-generated silent interval is not proof of exact-zero
 PCM at PS5 ingress unless received-zero counters establish that independently.

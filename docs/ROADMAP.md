@@ -1,6 +1,6 @@
 # Roadmap and ideas
 
-[← Back to README](../README.md) · [Open issues](https://github.com/blackbearreloaded/ProsperoLight/issues) · [Changelog](../CHANGELOG.md)
+[← Back to README](../README.md) · [Open issues](https://github.com/LedyBacer/ProsperoLight/issues) · [Changelog](../CHANGELOG.md)
 
 ProsperoLight aims to make PC game streaming feel natural on a PS5. The ideas below are **potential directions, not announced features, ranked commitments or delivery dates**. Implemented features belong in the README and changelog; active tasks and design discussion belong in GitHub issues.
 
@@ -29,4 +29,4 @@ ProsperoLight aims to make PC game streaming feel natural on a PS5. The ideas be
 
 ## Contribute an idea
 
-Before requesting a feature, check [existing issues](https://github.com/blackbearreloaded/ProsperoLight/issues). Include the user problem, desired behavior, firmware, host type, and any relevant hardware constraints. Hardware testing is especially valuable for display, VRR and controller work.
+Before requesting a feature, check [existing issues](https://github.com/LedyBacer/ProsperoLight/issues). Include the user problem, desired behavior, firmware, host type, and any relevant hardware constraints. Hardware testing is especially valuable for display, VRR and controller work.

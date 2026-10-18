@@ -15,7 +15,7 @@ ProsperoLight streams applications and the desktop from a compatible Sunshine ho
 
 ### Install from a published release
 
-1. Download the appropriate **`PPSA99002.zip`** and its checksum file from [GitHub Releases](https://github.com/blackbearreloaded/ProsperoLight/releases). Read the release notes: the `main` branch can contain features not yet shipped in a release.
+1. Download the appropriate **`PPSA99002.zip`** and its checksum file from [GitHub Releases](https://github.com/LedyBacer/ProsperoLight/releases). Read the release notes: the `main` branch can contain features not yet shipped in a release.
 2. Verify the ZIP against the accompanying `SHA256SUMS`, then extract it on your PC.
 3. Fully close ProsperoLight on your console. Upload the **entire** `PPSA99002/` directory to `/data/homebrew/`, resulting in `/data/homebrew/PPSA99002/eboot.bin`. Do not upload only `eboot.bin` or the ZIP itself.
 4. Refresh or restart your title loader (for example, ShadowMountPlus), or restart the console. Launch ProsperoLight and check its version in the launcher.
@@ -26,7 +26,9 @@ Use the published app-folder ZIP. **Do not leave an old `PPSA99002.exfat` or `PP
 
 ### Update from inside the app
 
-A compatible folder installation can offer **Update now** when an updated release is listed by [homebrew.page](https://homebrew.page/ps5). The app downloads and verifies the release, then closes while an update helper installs it. The update may not be offered for unlisted, image-based or development builds. Use the manual method above when needed.
+A compatible folder installation can offer **Update now** when an updated release is listed by [prosperostore.net](https://prosperostore.net/). The app downloads and verifies the release, then closes while an update helper installs it. The update may not be offered for unlisted, image-based or development builds. Use the manual method above when needed.
+
+> **Note for older installs:** Builds that still query `homebrew.page` do not follow HTTP redirects. After the catalog moved to prosperostore.net, those builds may not see in-app updates and should be updated manually from [GitHub Releases](https://github.com/LedyBacer/ProsperoLight/releases).
 
 Settings and pairing data are normally stored outside the application folder and survive a regular update.
 
@@ -104,7 +106,7 @@ Settings may only apply when launching or resuming a host app; if an existing se
 
 ## Diagnostics and saved data
 
-If a problem is reproducible, enable **Settings → Diagnostics → Diagnostic logs**, run the failing scenario, and then stop the stream normally. Include firmware, host/version, codec, resolution, FPS, pacing mode, and whether the TV reported VRR. Fetch the relevant trace files over your existing file-access method before [opening an issue](https://github.com/blackbearreloaded/ProsperoLight/issues).
+If a problem is reproducible, enable **Settings → Diagnostics → Diagnostic logs**, run the failing scenario, and then stop the stream normally. Include firmware, host/version, codec, resolution, FPS, pacing mode, and whether the TV reported VRR. Fetch the relevant trace files over your existing file-access method before [opening an issue](https://github.com/LedyBacer/ProsperoLight/issues).
 
 With filesystem access, data is stored under `/data/prosperolight/`:
 

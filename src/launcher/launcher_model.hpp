@@ -79,7 +79,7 @@ enum class Busy
 // and settings, Sunshine's state, pairing, and the requests that reach the
 // network. Requests run one at a time on a worker thread, so the screen keeps
 // moving while a PC is slow to answer; Poll() applies what they return.
-// A newer release the homebrew.page catalog lists
+// A newer release the prosperostore.net catalog lists
 // (third_party/update-check/self_update.h).
 struct UpdateOffer
 {

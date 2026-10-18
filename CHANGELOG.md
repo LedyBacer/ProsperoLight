@@ -262,7 +262,7 @@ The PS5 decoder, not the network, limits the usable bitrate, and this beta
 does not raise that limit. Measured at 4K HEVC: smooth up to 80 Mbps at
 120 FPS and about 115 Mbps at 90 or 60 FPS; above 100 Mbps at 120 FPS and
 145 Mbps at 90 FPS the stream freezes about once a second. The table and chart
-are under [Bitrate limits](https://github.com/blackbearreloaded/ProsperoLight#bitrate-limits).
+are under [Bitrate limits](https://github.com/LedyBacer/ProsperoLight#bitrate-limits).
 
 ### What was tested
 
@@ -274,7 +274,7 @@ want to help test it.
 
 ### Please report your results
 
-Use [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues) and include:
+Use [GitHub issues](https://github.com/LedyBacer/ProsperoLight/issues) and include:
 
 - PS5 firmware; Sunshine/Vibepollo version; host GPU and driver.
 - Codec/HDR, resolution/FPS, bitrate, stereo/5.1, Ethernet or Wi-Fi.
@@ -328,7 +328,7 @@ Higher bitrate is not higher FPS, and sustained 120 FPS is not guaranteed.
 
 ### Please report your results
 
-Use [GitHub issues](https://github.com/blackbearreloaded/ProsperoLight/issues) and include:
+Use [GitHub issues](https://github.com/LedyBacer/ProsperoLight/issues) and include:
 
 - PS5 firmware; Sunshine/Vibepollo version; host GPU and driver.
 - Codec/HDR, resolution/FPS, bitrate, stereo/5.1, Ethernet or Wi-Fi.
@@ -392,7 +392,7 @@ setup. CPU-observed frame age increased from 12.560 to 16.854 ms; overlap change
 when completion is observed, and the baseline excludes skipped pictures from
 that metric. It cannot establish an end-to-end latency change.
 
-See the [Round 2 measurements and methodology](https://github.com/blackbearreloaded/ProsperoLight/blob/01.000.060/docs/PERFORMANCE_ROUND_2.md#release-checkpoint--01000060).
+See the [Round 2 measurements and methodology](https://github.com/LedyBacer/ProsperoLight/blob/01.000.060/docs/PERFORMANCE_ROUND_2.md#release-checkpoint--01000060).
 Further performance work is deferred to the next version: FEC SIMD, Opus SIMD,
 audio catch-up, and shorter flip polling are **not enabled** in this release.
 
