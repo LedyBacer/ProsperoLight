@@ -936,7 +936,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
                                      const moonlight::TimingHistogram &input_intervals,
                                      const moonlight_stream_options_t *options, int result)
 {
-    if (!prosperolight_logs_enabled() || !state.mode || !options || !state.access_units)
+    if (!prosperolight_logs_enabled() || !state.mode || !options)
         return;
     static char report[16384];
     const auto &agc = native_agc_performance();
@@ -3058,6 +3058,8 @@ static void join_video_workers(native_renderer_state_t *state)
         (void)pthread_join(state->present_thread, NULL);
         state->present_started = false;
     }
+    if (state->stream_aware && state->lifecycle.state != moonlight::video::State::Failed)
+        state->lifecycle.state = moonlight::video::State::Stopping;
 }
 
 static void moonlight_renderer_start(void);

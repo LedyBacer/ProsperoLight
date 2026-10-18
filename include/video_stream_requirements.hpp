@@ -417,7 +417,7 @@ inline void hevc_hrd(Bits &b, unsigned layers)
                 }
     }
 }
-inline void hevc_vui(Bits &b, unsigned layers)
+inline void hevc_vui(Bits &b, unsigned layers, Requirements &r)
 {
     if (b.read(1))
     {
@@ -437,7 +437,10 @@ inline void hevc_vui(Bits &b, unsigned layers)
         b.ue(5);
         b.ue(5);
     }
-    b.skip(3);
+    b.skip(1);
+    if (b.read(1))
+        r.progressive = false;
+    b.skip(1);
     if (b.read(1))
     {
         b.ue();
@@ -463,7 +466,7 @@ inline void hevc_vui(Bits &b, unsigned layers)
         b.ue(16);
     }
 }
-inline void hevc_tail(Bits &b, unsigned layers, unsigned poc_bits)
+inline void hevc_tail(Bits &b, unsigned layers, unsigned poc_bits, Requirements &r)
 {
     b.ue(3);
     b.ue(3);
@@ -517,7 +520,7 @@ inline void hevc_tail(Bits &b, unsigned layers, unsigned poc_bits)
     }
     b.skip(2);
     if (b.read(1))
-        hevc_vui(b, layers);
+        hevc_vui(b, layers, r);
     if (b.read(1))
     {
         const auto range = b.read(1), multilayer = b.read(1), three_d = b.read(1),
@@ -585,16 +588,19 @@ inline ParseResult hevc_sps(const uint8_t *p, size_t n, Requirements &out)
         return ParseResult::Unsupported;
     const unsigned poc_bits = b.ue(12) + 4;
     const bool all = b.read(1);
+    unsigned previous_buffering = 0, previous_reorder = 0;
     for (unsigned i = all ? 0 : layers; i <= layers && b.ok; ++i)
     {
         const auto buffering = b.ue(15) + 1, reorder = b.ue(15);
         b.ue();
-        if (reorder >= buffering)
+        if (reorder >= buffering || buffering < previous_buffering || reorder < previous_reorder)
             return ParseResult::Invalid;
+        previous_buffering = buffering;
+        previous_reorder = reorder;
         r.buffering = std::max(r.buffering, buffering);
         r.reorder = std::max(r.reorder, reorder);
     }
-    hevc_tail(b, layers, poc_bits);
+    hevc_tail(b, layers, poc_bits, r);
     // HEVC A.4.2 MaxDpbSize; Main/Main10 use MaxDpbPicBuf=6.
     uint64_t max_luma = 0;
     switch (r.level)

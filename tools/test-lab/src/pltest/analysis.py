@@ -165,7 +165,7 @@ def _analyze_run(profile, report, directory):
         recovered = (lifecycle.get('valid') and faults > 0 and
                      performance.get('decoder_recovery_successes', 0) == faults and
                      performance.get('decoder_recovery_failures', 0) == 0 and
-                     performance.get('decoder_lifecycle_state') == 'ready')
+                     performance.get('decoder_lifecycle_state') in ('ready', 'stopping', 'stopped'))
         if recovered:
             issues.append('RECOVERED_DECODER_FAULT')
         if (faults and not recovered) or performance.get('present_errors', 0):
