@@ -1,0 +1,2195 @@
+{
+  "schema": "videodec2-validation-summary/1",
+  "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+  "runs": [
+    {
+      "case": "final-ab-baseline-1",
+      "run_id": "5b20a877-54f1-4142-b7fa-4136120feac2",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "b1b2c5d8cde17347419091b95c30fa95f22fedd0",
+      "build_label": "test-lab-videodec2-baseline-b1b2c5d",
+      "eboot_sha256": "6c86eb580a104bcec5ca666e8df658286074974723ae8f4ff5aace79ab224b83",
+      "codec": "hevc",
+      "resolution": "1080p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 6,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.089977,
+        "unique_presented_fps": 59.853817767956414,
+        "received_fps": 59.920285083634326,
+        "actual_mbps": 1.377562236089446,
+        "decode_call_us": {
+          "count": 1803,
+          "mean": 1712.6317249029396,
+          "median": 1708,
+          "p95": 1757,
+          "p99": 1784,
+          "max": 3035
+        },
+        "callback_to_ready_us": {
+          "count": 1803,
+          "mean": 1719.8374930671105,
+          "median": 1715,
+          "p95": 1765,
+          "p99": 1794,
+          "max": 3046
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1803,
+          "mean": 33050.63893510815,
+          "median": 33070,
+          "p95": 33365,
+          "p99": 33434,
+          "max": 33492
+        },
+        "frame_age_us": {
+          "count": 1803,
+          "mean": 33067.088740987245,
+          "median": 33086,
+          "p95": 33385,
+          "p99": 33450,
+          "max": 33506
+        },
+        "flip_interarrival_us": {
+          "count": 1800,
+          "mean": 16683.33722222222,
+          "median": 16683.0,
+          "p95": 16696,
+          "p99": 16708,
+          "max": 16750
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": false,
+        "reason": "legacy build has no lifecycle evidence"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "39e140a60b92dd220e81a53e9aa916d222e80d591c146e2bc908e1ee9321a0ed",
+      "export_sha256": "4026403baec6cc4d796470a9b6d0b3ddf5a3f559d2ed349b40a818b40d5dcfa0",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-ab-baseline-2",
+      "run_id": "c5835ce1-a627-4dac-99a3-863e29559221",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "b1b2c5d8cde17347419091b95c30fa95f22fedd0",
+      "build_label": "test-lab-videodec2-baseline-b1b2c5d",
+      "eboot_sha256": "6c86eb580a104bcec5ca666e8df658286074974723ae8f4ff5aace79ab224b83",
+      "codec": "hevc",
+      "resolution": "1080p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 6,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.086518,
+        "unique_presented_fps": 59.893936546595384,
+        "received_fps": 59.9604115039168,
+        "actual_mbps": 1.3817431448863573,
+        "decode_call_us": {
+          "count": 1804,
+          "mean": 1693.459534368071,
+          "median": 1687.0,
+          "p95": 1730,
+          "p99": 1757,
+          "max": 2979
+        },
+        "callback_to_ready_us": {
+          "count": 1804,
+          "mean": 1700.3348115299334,
+          "median": 1694.0,
+          "p95": 1737,
+          "p99": 1764,
+          "max": 2990
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1804,
+          "mean": 26465.139689578715,
+          "median": 26487.0,
+          "p95": 26793,
+          "p99": 26855,
+          "max": 26918
+        },
+        "frame_age_us": {
+          "count": 1804,
+          "mean": 26480.38802660754,
+          "median": 26502.0,
+          "p95": 26809,
+          "p99": 26870,
+          "max": 26934
+        },
+        "flip_interarrival_us": {
+          "count": 1801,
+          "mean": 16683.33425874514,
+          "median": 16683,
+          "p95": 16694,
+          "p99": 16706,
+          "max": 16714
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": false,
+        "reason": "legacy build has no lifecycle evidence"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "f91bcd49643be291850dcac7ca6f1da8528a35bcc83314a1f1a6e38debe60109",
+      "export_sha256": "69442f7c00ad1fff2087c1af0893b33cd616d7315dda5c5038749055e83448b6",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-ab-baseline-3",
+      "run_id": "8f71386a-b2b1-4e48-9622-66de21c9a52a",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "b1b2c5d8cde17347419091b95c30fa95f22fedd0",
+      "build_label": "test-lab-videodec2-baseline-b1b2c5d",
+      "eboot_sha256": "6c86eb580a104bcec5ca666e8df658286074974723ae8f4ff5aace79ab224b83",
+      "codec": "hevc",
+      "resolution": "1080p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 6,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.09158,
+        "unique_presented_fps": 59.88386119971101,
+        "received_fps": 59.917093087169235,
+        "actual_mbps": 1.3712699698719708,
+        "decode_call_us": {
+          "count": 1803,
+          "mean": 1696.3738214087632,
+          "median": 1691,
+          "p95": 1734,
+          "p99": 1755,
+          "max": 3044
+        },
+        "callback_to_ready_us": {
+          "count": 1803,
+          "mean": 1703.3560732113144,
+          "median": 1697,
+          "p95": 1741,
+          "p99": 1762,
+          "max": 3055
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1803,
+          "mean": 10450.30726566833,
+          "median": 10475,
+          "p95": 10754,
+          "p99": 10826,
+          "max": 11211
+        },
+        "frame_age_us": {
+          "count": 1803,
+          "mean": 10465.739323349972,
+          "median": 10490,
+          "p95": 10771,
+          "p99": 10842,
+          "max": 11226
+        },
+        "flip_interarrival_us": {
+          "count": 1801,
+          "mean": 16692.59744586341,
+          "median": 16683,
+          "p95": 16754,
+          "p99": 16999,
+          "max": 33366
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": false,
+        "reason": "legacy build has no lifecycle evidence"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "1ca9b05b92dcbe086df0426af984efe518c50101d0feb8dddf055177b2b5573d",
+      "export_sha256": "c0b92d0f688a290347b417c4e23b9249a0d2e4b73fe314097b5f65f403277f8a",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-ab-candidate-1",
+      "run_id": "34fefc83-6090-40d6-ab28-fd1089bf2839",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "hevc",
+      "resolution": "1080p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 3,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.085364,
+        "unique_presented_fps": 59.92947268312925,
+        "received_fps": 59.96271143669726,
+        "actual_mbps": 1.289957203110456,
+        "decode_call_us": {
+          "count": 1804,
+          "mean": 1695.2644124168514,
+          "median": 1690.0,
+          "p95": 1731,
+          "p99": 1756,
+          "max": 3011
+        },
+        "callback_to_ready_us": {
+          "count": 1804,
+          "mean": 1703.1507760532152,
+          "median": 1698.0,
+          "p95": 1739,
+          "p99": 1764,
+          "max": 3025
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1804,
+          "mean": 15375.119733924612,
+          "median": 15331.0,
+          "p95": 15945,
+          "p99": 16010,
+          "max": 16157
+        },
+        "frame_age_us": {
+          "count": 1804,
+          "mean": 15390.128048780487,
+          "median": 15346.0,
+          "p95": 15961,
+          "p99": 16025,
+          "max": 16172
+        },
+        "flip_interarrival_us": {
+          "count": 1802,
+          "mean": 16683.334073251943,
+          "median": 16684.0,
+          "p95": 17121,
+          "p99": 17200,
+          "max": 17264
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 2931,
+        "decode_to_first_present_us": 631406,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 320642,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 196230412323,
+          "decoder_first_decoded_us": 196230415254,
+          "decoder_first_presented_us": 196231046660,
+          "stream_coded_width": 1920,
+          "stream_coded_height": 1088,
+          "stream_required_dpb_frames": 2,
+          "max_dpb_frames": 3,
+          "decoder_cpu_memory_bytes": 21430272,
+          "decoder_gpu_memory_bytes": 25886720,
+          "decoder_shared_memory_bytes": 27017216,
+          "decoder_frame_pool_bytes": 23511040,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "88ee0825b6a1845c0ff78fda739746a23a259615d659e00e73a614b79961365b",
+      "export_sha256": "f34a5a7d7d05dfb039902d3e3cfe9057560a011a4196dcb3d47fdbd66ceb7bea",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-ab-candidate-2",
+      "run_id": "47ede86a-bbf9-48e1-8853-c6c09c9626a1",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "hevc",
+      "resolution": "1080p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 3,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.098564,
+        "unique_presented_fps": 59.90319006581178,
+        "received_fps": 59.93641424222099,
+        "actual_mbps": 1.3614406321843129,
+        "decode_call_us": {
+          "count": 1804,
+          "mean": 1699.4174057649668,
+          "median": 1692.0,
+          "p95": 1738,
+          "p99": 1767,
+          "max": 2907
+        },
+        "callback_to_ready_us": {
+          "count": 1804,
+          "mean": 1707.3420177383591,
+          "median": 1700.0,
+          "p95": 1746,
+          "p99": 1775,
+          "max": 2918
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1804,
+          "mean": 11587.588691796009,
+          "median": 11632.0,
+          "p95": 11957,
+          "p99": 12052,
+          "max": 12617
+        },
+        "frame_age_us": {
+          "count": 1804,
+          "mean": 11602.667960088691,
+          "median": 11647.5,
+          "p95": 11972,
+          "p99": 12066,
+          "max": 12631
+        },
+        "flip_interarrival_us": {
+          "count": 1802,
+          "mean": 16683.3346281909,
+          "median": 16683.0,
+          "p95": 16697,
+          "p99": 16716,
+          "max": 17259
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 2849,
+        "decode_to_first_present_us": 621171,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 317934,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 196371083603,
+          "decoder_first_decoded_us": 196371086452,
+          "decoder_first_presented_us": 196371707623,
+          "stream_coded_width": 1920,
+          "stream_coded_height": 1088,
+          "stream_required_dpb_frames": 2,
+          "max_dpb_frames": 3,
+          "decoder_cpu_memory_bytes": 21430272,
+          "decoder_gpu_memory_bytes": 25886720,
+          "decoder_shared_memory_bytes": 27017216,
+          "decoder_frame_pool_bytes": 23511040,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "4378c69a5fb3f596f6fd28b4ee2f570dfd9dc4c06a1247f4720bf1165a9ff509",
+      "export_sha256": "41099b1b4e232521652fbd91b4a4035e08bbc66e481793676623b496d7254276",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-ab-candidate-3",
+      "run_id": "58755c8a-3941-4f5d-9f9c-1247acccb3c0",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "hevc",
+      "resolution": "1080p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 3,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.087961,
+        "unique_presented_fps": 59.92429995505511,
+        "received_fps": 59.9575358396669,
+        "actual_mbps": 1.3589935190357365,
+        "decode_call_us": {
+          "count": 1804,
+          "mean": 1783.4218403547673,
+          "median": 1747.0,
+          "p95": 2021,
+          "p99": 2096,
+          "max": 3059
+        },
+        "callback_to_ready_us": {
+          "count": 1804,
+          "mean": 1791.2849223946785,
+          "median": 1755.0,
+          "p95": 2030,
+          "p99": 2105,
+          "max": 3071
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1804,
+          "mean": 17194.87694013304,
+          "median": 17205.5,
+          "p95": 17555,
+          "p99": 18067,
+          "max": 18146
+        },
+        "frame_age_us": {
+          "count": 1804,
+          "mean": 17209.691241685145,
+          "median": 17220.0,
+          "p95": 17569,
+          "p99": 18081,
+          "max": 18160
+        },
+        "flip_interarrival_us": {
+          "count": 1802,
+          "mean": 16683.335738068814,
+          "median": 16683.0,
+          "p95": 16705,
+          "p99": 17223,
+          "max": 17281
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 2802,
+        "decode_to_first_present_us": 632086,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 316482,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 196512096948,
+          "decoder_first_decoded_us": 196512099750,
+          "decoder_first_presented_us": 196512731836,
+          "stream_coded_width": 1920,
+          "stream_coded_height": 1088,
+          "stream_required_dpb_frames": 2,
+          "max_dpb_frames": 3,
+          "decoder_cpu_memory_bytes": 21430272,
+          "decoder_gpu_memory_bytes": 25886720,
+          "decoder_shared_memory_bytes": 27017216,
+          "decoder_frame_pool_bytes": 23511040,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "880da115ee84e05badeaf89981c51a46285bdf4f7ca10cf8a2d807bfdf531440",
+      "export_sha256": "f222b97c0623c6235cb714521220560b7e4290f56275f54c5d926c000c758878",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-capacity-recovery",
+      "run_id": "ec9b411e-e482-4858-841e-8a4475456423",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "INCONCLUSIVE",
+      "overall_verdict": "INCONCLUSIVE",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "hevc",
+      "resolution": "1080p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 7,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 1,
+        "decoder_refreshes": 1,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 1,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.089619,
+        "unique_presented_fps": 59.920998002666636,
+        "received_fps": 59.954232055912705,
+        "actual_mbps": 1.3102618547612717,
+        "decode_call_us": {
+          "count": 1804,
+          "mean": 1675.0443458980044,
+          "median": 1667.0,
+          "p95": 1723,
+          "p99": 1750,
+          "max": 3021
+        },
+        "callback_to_ready_us": {
+          "count": 1804,
+          "mean": 1682.7317073170732,
+          "median": 1675.0,
+          "p95": 1731,
+          "p99": 1758,
+          "max": 3033
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1804,
+          "mean": 14915.724501108647,
+          "median": 14890.5,
+          "p95": 15350,
+          "p99": 15433,
+          "max": 15598
+        },
+        "frame_age_us": {
+          "count": 1804,
+          "mean": 14930.885254988914,
+          "median": 14905.0,
+          "p95": 15365,
+          "p99": 15448,
+          "max": 15613
+        },
+        "flip_interarrival_us": {
+          "count": 1802,
+          "mean": 16683.20810210877,
+          "median": 16683.0,
+          "p95": 17209,
+          "p99": 17245,
+          "max": 17266
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 2838,
+        "decode_to_first_present_us": 618183,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 2,
+          "decoder_initialization_us": 331960,
+          "decoder_reconfiguration_count": 1,
+          "decoder_reconfiguration_us": 34682,
+          "decoder_recovery_attempts": 1,
+          "decoder_recovery_successes": 1,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 196046631414,
+          "decoder_first_decoded_us": 196046634252,
+          "decoder_first_presented_us": 196047252435,
+          "stream_coded_width": 1920,
+          "stream_coded_height": 1088,
+          "stream_required_dpb_frames": 2,
+          "max_dpb_frames": 7,
+          "decoder_cpu_memory_bytes": 23281664,
+          "decoder_gpu_memory_bytes": 52625408,
+          "decoder_shared_memory_bytes": 27017216,
+          "decoder_frame_pool_bytes": 23511040,
+          "decoder_test_capacity_errors": 1
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [
+        "DEVELOPER_DECODER_CAPACITY_PROBE",
+        "DECODER_RECONFIGURED",
+        "RECOVERED_DECODER_FAULT",
+        "DECODER_RECREATED"
+      ],
+      "raw_report_sha256": "02096802a1a94286fd1651053b8ecd3ec5c7e3db8aed87cfe0e903d0805b267f",
+      "export_sha256": "18b30a5cd4e0b049d4ba46d1163e71457aaad23080f2511490c5f3be5604f526",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-h264-1080p60",
+      "run_id": "8d49220a-2450-4c0d-8240-06279e4484b1",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "h264",
+      "resolution": "1080p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 2,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "h264_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.093674,
+        "unique_presented_fps": 59.91292389224393,
+        "received_fps": 59.94615346733669,
+        "actual_mbps": 0.7518879881532577,
+        "decode_call_us": {
+          "count": 1804,
+          "mean": 1815.9922394678492,
+          "median": 1804.0,
+          "p95": 1893,
+          "p99": 1935,
+          "max": 6402
+        },
+        "callback_to_ready_us": {
+          "count": 1804,
+          "mean": 1933.429046563193,
+          "median": 1921.0,
+          "p95": 2011,
+          "p99": 2054,
+          "max": 6530
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1804,
+          "mean": 10749.06596452328,
+          "median": 10762.0,
+          "p95": 11055,
+          "p99": 11129,
+          "max": 11594
+        },
+        "frame_age_us": {
+          "count": 1804,
+          "mean": 10763.692350332594,
+          "median": 10777.0,
+          "p95": 11069,
+          "p99": 11144,
+          "max": 11606
+        },
+        "flip_interarrival_us": {
+          "count": 1802,
+          "mean": 16683.330188679247,
+          "median": 16683.0,
+          "p95": 16708,
+          "p99": 16997,
+          "max": 17252
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 7581,
+        "decode_to_first_present_us": 626964,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 319871,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 196582909737,
+          "decoder_first_decoded_us": 196582917318,
+          "decoder_first_presented_us": 196583544282,
+          "stream_coded_width": 1920,
+          "stream_coded_height": 1088,
+          "stream_required_dpb_frames": 1,
+          "max_dpb_frames": 2,
+          "decoder_cpu_memory_bytes": 16760832,
+          "decoder_gpu_memory_bytes": 21463040,
+          "decoder_shared_memory_bytes": 12189696,
+          "decoder_frame_pool_bytes": 23511040,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "e12a695328a52b6607fe37281b0f025a4a70d86a609845b537ffb1ee85aa6a4a",
+      "export_sha256": "55604564ba59d5ff8b37964c9f2401f98f20059b871d35a7cdab27fdc89bf386",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-h264-1440p60-nvenc",
+      "run_id": "a29291aa-85d5-4180-aedc-b6cc8f78bc05",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "h264",
+      "resolution": "1440p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 80
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 2,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "h264_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 80.000233,
+        "unique_presented_fps": 59.89982554175811,
+        "received_fps": 59.91232550535197,
+        "actual_mbps": 7.894795406408379,
+        "decode_call_us": {
+          "count": 4793,
+          "mean": 3190.344877947006,
+          "median": 3061,
+          "p95": 3821,
+          "p99": 4644,
+          "max": 8847
+        },
+        "callback_to_ready_us": {
+          "count": 4793,
+          "mean": 3324.1662841644065,
+          "median": 3199,
+          "p95": 3959,
+          "p99": 4777,
+          "max": 8984
+        },
+        "callback_to_flip_observed_us": {
+          "count": 4793,
+          "mean": 19610.329021489673,
+          "median": 19945,
+          "p95": 26269,
+          "p99": 26426,
+          "max": 26627
+        },
+        "frame_age_us": {
+          "count": 4793,
+          "mean": 19624.842061339452,
+          "median": 19959,
+          "p95": 26283,
+          "p99": 26440,
+          "max": 26639
+        },
+        "flip_interarrival_us": {
+          "count": 4791,
+          "mean": 16690.302233354207,
+          "median": 16683,
+          "p95": 17104,
+          "p99": 17224,
+          "max": 33628
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 10639,
+        "decode_to_first_present_us": 622906,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 305844,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 196653439503,
+          "decoder_first_decoded_us": 196653450142,
+          "decoder_first_presented_us": 196654073048,
+          "stream_coded_width": 2560,
+          "stream_coded_height": 1440,
+          "stream_required_dpb_frames": 1,
+          "max_dpb_frames": 2,
+          "decoder_cpu_memory_bytes": 21659648,
+          "decoder_gpu_memory_bytes": 35586048,
+          "decoder_shared_memory_bytes": 20217856,
+          "decoder_frame_pool_bytes": 38764544,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "dd562262be28e76e8536e745e1e23dcb4163c350b242347dc96af58028342d50",
+      "export_sha256": "41d69eb9167192c98f0dda6529af114d962fbc2f3a56d8bfedc586ad282a4887",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-h264-2160p60",
+      "run_id": "e3c630e9-43d4-4b83-b9c2-cd53f8f56cda",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "h264",
+      "resolution": "2160p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 2,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "h264_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.090179,
+        "unique_presented_fps": 59.88664939480752,
+        "received_fps": 59.95311626428012,
+        "actual_mbps": 0.7355128063545252,
+        "decode_call_us": {
+          "count": 1804,
+          "mean": 4358.904656319291,
+          "median": 4287.0,
+          "p95": 4498,
+          "p99": 4560,
+          "max": 13697
+        },
+        "callback_to_ready_us": {
+          "count": 1804,
+          "mean": 4539.678492239468,
+          "median": 4469.0,
+          "p95": 4679,
+          "p99": 4742,
+          "max": 13888
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1804,
+          "mean": 32315.874168514412,
+          "median": 32332.0,
+          "p95": 32610,
+          "p99": 32683,
+          "max": 32775
+        },
+        "frame_age_us": {
+          "count": 1804,
+          "mean": 32330.622505543237,
+          "median": 32348.0,
+          "p95": 32626,
+          "p99": 32698,
+          "max": 32791
+        },
+        "flip_interarrival_us": {
+          "count": 1801,
+          "mean": 16683.334813992227,
+          "median": 16683,
+          "p95": 16695,
+          "p99": 16704,
+          "max": 16718
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 16091,
+        "decode_to_first_present_us": 627968,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 313095,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 196774287243,
+          "decoder_first_decoded_us": 196774303334,
+          "decoder_first_presented_us": 196774931302,
+          "stream_coded_width": 3840,
+          "stream_coded_height": 2160,
+          "stream_required_dpb_frames": 1,
+          "max_dpb_frames": 2,
+          "decoder_cpu_memory_bytes": 35799040,
+          "decoder_gpu_memory_bytes": 80461824,
+          "decoder_shared_memory_bytes": 43679744,
+          "decoder_frame_pool_bytes": 87162880,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "c46bc1aa9acfeceb93b21cf165d82df4eb8e0f3cfb78f73d1611a72bbd7437d9",
+      "export_sha256": "1a98ca14c76659ad280b8e72eeecf1bb86496a13bf851b7852a792ffe8422957",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-hevc-1440p60-adaptive",
+      "run_id": "dfed5bff-1aae-495a-85f0-79f8e66e5cae",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "hevc",
+      "resolution": "1440p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "adaptive",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 3,
+        "decoder_pipeline_depth": 3,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.089998,
+        "unique_presented_fps": 59.920243264888214,
+        "received_fps": 59.920243264888214,
+        "actual_mbps": 0.7183250726703272,
+        "decode_call_us": {
+          "count": 1803,
+          "mean": 55.68940654464781,
+          "median": 55,
+          "p95": 63,
+          "p99": 73,
+          "max": 87
+        },
+        "callback_to_ready_us": {
+          "count": 1803,
+          "mean": 2222.3155851358847,
+          "median": 2212,
+          "p95": 2290,
+          "p99": 2330,
+          "max": 3995
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1803,
+          "mean": 6159.9179145868,
+          "median": 6190,
+          "p95": 6572,
+          "p99": 6655,
+          "max": 6740
+        },
+        "frame_age_us": {
+          "count": 1803,
+          "mean": 6174.302828618968,
+          "median": 6204,
+          "p95": 6587,
+          "p99": 6669,
+          "max": 6754
+        },
+        "flip_interarrival_us": {
+          "count": 1802,
+          "mean": 16683.335183129857,
+          "median": 16683.0,
+          "p95": 16696,
+          "p99": 16707,
+          "max": 17030
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 4411,
+        "decode_to_first_present_us": 625095,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 324962,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 196845468706,
+          "decoder_first_decoded_us": 196845473117,
+          "decoder_first_presented_us": 196846098212,
+          "stream_coded_width": 2560,
+          "stream_coded_height": 1440,
+          "stream_required_dpb_frames": 2,
+          "max_dpb_frames": 3,
+          "decoder_cpu_memory_bytes": 36274176,
+          "decoder_gpu_memory_bytes": 43073536,
+          "decoder_shared_memory_bytes": 70320128,
+          "decoder_frame_pool_bytes": 38764544,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "6cb9a1f2d79c0b489ebdba7e34b54880ef0cac1de1ad70598b74076413edd737",
+      "export_sha256": "fecb6ce0c01e86935ed1b7066276a4a68a0f3f2b5118a8c1daa8a390fa737a96",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-hevc-2160p120",
+      "run_id": "0d715456-ef2f-43c4-a863-2ec88d8a659a",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "hevc",
+      "resolution": "2160p",
+      "fps": 120,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 3,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.097886,
+        "unique_presented_fps": 119.84230387476383,
+        "received_fps": 119.87552879959742,
+        "actual_mbps": 1.377385242272497,
+        "decode_call_us": {
+          "count": 3608,
+          "mean": 3545.225332594235,
+          "median": 3537.0,
+          "p95": 3638,
+          "p99": 3698,
+          "max": 5181
+        },
+        "callback_to_ready_us": {
+          "count": 3608,
+          "mean": 3552.1455099778273,
+          "median": 3544.0,
+          "p95": 3645,
+          "p99": 3705,
+          "max": 5189
+        },
+        "callback_to_flip_observed_us": {
+          "count": 3608,
+          "mean": 9684.335643015522,
+          "median": 9693.0,
+          "p95": 9970,
+          "p99": 10047,
+          "max": 10146
+        },
+        "frame_age_us": {
+          "count": 3608,
+          "mean": 9697.186807095344,
+          "median": 9706.0,
+          "p95": 9983,
+          "p99": 10059,
+          "max": 10157
+        },
+        "flip_interarrival_us": {
+          "count": 3606,
+          "mean": 8341.664725457571,
+          "median": 8341.0,
+          "p95": 8358,
+          "p99": 8371,
+          "max": 8883
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 5385,
+        "decode_to_first_present_us": 588447,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 332241,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 196985789896,
+          "decoder_first_decoded_us": 196985795281,
+          "decoder_first_presented_us": 196986383728,
+          "stream_coded_width": 3840,
+          "stream_coded_height": 2176,
+          "stream_required_dpb_frames": 2,
+          "max_dpb_frames": 3,
+          "decoder_cpu_memory_bytes": 35536896,
+          "decoder_gpu_memory_bytes": 96780288,
+          "decoder_shared_memory_bytes": 80084992,
+          "decoder_frame_pool_bytes": 87851008,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "c19103dd081e75b2cea5b5f92d4f2db8fc179488c9bad26560063e54690058e7",
+      "export_sha256": "29c03dfe7e918e369ba97c881fab21ced960e1f1a93de71041ec23304c94b748",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-hevc-2160p60",
+      "run_id": "139ae794-5ec5-46a0-bec0-c15984663088",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "hevc",
+      "resolution": "2160p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 3,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.093783,
+        "unique_presented_fps": 59.84624797753078,
+        "received_fps": 59.91270688700055,
+        "actual_mbps": 0.7537163406807313,
+        "decode_call_us": {
+          "count": 1803,
+          "mean": 3860.139212423738,
+          "median": 3856,
+          "p95": 4063,
+          "p99": 4174,
+          "max": 5972
+        },
+        "callback_to_ready_us": {
+          "count": 1803,
+          "mean": 3867.5474209650583,
+          "median": 3864,
+          "p95": 4070,
+          "p99": 4181,
+          "max": 5986
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1803,
+          "mean": 19815.40876317249,
+          "median": 19822,
+          "p95": 20305,
+          "p99": 20504,
+          "max": 20736
+        },
+        "frame_age_us": {
+          "count": 1803,
+          "mean": 19829.546311702718,
+          "median": 19836,
+          "p95": 20319,
+          "p99": 20518,
+          "max": 20748
+        },
+        "flip_interarrival_us": {
+          "count": 1800,
+          "mean": 16692.459444444445,
+          "median": 16684.0,
+          "p95": 17170,
+          "p99": 17228,
+          "max": 33839
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 6580,
+        "decode_to_first_present_us": 630665,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 344501,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 196915184831,
+          "decoder_first_decoded_us": 196915191411,
+          "decoder_first_presented_us": 196915822076,
+          "stream_coded_width": 3840,
+          "stream_coded_height": 2176,
+          "stream_required_dpb_frames": 2,
+          "max_dpb_frames": 3,
+          "decoder_cpu_memory_bytes": 35536896,
+          "decoder_gpu_memory_bytes": 96780288,
+          "decoder_shared_memory_bytes": 80084992,
+          "decoder_frame_pool_bytes": 87851008,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "8582227594054ab841893a9dc9b73eb38bb7d7740ba79861260622eaf2cd2121",
+      "export_sha256": "0adaa5e7e5a45dbae5cd271149041cc0776faac4b071c84fa3fb8c2b16050753",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-hevc-main10-2160p120",
+      "run_id": "223d8ebc-e9b6-4b1d-98f6-af08298555e8",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "hevc",
+      "resolution": "2160p",
+      "fps": 120,
+      "hdr": true,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 3,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.10019,
+        "unique_presented_fps": 119.8331306214346,
+        "received_fps": 119.86635300308735,
+        "actual_mbps": 1.381668354917361,
+        "decode_call_us": {
+          "count": 3608,
+          "mean": 3750.4451219512193,
+          "median": 3739.0,
+          "p95": 3838,
+          "p99": 3895,
+          "max": 5718
+        },
+        "callback_to_ready_us": {
+          "count": 3608,
+          "mean": 3757.675997782705,
+          "median": 3746.0,
+          "p95": 3845,
+          "p99": 3903,
+          "max": 5728
+        },
+        "callback_to_flip_observed_us": {
+          "count": 3608,
+          "mean": 13640.56042128603,
+          "median": 13650.0,
+          "p95": 13938,
+          "p99": 14033,
+          "max": 14443
+        },
+        "frame_age_us": {
+          "count": 3608,
+          "mean": 13654.468680709535,
+          "median": 13663.0,
+          "p95": 13952,
+          "p99": 14048,
+          "max": 14456
+        },
+        "flip_interarrival_us": {
+          "count": 3606,
+          "mean": 8341.671935662784,
+          "median": 8342.0,
+          "p95": 8357,
+          "p99": 8589,
+          "max": 8899
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 9302,
+        "decode_to_first_present_us": 585094,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 330750,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 197126596677,
+          "decoder_first_decoded_us": 197126605979,
+          "decoder_first_presented_us": 197127191073,
+          "stream_coded_width": 3840,
+          "stream_coded_height": 2176,
+          "stream_required_dpb_frames": 2,
+          "max_dpb_frames": 3,
+          "decoder_cpu_memory_bytes": 35536896,
+          "decoder_gpu_memory_bytes": 192872448,
+          "decoder_shared_memory_bytes": 92618752,
+          "decoder_frame_pool_bytes": 175587328,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "a1eb7405e0a53ec3a83e1adb25dc3e8e6e18ebf3df385136c4d9f026ace286d0",
+      "export_sha256": "6ed174e8478967c786128221fb3f47b9000cb6e9f162dd88d0f5adaa3f446237",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-hevc-main10-2160p60",
+      "run_id": "7f180529-63e9-4dbe-877b-3af1ccfdd84e",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "hevc",
+      "resolution": "2160p",
+      "fps": 60,
+      "hdr": true,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 3,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.087899,
+        "unique_presented_fps": 59.924423436810926,
+        "received_fps": 59.957659389909544,
+        "actual_mbps": 0.723495116757737,
+        "decode_call_us": {
+          "count": 1804,
+          "mean": 3740.9695121951218,
+          "median": 3724.0,
+          "p95": 3814,
+          "p99": 3861,
+          "max": 6646
+        },
+        "callback_to_ready_us": {
+          "count": 1804,
+          "mean": 3748.440133037694,
+          "median": 3731.0,
+          "p95": 3821,
+          "p99": 3868,
+          "max": 6660
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1804,
+          "mean": 9362.00332594235,
+          "median": 9306.0,
+          "p95": 9869,
+          "p99": 9934,
+          "max": 10119
+        },
+        "frame_age_us": {
+          "count": 1804,
+          "mean": 9376.487804878048,
+          "median": 9320.5,
+          "p95": 9885,
+          "p99": 9948,
+          "max": 10135
+        },
+        "flip_interarrival_us": {
+          "count": 1802,
+          "mean": 16683.450055493897,
+          "median": 16684.0,
+          "p95": 17101,
+          "p99": 17227,
+          "max": 17255
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 8726,
+        "decode_to_first_present_us": 629170,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 327294,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 197056654639,
+          "decoder_first_decoded_us": 197056663365,
+          "decoder_first_presented_us": 197057292535,
+          "stream_coded_width": 3840,
+          "stream_coded_height": 2176,
+          "stream_required_dpb_frames": 2,
+          "max_dpb_frames": 3,
+          "decoder_cpu_memory_bytes": 35536896,
+          "decoder_gpu_memory_bytes": 192872448,
+          "decoder_shared_memory_bytes": 92618752,
+          "decoder_frame_pool_bytes": 175587328,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "98e47e3d3b2aa6863ad9c5492c766e1710ea09bbb3cd9fbbefa88c8cce2f17f8",
+      "export_sha256": "893e823992b4a4688cc32b23c8df50700b0685f423ac03e75d341240a6fa8b15",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-pyrowave-1080p60",
+      "run_id": "2a9e0538-d224-4d3f-a24f-4f659d32646f",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "VALID",
+      "overall_verdict": "PASS",
+      "reason_code": null,
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "pyrowave",
+      "resolution": "1080p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": null,
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {},
+      "encoder": [
+        "pyrowave"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.074777,
+        "unique_presented_fps": 59.052806941843656,
+        "ready_to_submit_us": {
+          "count": 1802,
+          "mean": 21.772475027746946,
+          "median": 6.0,
+          "p95": 47,
+          "p99": 489,
+          "max": 977
+        },
+        "submit_to_post_present_observation_us": {
+          "count": 1802,
+          "mean": 21.855160932297448,
+          "median": 21.0,
+          "p95": 24,
+          "p99": 39,
+          "max": 80
+        }
+      },
+      "lifecycle": null,
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [],
+      "raw_report_sha256": "53916bb864ec50492bf1f160f4dbd1f11cd7d619ac61c6972c3e3fade9a6263b",
+      "export_sha256": "73e859db4b08dcbcac35c7feff413275eaa139c3fbd03b80fc396cf520cf08a6",
+      "integrity": {
+        "manifest_files": 50,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    },
+    {
+      "case": "final-startup-cancel",
+      "run_id": "d266d484-a537-4b4d-b861-89f04d252b86",
+      "execution_state": "CANCELLED",
+      "functional_verdict": "CANCELLED",
+      "measurement_validity": "INCONCLUSIVE",
+      "overall_verdict": "CANCELLED",
+      "reason_code": "CANCELLED_BY_OPERATOR",
+      "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+      "build_label": "test-lab-videodec2-74a5e8b",
+      "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30",
+      "codec": "hevc",
+      "resolution": "1080p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 3,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 0,
+        "decoder_refreshes": 0,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 0,
+        "unrecoverable_frames": 0
+      },
+      "encoder": null,
+      "metrics": {},
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 3015,
+        "decode_to_first_present_us": 632993,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 1,
+          "decoder_initialization_us": 316490,
+          "decoder_reconfiguration_count": 0,
+          "decoder_reconfiguration_us": 0,
+          "decoder_recovery_attempts": 0,
+          "decoder_recovery_successes": 0,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 196127781661,
+          "decoder_first_decoded_us": 196127784676,
+          "decoder_first_presented_us": 196128417669,
+          "stream_coded_width": 1920,
+          "stream_coded_height": 1088,
+          "stream_required_dpb_frames": 2,
+          "max_dpb_frames": 3,
+          "decoder_cpu_memory_bytes": 21430272,
+          "decoder_gpu_memory_bytes": 25886720,
+          "decoder_shared_memory_bytes": 27017216,
+          "decoder_frame_pool_bytes": 23511040,
+          "decoder_test_capacity_errors": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [
+        "HOST_MEASUREMENT_INVALID",
+        "HOST_CAPTURE_OUTPUT_UNVERIFIED",
+        "PS5_RECEIPT_NOT_PASS",
+        "NEGOTIATED_FIELD_UNVERIFIED",
+        "NEGOTIATED_FIELD_UNVERIFIED",
+        "NEGOTIATED_FIELD_UNVERIFIED",
+        "HOST_SESSION_FIELD_UNVERIFIED",
+        "HOST_SESSION_FIELD_UNVERIFIED",
+        "HOST_SESSION_FIELD_UNVERIFIED",
+        "HOST_SESSION_FIELD_UNVERIFIED",
+        "HOST_SESSION_FIELD_UNVERIFIED",
+        "TRACE_ANALYSIS_UNAVAILABLE"
+      ],
+      "raw_report_sha256": "bb908db130f615fe908dac017ce39676b0bb1b194f02d08f16d6df409af98c4b",
+      "export_sha256": "dc8b55dfcb1e219e50a00a1cb195dfe0173d8fee6045cc882a887b591b17b443",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    }
+  ],
+  "comparison": {
+    "verdict": "PASS",
+    "measurement_validity": "VALID",
+    "performance_delta": "NO_CLEAR_CHANGE",
+    "reason_code": "PAIRED_SCREENING",
+    "sample_pairs": 3,
+    "calibration_status": "NOT_SUPPLIED",
+    "metrics": {
+      "unique_presented_fps": {
+        "median_fraction": 0.0006752863715523658,
+        "median_delta": 0.040438755344098354,
+        "ordered_fractions": [
+          0.0012639948125971767,
+          0.00015449843089199354,
+          0.0006752863715523658
+        ],
+        "ordered_deltas": [
+          0.07565491517283363,
+          0.009253519216393613,
+          0.040438755344098354
+        ],
+        "range_fraction": [
+          0.00015449843089199354,
+          0.0012639948125971767
+        ],
+        "baseline_first_to_last": 0.030043431754599226,
+        "candidate_first_to_last": -0.005172728074136046,
+        "threshold": {
+          "fraction": 0.02,
+          "absolute": 0
+        },
+        "performance_delta": "NO_CLEAR_CHANGE"
+      },
+      "frame_age_us": {
+        "median_fraction": -0.5219110378912686,
+        "median_delta": -14837,
+        "ordered_fractions": [
+          -0.5219110378912686,
+          -0.553433548435227,
+          0.6311391699935011
+        ],
+        "ordered_deltas": [
+          -17424,
+          -14837,
+          6798
+        ],
+        "range_fraction": [
+          -0.553433548435227,
+          0.6311391699935011
+        ],
+        "baseline_first_to_last": -22614,
+        "candidate_first_to_last": 1608,
+        "threshold": {
+          "fraction": 0.1,
+          "absolute": 1000
+        },
+        "performance_delta": "NO_CLEAR_CHANGE"
+      },
+      "callback_to_ready_us": {
+        "median_fraction": 0.0051813471502590676,
+        "median_delta": 9,
+        "ordered_fractions": [
+          -0.014730878186968839,
+          0.0051813471502590676,
+          0.16599655370476737
+        ],
+        "ordered_deltas": [
+          -26,
+          9,
+          289
+        ],
+        "range_fraction": [
+          -0.014730878186968839,
+          0.16599655370476737
+        ],
+        "baseline_first_to_last": -24,
+        "candidate_first_to_last": 291,
+        "threshold": {
+          "fraction": 0.1,
+          "absolute": 1000
+        },
+        "performance_delta": "NO_CLEAR_CHANGE"
+      }
+    },
+    "pairs": [
+      {
+        "baseline": "5b20a877-54f1-4142-b7fa-4136120feac2",
+        "candidate": "34fefc83-6090-40d6-ab28-fd1089bf2839",
+        "metrics": {
+          "unique_presented_fps": {
+            "baseline": 59.853817767956414,
+            "candidate": 59.92947268312925,
+            "delta": 0.07565491517283363,
+            "fraction": 0.0012639948125971767
+          },
+          "frame_age_us": {
+            "baseline": 33385,
+            "candidate": 15961,
+            "delta": -17424,
+            "fraction": -0.5219110378912686
+          },
+          "callback_to_ready_us": {
+            "baseline": 1765,
+            "candidate": 1739,
+            "delta": -26,
+            "fraction": -0.014730878186968839
+          }
+        },
+        "baseline_identity": {
+          "source_sha": "b1b2c5d8cde17347419091b95c30fa95f22fedd0",
+          "build_label": "test-lab-videodec2-baseline-b1b2c5d",
+          "eboot_sha256": "6c86eb580a104bcec5ca666e8df658286074974723ae8f4ff5aace79ab224b83"
+        },
+        "candidate_identity": {
+          "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+          "build_label": "test-lab-videodec2-74a5e8b",
+          "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30"
+        }
+      },
+      {
+        "baseline": "c5835ce1-a627-4dac-99a3-863e29559221",
+        "candidate": "47ede86a-bbf9-48e1-8853-c6c09c9626a1",
+        "metrics": {
+          "unique_presented_fps": {
+            "baseline": 59.893936546595384,
+            "candidate": 59.90319006581178,
+            "delta": 0.009253519216393613,
+            "fraction": 0.00015449843089199354
+          },
+          "frame_age_us": {
+            "baseline": 26809,
+            "candidate": 11972,
+            "delta": -14837,
+            "fraction": -0.553433548435227
+          },
+          "callback_to_ready_us": {
+            "baseline": 1737,
+            "candidate": 1746,
+            "delta": 9,
+            "fraction": 0.0051813471502590676
+          }
+        },
+        "baseline_identity": {
+          "source_sha": "b1b2c5d8cde17347419091b95c30fa95f22fedd0",
+          "build_label": "test-lab-videodec2-baseline-b1b2c5d",
+          "eboot_sha256": "6c86eb580a104bcec5ca666e8df658286074974723ae8f4ff5aace79ab224b83"
+        },
+        "candidate_identity": {
+          "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+          "build_label": "test-lab-videodec2-74a5e8b",
+          "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30"
+        }
+      },
+      {
+        "baseline": "8f71386a-b2b1-4e48-9622-66de21c9a52a",
+        "candidate": "58755c8a-3941-4f5d-9f9c-1247acccb3c0",
+        "metrics": {
+          "unique_presented_fps": {
+            "baseline": 59.88386119971101,
+            "candidate": 59.92429995505511,
+            "delta": 0.040438755344098354,
+            "fraction": 0.0006752863715523658
+          },
+          "frame_age_us": {
+            "baseline": 10771,
+            "candidate": 17569,
+            "delta": 6798,
+            "fraction": 0.6311391699935011
+          },
+          "callback_to_ready_us": {
+            "baseline": 1741,
+            "candidate": 2030,
+            "delta": 289,
+            "fraction": 0.16599655370476737
+          }
+        },
+        "baseline_identity": {
+          "source_sha": "b1b2c5d8cde17347419091b95c30fa95f22fedd0",
+          "build_label": "test-lab-videodec2-baseline-b1b2c5d",
+          "eboot_sha256": "6c86eb580a104bcec5ca666e8df658286074974723ae8f4ff5aace79ab224b83"
+        },
+        "candidate_identity": {
+          "source_sha": "74a5e8bba86a5826da73577a82fd3c6e18e67f4b",
+          "build_label": "test-lab-videodec2-74a5e8b",
+          "eboot_sha256": "c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30"
+        }
+      }
+    ],
+    "limitations": [
+      "Paired screening heuristics are not statistical proof.",
+      "Run interleaved A/B pairs; distribution and ordered drift are reported.",
+      "Build/source identities are recorded separately; changed code is allowed only with identical build flags/environment."
+    ]
+  },
+  "final_cleanup": {
+    "saved_configuration_pairing_unchanged": true,
+    "original_shader_cache_restored_and_readback_verified": true,
+    "original_cache_files": 6,
+    "saved_configuration_pairing_files": 14,
+    "ps5_title_idle": true,
+    "remote_lease_present": false,
+    "active_host_clients": 0,
+    "active_rtsp_sessions": 0,
+    "owned_windows_worker": "normal shutdown; scheduled task Ready, LastTaskResult 0"
+  }
+}

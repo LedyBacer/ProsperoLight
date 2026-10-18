@@ -45,8 +45,8 @@ introduced. PyroWave bypasses this entire owner.
 
 ## References
 
-- [PR17](https://github.com/blackbearreloaded/ProsperoLight/pull/17)
-- [PR51](https://github.com/blackbearreloaded/ProsperoLight/pull/51)
+- [PR17](https://github.com/LedyBacer/ProsperoLight/pull/17)
+- [PR51](https://github.com/LedyBacer/ProsperoLight/pull/51)
 - [H.264 level table](https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/h264_levels.c)
 - [H.264 parameter parsing](https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/h264_ps.c)
 
