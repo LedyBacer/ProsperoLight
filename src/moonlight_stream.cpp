@@ -1002,33 +1002,39 @@ static void save_performance_summary(const native_renderer_state_t &state,
              PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES, state.flush_calls, state.decoder_delayed,
              state.observed_slices_min, state.observed_slices_max, state.layout_samples);
     const auto &life = state.lifecycle;
-    ok =
-        ok &&
-        report_append(
-            report, sizeof(report), &length,
-            "\"decoder_lifecycle_state\":\"%s\",\"decoder_generation\":%u,"
-            "\"decoder_initialization_us\":%llu,\"decoder_reconfiguration_count\":%u,"
-            "\"decoder_reconfiguration_us\":%llu,\"decoder_recovery_attempts\":%u,"
-            "\"decoder_recovery_successes\":%u,\"decoder_recovery_failures\":%u,"
-            "\"decoder_recovery_reason\":%u,\"stream_parameters_verified\":%u,"
-            "\"stream_coded_width\":%u,\"stream_coded_height\":%u,"
-            "\"stream_profile\":%u,\"stream_level\":%u,\"stream_reference_frames\":%u,"
-            "\"stream_required_dpb_frames\":%u,\"stream_standard_max_dpb_frames\":%u,"
-            "\"decoder_cpu_memory_bytes\":%llu,\"decoder_gpu_memory_bytes\":%llu,"
-            "\"decoder_shared_memory_bytes\":%llu,\"decoder_frame_pool_bytes\":%llu,"
-            "\"decoder_ready_us\":%llu,\"decoder_first_decoded_us\":%llu,"
-            "\"decoder_first_presented_us\":%llu,\n",
-            moonlight::video::name(life.state), life.generation,
-            (unsigned long long)life.initialization_us, life.reconfigurations,
-            (unsigned long long)life.reconfiguration_us, life.attempts, life.successes,
-            life.failures, unsigned(life.reason), life.stream.verified ? 1u : 0u, life.stream.width,
-            life.stream.height, life.stream.profile, life.stream.level, life.stream.references,
-            life.stream.buffering, life.stream.standard_dpb,
-            (unsigned long long)state.owned_resources.cpu_mapping_size,
-            (unsigned long long)state.decoder_memory.gpu_size,
-            (unsigned long long)state.decoder_memory.cpu_gpu_size,
-            (unsigned long long)state.owned_frame_bytes, (unsigned long long)life.first_ready_us,
-            (unsigned long long)state.first_decoded_us, (unsigned long long)state.first_present_us);
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"decoder_lifecycle_state\":\"%s\",\"decoder_generation\":%u,"
+             "\"decoder_initialization_us\":%llu,\"decoder_reconfiguration_count\":%u,"
+             "\"decoder_reconfiguration_us\":%llu,\"decoder_recovery_attempts\":%u,"
+             "\"decoder_recovery_successes\":%u,\"decoder_recovery_failures\":%u,"
+             "\"decoder_recovery_reason\":%u,\"stream_parameters_verified\":%u,"
+             "\"stream_coded_width\":%u,\"stream_coded_height\":%u,"
+             "\"stream_profile\":%u,\"stream_level\":%u,\"stream_reference_frames\":%u,"
+             "\"stream_required_dpb_frames\":%u,\"stream_standard_max_dpb_frames\":%u,"
+             "\"decoder_cpu_memory_bytes\":%llu,\"decoder_gpu_memory_bytes\":%llu,"
+             "\"decoder_shared_memory_bytes\":%llu,\"decoder_frame_pool_bytes\":%llu,"
+             "\"decoder_ready_us\":%llu,\"decoder_first_decoded_us\":%llu,"
+             "\"decoder_first_presented_us\":%llu,\n",
+             moonlight::video::name(life.state), life.generation,
+             (unsigned long long)life.initialization_us, life.reconfigurations,
+             (unsigned long long)life.reconfiguration_us, life.attempts, life.successes,
+             life.failures, unsigned(life.reason), life.stream.verified ? 1u : 0u,
+             life.stream.width, life.stream.height, life.stream.profile, life.stream.level,
+             life.stream.references, life.stream.buffering, life.stream.standard_dpb,
+             (unsigned long long)(state.owned_resources.memory.cpu
+                                      ? state.owned_resources.cpu_mapping_size
+                                      : 0),
+             (unsigned long long)(state.owned_resources.gpu_start >= 0
+                                      ? state.owned_resources.gpu_size
+                                      : 0),
+             (unsigned long long)(state.owned_resources.cpu_gpu_start >= 0
+                                      ? state.owned_resources.cpu_gpu_size
+                                      : 0),
+             (unsigned long long)(state.owned_frame_start >= 0 ? state.owned_frame_bytes : 0),
+             (unsigned long long)life.first_ready_us, (unsigned long long)state.first_decoded_us,
+             (unsigned long long)state.first_present_us);
     ok = ok &&
          report_append(
              report, sizeof(report), &length,
