@@ -594,22 +594,25 @@ typedef struct stream_ready_frame
     native_agc_metrics_t hud;
 } stream_ready_frame_t;
 
-// Three owners. "Fixed" fields are written before the workers start. The decode
-// worker owns decoding and its statistics; the presentation worker owns AGC and
-// its statistics. Only `frames`, `mailbox` and `stop_presenting` are shared, and
-// only under `lock`. Aggregates are read after both workers have joined.
+// Three owners. Session policy is set before workers start. The decode worker
+// owns decoder storage/configuration and its statistics; presentation borrows
+// only ready surfaces and owns AGC/statistics. Reconfiguration joins presentation
+// before changing storage. Frames/mailbox/stop_presenting use `lock`; aggregates
+// are read only after both workers have joined.
 typedef struct native_renderer_state
 {
-    // Fixed.
+    // Negotiated presentation context (immutable while workers run).
     const native_video_mode_t *mode;
     uint32_t stream_fps;
     uint32_t client_refresh_x100;
+    // Decode-owned storage/configuration, replaced only behind the join barrier.
     void *input_memory;
     void *frame_memory;
     size_t input_size;
     size_t frame_size;
     videodec2_decoder_config_t decoder_config;
     videodec2_decoder_memory_t decoder_memory;
+    // Session policy and effective placement (snapshotted after join).
     uint32_t pipeline_mode; // MOONLIGHT_DECODER_PIPELINE_*
     uint32_t requested_depth;
     uint32_t decoder_cores;
