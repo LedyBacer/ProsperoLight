@@ -632,6 +632,7 @@ typedef struct native_renderer_state
     bool stream_aware;
     bool recovery_pending;
     bool parameters_requested;
+    uint32_t test_capacity_errors;
     uint64_t cached_sps_identity;
     std::array<uint8_t, 16390> cached_sps;
     size_t cached_sps_size;
@@ -1009,7 +1010,8 @@ static void save_performance_summary(const native_renderer_state_t &state,
              "\"decoder_initialization_us\":%llu,\"decoder_reconfiguration_count\":%u,"
              "\"decoder_reconfiguration_us\":%llu,\"decoder_recovery_attempts\":%u,"
              "\"decoder_recovery_successes\":%u,\"decoder_recovery_failures\":%u,"
-             "\"decoder_recovery_reason\":%u,\"stream_parameters_verified\":%u,"
+             "\"decoder_lifecycle_failures\":%u,\"decoder_recovery_reason\":%u,\"decoder_test_"
+             "capacity_errors\":%u,\"stream_parameters_verified\":%u,"
              "\"stream_coded_width\":%u,\"stream_coded_height\":%u,"
              "\"stream_profile\":%u,\"stream_level\":%u,\"stream_reference_frames\":%u,"
              "\"stream_required_dpb_frames\":%u,\"stream_standard_max_dpb_frames\":%u,"
@@ -1020,9 +1022,10 @@ static void save_performance_summary(const native_renderer_state_t &state,
              moonlight::video::name(life.state), life.generation,
              (unsigned long long)life.initialization_us, life.reconfigurations,
              (unsigned long long)life.reconfiguration_us, life.attempts, life.successes,
-             life.failures, unsigned(life.reason), life.stream.verified ? 1u : 0u,
-             life.stream.width, life.stream.height, life.stream.profile, life.stream.level,
-             life.stream.references, life.stream.buffering, life.stream.standard_dpb,
+             life.failed_recoveries, life.failures, unsigned(life.reason),
+             state.test_capacity_errors, life.stream.verified ? 1u : 0u, life.stream.width,
+             life.stream.height, life.stream.profile, life.stream.level, life.stream.references,
+             life.stream.buffering, life.stream.standard_dpb,
              (unsigned long long)(state.owned_resources.memory.cpu
                                       ? state.owned_resources.cpu_mapping_size
                                       : 0),
@@ -1826,13 +1829,8 @@ static int32_t settle_decoder_call(native_renderer_state_t *state, int offered,
         if (!state->decoded)
             state->first_decoded_us = completed_us;
         ++state->decoded;
-        state->lifecycle.corruptions = 0;
-        if (state->recovery_pending)
-        {
-            ++state->lifecycle.successes;
-            state->recovery_pending = false;
-            state->lifecycle.state = moonlight::video::State::Ready;
-        }
+        state->lifecycle.output(state->recovery_pending);
+        state->recovery_pending = false;
         state->decoded_rate.update(completed_us, state->decoded);
         if (++state->clean_outputs >= PIPELINE_CLEAN_OUTPUTS)
             state->pipeline_faults = 0;
@@ -2012,6 +2010,7 @@ static bool configure_stream_decoder(native_renderer_state_t *state,
     state->clean_outputs = 0;
     plan.depth = config.pipeline_depth;
     state->lifecycle.configured(requirements, plan, monotonic_us(), monotonic_us() - started);
+    state->decoder_recreations = state->lifecycle.reconfigurations;
     if (recovering)
         state->lifecycle.state = State::Recovering;
     pthread_mutex_lock(&state->lock);
@@ -2202,6 +2201,18 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
         state->parameters_requested = true;
         return DR_NEED_IDR;
     }
+#if PROSPEROLIGHT_TEST_LAB
+    // This is a declared synthetic API error, not a hardware-error observation.
+    // The native quiescence, replacement, keyframe and subsequent output are real.
+    if (state->stream_aware && prosperolight::test_lab::active() &&
+        prosperolight::test_lab::active_profile().decoder_capacity_probe &&
+        state->test_capacity_errors == 0 && state->decoded >= 60 && state->presented.load() >= 30)
+    {
+        ++state->test_capacity_errors;
+        (void)lan_http_report_text("Native decoder developer probe: synthetic capacity error once");
+        return decode_refused(state, int32_t(0x811d0302u), nullptr);
+    }
+#endif
     if (state->await_keyframe)
     {
         // The decoder was rebuilt outside a frame: resume only on a keyframe.
@@ -2484,7 +2495,6 @@ static void fallback_to_classic_decoder(native_renderer_state_t *state, int32_t 
         if (configure_stream_decoder(state, state->lifecycle.stream, next))
         {
             state->await_keyframe = true;
-            ++state->decoder_recreations;
         }
         return;
     }

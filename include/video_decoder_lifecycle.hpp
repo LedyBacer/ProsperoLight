@@ -44,7 +44,9 @@ struct Lifecycle
     Error reason{Error::None};
     Requirements stream{};
     Plan effective{};
-    uint32_t generation{}, reconfigurations{}, attempts{}, successes{}, failures{}, corruptions{};
+    uint32_t generation{}, reconfigurations{}, attempts{}, successes{}, failures{},
+        failed_recoveries{}, corruptions{};
+    bool local_recovery_active{};
     uint64_t waiting_since{}, initialization_us{}, reconfiguration_us{}, ready_us{},
         first_ready_us{};
     static constexpr uint32_t recovery_budget = 2, corruption_budget = 8;
@@ -72,9 +74,14 @@ struct Lifecycle
     }
     void fail(Error e)
     {
-        reason = e;
         if (state != State::Failed)
+        {
             ++failures;
+            if (local_recovery_active || e == Error::Capacity || e == Error::Reset)
+                ++failed_recoveries;
+        }
+        local_recovery_active = false;
+        reason = e;
         state = State::Failed;
     }
     bool recover(Error e)
@@ -83,10 +90,12 @@ struct Lifecycle
             return false;
         if (attempts >= recovery_budget)
         {
+            local_recovery_active = true;
             fail(Error::Exhausted);
             return false;
         }
         ++attempts;
+        local_recovery_active = true;
         reason = e;
         state = State::Recovering;
         return true;
@@ -110,10 +119,24 @@ struct Lifecycle
     }
     bool corruption()
     {
+        if (state == State::Stopping || state == State::Stopped || state == State::Failed)
+            return false;
+        reason = Error::Corruption;
+        state = State::Recovering;
         if (++corruptions <= corruption_budget)
             return true;
         fail(Error::Exhausted);
         return false;
+    }
+    void output(bool local_recovery)
+    {
+        if (state == State::Failed || state == State::Stopping || state == State::Stopped)
+            return;
+        corruptions = 0;
+        if (local_recovery)
+            ++successes;
+        local_recovery_active = false;
+        state = State::Ready;
     }
 };
 } // namespace moonlight::video

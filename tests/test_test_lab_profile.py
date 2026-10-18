@@ -26,6 +26,13 @@ int main() {
     const char *base=R"({"schema":"prosperolight-test/1","run_id":"run-1","suite":"decoder-smoke","client":{"host":"PC:47989","app":"Desktop","codec":"hevc","chroma":"420","hdr":false,"resolution":"1080p","fps":60,"bitrate_mbps":20,"vsync":true,"decoder_pipeline":"classic","decoder_cores":3,"pacing":"paced","vrr_profile":"smooth","host_extensions":{"enabled":true,"vrr":"off","display":"virtual","scale":75,"optimize":false,"mute_host":false,"quit_host":false}},"timing":{"hard_seconds":120}})";
     TestProfile profile; std::string error;
     assert(parse_profile(base,"run-1",profile,error));
+    assert(!profile.decoder_capacity_probe);
+    std::string probe=base; probe.insert(1,"\"capture\":{\"decoder_capacity_probe\":true},");
+    assert(parse_profile(probe,"run-1",profile,error) && profile.decoder_capacity_probe);
+    auto wrong_probe=probe; auto at=wrong_probe.find("decoder_capacity_probe\":true");
+    wrong_probe.replace(at,strlen("decoder_capacity_probe\":true"),"decoder_capacity_probe\":1");
+    assert(!parse_profile(wrong_probe,"run-1",profile,error));
+    assert(parse_profile(base,"run-1",profile,error));
     assert(!profile.coordinated.value_or(false));
     std::string coordinated=base;coordinated.insert(1,"\"coordinated\":true,");
     assert(parse_profile(coordinated,"run-1",profile,error) && profile.coordinated.value());

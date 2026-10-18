@@ -108,6 +108,29 @@ int main()
     assert(life.state == State::Failed);
     life.state = State::Stopping;
     assert(!life.recover(Error::Capacity));
+    Lifecycle transient;
+    transient.wait(1);
+    transient.configured(unchanged, plan(unchanged, {}), 2, 1);
+    assert(transient.corruption() && transient.state == State::Recovering &&
+           transient.reason == Error::Corruption);
+    transient.output(false);
+    assert(transient.state == State::Ready && transient.corruptions == 0 &&
+           transient.attempts == 0);
+    assert(transient.recover(Error::Capacity));
+    transient.output(true);
+    assert(transient.state == State::Ready && transient.successes == 1);
+    transient.state = State::Stopping;
+    transient.output(true);
+    assert(transient.state == State::Stopping && !transient.corruption());
+    Lifecycle rejected;
+    rejected.wait(1);
+    rejected.fail(Error::Unsupported);
+    assert(rejected.failures == 1 && rejected.failed_recoveries == 0);
+    Lifecycle failed_recovery;
+    failed_recovery.wait(1);
+    assert(failed_recovery.recover(Error::Capacity));
+    failed_recovery.fail(Error::Allocation);
+    assert(failed_recovery.failures == 1 && failed_recovery.failed_recoveries == 1);
     Lifecycle corruption;
     for (unsigned i = 0; i < Lifecycle::corruption_budget; ++i)
         assert(corruption.corruption());

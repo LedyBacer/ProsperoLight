@@ -105,3 +105,13 @@ SPS levels up to the highest values already requested by the native 4K120 path
 (H.264 6.0 / HEVC 5.2), with actual Query/Create acceptance still mandatory.
 A valid higher declared level at a smaller resolution must not be rejected just
 because the previous resolution table used a lower default.
+
+The developer-only `hevc-capacity-recovery-probe` profile injects exactly one
+synthetic `0x811d0302` result after active decoding/presentation. It exercises the
+real native retirement/recreation, IDR and resumed-output path. This is not an
+observation of a spontaneous hardware fault. Its telemetry records the injected
+count; functional recovery must pass, but measurement remains inconclusive and
+cannot enter a performance comparison. Production builds cannot enable the probe.
+Fatal lifecycle failures and failed local recovery attempts have separate counters;
+a startup rejection is not reported as a failed recovery. HEVC reference telemetry
+is a buffering-derived upper bound, not a count of explicit reference pictures.

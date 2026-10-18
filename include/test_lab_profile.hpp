@@ -20,6 +20,8 @@ struct TestProfile
     std::optional<unsigned> codec, chroma, resolution, fps, bitrate_mbps, pipeline, cores, pacing,
         vrr_profile, host_vrr, display, scale;
     std::optional<bool> hdr, vsync, extensions, optimize, mute_host, quit_host, coordinated;
+    // Developer-only deterministic lifecycle exercise; never a saved preference.
+    bool decoder_capacity_probe = false;
     unsigned startup_seconds = 30, ready_seconds = 30, hard_seconds = 120;
     unsigned warmup_seconds = 0, measure_seconds = 30, cooldown_seconds = 0;
 };

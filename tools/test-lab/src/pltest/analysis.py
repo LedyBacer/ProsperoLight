@@ -136,9 +136,21 @@ def _analyze_run(profile, report, directory):
         from .decoder_lifecycle import decoder_lifecycle
         lifecycle = decoder_lifecycle(performance)
         result['decoder_lifecycle'] = lifecycle
-        if lifecycle['available'] and not lifecycle.get('valid'):
+        probe = bool(profile.get('capture', {}).get('decoder_capacity_probe', False))
+        injected = performance.get('decoder_test_capacity_errors', 0)
+        if injected:
+            issues.append('DEVELOPER_DECODER_CAPACITY_PROBE')
+        if probe and result['functional_verdict'] == 'PASS' and (injected != 1 or performance.get('decoder_generation', 0) < 2 or
+                      performance.get('decoder_recovery_successes', 0) != 1):
             result['functional_verdict'] = 'FAIL'
+            issues.append('DECODER_PROBE_NOT_RECOVERED')
+        if lifecycle['available'] and not lifecycle.get('valid'):
+            if result['functional_verdict'] == 'PASS':
+                result['functional_verdict'] = 'FAIL'
             issues.append('DECODER_LIFECYCLE_INCOMPLETE')
+        if performance.get('decoder_lifecycle_failures', 0):
+            result['functional_verdict'] = 'FAIL'
+            issues.append('DECODER_LIFECYCLE_FAILED')
         if performance.get('decoder_recovery_failures', 0):
             result['functional_verdict'] = 'FAIL'
             issues.append('DECODER_RECOVERY_FAILED')

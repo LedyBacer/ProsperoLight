@@ -37,3 +37,10 @@ class DecoderEvidenceTests(unittest.TestCase):
         self.assertFalse(decoder_lifecycle(value)['valid'])
         value['decoder_first_presented_us'] = True
         self.assertFalse(decoder_lifecycle(value)['valid'])
+
+    def test_probe_counter_is_explicit_and_typed(self):
+        value = self.sample()
+        value['decoder_test_capacity_errors'] = 1
+        self.assertEqual(decoder_lifecycle(value)['counters']['decoder_test_capacity_errors'], 1)
+        value['decoder_test_capacity_errors'] = True
+        self.assertFalse(decoder_lifecycle(value)['valid'])

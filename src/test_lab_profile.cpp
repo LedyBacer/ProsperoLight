@@ -315,14 +315,18 @@ bool parse_profile(std::string_view json, std::string_view expected_id, TestProf
     }
     if (auto capture = field(root, "capture"))
     {
-        if (!known(*capture, {"detailed_frame_trace", "host_logs", "gpu_metrics"}))
+        if (!known(*capture,
+                   {"detailed_frame_trace", "host_logs", "gpu_metrics", "decoder_capacity_probe"}))
             return false;
         for (const auto &[key, val] : capture->fields)
         {
-            (void)key;
             if (val.kind != Value::boolean)
                 return false;
+            if (key == "decoder_capacity_probe")
+                p.decoder_capacity_probe = val.flag;
         }
+        if (p.decoder_capacity_probe && (!p.codec || *p.codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE))
+            return false;
     }
     if (auto env = field(root, "environment"))
     {
