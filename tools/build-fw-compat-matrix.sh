@@ -30,6 +30,7 @@ assert r['runtime_archive_sha256']==hashlib.sha256((p/'lib/libps5_opengl_core33.
 PY
 (cd "$PS5_OPENGL_PREFIX" && sha256sum --check --strict --quiet manifest.sha256)
 cp "$PS5_OPENGL_PREFIX/fwcompat-sdk.json" "$out/"
+sdk_id=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("ps5_opengl_1_0_2_fwcompat_"+r["patch_sha256"][:12])' "$out/fwcompat-sdk.json")
 printf '%s\n' "$sha" > "$out/source-sha.txt"
 python3 - "${1:-}" > "$out/variants.txt" <<'PY'
 import json,sys
@@ -48,7 +49,7 @@ while read -r id warmup preload cache mode pyrowave; do
     options=(FWCOMPAT_DIAGNOSTICS=1 FWCOMPAT_VARIANT_ID="${id//-/_}"
         FWCOMPAT_SKIP_DECODER_WARMUP="$warmup" FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD="$preload"
         FWCOMPAT_DISABLE_SHADER_CACHE="$cache" FWCOMPAT_FORCE_1080P="$mode"
-        FWCOMPAT_SDK_ID=ps5_opengl_1_0_2_fwcompat PYROWAVE="$pyrowave"
+        FWCOMPAT_SDK_ID="$sdk_id" PYROWAVE="$pyrowave"
         TEST_LAB=0 LAUNCH_PROOF=0 LAN_TELEMETRY=0 UPDATE_DEV_OFFER=0 UPDATE_AUTO_ACCEPT=0
         STREAM_SELF_TEST_FPS=0 VIDEO_OUTPUT_SELF_TEST_FPS=0 STOP_ACTIVE_APP_SELF_TEST=0
         BUILD_LABEL="FWCompat $id ${sha:0:7}")

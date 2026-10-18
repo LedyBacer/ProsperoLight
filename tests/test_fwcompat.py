@@ -45,6 +45,28 @@ int main(int,char **argv) {
    text=(p/'log').read_text();self.assertIn('early.begin',text);self.assertIn('variant=01-no-warmup',text);self.assertIn('complete',text)
    rows=[json.loads(line) for line in (p/'fwcompat-startup.jsonl').read_text().splitlines()]
    self.assertEqual(rows[0]['variant'],'01-no-warmup');self.assertEqual(rows[-1]['stage'],'complete')
+ def test_module_skip_preserves_keyboard_mouse_and_process_lifetime(self):
+  compiler=shutil.which('clang++') or shutil.which('c++')
+  with tempfile.TemporaryDirectory() as d:
+   p=Path(d);src=p/'test.cpp';exe=p/'test'
+   src.write_text('''#include "fwcompat.h"
+#include "native_modules.hpp"
+#include <cassert>
+unsigned loads=0;
+extern "C" int sceSysmoduleLoadModule(unsigned id) {
+ ++loads;assert(!FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD || id!=prosperolight::native_modules::video_decoder);return 0;
+}
+extern "C" void fwcompat_checkpoint(const char*,long long) {}
+int main() {
+ using namespace prosperolight::native_modules;
+ PrepareBeforeStorage();PrepareBeforeStorage();
+ assert(loads==(FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD?2:3));
+ assert(Result(keyboard)==0 && Result(mouse)==0);
+ assert(Result(video_decoder)==(FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD?-1:0));
+}''')
+   for skip in (0,1):
+    subprocess.run([compiler,'-std=c++20','-I'+str(ROOT/'include'),'-DFWCOMPAT_DIAGNOSTICS=1',f'-DFWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD={skip}',str(src),str(ROOT/'src/native_modules.cpp'),'-o',str(exe)],check=True)
+    subprocess.run([str(exe)],check=True)
  def test_ui_generated_only_and_calls_wrapped(self):
   m=module('fwui','tools/fwcompat-instrument-ui.py')
   text='if (!eglInitialize(display_, &major, &minor)) return false;'

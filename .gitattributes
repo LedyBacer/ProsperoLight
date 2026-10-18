@@ -30,3 +30,6 @@ ui/fonts/** -text -whitespace
 
 # Unified diff context includes intentionally blank context lines.
 tools/pyrowave/patches/** -whitespace
+
+# Unified patch context contains single-space blank lines.
+tools/fwcompat/*.patch whitespace=-blank-at-eol
