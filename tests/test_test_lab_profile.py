@@ -31,7 +31,7 @@ int main() {
     assert(parse_profile(probe,"run-1",profile,error) && profile.decoder_capacity_probe);
     auto early=probe;early.insert(early.find("decoder_capacity_probe")-1,"\"decoder_capacity_probe_first\":true,");
     assert(parse_profile(early,"run-1",profile,error) && profile.decoder_capacity_probe_first);
-    auto only_first=base;only_first.insert(1,"\"capture\":{\"decoder_capacity_probe_first\":true},");
+    std::string only_first=base;only_first.insert(1,"\"capture\":{\"decoder_capacity_probe_first\":true},");
     assert(!parse_profile(only_first,"run-1",profile,error));
     auto wrong_probe=probe; auto at=wrong_probe.find("decoder_capacity_probe\":true");
     wrong_probe.replace(at,strlen("decoder_capacity_probe\":true"),"decoder_capacity_probe\":1");

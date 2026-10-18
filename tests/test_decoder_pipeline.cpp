@@ -61,6 +61,7 @@ static void fill_output(videodec2_output_t *output, void *buffer)
 // Worker-thread scenario: a stand-in for moonlight-common-c's frame queue.
 static std::atomic<unsigned> feed_total, feed_next, completed_units, refused_units;
 static std::atomic<bool> wake_requested;
+static std::atomic<unsigned> poll_calls;
 static uint8_t access_unit[] = {0, 0, 1, 0x65, 0x80};
 static LENTRY fragment;
 static DECODE_UNIT queued_unit;
@@ -124,6 +125,7 @@ extern "C"
     }
     bool LiPollNextVideoFrame(VIDEO_FRAME_HANDLE *handle, PDECODE_UNIT *unit)
     {
+        ++poll_calls;
         if (feed_next.load() >= feed_total.load())
             return false;
         return LiWaitForNextVideoFrame(handle, unit);
@@ -978,9 +980,11 @@ static void first_access_unit_and_cancellation()
         dispose_owner(state);
     }
     state = uninitialized_owner();
-    Requirements waiting{};
-    assert(parse_sps(Codec::H264, sps.data(), sps.size(), waiting) == ParseResult::Valid);
-    assert(configure_stream_decoder(state, waiting, plan(waiting, {})) && state->decoded == 0);
+    Requirements waiting_requirements{};
+    assert(parse_sps(Codec::H264, sps.data(), sps.size(), waiting_requirements) ==
+           ParseResult::Valid);
+    assert(configure_stream_decoder(state, waiting_requirements, plan(waiting_requirements, {})) &&
+           state->decoded == 0);
     join_video_workers(state);
     assert(!state->present_started);
     dispose_owner(state);
@@ -992,7 +996,11 @@ static void first_access_unit_and_cancellation()
     dispose_owner(state);
     state = uninitialized_owner();
     feed_total = feed_next = 0;
+    poll_calls = 0;
     std::thread waiting([&] { video_decode_thread(state); });
+    for (unsigned i = 0; i < 5000 && !poll_calls.load(); ++i)
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+    assert(poll_calls);
     state->running = 0;
     waiting.join();
     dispose_owner(state);
