@@ -77,6 +77,20 @@ int main() {
   self.assertIn('FWCOMPAT_CALL("egl.eglInitialize", eglInitialize(display_, &major, &minor))',wrapped)
   source=(ROOT/'tools/build.sh').read_text();self.assertIn('compile_source="$generated"',source)
   self.assertIn('FWCOMPAT_DIAGNOSTICS:-0',source)
+ def test_original_release_build_id_note_is_checked(self):
+  import struct
+  compare=module('codecompare','tools/fwcompat/compare-release-code.py')
+  data=bytearray(256)
+  struct.pack_into('<Q',data,32,64)
+  struct.pack_into('<HH',data,54,56,1)
+  struct.pack_into('<IIQQQQQQ',data,64,4,0,120,0,0,36,36,4)
+  struct.pack_into('<III',data,120,4,20,3)
+  data[132:136]=b'GNU\0'
+  fingerprint='c42ff125149aa6fde1bbd8b08009eeee00000000'
+  data[136:156]=bytes.fromhex(fingerprint)
+  self.assertEqual(compare.build_id(data),fingerprint)
+  data[132]=ord('X')
+  with self.assertRaises(ValueError):compare.build_id(data)
  def test_sdk_source_patch_cannot_silently_target_enclosing_git_checkout(self):
   import difflib
   sdk=module('sdkbuild','tools/fwcompat/build-sdk.py')

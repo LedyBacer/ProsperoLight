@@ -43,7 +43,9 @@ storage access and without captured console output, early evidence may be lost.
 An old `crash-last.txt` is not evidence that this attempt crashed. Save the old
 report before testing; compare its modification time/content afterwards. Match
 new logs to `[FWCOMPAT] variant=...`, `git_sha...`, and `process.start_unix`.
-Keep the matching developer ELF out of the console installation.
+Keep the matching developer ELF out of the console installation. Do not mix
+symbols from local builds and GitHub CI builds, even with the same variant/SHA;
+use the artifact receipt and checksums supplied with that exact ZIP.
 
 `RESULT=LAUNCHER_READY` means the diagnostic code saw the first render with no
 GL error or flagged AGC failure, followed by a successful EGL swap. **Also say

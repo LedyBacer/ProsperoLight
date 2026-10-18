@@ -25,6 +25,21 @@ def text(data):
         if kind==1 and flags&1:return va,data[offset:offset+length]
     raise ValueError('No executable segment')
 
+def build_id(data):
+    ph=struct.unpack_from('<Q',data,32)[0];size,count=struct.unpack_from('<HH',data,54)
+    found=[]
+    for i in range(count):
+        kind,_,offset,_,_,length,_,_=struct.unpack_from('<IIQQQQQQ',data,ph+i*size)
+        if kind!=4:continue
+        pos=offset
+        while pos+12<=offset+length:
+            names,desc,tag=struct.unpack_from('<III',data,pos);pos+=12
+            name=data[pos:pos+names];pos+=(names+3)&~3
+            value=data[pos:pos+desc];pos+=(desc+3)&~3
+            if name==b'GNU\0' and tag==3:found.append(value.hex())
+    if len(found)!=1:raise ValueError('Expected one GNU build-id note')
+    return found[0]
+
 def code_mask(data, section):
     ss=sections(data);h=ss[section];code=data[h[4]:h[4]+h[5]];mask=bytearray(b'\1'*len(code))
     if '.rela'+section in ss:
@@ -49,10 +64,15 @@ def compare(obj, release, rip, offset, section=".text.ps5_agc_gate2_run"):
         symbol=section.removeprefix('.text.'),symbol_absolute=hex(rip-offset),offset=hex(offset),rip=hex(rip),
         function_bytes=len(code),compared_bytes=sum(mask),mismatches=0,
         instruction_at_fault=candidate[offset:offset+3].hex(),
+        release_gnu_build_id=build_id(release),
         sdk_object_sha256=hashlib.sha256(obj).hexdigest(),extracted_release_elf_sha256=hashlib.sha256(release).hexdigest())
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('sdk_object',type=Path)
     p.add_argument('extracted_release_elf',type=Path);p.add_argument('--rip',type=lambda x:int(x,0),required=True)
     p.add_argument('--function-offset',type=lambda x:int(x,0),default=0x19a6)
     p.add_argument('--section',default='.text.ps5_agc_gate2_run')
-    a=p.parse_args();print(json.dumps(compare(a.sdk_object.read_bytes(),a.extracted_release_elf.read_bytes(),a.rip,a.function_offset,a.section),indent=2))
+    p.add_argument('--fingerprint',help='Require the GNU build ID reported by the console')
+    a=p.parse_args()
+    elf=a.extracted_release_elf.read_bytes()
+    if a.fingerprint and build_id(elf)!=a.fingerprint.lower():raise ValueError('Reported fingerprint does not match this release')
+    print(json.dumps(compare(a.sdk_object.read_bytes(),elf,a.rip,a.function_offset,a.section),indent=2))

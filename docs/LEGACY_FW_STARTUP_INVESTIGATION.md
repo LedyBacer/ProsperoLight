@@ -92,14 +92,17 @@ that API returns NULL on the users' systems remains open. API version/init
 semantics, module/runtime state or a firmware ABI difference still require
 new init/defaults checkpoints. Decoder success does not establish AGC success.
 A guard is a valid crash-safety fix, **not yet a successful startup fix**.
-The operator fingerprints are recorded but were not independently matched to
-the downloaded files; if their binaries differ from the public releases,
-obtain their eboot hashes/files before extending this conclusion to them.
+Both operator-reported fingerprints were then **independently verified** as
+the GNU build-ID descriptors in the original public binaries' PT_NOTE segments
+(note owner `GNU`, type 3, 20-byte descriptor). The code-match receipt includes
+these exact build IDs. This ties the reported addresses to the matching public
+builds without substituting a differently linked executable. We still do not
+claim to have collected fresh console crash logs ourselves.
 
 To reproduce a RIP match, extract the public SELF with the native tool and run:
 
 ```sh
-python3 tools/fwcompat/compare-release-code.py ps5_agc_runtime_backend.o original-release.elf --rip 0x5c4b06
+python3 tools/fwcompat/compare-release-code.py ps5_agc_runtime_backend.o original-release.elf --rip 0x5c4b06 --fingerprint c42ff125149aa6fde1bbd8b08009eeee00000000
 # TV: --rip 0xaaa9a6. Stack frames: use ps5_screen.o, --section and --function-offset from the table.
 ```
 
@@ -226,3 +229,8 @@ After logs return, associate each report with its receipt/ELF, symbolize only
 that ELF with `tools/symbolize-crash.py`, repeat the smallest differentiating
 variant, and propose the narrow verified fix separately. Do not merge this
 experiment or publish it as a normal release.
+
+## Build and validation record
+
+See [final validation and artifact inventory](LEGACY_FW_STARTUP_VALIDATION.md)
+for exact tested source SHA, checks, seven ZIP/ELF associations and CI artifacts.

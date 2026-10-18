@@ -10,6 +10,7 @@
       "compared_bytes": 9624,
       "mismatches": 0,
       "instruction_at_fault": "488b10",
+      "release_gnu_build_id": "c42ff125149aa6fde1bbd8b08009eeee00000000",
       "sdk_object_sha256": "ba5a5c27f927ee8657f701b70caf4d1fc9d9e964f32f11602c8c4aaeee92f0eb",
       "extracted_release_elf_sha256": "2957e2fa02373366386be871af8ba715605f036f8126f66e70a746f6e918b705"
     },
@@ -23,6 +24,7 @@
       "compared_bytes": 9624,
       "mismatches": 0,
       "instruction_at_fault": "488b10",
+      "release_gnu_build_id": "717caaf832d6f6916b6ffe89392630bd00000000",
       "sdk_object_sha256": "ba5a5c27f927ee8657f701b70caf4d1fc9d9e964f32f11602c8c4aaeee92f0eb",
       "extracted_release_elf_sha256": "0dd65a114aa68c20662c59d5835ee40a9b791f1009e95cbf7da70048efd4244b"
     }
@@ -66,5 +68,6 @@
     "ProsperoTV-070-eboot.bin": "869cd7319de043603375c2479d706d0a4824d9744bcd44764039bef78d825194",
     "stock-sdk-1.0.2-agc.o": "ba5a5c27f927ee8657f701b70caf4d1fc9d9e964f32f11602c8c4aaeee92f0eb",
     "ps5_screen.o": "7c9f6514e067c93738352e4177e3cfb9d23ca9ef7fc8d8739a9b782604083307"
-  }
+  },
+  "reported_fingerprints_verified_against_GNU_build_id_notes": true
 }
