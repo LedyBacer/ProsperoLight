@@ -32,7 +32,8 @@ static bool fail_decode, fail_reset, fail_flush, fail_create, orphan_flush;
 // held, the decoder refuses to decode until the rest are flushed too.
 static bool flushing;
 static bool cancel_query, cancel_create, fail_source_idle;
-static unsigned native_allocations;
+static std::atomic<unsigned> native_allocations;
+static std::atomic<bool> hold_presentation, presentation_entered;
 static int pending_after_flush = -1; // A frame arriving while a flush blocks.
 static std::atomic<int> pending_frames;
 static int decoder_token, classic_token;
@@ -316,10 +317,18 @@ int native_agc_vsync_active(void)
 {
     return 1;
 }
-int native_agc_present_nv12(const void *, size_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                            const native_agc_metrics_t *metrics)
+int native_agc_present_nv12(const void *source, size_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                            uint32_t, const native_agc_metrics_t *metrics)
 {
     assert(metrics);
+    if (hold_presentation.load())
+    {
+        presentation_entered = true;
+        while (hold_presentation.load())
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        // ASan also checks that replacement did not free this borrowed surface.
+        assert(*static_cast<const uint8_t *>(source) == 0x5a);
+    }
     ++submits;
     return 0;
 }
@@ -718,17 +727,37 @@ static void stream_aware_owner()
     assert(state->decoder && state->lifecycle.generation == 1 && creates == 1);
     assert(prepare_stream_decoder(state, &unit));
     assert(creates == 1);
+    hold_presentation = true;
+    presentation_entered = false;
+    *static_cast<uint8_t *>(state->frame_memory) = 0x5a;
+    stream_ready_frame_t borrowed{};
+    borrowed.slot = 0;
+    borrowed.buffer = state->frame_memory;
+    borrowed.buffer_size = state->frame_size;
+    borrowed.frame = 1;
+    borrowed.ready_us = borrowed.arrival_us = monotonic_us();
+    publish_ready_frame(state, borrowed);
+    for (unsigned wait = 0; !presentation_entered && wait < 5000; ++wait)
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+    assert(presentation_entered);
+    const auto before_replacement = native_allocations.load();
     sps = fixture::h264(1920, 1080, 2, 42, true, 3);
     parameters.data = reinterpret_cast<char *>(sps.data());
     parameters.length = sps.size();
-    assert(prepare_stream_decoder(state, &unit));
+    bool replaced = false;
+    std::thread replacement([&] { replaced = prepare_stream_decoder(state, &unit); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    assert(native_allocations.load() == before_replacement);
+    hold_presentation = false;
+    replacement.join();
+    assert(replaced);
     assert(creates == 2 && deletes == 1 && state->lifecycle.generation == 2);
     assert(recover_stream_capacity(state));
     assert(creates == 3 && state->decoder_config.max_dpb_frames == 5);
     assert(!recover_stream_capacity(state));
     assert(!state->running && creates == 3);
     fail_source_idle = true;
-    const auto retained = native_allocations;
+    const auto retained = native_allocations.load();
     assert(retained > 0 && !retire_stream_decoder(state));
     assert(native_allocations == retained && state->decoder);
     fail_source_idle = false;

@@ -2160,6 +2160,7 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     videodec2_output_t output = {};
     moonlight::FrameTrace::Sample *trace = nullptr;
     const uint64_t arrival_us = monotonic_us();
+    const uint64_t callback_network_us = PltGetMicroseconds();
     const char *phase = "decode";
     PLENTRY entry;
     uint32_t fragment_count = 0;
@@ -2252,7 +2253,8 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
         decode_unit->enqueueTimeUs ? decode_unit->enqueueTimeUs : PltGetMicroseconds();
     // Use the upstream clock on both sides of enqueue->dequeue. This excludes
     // our copy, decode, and flip wait.
-    const uint64_t callback_network_us = PltGetMicroseconds();
+    // Captured alongside arrival_us, before deferred initialization, so the
+    // clock translation and queue age exclude configuration work.
 #if PROSPEROLIGHT_PERFORMANCE_DETAIL
     trace = frame_trace.append();
     if (trace)
