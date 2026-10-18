@@ -2378,6 +2378,7 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
             return state->stream_aware ? DR_OK : DR_NEED_IDR;
         state->await_keyframe = false;
         state->transition_wait_since = 0;
+        state->parameters_requested = false;
     }
     if (state->decoder_needs_reset)
     {

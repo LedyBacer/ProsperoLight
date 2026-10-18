@@ -967,6 +967,7 @@ static void first_access_unit_and_cancellation()
     assert(state->lifecycle.attempts == 1 && state->await_keyframe);
     assert(decode(state, &unit, 2, FRAME_TYPE_IDR) == DR_OK);
     assert(state->decoded == 1 && state->lifecycle.successes == 1);
+    assert(!state->await_keyframe && !state->parameters_requested && !state->transition_wait_since);
     dispose_owner(state);
     for (unsigned point = 1; point <= 8; ++point)
     {
