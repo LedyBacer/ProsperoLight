@@ -1,0 +1,272 @@
+/* ProsperoLight - bounded native decoder stream requirements.
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+#pragma once
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+namespace moonlight::video
+{
+enum class Codec { H264, Hevc };
+enum class ParseResult { NotParameters, Valid, Invalid, Unsupported };
+struct Requirements
+{
+    Codec codec{};
+    uint32_t profile{}, level{}, width{}, height{}, visible_width{}, visible_height{};
+    uint32_t chroma{1}, bit_depth{8}, references{}, buffering{}, reorder{}, standard_dpb{};
+    uint32_t parameter_id{};
+    uint64_t identity{};
+    bool verified{}, progressive{true};
+};
+// No heap allocation or unbounded syntax loops. RBSP never exceeds 16 KiB.
+class Bits
+{
+    std::array<uint8_t, 16384> data{};
+    size_t size{}, position{};
+public:
+    bool ok{true};
+    Bits(const uint8_t *p, size_t n)
+    {
+        if (!p || n == 0 || n > data.size()) { ok = false; return; }
+        unsigned zeros = 0;
+        for (size_t i = 0; i < n; ++i)
+        {
+            if (zeros >= 2 && p[i] == 3)
+            {
+                if (i + 1 == n || p[i + 1] > 3) { ok = false; return; }
+                zeros = 0;
+                continue;
+            }
+            data[size++] = p[i];
+            zeros = p[i] == 0 ? zeros + 1 : 0;
+        }
+    }
+    uint32_t read(unsigned n)
+    {
+        if (!ok || n > 32 || position + n > size * 8) { ok = false; return 0; }
+        uint32_t v = 0;
+        while (n--) { v = (v << 1) | ((data[position / 8] >> (7 - position % 8)) & 1); ++position; }
+        return v;
+    }
+    void skip(unsigned n) { while (n > 32 && ok) { read(32); n -= 32; } read(n); }
+    uint32_t ue(uint32_t maximum = 65535)
+    {
+        unsigned zeros = 0;
+        while (ok && read(1) == 0) { if (++zeros > 30) { ok = false; return 0; } }
+        const uint32_t v = ((uint32_t(1) << zeros) - 1) + read(zeros);
+        if (v > maximum) ok = false;
+        return v;
+    }
+    int32_t se() { uint32_t v = ue(); return (v & 1) ? int32_t((v + 1) / 2) : -int32_t(v / 2); }
+};
+inline uint32_t h264_dpb_mbs(uint32_t level)
+{
+    switch (level)
+    {
+    case 9: case 10: return 396;
+    case 11: return 900;
+    case 12: case 13: case 20: return 2376;
+    case 21: return 4752;
+    case 22: case 30: return 8100;
+    case 31: return 18000;
+    case 32: return 20480;
+    case 40: case 41: return 32768;
+    case 42: return 34816;
+    case 50: return 110400;
+    case 51: case 52: return 184320;
+    case 60: case 61: case 62: return 696320;
+    default: return 0;
+    }
+}
+inline uint64_t identity(const uint8_t *p, size_t n)
+{
+    uint64_t hash = UINT64_C(14695981039346656037);
+    for (size_t i = 0; i < n; ++i) hash = (hash ^ p[i]) * UINT64_C(1099511628211);
+    return hash;
+}
+inline void h264_hrd(Bits &b)
+{
+    const auto count = b.ue(31) + 1;
+    b.skip(8);
+    for (uint32_t i = 0; b.ok && i < count; ++i) { b.ue(); b.ue(); b.skip(1); }
+    b.skip(20);
+}
+inline ParseResult h264_sps(const uint8_t *p, size_t n, Requirements &out)
+{
+    Bits b(p, n);
+    Requirements r{};
+    r.codec = Codec::H264;
+    r.profile = b.read(8);
+    const auto constraints = b.read(8);
+    r.level = b.read(8);
+    if (r.level == 11 && (constraints & 16)) r.level = 9;
+    r.parameter_id = b.ue(31);
+    switch (r.profile)
+    {
+    case 100: case 110: case 122: case 244: case 44: case 83: case 86:
+    case 118: case 128: case 138: case 139: case 134: case 135:
+        r.chroma = b.ue(3);
+        if (r.chroma == 3) b.skip(1);
+        r.bit_depth = b.ue(6) + 8;
+        if (b.ue(6) + 8 != r.bit_depth) return ParseResult::Unsupported;
+        b.skip(1);
+        if (b.read(1))
+            for (unsigned i = 0; i < (r.chroma == 3 ? 12u : 8u) && b.ok; ++i)
+                if (b.read(1))
+                {
+                    int last = 8, next = 8;
+                    for (unsigned j = 0; j < (i < 6 ? 16u : 64u) && b.ok; ++j)
+                    {
+                        if (next) next = (last + b.se() + 256) % 256;
+                        if (next) last = next;
+                    }
+                }
+        break;
+    default: break;
+    }
+    b.ue(12); // log2_max_frame_num_minus4
+    const auto poc = b.ue(2);
+    if (poc == 0) b.ue(12);
+    else if (poc == 1)
+    {
+        b.skip(1); b.se(); b.se();
+        const auto count = b.ue(255);
+        for (uint32_t i = 0; i < count && b.ok; ++i) b.se();
+    }
+    r.references = b.ue(16);
+    b.skip(1);
+    const uint32_t mbs_w = b.ue(511) + 1, map_h = b.ue(511) + 1;
+    r.progressive = b.read(1) != 0;
+    if (!r.progressive) b.skip(1);
+    b.skip(1);
+    r.width = mbs_w * 16;
+    r.height = map_h * 16 * (r.progressive ? 1 : 2);
+    uint32_t crop_x = 0, crop_y = 0;
+    if (b.read(1))
+    {
+        const auto left = b.ue(8192), right = b.ue(8192), top = b.ue(8192), bottom = b.ue(8192);
+        crop_x = (left + right) * (r.chroma == 1 || r.chroma == 2 ? 2 : 1);
+        crop_y = (top + bottom) * (r.chroma == 1 ? 2 : 1) * (r.progressive ? 1 : 2);
+    }
+    r.standard_dpb = std::min(16u, h264_dpb_mbs(r.level) / (mbs_w * map_h * (r.progressive ? 1 : 2)));
+    r.buffering = r.standard_dpb;
+    r.reorder = r.standard_dpb;
+    if (b.read(1)) // VUI
+    {
+        if (b.read(1)) { if (b.read(8) == 255) b.skip(32); }
+        if (b.read(1)) b.skip(1);
+        if (b.read(1)) { b.skip(4); if (b.read(1)) b.skip(24); }
+        if (b.read(1)) { b.ue(5); b.ue(5); }
+        if (b.read(1)) b.skip(65);
+        const bool nal = b.read(1); if (nal) h264_hrd(b);
+        const bool vcl = b.read(1); if (vcl) h264_hrd(b);
+        if (nal || vcl) b.skip(1);
+        b.skip(1);
+        if (b.read(1))
+        {
+            b.skip(1); b.ue(16); b.ue(16); b.ue(16); b.ue(16);
+            r.reorder = b.ue(16); r.buffering = b.ue(16);
+        }
+        else if ((constraints & 16) && (r.profile == 44 || r.profile == 86 || r.profile == 100 || r.profile == 110 || r.profile == 122 || r.profile == 244))
+            r.reorder = 0;
+    }
+    if (!b.ok || crop_x >= r.width || crop_y >= r.height || !r.standard_dpb ||
+        r.references > r.buffering || r.buffering > r.standard_dpb || r.reorder > r.buffering)
+        return ParseResult::Invalid;
+    r.visible_width = r.width - crop_x; r.visible_height = r.height - crop_y;
+    r.identity = identity(p, n); r.verified = true;
+    out = r;
+    return ParseResult::Valid;
+}
+inline ParseResult hevc_sps(const uint8_t *p, size_t n, Requirements &out)
+{
+    Bits b(p, n);
+    Requirements r{}; r.codec = Codec::Hevc;
+    b.skip(4);
+    const auto layers = b.read(3);
+    if (layers > 6) return ParseResult::Invalid;
+    b.skip(1);
+    b.skip(3); r.profile = b.read(5);
+    b.skip(32); b.skip(48); r.level = b.read(8);
+    bool sub_profile[7]{}, sub_level[7]{};
+    for (unsigned i = 0; i < layers; ++i) { sub_profile[i] = b.read(1); sub_level[i] = b.read(1); }
+    if (layers) b.skip((8 - layers) * 2);
+    for (unsigned i = 0; i < layers; ++i) { if (sub_profile[i]) b.skip(88); if (sub_level[i]) b.skip(8); }
+    r.parameter_id = b.ue(15); r.chroma = b.ue(3);
+    if (r.chroma == 3) b.skip(1);
+    r.width = b.ue(8192); r.height = b.ue(8192);
+    uint32_t crop_x = 0, crop_y = 0;
+    if (b.read(1))
+    {
+        const auto left = b.ue(8192), right = b.ue(8192), top = b.ue(8192), bottom = b.ue(8192);
+        crop_x = (left + right) * (r.chroma == 1 || r.chroma == 2 ? 2 : 1);
+        crop_y = (top + bottom) * (r.chroma == 1 ? 2 : 1);
+    }
+    r.bit_depth = b.ue(8) + 8;
+    if (b.ue(8) + 8 != r.bit_depth) return ParseResult::Unsupported;
+    b.ue(12);
+    const bool all = b.read(1);
+    for (unsigned i = all ? 0 : layers; i <= layers && b.ok; ++i)
+    {
+        const auto buffering = b.ue(15) + 1, reorder = b.ue(15);
+        b.ue();
+        if (reorder >= buffering) return ParseResult::Invalid;
+        r.buffering = std::max(r.buffering, buffering); r.reorder = std::max(r.reorder, reorder);
+    }
+    // HEVC A.4.2 MaxDpbSize; Main/Main10 use MaxDpbPicBuf=6.
+    uint64_t max_luma = 0;
+    switch (r.level)
+    {
+    case 30: max_luma = 36864; break; case 60: max_luma = 122880; break;
+    case 63: max_luma = 245760; break; case 90: max_luma = 552960; break;
+    case 93: max_luma = 983040; break; case 120: case 123: max_luma = 2228224; break;
+    case 150: case 153: case 156: max_luma = 8912896; break;
+    case 180: case 183: case 186: max_luma = 35651584; break;
+    default: return ParseResult::Unsupported;
+    }
+    const uint64_t pixels = uint64_t(r.width) * r.height;
+    r.standard_dpb = pixels <= max_luma / 4 ? 16 : pixels <= max_luma / 2 ? 12 : pixels <= max_luma * 3 / 4 ? 8 : 6;
+    r.references = r.buffering; // conservative bound, not an H.264 ref count
+    if (!b.ok || !r.width || !r.height || pixels > max_luma || crop_x >= r.width || crop_y >= r.height || r.buffering > r.standard_dpb)
+        return ParseResult::Invalid;
+    r.visible_width = r.width - crop_x; r.visible_height = r.height - crop_y;
+    r.identity = identity(p, n); r.verified = true; out = r;
+    return ParseResult::Valid;
+}
+// Input is one Annex-B NAL (or a bare NAL), never a whole unbounded frame.
+inline ParseResult parse_sps(Codec codec, const uint8_t *p, size_t n, Requirements &out)
+{
+    if (!p || !n || n > 16390) return ParseResult::Invalid;
+    if (n >= 4 && p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 1) { p += 4; n -= 4; }
+    else if (n >= 3 && p[0] == 0 && p[1] == 0 && p[2] == 1) { p += 3; n -= 3; }
+    const unsigned header = codec == Codec::H264 ? 1 : 2;
+    if (n < header || (p[0] & 128)) return ParseResult::Invalid;
+    const auto type = codec == Codec::H264 ? p[0] & 31 : (p[0] >> 1) & 63;
+    if (type != (codec == Codec::H264 ? 7 : 33)) return ParseResult::NotParameters;
+    if (codec == Codec::Hevc && ((p[0] & 1) || (p[1] >> 3) || !(p[1] & 7))) return ParseResult::Unsupported;
+    return codec == Codec::H264 ? h264_sps(p + header, n - header, out) : hevc_sps(p + header, n - header, out);
+}
+struct Limits
+{
+    uint32_t width{4096}, height{2304}, dpb{17}, level_h264{52}, level_hevc{186};
+    uint32_t bit_depth{8}, depth{1}, output_margin{1};
+};
+struct Plan { bool supported{}; uint32_t dpb{}, depth{}; const char *reason{"unverified parameters"}; };
+inline Plan plan(const Requirements &r, const Limits &l)
+{
+    Plan p{};
+    if (!r.verified) return p;
+    p.reason = "unsupported codec profile, format or dimensions";
+    if (!r.progressive || r.chroma != 1 || r.bit_depth != l.bit_depth || !r.width || !r.height ||
+        r.width > l.width || r.height > l.height ||
+        (r.codec == Codec::H264 ? (r.profile != 66 && r.profile != 77 && r.profile != 100) || r.level > l.level_h264 || r.bit_depth != 8
+                              : (r.profile != 1 && r.profile != 2) || r.level > l.level_hevc)) return p;
+    p.reason = "stream exceeds native DPB capacity";
+    const auto required = std::max(r.references, std::max(r.buffering, r.reorder));
+    if (!required || required > r.standard_dpb || l.output_margin > l.dpb || required > l.dpb - l.output_margin) return p;
+    p.dpb = required + l.output_margin; p.depth = std::max(1u, std::min(3u, l.depth));
+    p.supported = true; p.reason = "supported"; return p;
+}
+}
