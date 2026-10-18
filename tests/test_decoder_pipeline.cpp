@@ -736,6 +736,17 @@ static void stream_aware_owner()
     assert(native_allocations == 0);
     renderer_sync_destroy(state);
     delete state;
+    // A valid over-declared level is not limited by the old mode's default.
+    state = uninitialized_owner();
+    auto higher_level = fixture::h264(1920, 1080, 1, 52, true, 2);
+    parameters.data = reinterpret_cast<char *>(higher_level.data());
+    parameters.length = higher_level.size();
+    assert(prepare_stream_decoder(state, &unit));
+    assert(state->lifecycle.stream.level == 52);
+    assert(retire_stream_decoder(state));
+    assert(native_allocations == 0);
+    renderer_sync_destroy(state);
+    delete state;
     for (unsigned stage = 0; stage < 2; ++stage)
     {
         state = uninitialized_owner();

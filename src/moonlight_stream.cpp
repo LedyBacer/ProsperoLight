@@ -2067,14 +2067,18 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
         Limits limits{};
         limits.width = state->mode->max_width;
         limits.height = state->mode->max_height;
-        limits.level_h264 = decoder_max_level(state->mode, state->stream_fps);
-        limits.level_hevc = limits.level_h264;
+        // Mode defaults were negotiation-era targets, not backend ceilings.
+        // Keep the highest limits already used by the native 4K120 path;
+        // Query/Create still verify acceptance for the exact stream config.
+        limits.level_h264 = 60;
+        limits.level_hevc = 156;
         limits.bit_depth = state->mode->hdr ? 10 : 8;
         limits.depth = state->requested_depth;
         const auto selected = plan(r, limits);
         if (!selected.supported || r.visible_width != state->mode->visible_width ||
             r.visible_height != state->mode->visible_height)
         {
+            state->lifecycle.stream = r;
             lifecycle_failure(state, Error::Unsupported, -31);
             return false;
         }

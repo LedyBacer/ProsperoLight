@@ -99,3 +99,9 @@ successful decoder creation followed by repeated `811d0302`, 84 refreshes and
 zero decoded/presented frames. It contains no independently parsed SPS fixture;
 the nine-reference claim remains contributor-reported. No private raw log is
 published by this change.
+
+Mode-specific historical levels are not hardware ceilings: the planner permits
+SPS levels up to the highest values already requested by the native 4K120 path
+(H.264 6.0 / HEVC 5.2), with actual Query/Create acceptance still mandatory.
+A valid higher declared level at a smaller resolution must not be rejected just
+because the previous resolution table used a lower default.
