@@ -562,10 +562,13 @@ Result Run(Selection *selection, const char *stream_error, bool first_start)
         gfx::Font headline;
         gfx::Font mono;
         ui::Fonts fonts;
+#if FWCOMPAT_DIAGNOSTICS
+        const auto renderer_started = elapsed();
+#endif
         FWCOMPAT_POINT("renderer.init.begin", elapsed());
         bool ready = renderer.init();
         FWCOMPAT_POINT("renderer.init.end", ready);
-        FWCOMPAT_POINT("renderer.init.elapsed_ms", elapsed());
+        FWCOMPAT_POINT("renderer.init.duration_ms", elapsed() - renderer_started);
         PL_LOG("[PL] launcher: renderer after %lld ms", elapsed());
         ready = ready && LoadFont(renderer, "inter-regular.huifont", &regular, &fonts.regular) &&
                 LoadFont(renderer, "inter-semibold.huifont", &semibold, &fonts.semibold);

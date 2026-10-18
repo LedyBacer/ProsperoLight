@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# ps5-native-app-boilerplate / ProsperoLight - Firmware startup experiment.
+# Copyright (C) 2026 BlackBearReloaded
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Build one patched AGC runtime object in an independent SDK derivative.
 All other SDK bytes remain those of the checksum-pinned 1.0.2 release.
 """
@@ -19,6 +22,12 @@ PATCH=ROOT/'tools/fwcompat/opengl-1.0.2.patch'
 def digest(p):
     with Path(p).open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 def run(*args,**kw):subprocess.run([str(a) for a in args],check=True,**kw)
+def apply_patch(source, patch):
+    # Never let git apply discover an unrelated enclosing repository.
+    run('git','init','--quiet',source)
+    run('git','apply','--check',patch,cwd=source)
+    run('git','apply',patch,cwd=source)
+
 def build(folder, payload, archive=None):
     folder=folder.resolve();payload=payload.resolve()
     if folder.exists():raise ValueError('Use a new SDK output directory; never overwrite a verified SDK')
@@ -38,9 +47,14 @@ def build(folder, payload, archive=None):
     third=source/'third_party';third.mkdir(exist_ok=True)
     shutil.move(str(folder/'source/opengnm-psbc'),third/'opengnm-psbc')
     with tarfile.open(release/'sources/mesa-26.2.0.tar.xz') as tar:tar.extractall(third,filter='data')
-    run('git','apply',source/'toolchain/opengnm-psbc-ps5.patch',cwd=third/'opengnm-psbc')
-    run('git','apply','--check',PATCH,cwd=source)
-    run('git','apply',PATCH,cwd=source)
+    # Source snapshots are nested inside the app checkout on CI. Without their
+    # own Git roots, git apply can silently skip paths relative to the parent repo.
+    apply_patch(third/'opengnm-psbc',source/'toolchain/opengnm-psbc-ps5.patch')
+    apply_patch(source,PATCH)
+    patched=(source/'src/platform/ps5_agc_native_runtime.c').read_text()
+    target=patched[patched.index('static int append_target_state('):]
+    assert target.index('if (!defaults)') < target.index('**blocks =')
+    assert 'PsbcShaderMetadata' in (third/'opengnm-psbc/libpsbc/psbc_compile.h').read_text()
     run(sys.executable,ROOT/'tools/fwcompat/test-sdk-runtime.py',source/'src/platform/ps5_agc_native_runtime.c')
     lines=(release/'runtime-config.txt').read_text().splitlines()
     original_root='/home/runner/work/ps5-opengl/ps5-opengl'

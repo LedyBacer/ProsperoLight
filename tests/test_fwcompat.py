@@ -1,3 +1,6 @@
+# ps5-native-app-boilerplate / ProsperoLight - Firmware startup experiment.
+# Copyright (C) 2026 BlackBearReloaded
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Focused configuration, diagnostic persistence and matrix regression tests."""
 from pathlib import Path
 import importlib.util
@@ -74,6 +77,18 @@ int main() {
   self.assertIn('FWCOMPAT_CALL("egl.eglInitialize", eglInitialize(display_, &major, &minor))',wrapped)
   source=(ROOT/'tools/build.sh').read_text();self.assertIn('compile_source="$generated"',source)
   self.assertIn('FWCOMPAT_DIAGNOSTICS:-0',source)
+ def test_sdk_source_patch_cannot_silently_target_enclosing_git_checkout(self):
+  import difflib
+  sdk=module('sdkbuild','tools/fwcompat/build-sdk.py')
+  with tempfile.TemporaryDirectory() as d:
+   parent=Path(d);subprocess.run(['git','init','-q',d],check=True)
+   source=parent/'results/source';source.mkdir(parents=True)
+   (source/'a.c').write_text('unsafe\n')
+   patch=parent/'change.patch'
+   patch.write_text(''.join(difflib.unified_diff(['unsafe\n'],['guarded\n'],fromfile='a/a.c',tofile='b/a.c')))
+   sdk.apply_patch(source,patch)
+   self.assertEqual((source/'a.c').read_text(),'guarded\n')
+   self.assertFalse((parent/'a.c').exists())
  def test_sdk_guard_and_real_callsites(self):
   patch=(ROOT/'tools/fwcompat/opengl-1.0.2.patch').read_text()
   self.assertIn('+    if (!defaults) {',patch)

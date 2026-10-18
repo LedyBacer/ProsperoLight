@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# ps5-native-app-boilerplate / ProsperoLight - Firmware startup experiment.
+# Copyright (C) 2026 BlackBearReloaded
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Freeze full ZIP, exact symbols and the byte-level artifact association."""
 from pathlib import Path
 import hashlib

@@ -1,0 +1,70 @@
+{
+  "rip": [
+    {
+      "method": "full function code match excluding relocation/relaxation bytes",
+      "symbol": "ps5_agc_gate2_run",
+      "symbol_absolute": "0x5c3160",
+      "offset": "0x19a6",
+      "rip": "0x5c4b06",
+      "function_bytes": 11102,
+      "compared_bytes": 9624,
+      "mismatches": 0,
+      "instruction_at_fault": "488b10",
+      "sdk_object_sha256": "ba5a5c27f927ee8657f701b70caf4d1fc9d9e964f32f11602c8c4aaeee92f0eb",
+      "extracted_release_elf_sha256": "2957e2fa02373366386be871af8ba715605f036f8126f66e70a746f6e918b705"
+    },
+    {
+      "method": "full function code match excluding relocation/relaxation bytes",
+      "symbol": "ps5_agc_gate2_run",
+      "symbol_absolute": "0xaa9000",
+      "offset": "0x19a6",
+      "rip": "0xaaa9a6",
+      "function_bytes": 11102,
+      "compared_bytes": 9624,
+      "mismatches": 0,
+      "instruction_at_fault": "488b10",
+      "sdk_object_sha256": "ba5a5c27f927ee8657f701b70caf4d1fc9d9e964f32f11602c8c4aaeee92f0eb",
+      "extracted_release_elf_sha256": "0dd65a114aa68c20662c59d5835ee40a9b791f1009e95cbf7da70048efd4244b"
+    }
+  ],
+  "stack": [
+    {
+      "symbol": "ps5_draw_vbo_locked",
+      "light": "0x5aa09d",
+      "tv": "0xa8ff3d",
+      "return_offset": "0x2b8d",
+      "checked_bytes": 11242,
+      "mismatches": 0
+    },
+    {
+      "symbol": "ps5_draw_vbo",
+      "light": "0x5a4dc0",
+      "tv": "0xa8ac60",
+      "return_offset": "0x1a50",
+      "checked_bytes": 5774,
+      "mismatches": 0
+    },
+    {
+      "symbol": "ps5_draw_vbo_reported",
+      "light": "0x592759",
+      "tv": "0xa785f9",
+      "return_offset": "0x289",
+      "checked_bytes": 757,
+      "mismatches": 0
+    },
+    {
+      "symbol": "ps5_clear",
+      "light": "0x59c00d",
+      "tv": "0xa81ead",
+      "return_offset": "0x458d",
+      "checked_bytes": 18111,
+      "mismatches": 0
+    }
+  ],
+  "inputs_sha256": {
+    "ProsperoLight-110-eboot.bin": "512e76eae07833a73c5d553081a6320b0974f9b57fdc3800b1e73856a08dff63",
+    "ProsperoTV-070-eboot.bin": "869cd7319de043603375c2479d706d0a4824d9744bcd44764039bef78d825194",
+    "stock-sdk-1.0.2-agc.o": "ba5a5c27f927ee8657f701b70caf4d1fc9d9e964f32f11602c8c4aaeee92f0eb",
+    "ps5_screen.o": "7c9f6514e067c93738352e4177e3cfb9d23ca9ef7fc8d8739a9b782604083307"
+  }
+}

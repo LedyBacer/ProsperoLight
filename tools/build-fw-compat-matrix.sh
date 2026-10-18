@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# ps5-native-app-boilerplate / ProsperoLight - Firmware startup experiment.
+# Copyright (C) 2026 BlackBearReloaded
+# SPDX-License-Identifier: GPL-3.0-or-later
 # No deployment, tags or releases. Run in a dedicated clean checkout.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)

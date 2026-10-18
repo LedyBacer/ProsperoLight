@@ -1,3 +1,7 @@
+/* ps5-native-app-boilerplate / ProsperoLight - Firmware startup experiment.
+ * Copyright (C) 2026 BlackBearReloaded
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 /* Diagnostic experiment only; production defaults preserve the existing startup. */
 #pragma once
 #ifndef FWCOMPAT_DIAGNOSTICS

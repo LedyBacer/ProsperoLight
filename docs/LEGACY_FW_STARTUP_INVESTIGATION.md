@@ -14,8 +14,9 @@ not a locally reproduced crash. No affected-firmware console was tested here.
 Inspected `.110` CI run `38676031668`: release artifact `11945654508` contains
 only `PPSA99002.zip` and `SHA256SUMS`; provenance artifact `11945644315` contains
 only `build-provenance.json`. Available builder outputs belong to other source
-revisions. No exact corresponding unstripped ELF was located, so **no reliable
-function name is assigned to the old RIP**. Rebuilding the same source is not
+revisions. No exact corresponding unstripped application ELF was located.
+The later cross-application section identifies the shared function through
+original published code bytes and exact SDK objects instead. Rebuilding the same source is not
 proof of byte identity. Obtain the original ELF and verify its build association
 before symbolizing that report. New variants freeze their own ELF and hashes.
 
@@ -26,6 +27,81 @@ copy, not the inspected preload/warmup/EGL/renderer startup sequence or SDK pin.
 The control is current main with shared diagnostics/guard, not a reproduction
 of the exact `.110` executable. Release `.110` additionally used CI performance
 flags; the matrix retains current main defaults and records all definitions.
+
+## Cross-application binary comparison (additional operator report)
+
+Both supplied FW 3.00 reports have fault address zero and executable base
+`0x400000`. Reported fingerprints are:
+
+- ProsperoLight 01.000.110 / PPSA99002: `c42ff125149aa6fde1bbd8b08009eeee00000000`.
+- ProsperoTV 01.000.070 / PPSA99003: `717caaf832d6f6916b6ffe89392630bd00000000`.
+
+The reported registers include RAX=0, RBX=`0x474c3301` (the SDK's RENDER_MARKER),
+RCX=`0x800000fec`, RDI=4. ProsperoTV's reported decoder loads/queries all returned
+zero, and it does not normally link PyroWave. These are operator-provided
+observations, not new hardware measurements.
+
+Downloaded the **published** installation ZIPs from
+[LedyBacer/ProsperoLight 01.000.110](https://github.com/LedyBacer/ProsperoLight/releases/tag/01.000.110)
+and [ThatGuyKalvin/ProsperoTV 01.000.070](https://github.com/ThatGuyKalvin/ProsperoTV/releases/tag/01.000.070).
+The native container tool verified their plaintext homebrew SELF integrity and
+extracted their original loaded segments; this does not recreate debug symbols.
+Compared those bytes with the original SDK 1.0.2 runtime archive, whose release
+archive hash and manifest were verified. **No newly compiled ELF was used to
+name old addresses.** This is a relocation-aware binary match, not a claim to
+possess the original unstripped application ELFs or the users' actual files.
+
+| Frame | ProsperoLight | ProsperoTV | Matched SDK function + offset |
+|---|---|---|---|
+| RIP | 0x5c4b06 | 0xaaa9a6 | ps5_agc_gate2_run + 0x19a6 |
+| #1 | 0x5aa09d | 0xa8ff3d | ps5_draw_vbo_locked + 0x2b8d |
+| #2 | 0x5a4dc0 | 0xa8ac60 | ps5_draw_vbo + 0x1a50 |
+| #3 | 0x592759 | 0xa785f9 | ps5_draw_vbo_reported + 0x289 |
+| #7 | 0x59c00d | 0xa81ead | ps5_clear + 0x458d |
+
+Every pair differs by `0x4e5ea0`. For the 11,102-byte `ps5_agc_gate2_run`
+function, **9,624 non-relocation/relaxation bytes match, zero mismatches in
+both published applications**. The four stack functions also match throughout
+all compared bytes in both binaries. Relocation displacements and up to three
+preceding bytes (which the linker may relax) are excluded, explicitly, not
+silently treated as matches. Hashes, compared byte counts and addresses are
+preserved in [the code-match receipt](LEGACY_FW_RELEASE_CODE_MATCH.json).
+
+At the reported RIP, both published binaries contain:
+
+```asm
+callq *...       # SDK object relocation: sceAgcGetRegisterDefaults
+movq  (%rax),%rdx  # RIP: 48 8b 10; reads address zero when RAX=0
+movl  0x20(%rax),%ecx
+...
+callq append_target_state
+```
+
+The **original SDK object's** DWARF maps `ps5_agc_gate2_run+0x19a6` to
+`src/platform/ps5_agc_native_runtime.c:4367`, the call to `append_target_state`.
+Optimization promoted the defaults dereferences into its caller, before the
+machine-code call to `append_target_state`. This explains why naming only that
+callee could miss the actual faulting instruction. The guarded derivative was
+also disassembled: it passes the defaults pointer intact and tests it before
+loading either field.
+
+This identifies the common immediate failure mechanism in the published code
+at the reported addresses: **NULL returned by the register-defaults API,
+dereferenced during native clear/draw target generation**. Establishing why
+that API returns NULL on the users' systems remains open. API version/init
+semantics, module/runtime state or a firmware ABI difference still require
+new init/defaults checkpoints. Decoder success does not establish AGC success.
+A guard is a valid crash-safety fix, **not yet a successful startup fix**.
+The operator fingerprints are recorded but were not independently matched to
+the downloaded files; if their binaries differ from the public releases,
+obtain their eboot hashes/files before extending this conclusion to them.
+
+To reproduce a RIP match, extract the public SELF with the native tool and run:
+
+```sh
+python3 tools/fwcompat/compare-release-code.py ps5_agc_runtime_backend.o original-release.elf --rip 0x5c4b06
+# TV: --rip 0xaaa9a6. Stack frames: use ps5_screen.o, --section and --function-offset from the table.
+```
 
 ## Actual AGC path
 
