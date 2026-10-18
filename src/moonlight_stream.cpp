@@ -999,33 +999,33 @@ static void save_performance_summary(const native_renderer_state_t &state,
              PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES, state.flush_calls, state.decoder_delayed,
              state.observed_slices_min, state.observed_slices_max, state.layout_samples);
     const auto &life = state.lifecycle;
-    ok = ok &&
-         report_append(report, sizeof(report), &length,
-                       "\"decoder_lifecycle_state\":\"%s\",\"decoder_generation\":%u,"
-                       "\"decoder_initialization_us\":%llu,\"decoder_reconfiguration_count\":%u,"
-                       "\"decoder_reconfiguration_us\":%llu,\"decoder_recovery_attempts\":%u,"
-                       "\"decoder_recovery_successes\":%u,\"decoder_recovery_failures\":%u,"
-                       "\"decoder_recovery_reason\":%u,\"stream_parameters_verified\":%u,"
-                       "\"stream_coded_width\":%u,\"stream_coded_height\":%u,"
-                       "\"stream_profile\":%u,\"stream_level\":%u,\"stream_reference_frames\":%u,"
-                       "\"stream_required_dpb_frames\":%u,\"stream_standard_max_dpb_frames\":%u,"
-                       "\"decoder_cpu_memory_bytes\":%llu,\"decoder_gpu_memory_bytes\":%llu,"
-                       "\"decoder_shared_memory_bytes\":%llu,\"decoder_frame_pool_bytes\":%llu,"
-                       "\"decoder_ready_us\":%llu,\"decoder_first_decoded_us\":%llu,"
-                       "\"decoder_first_presented_us\":%llu,\n",
-                       moonlight::video::name(life.state), life.generation,
-                       (unsigned long long)life.initialization_us, life.reconfigurations,
-                       (unsigned long long)life.reconfiguration_us, life.attempts, life.successes,
-                       life.failures, unsigned(life.reason), life.stream.verified ? 1u : 0u,
-                       life.stream.width, life.stream.height, life.stream.profile,
-                       life.stream.level, life.stream.references, life.stream.buffering,
-                       life.stream.standard_dpb, (unsigned long long)state.decoder_memory.cpu_size,
-                       (unsigned long long)state.decoder_memory.gpu_size,
-                       (unsigned long long)state.decoder_memory.cpu_gpu_size,
-                       (unsigned long long)state.owned_frame_bytes,
-                       (unsigned long long)life.first_ready_us,
-                       (unsigned long long)state.first_decoded_us,
-                       (unsigned long long)state.first_present_us);
+    ok =
+        ok &&
+        report_append(
+            report, sizeof(report), &length,
+            "\"decoder_lifecycle_state\":\"%s\",\"decoder_generation\":%u,"
+            "\"decoder_initialization_us\":%llu,\"decoder_reconfiguration_count\":%u,"
+            "\"decoder_reconfiguration_us\":%llu,\"decoder_recovery_attempts\":%u,"
+            "\"decoder_recovery_successes\":%u,\"decoder_recovery_failures\":%u,"
+            "\"decoder_recovery_reason\":%u,\"stream_parameters_verified\":%u,"
+            "\"stream_coded_width\":%u,\"stream_coded_height\":%u,"
+            "\"stream_profile\":%u,\"stream_level\":%u,\"stream_reference_frames\":%u,"
+            "\"stream_required_dpb_frames\":%u,\"stream_standard_max_dpb_frames\":%u,"
+            "\"decoder_cpu_memory_bytes\":%llu,\"decoder_gpu_memory_bytes\":%llu,"
+            "\"decoder_shared_memory_bytes\":%llu,\"decoder_frame_pool_bytes\":%llu,"
+            "\"decoder_ready_us\":%llu,\"decoder_first_decoded_us\":%llu,"
+            "\"decoder_first_presented_us\":%llu,\n",
+            moonlight::video::name(life.state), life.generation,
+            (unsigned long long)life.initialization_us, life.reconfigurations,
+            (unsigned long long)life.reconfiguration_us, life.attempts, life.successes,
+            life.failures, unsigned(life.reason), life.stream.verified ? 1u : 0u, life.stream.width,
+            life.stream.height, life.stream.profile, life.stream.level, life.stream.references,
+            life.stream.buffering, life.stream.standard_dpb,
+            (unsigned long long)state.owned_resources.cpu_mapping_size,
+            (unsigned long long)state.decoder_memory.gpu_size,
+            (unsigned long long)state.decoder_memory.cpu_gpu_size,
+            (unsigned long long)state.owned_frame_bytes, (unsigned long long)life.first_ready_us,
+            (unsigned long long)state.first_decoded_us, (unsigned long long)state.first_present_us);
     ok = ok &&
          report_append(
              report, sizeof(report), &length,
@@ -1876,6 +1876,9 @@ static bool retire_stream_decoder(native_renderer_state_t *state)
         (void)pthread_join(state->present_thread, nullptr);
         state->present_started = false;
     }
+    // Recovery can precede the first output, while the loading worker still
+    // owns AGC. Join it as well before retiring shared native submissions.
+    connecting_screen_stop();
     const int idle = native_agc_finish_frame();
     if (idle != 0)
     {
@@ -2056,7 +2059,9 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
             parse_sps(codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length, r);
         if (parsed != ParseResult::Valid)
         {
-            lifecycle_failure(state, Error::Parameters, -30);
+            lifecycle_failure(
+                state, parsed == ParseResult::Unsupported ? Error::Unsupported : Error::Parameters,
+                -30);
             return false;
         }
         Limits limits{};
@@ -2566,7 +2571,10 @@ static uint64_t drain_decoder(native_renderer_state_t *state)
             // Flushing mid-stream is not usable on this decoder: stop relying on it.
             report_decoder_call(state, "drain", result, -1, offered, frame, output);
             ++state->drain_faults;
-            fallback_to_classic_decoder(state, result);
+            if (state->stream_aware && uint32_t(result) == 0x811d0302u)
+                (void)recover_stream_capacity(state);
+            else
+                fallback_to_classic_decoder(state, result);
             break;
         }
     }

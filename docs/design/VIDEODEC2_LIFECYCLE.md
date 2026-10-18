@@ -93,3 +93,9 @@ INCONCLUSIVE honestly. Software timestamps are not physical input-to-photon data
 Pre-merge requirements: native PS5 functional runs on available matrix rows,
 independent Intel VAAPI and QSV 1440p60 evidence, and a valid paired performance
 comparison. Historical logs and host mocks alone do not satisfy these gates.
+
+The supplied historical VAAPI log was located and inspected locally: it records
+successful decoder creation followed by repeated `811d0302`, 84 refreshes and
+zero decoded/presented frames. It contains no independently parsed SPS fixture;
+the nine-reference claim remains contributor-reported. No private raw log is
+published by this change.
