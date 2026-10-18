@@ -126,3 +126,9 @@ Both backends use `frame_pacing.hpp`; decoder ownership and teardown remain
 backend-specific. `ps5_dualsense.cpp` is the sole owner of additional pad handles
 and extended controller feedback. See [PyroWave](PYROWAVE.md),
 [DualSense](DUALSENSE.md) and [frame pacing](CONFIGURATION.md#source-clock-frame-pacing).
+
+Native VideoDec2 now waits for bounded SPS acquisition on the pull decode worker.
+Parsed stream facts drive DPB/resource planning; instance replacement joins the
+presenter and retires GPU reads before freeing old surfaces. See the
+[stream-aware lifecycle design](design/VIDEODEC2_LIFECYCLE.md) for ownership,
+recovery budgets, API assumptions and validation boundaries.

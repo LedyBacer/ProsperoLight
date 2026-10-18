@@ -52,3 +52,44 @@ introduced. PyroWave bypasses this entire owner.
 
 The six-slot workaround and reported 13-slot VAAPI result are historical evidence,
 not independent reproduction. Intel VAAPI/QSV 1440p60 remains a pre-merge test.
+
+## Test Lab reproduction and merge gates
+
+Templates are in `tools/test-lab/profiles/video-lifecycle/`. They deliberately use
+an invalid hostname and zero source identity. Copy outside the repository, fill
+in the already-paired host endpoint, exact source SHA/build label and validated
+build manifest. Follow [Test Lab](../TEST_LAB.md) and [smoke/recovery](../TEST_LAB_SMOKE.md)
+for normal-exit, deployment readback, configuration/pairing and lease safeguards.
+They are inputs to the existing coordinator, not a new benchmark runner.
+
+Use `decoder-smoke` first, then supported `decoder-matrix` profiles (10s warmup,
+20s simple / 40s noise-motion / 20s recovery). `pyrowave-matrix` is only a limited
+compatibility check. HDR/120Hz need matching display/host support; skipped rows
+must be reported as unverified. Do not alter host encoder settings automatically.
+Intel templates name an expected encoder but do not select one: the contributor
+must independently record actual VAAPI/QSV backend, encoder version/settings and
+matching authenticated host evidence before claiming that regression reproduced.
+
+The existing `performance-last.json` gains lifecycle/DPB/allocation counters and
+PS5-local first-ready/decoded/presented timestamps. `analysis.decoder_lifecycle`
+keeps these separate from RTSP negotiation. Old builds explicitly report lifecycle
+evidence unavailable. Recovered native faults remain measurement-invalid, even
+when recovery completed functionally; they cannot become performance improvements.
+
+For startup/cancel/reconnect use coordinator normal stop with an owned run and
+repeat with a fresh UUID. Unit/mock tests deterministically exercise parameter
+changes and capacity errors; no corruption/injection is enabled in production.
+Live encoder parameter switching is not manufactured by a separate payload.
+Unsupported visible-resolution changes currently fail explicitly: the negotiated
+presentation mode remains fixed, so changing crop/VideoOut without renegotiation
+would be unsafe. Coded-size/DPB/profile changes within that mode are replanned.
+
+For performance use existing `pltest paired` with >=3 baseline/candidate pairs,
+identical flags/stream settings/stimulus/environment and complete session exclusion
+evidence. Compare startup separately from steady-state decode/queue/frame-age
+p95/p99, actual received bitrate, drops and memory. Report NOT_COMPARABLE or
+INCONCLUSIVE honestly. Software timestamps are not physical input-to-photon data.
+
+Pre-merge requirements: native PS5 functional runs on available matrix rows,
+independent Intel VAAPI and QSV 1440p60 evidence, and a valid paired performance
+comparison. Historical logs and host mocks alone do not satisfy these gates.

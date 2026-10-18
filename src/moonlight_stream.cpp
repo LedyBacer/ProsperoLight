@@ -1023,7 +1023,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
         (unsigned long long)state.decoder_memory.gpu_size,
         (unsigned long long)state.decoder_memory.cpu_gpu_size,
         (unsigned long long)state.owned_frame_bytes,
-        (unsigned long long)life.ready_us, (unsigned long long)state.first_decoded_us,
+        (unsigned long long)life.first_ready_us, (unsigned long long)state.first_decoded_us,
         (unsigned long long)state.first_present_us);
     ok = ok &&
          report_append(
@@ -1802,6 +1802,7 @@ static int32_t settle_decoder_call(native_renderer_state_t *state, int offered,
         {
             ++state->lifecycle.successes;
             state->recovery_pending = false;
+            state->lifecycle.state = moonlight::video::State::Ready;
         }
         state->decoded_rate.update(completed_us, state->decoded);
         if (++state->clean_outputs >= PIPELINE_CLEAN_OUTPUTS)
@@ -1943,6 +1944,7 @@ static bool configure_stream_decoder(native_renderer_state_t *state,
     state->clean_outputs = 0;
     plan.depth = config.pipeline_depth;
     state->lifecycle.configured(requirements, plan, monotonic_us(), monotonic_us() - started);
+    if (recovering) state->lifecycle.state = State::Recovering;
     pthread_mutex_lock(&state->lock);
     state->stop_presenting = false;
     pthread_mutex_unlock(&state->lock);

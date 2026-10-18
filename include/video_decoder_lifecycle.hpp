@@ -17,7 +17,7 @@ struct Lifecycle
     Requirements stream{};
     Plan effective{};
     uint32_t generation{}, reconfigurations{}, attempts{}, successes{}, failures{}, corruptions{};
-    uint64_t waiting_since{}, initialization_us{}, reconfiguration_us{}, ready_us{};
+    uint64_t waiting_since{}, initialization_us{}, reconfiguration_us{}, ready_us{}, first_ready_us{};
     static constexpr uint32_t recovery_budget = 2, corruption_budget = 8;
     static constexpr uint64_t startup_timeout_us = 10000000;
     void wait(uint64_t now) { state = State::WaitingParameters; waiting_since = now; }
@@ -32,16 +32,18 @@ struct Lifecycle
             r.chroma != stream.chroma || r.bit_depth != stream.bit_depth ||
             r.buffering != stream.buffering || r.references != stream.references || r.reorder != stream.reorder;
     }
-    void fail(Error e) { reason = e; state = State::Failed; ++failures; }
+    void fail(Error e) { reason = e; if (state != State::Failed) ++failures; state = State::Failed; }
     bool recover(Error e)
     {
-        if (state == State::Stopping || state == State::Stopped || state == State::Failed || attempts >= recovery_budget) { fail(Error::Exhausted); return false; }
+        if (state == State::Stopping || state == State::Stopped || state == State::Failed) return false;
+        if (attempts >= recovery_budget) { fail(Error::Exhausted); return false; }
         ++attempts; reason = e; state = State::Recovering; return true;
     }
     void configured(const Requirements &r, Plan p, uint64_t now, uint64_t elapsed)
     {
         if (generation) { ++reconfigurations; reconfiguration_us += elapsed; }
         else initialization_us = now >= waiting_since ? now - waiting_since : elapsed;
+        if (!generation) first_ready_us = now;
         stream = r; effective = p; ++generation; ready_us = now; state = State::Ready;
     }
     bool corruption()

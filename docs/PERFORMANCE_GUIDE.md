@@ -80,3 +80,9 @@ Implementation and measurement details: [Configuration](CONFIGURATION.md#source-
 5. When something stutters, record whether it was caused by network packet loss, decode pressure, dropped/late pictures, or TV refresh variation. Do not treat the VideoOut software counter as a physical HDMI timestamp.
 
 For reproducible comparisons, follow the [frame-pacing test matrix](PACING_TEST_MATRIX.md) rather than relying solely on subjective comparisons from unrelated games.
+
+VideoDec2 startup is stream-aware. The old `EXPERIMENTAL_HOST_DPB` switch no
+longer selects a fixed four/six-slot allocation. Inspect stream-required DPB,
+configured native capacity, allocation bytes and lifecycle counters separately.
+See [decoder lifecycle validation](design/VIDEODEC2_LIFECYCLE.md) for Test Lab
+profiles and first-ready/decoded/presented software-clock interpretation.

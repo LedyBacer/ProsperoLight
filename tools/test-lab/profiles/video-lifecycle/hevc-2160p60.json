@@ -1,0 +1,44 @@
+{
+  "schema": "prosperolight-test/1",
+  "run_id": "hevc-2160p60",
+  "suite": "decoder-smoke",
+  "source_sha": "0000000000000000000000000000000000000000",
+  "build_label": "test-lab-replace-with-exact-build-label",
+  "client": {
+    "host": "stream-host.invalid:47989",
+    "app": "Desktop",
+    "codec": "hevc",
+    "chroma": "420",
+    "hdr": false,
+    "resolution": "2160p",
+    "fps": 60,
+    "bitrate_mbps": 20,
+    "vsync": true,
+    "decoder_pipeline": "classic",
+    "decoder_cores": 3,
+    "pacing": "paced",
+    "vrr_profile": "balanced",
+    "host_extensions": {
+      "enabled": false,
+      "quit_host": false
+    }
+  },
+  "timing": {
+    "startup_seconds": 30,
+    "ready_seconds": 30,
+    "hard_seconds": 420,
+    "warmup_seconds": 10,
+    "measure_seconds": 30,
+    "cooldown_seconds": 0,
+    "stage_timeout_seconds": 300
+  },
+  "capture": {
+    "detailed_frame_trace": true,
+    "host_logs": false,
+    "gpu_metrics": false
+  },
+  "host_stimulus": {
+    "scene": "low-motion",
+    "seed": 137
+  }
+}
