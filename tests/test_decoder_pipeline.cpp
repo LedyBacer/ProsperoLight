@@ -11,6 +11,7 @@
 #include <chrono>
 #include <deque>
 #include <thread>
+#include "video_sps_fixtures.hpp"
 
 // Videodec2 stand-in. Two buffer models are plausible on hardware and both
 // must work: the decoder keeps the frame buffer offered with each access unit
@@ -201,6 +202,16 @@ extern "C"
         flushing = internal_pictures != 0;
         return 0;
     }
+    int32_t sceVideodec2QueryDecoderMemoryInfo(const videodec2_decoder_config_t *, videodec2_decoder_memory_t *m)
+    { m->cpu_size = m->gpu_size = 16384; m->max_frame_size = 64; return 0; }
+    int32_t sceKernelAvailableFlexibleMemorySize(size_t *size) { *size = 1024 * 1024; return 0; }
+    int32_t sceKernelMapNamedFlexibleMemory(void **p, size_t n, int, int, const char *) { *p = malloc(n); return *p ? 0 : -1; }
+    int32_t sceKernelReleaseFlexibleMemory(void *, size_t) { return 0; }
+    int32_t sceKernelVirtualQuery(void *, int, void *p, size_t n) { memset(p,0,n); return 0; }
+    int32_t sceKernelAllocateDirectMemory(int64_t, int64_t, size_t, size_t, int, int64_t *start) { *start = 1; return 0; }
+    int32_t sceKernelMapDirectMemory(void **p, size_t n, int, int, int64_t, size_t) { *p = malloc(n); return *p ? 0 : -1; }
+    int32_t sceKernelMunmap(void *p, size_t) { free(p); return 0; }
+    int32_t sceKernelReleaseDirectMemory(int64_t, size_t) { return 0; }
     int32_t sceVideodec2DeleteDecoder(void *)
     {
         ++deletes;
@@ -621,8 +632,38 @@ static void paced_ready_queue_retains_surface_ownership()
     delete state;
 }
 
+static void stream_aware_owner()
+{
+    using namespace moonlight::video;
+    auto *state = make_state(1, Model::SameCall, 1);
+    // The manual fixture's borrowed static buffers are not native allocations.
+    state->decoder = nullptr; state->input_memory = state->frame_memory = nullptr;
+    state->stream_aware = true;
+    state->owned_resources = make_decoder_resources();
+    state->owned_input_start = state->owned_frame_start = -1;
+    state->input_size = 64; state->requested_depth = 1;
+    state->requested_cpu_mask = moonlight::kClassicDecoderCpuMask;
+    state->lifecycle.wait(monotonic_us());
+    auto sps = fixture::h264(1920,1080,1,42,true,2);
+    LENTRY parameters{}; parameters.bufferType = BUFFER_TYPE_SPS;
+    parameters.data = reinterpret_cast<char *>(sps.data()); parameters.length = sps.size();
+    DECODE_UNIT unit{}; unit.bufferList = &parameters; unit.frameType = FRAME_TYPE_IDR;
+    assert(prepare_stream_decoder(state,&unit));
+    assert(state->decoder && state->lifecycle.generation == 1 && creates == 1);
+    assert(prepare_stream_decoder(state,&unit)); assert(creates == 1);
+    sps = fixture::h264(1920,1080,2,42,true,3);
+    parameters.data = reinterpret_cast<char *>(sps.data()); parameters.length = sps.size();
+    assert(prepare_stream_decoder(state,&unit));
+    assert(creates == 2 && deletes == 1 && state->lifecycle.generation == 2);
+    assert(recover_stream_capacity(state)); assert(creates == 3 && state->decoder_config.max_dpb_frames == 5);
+    assert(!recover_stream_capacity(state)); assert(!state->running && creates == 3);
+    assert(retire_stream_decoder(state));
+    renderer_sync_destroy(state); delete state;
+}
+
 int main()
 {
+    stream_aware_owner();
     fragment.data = reinterpret_cast<char *>(access_unit);
     fragment.length = sizeof(access_unit);
     pipelined_then_drained(Model::Queued);

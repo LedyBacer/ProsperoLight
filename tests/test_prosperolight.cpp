@@ -27,11 +27,6 @@
 #include <string>
 #include <vector>
 
-TEST(Decoder, HostDpbStaysAtFourUnlessRequested)
-{
-
-}
-
 TEST(Performance, SliceHeadersAreCountedWithoutReadingTruncatedNals)
 {
     const uint8_t h264[] = {0, 0, 0, 1, 0x67, 0x42, 0, 0, 1, 0x65, 0x80, 0, 0, 1, 0x41, 0x80};

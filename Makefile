@@ -266,8 +266,14 @@ performance-candidates:
 performance-round3-candidates:
 	@bash tools/build-performance-candidates.sh --round3
 
+.PHONY: test-video-lifecycle
+test-video-lifecycle:
+	@mkdir -p build/tests
+	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -Iinclude -fsanitize=address,undefined -fno-sanitize-recover=all tests/test_video_stream_requirements.cpp -o build/tests/video_stream_requirements
+	@build/tests/video_stream_requirements
+
 .PHONY: test-performance-guards
-test-performance-guards: | transport-deps
+test-performance-guards: test-video-lifecycle | transport-deps
 	@mkdir -p build/tests
 	@clang -std=c11 -D_DEFAULT_SOURCE -DUSE_MBEDTLS -O2 -c third_party/moonlight-common-c/src/FakeCallbacks.c \
 		-Ithird_party/moonlight-common-c/src -Ithird_party/moonlight-common-c/enet/include \

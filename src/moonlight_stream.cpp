@@ -628,7 +628,10 @@ typedef struct native_renderer_state
     size_t owned_input_bytes, owned_frame_bytes;
     bool stream_aware;
     bool recovery_pending;
+    bool parameters_requested;
     uint64_t cached_sps_identity;
+    std::array<uint8_t, 16390> cached_sps;
+    size_t cached_sps_size;
     void *decoder;
     uint32_t pipeline_depth; // effective; one after a fallback
     bool drain_enabled;
@@ -672,6 +675,7 @@ typedef struct native_renderer_state
     uint32_t rtt_variance_ms;
     int rtt_valid;
     uint64_t first_video_us;
+    uint64_t first_decoded_us;
     uint64_t last_video_us;
     uint32_t pending_video_high_water;
     uint32_t reassembly_invalid_samples;
@@ -934,7 +938,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
 {
     if (!prosperolight_logs_enabled() || !state.mode || !options || !state.access_units)
         return;
-    static char report[12288];
+    static char report[16384];
     const auto &agc = native_agc_performance();
     const auto network = ps5_network_metrics_read();
     const auto placement = ps5_thread_placement_stats();
@@ -994,6 +998,33 @@ static void save_performance_summary(const native_renderer_state_t &state,
              state.decoder_config.max_dpb_frames, PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION,
              PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES, state.flush_calls, state.decoder_delayed,
              state.observed_slices_min, state.observed_slices_max, state.layout_samples);
+    const auto &life = state.lifecycle;
+    ok = ok && report_append(
+        report, sizeof(report), &length,
+        "\"decoder_lifecycle_state\":\"%s\",\"decoder_generation\":%u,"
+        "\"decoder_initialization_us\":%llu,\"decoder_reconfiguration_count\":%u,"
+        "\"decoder_reconfiguration_us\":%llu,\"decoder_recovery_attempts\":%u,"
+        "\"decoder_recovery_successes\":%u,\"decoder_recovery_failures\":%u,"
+        "\"decoder_recovery_reason\":%u,\"stream_parameters_verified\":%u,"
+        "\"stream_coded_width\":%u,\"stream_coded_height\":%u,"
+        "\"stream_profile\":%u,\"stream_level\":%u,\"stream_reference_frames\":%u,"
+        "\"stream_required_dpb_frames\":%u,\"stream_standard_max_dpb_frames\":%u,"
+        "\"decoder_cpu_memory_bytes\":%llu,\"decoder_gpu_memory_bytes\":%llu,"
+        "\"decoder_shared_memory_bytes\":%llu,\"decoder_frame_pool_bytes\":%llu,"
+        "\"decoder_ready_us\":%llu,\"decoder_first_decoded_us\":%llu,"
+        "\"decoder_first_presented_us\":%llu,\n",
+        moonlight::video::name(life.state), life.generation,
+        (unsigned long long)life.initialization_us, life.reconfigurations,
+        (unsigned long long)life.reconfiguration_us, life.attempts, life.successes, life.failures,
+        unsigned(life.reason), life.stream.verified ? 1u : 0u,
+        life.stream.width, life.stream.height, life.stream.profile, life.stream.level,
+        life.stream.references, life.stream.buffering, life.stream.standard_dpb,
+        (unsigned long long)state.decoder_memory.cpu_size,
+        (unsigned long long)state.decoder_memory.gpu_size,
+        (unsigned long long)state.decoder_memory.cpu_gpu_size,
+        (unsigned long long)state.owned_frame_bytes,
+        (unsigned long long)life.ready_us, (unsigned long long)state.first_decoded_us,
+        (unsigned long long)state.first_present_us);
     ok = ok &&
          report_append(
              report, sizeof(report), &length,
@@ -1764,6 +1795,7 @@ static int32_t settle_decoder_call(native_renderer_state_t *state, int offered,
         ++state->ready_calls;
         if (submission.trace)
             submission.trace->ready_us = elapsed;
+        if (!state->decoded) state->first_decoded_us = completed_us;
         ++state->decoded;
         state->lifecycle.corruptions = 0;
         if (state->recovery_pending)
@@ -1867,7 +1899,8 @@ static bool configure_stream_decoder(native_renderer_state_t *state,
     config.max_height = requirements.height;
     config.max_level = requirements.level;
     config.max_dpb_frames = plan.dpb;
-    // The native profile is an API enum, not an SPS profile_idc.
+    // The currently supported native profiles use H.264 profile_idc or HEVC profile_idc.
+    config.profile = requirements.profile;
     int32_t result = -1;
     for (uint32_t depth = plan.depth; depth && !state->owned_resources.decoder && state->running; --depth)
         for (unsigned attempt = 0; attempt < 2 && !state->owned_resources.decoder && state->running; ++attempt)
@@ -1939,7 +1972,9 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
         if (entry->bufferType != BUFFER_TYPE_SPS) continue;
         if (entry->length <= 0 || entry->length > 16390) { lifecycle_failure(state, Error::Parameters, -30); return false; }
         const auto hash = identity(reinterpret_cast<const uint8_t *>(entry->data), entry->length);
-        if (hash == state->cached_sps_identity && state->decoder) continue;
+        if (hash == state->cached_sps_identity && state->decoder &&
+            state->cached_sps_size == size_t(entry->length) &&
+            !memcmp(entry->data, state->cached_sps.data(), state->cached_sps_size)) continue;
         Requirements r{};
         const auto parsed = parse_sps(codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length, r);
         if (parsed != ParseResult::Valid) { lifecycle_failure(state, Error::Parameters, -30); return false; }
@@ -1958,6 +1993,8 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
             if (!configure_stream_decoder(state, r, selected)) return false;
         }
         state->cached_sps_identity = hash;
+        state->cached_sps_size = entry->length;
+        memcpy(state->cached_sps.data(), entry->data, state->cached_sps_size);
     }
     if (!state->decoder)
     {
@@ -2037,12 +2074,16 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     if (!state->running)
         return DR_OK;
     if (state->stream_aware && !prepare_stream_decoder(state, decode_unit))
-        return state->running ? DR_NEED_IDR : DR_OK;
+    {
+        if (!state->running || state->parameters_requested) return DR_OK;
+        state->parameters_requested = true;
+        return DR_NEED_IDR;
+    }
     if (state->await_keyframe)
     {
         // The decoder was rebuilt outside a frame: resume only on a keyframe.
         if (decode_unit->frameType != FRAME_TYPE_IDR)
-            return DR_NEED_IDR;
+            return state->stream_aware ? DR_OK : DR_NEED_IDR;
         state->await_keyframe = false;
     }
     if (state->decoder_needs_reset)
@@ -2449,7 +2490,7 @@ static void *video_decode_thread(void *context)
             ++state->decoder_refreshes;
             std::atomic_fetch_add_explicit(&video_recovery_epoch, 1u, std::memory_order_relaxed);
         }
-        else
+        else if (state->running && state->decoder)
             busy_us += drain_decoder(state);
         if (state->pipeline_depth > 1u && state->pipeline_faults >= PIPELINE_FAULT_LIMIT)
             fallback_to_classic_decoder(state, state->last_result);
@@ -4947,7 +4988,13 @@ configure_stream:
     // Renderer/audio aggregates are single-writer, so snapshot only after join.
     if (result != 0 && !first_frame_timed_out)
     {
-        if (renderer.decoder_lost)
+        if (renderer.lifecycle.state == moonlight::video::State::Failed)
+            gs_error = renderer.lifecycle.reason == moonlight::video::Error::Capacity
+                ? "Video decoder capacity does not support this stream"
+                : renderer.lifecycle.reason == moonlight::video::Error::Unsupported
+                ? "The incoming stream has unsupported decoder parameters"
+                : "Video decoder initialization or recovery failed; see decoder diagnostics";
+        else if (renderer.decoder_lost)
             gs_error = "The video decoder could not be restarted";
         else if (result ==
                  std::atomic_load_explicit(&renderer.present_result, std::memory_order_relaxed))
@@ -4971,7 +5018,7 @@ configure_stream:
                                      ? (uint64_t)(presented - 1) * UINT64_C(100000000) /
                                            live_elapsed_us
                                      : 0),
-            frame_memory);
+            renderer.frame_memory);
         (void)lan_http_report_text(notification.message);
         snprintf(notification.message, sizeof(notification.message),
                  "Moonlight synthetic motion: enabled=%u events=%u errors=%u",
