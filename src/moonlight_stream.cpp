@@ -2044,7 +2044,7 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
         }
         if (entry->bufferType != BUFFER_TYPE_SPS)
             continue;
-        if (entry->length <= 0 || entry->length > 16390)
+        if (!entry->data || entry->length <= 0 || entry->length > 16390)
         {
             lifecycle_failure(state, Error::Parameters, -30);
             return false;

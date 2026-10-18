@@ -776,6 +776,15 @@ static void stream_aware_owner()
     assert(native_allocations == 0);
     renderer_sync_destroy(state);
     delete state;
+    state = uninitialized_owner();
+    parameters.data = nullptr;
+    parameters.length = 8;
+    assert(!prepare_stream_decoder(state, &unit));
+    assert(!state->running && creates == 0 && !state->lifecycle.stream.verified);
+    assert(retire_stream_decoder(state));
+    assert(native_allocations == 0);
+    renderer_sync_destroy(state);
+    delete state;
     for (unsigned stage = 0; stage < 2; ++stage)
     {
         state = uninitialized_owner();

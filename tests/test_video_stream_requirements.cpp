@@ -9,7 +9,7 @@
 using namespace moonlight::video;
 #include "video_sps_fixtures.hpp"
 using namespace fixture;
-static Requirements parsed(Codec codec, const std::vector<uint8_t> &nal)
+template <class Bytes> static Requirements parsed(Codec codec, const Bytes &nal)
 {
     Requirements r{};
     assert(parse_sps(codec, nal.data(), nal.size(), r) == ParseResult::Valid);
@@ -76,6 +76,19 @@ int main()
         (void)parse_sps(trial & 1 ? Codec::H264 : Codec::Hevc, mutated.data(), mutated.size(),
                         scratch);
     }
+    const auto encoded = parsed(Codec::H264, encoded_h264_9refs);
+    assert(encoded.references == 9 && encoded.buffering == 9 && encoded.reorder == 2);
+    assert(encoded.width == 2560 && encoded.height == 1440 && encoded.standard_dpb == 12);
+    assert(plan(encoded, {}).supported && plan(encoded, {}).dpb == 10);
+    auto main = parsed(Codec::Hevc, encoded_hevc_main);
+    auto main10 = parsed(Codec::Hevc, encoded_hevc_main10);
+    assert(main.profile == 1 && main10.profile == 2 && main.bit_depth == 8 &&
+           main10.bit_depth == 10);
+    assert(main.width == 1920 && main.height == 1088 && main.visible_height == 1080);
+    assert(main.buffering == 5 && main.reorder == 2 && main.standard_dpb == 6);
+    Limits hdr_limits{};
+    hdr_limits.bit_depth = 10;
+    assert(plan(main10, hdr_limits).supported && !plan(main10, {}).supported);
     Lifecycle life;
     life.wait(100);
     assert(!life.expired(100));
