@@ -110,7 +110,13 @@ struct ParameterSets
     bool pps(Codec codec, const uint8_t *p, size_t n)
     {
         uint32_t id{}, parent{};
-        if (n > 16390)
+        if (parameter_nal(codec, p, n) != ParseResult::Valid)
+            return false;
+        const unsigned header = codec == Codec::H264 ? 1 : 2;
+        // Reject invalid/dangling escape bytes across the bounded payload;
+        // this does not validate full PPS semantics.
+        Bits payload(p + header, n - header);
+        if (!payload.ok)
             return false;
         if (!parameter_ids(codec, p, n, false, id, parent))
             return false;

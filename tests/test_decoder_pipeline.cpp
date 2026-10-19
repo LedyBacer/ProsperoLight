@@ -1073,6 +1073,17 @@ static void parameter_activation_regressions()
     const auto initial_resets = resets;
     assert(decode(state, &unit, 2, FRAME_TYPE_IDR) == DR_OK);
     assert(creates == 1 && resets == initial_resets);
+    // Equivalent Annex-B framing must preserve native knowledge even on a P frame.
+    sp.erase(sp.begin());
+    pp.erase(pp.begin());
+    sp.insert(sp.end(), 3, 0);
+    pp.insert(pp.end(), 3, 0);
+    pic[4] = 0x41;
+    update();
+    assert(decode(state, &unit, 2, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(creates == 1 && resets == initial_resets && !state->transition_wait_since &&
+           !state->parameters_requested);
+    assert(state->parameter_sets.native_ready(0, state->lifecycle.stream));
     // Same ID and resources; changed POC syntax requires a complete IDR/reset.
     const auto old = state->lifecycle.stream;
     sp = fixture::h264(1920, 1080, 1, 42, true, 2, 0, 1);

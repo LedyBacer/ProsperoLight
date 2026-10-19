@@ -125,6 +125,36 @@ int main()
         assert(!sets.native_ready(3, r));
         sets.submitted();
         assert(sets.native_ready(3, r));
+        auto sp =
+            codec == Codec::H264 ? h264(1920, 1080, 1, 42, true, 2, 1) : hevc(1920, 1080, 8, 2);
+        const auto original_sps = parsed(codec, sp);
+        sp.erase(sp.begin()); // Four-byte to three-byte prefix.
+        assert(parsed(codec, sp).identity == original_sps.identity);
+        sp.insert(sp.end(), 3, 0);
+        assert(parsed(codec, sp).identity == original_sps.identity);
+        auto equivalent = pps;
+        equivalent.erase(equivalent.begin());
+        assert(sets.pps(codec, equivalent.data(), equivalent.size()) && sets.native_ready(3, r));
+        equivalent.insert(equivalent.end(), 3, 0);
+        assert(sets.pps(codec, equivalent.data(), equivalent.size()) && sets.native_ready(3, r));
+        // A real payload change after the IDs remains distinct, unlike framing.
+        auto changed = pps;
+        changed.back() = 0x60; // Same ID prefix; distinct following PPS syntax bits.
+        const auto previous_pps = sets.pps_identity[3];
+        assert(sets.pps(codec, changed.data(), changed.size()));
+        assert(sets.pps_identity[3] != previous_pps && !sets.native_ready(3, r));
+        assert(sets.pps(codec, pps.data(), pps.size()) && sets.native_ready(3, r));
+        const uint8_t empty[] = {0, 0, 1};
+        const uint8_t *view = empty;
+        size_t length = sizeof(empty);
+        assert(parameter_nal(codec, view, length) == ParseResult::Invalid);
+        auto padding_only = pps;
+        padding_only.resize(codec == Codec::H264 ? 5 : 6);
+        padding_only.insert(padding_only.end(), 3, 0);
+        assert(!sets.pps(codec, padding_only.data(), padding_only.size()));
+        auto dangling_escape = pps;
+        dangling_escape.insert(dangling_escape.end(), {0, 0, 3, 0});
+        assert(!sets.pps(codec, dangling_escape.data(), dangling_escape.size()));
         sets.remember(r); // Identical SPS keeps the PPS binding.
         assert(sets.native_ready(3, r));
         ++r.identity;

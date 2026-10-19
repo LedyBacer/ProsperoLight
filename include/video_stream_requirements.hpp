@@ -359,7 +359,6 @@ inline ParseResult h264_sps(const uint8_t *p, size_t n, Requirements &out)
         return ParseResult::Invalid;
     r.visible_width = r.width - crop_x;
     r.visible_height = r.height - crop_y;
-    r.identity = identity(p, n);
     r.verified = true;
     out = r;
     return ParseResult::Valid;
@@ -648,36 +647,62 @@ inline ParseResult hevc_sps(const uint8_t *p, size_t n, Requirements &out)
         return ParseResult::Invalid;
     r.visible_width = r.width - crop_x;
     r.visible_height = r.height - crop_y;
-    r.identity = identity(p, n);
     r.verified = true;
     out = r;
     return ParseResult::Valid;
 }
-// Input is one Annex-B NAL (or a bare NAL), never a whole unbounded frame.
-inline ParseResult parse_sps(Codec codec, const uint8_t *p, size_t n, Requirements &out)
+// Normalize framing only, for one bounded SPS/PPS NAL. Parameter-set RBSPs
+// end with rbsp_trailing_bits: their final payload byte contains a stop bit and
+// cannot be zero. Unlike VCL/CABAC NALs, no cabac_zero_word belongs to these NALs.
+// With explicit Annex-B framing, final zero bytes are therefore trailing_zero_8bits.
+// Bare NALs retain all bytes; this helper is not general RBSP canonicalization.
+inline ParseResult parameter_nal(Codec codec, const uint8_t *&p, size_t &n)
 {
     if (!p || !n || n > 16390)
         return ParseResult::Invalid;
-    if (n >= 4 && p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 1)
+    bool annex_b = false;
+    if (n >= 4 && !p[0] && !p[1] && !p[2] && p[3] == 1)
     {
         p += 4;
         n -= 4;
+        annex_b = true;
     }
-    else if (n >= 3 && p[0] == 0 && p[1] == 0 && p[2] == 1)
+    else if (n >= 3 && !p[0] && !p[1] && p[2] == 1)
     {
         p += 3;
         n -= 3;
+        annex_b = true;
     }
     const unsigned header = codec == Codec::H264 ? 1 : 2;
-    if (n < header || (p[0] & 128))
+    if (n <= header || (p[0] & 128))
         return ParseResult::Invalid;
+    const unsigned type = codec == Codec::H264 ? p[0] & 31 : (p[0] >> 1) & 63;
+    if (codec == Codec::H264 ? type != 7 && type != 8 : type != 33 && type != 34)
+        return ParseResult::NotParameters;
+    if (codec == Codec::Hevc && !(p[1] & 7))
+        return ParseResult::Invalid;
+    if (annex_b)
+        while (n > header && p[n - 1] == 0)
+            --n;
+    return n > header ? ParseResult::Valid : ParseResult::Invalid;
+}
+// Input is one Annex-B NAL (or a bare NAL), never a whole unbounded frame.
+inline ParseResult parse_sps(Codec codec, const uint8_t *p, size_t n, Requirements &out)
+{
+    const auto normalized = parameter_nal(codec, p, n);
+    if (normalized != ParseResult::Valid)
+        return normalized;
+    const unsigned header = codec == Codec::H264 ? 1 : 2;
     const auto type = codec == Codec::H264 ? p[0] & 31 : (p[0] >> 1) & 63;
     if (type != (codec == Codec::H264 ? 7 : 33))
         return ParseResult::NotParameters;
-    if (codec == Codec::Hevc && ((p[0] & 1) || (p[1] >> 3) || !(p[1] & 7)))
+    if (codec == Codec::Hevc && ((p[0] & 1) || (p[1] >> 3)))
         return ParseResult::Unsupported;
-    return codec == Codec::H264 ? h264_sps(p + header, n - header, out)
-                                : hevc_sps(p + header, n - header, out);
+    const auto parsed = codec == Codec::H264 ? h264_sps(p + header, n - header, out)
+                                             : hevc_sps(p + header, n - header, out);
+    if (parsed == ParseResult::Valid)
+        out.identity = identity(p, n); // Preserve the NAL header and all EBSP bytes.
+    return parsed;
 }
 struct Limits
 {

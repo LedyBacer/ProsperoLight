@@ -40,6 +40,20 @@ fresh selected sets. Unselected future PPS versions remain filtered. Cancellatio
 clears the bounded tracker after joining the decode owner. No new queues, threads,
 raw-NAL caches, or pixel copies are introduced.
 
+Parameter identity normalizes framing for one bounded SPS/PPS NAL: three-/four-byte
+Annex-B prefixes and Annex-B trailing_zero_8bits are excluded. SPS/PPS RBSP ends
+with rbsp_trailing_bits, so the final payload byte must be nonzero; unlike VCL NALs,
+these parameter NALs have no CABAC zero words. This rule is restricted to explicitly
+Annex-B-framed parameter sets. Bare NAL trailing bytes are retained conservatively.
+The hash preserves the complete NAL header and remaining EBSP, including escape
+bytes; this is not RBSP/semantic canonicalization. SPS still requires its existing
+full supported-syntax/trailing-bit validation. PPS retains bounded ID parsing plus
+invalid/dangling escape checks, not a full PPS parser. Invalid PPS semantics remain
+subject to native decode rejection and existing bounded recovery. Framing changes
+therefore preserve bindings/native knowledge; real POC/PPS/header/content changes
+still follow the existing generation/activation rules. HEVC IDR-only activation
+(types19/20, not CRA/BLA) is intentional and unchanged.
+
 This final hardening is validated by focused parser/tracker and native-owner mocks,
 not a new PS5 hardware run. Earlier hardware reports below retain their original
 source/build identities. Intel VAAPI/QSV 1440p60 remains an external premerge gate.
