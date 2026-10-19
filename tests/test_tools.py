@@ -997,7 +997,8 @@ class ToolTests(unittest.TestCase):
         # C++ concatenates adjacent literals, including across formatted lines.
         about = re.sub(r'"\s*"', "", about)
         for text in ("Powered by Moonlight", "moonlight-stream.org", "Sunshine developers",
-                     "brought to you by BlackBearReloaded", "made with ElevenLabs",
+                     "Original creator: BlackBearReloaded", "Current maintainer: LedyBacer",
+                     "Nikita Dybov, KrisEnigma", "made with ElevenLabs",
                      '"Version " + version_', "files_.draw(canvas);"):
             self.assertCodeContains(text, about)
         self.assertIn("view.set_storage(StorageFolders());", platform)
