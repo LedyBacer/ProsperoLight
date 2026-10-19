@@ -115,3 +115,9 @@ cannot enter a performance comparison. Production builds cannot enable the probe
 Fatal lifecycle failures and failed local recovery attempts have separate counters;
 a startup rejection is not reported as a failed recovery. HEVC reference telemetry
 is a buffering-derived upper bound, not a count of explicit reference pictures.
+
+The final review adds bounded PPS/slice-selected pending SPS transitions, effective
+decode/present affinity application behind the existing join barrier, and packet-
+independent startup/transition deadlines. See [the targeted review report](../VIDEODEC2_REVIEW_VALIDATION.md)
+for the conservative parameter-ID policy, cancellation guarantees, reconnect ownership
+blocker, real encoder fixtures and synthetic first-AU recovery hardware evidence.

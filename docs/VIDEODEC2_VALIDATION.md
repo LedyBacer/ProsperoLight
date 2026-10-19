@@ -1,5 +1,7 @@
 # VideoDec2 hardware validation
 
+This is the original validation at the source below. See [targeted final-review validation](VIDEODEC2_REVIEW_VALIDATION.md) for later lifecycle fixes and their dedicated hardware run.
+
 Tested code: `74a5e8bba86a5826da73577a82fd3c6e18e67f4b`.
 OpenGL SDK 1.0.2; developer label `test-lab-videodec2-74a5e8b`.
 Candidate eboot SHA256: `c59ecc018c6a24d06bde2f783027f8346b5dc798addd993e65a0b19384df5b30`.

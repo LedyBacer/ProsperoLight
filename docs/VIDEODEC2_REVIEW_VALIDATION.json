@@ -1,0 +1,172 @@
+{
+  "schema": "videodec2-targeted-review-evidence/1",
+  "source_sha": "4709463d7c8870120a384e0de0ae55001bd19fa9",
+  "runs": [
+    {
+      "case": "first-au-recovery",
+      "run_id": "6bc088f1-ae52-40c1-b831-6407101443b3",
+      "execution_state": "COMPLETED",
+      "functional_verdict": "PASS",
+      "measurement_validity": "INCONCLUSIVE",
+      "overall_verdict": "INCONCLUSIVE",
+      "reason_code": null,
+      "source_sha": "4709463d7c8870120a384e0de0ae55001bd19fa9",
+      "build_label": "test-lab-review-4709463",
+      "eboot_sha256": "85594298a09653924a0a325d478a99aac8330e1555803639ca58fe9b1726ad02",
+      "codec": "hevc",
+      "resolution": "1080p",
+      "fps": 60,
+      "hdr": false,
+      "pipeline": "classic",
+      "timing": {
+        "warmup_seconds": 10,
+        "measure_seconds": 30
+      },
+      "configured_bitrate_ceiling_mbps": 20,
+      "native_observations": {
+        "max_dpb_frames": 7,
+        "decoder_pipeline_depth": 1,
+        "decode_errors": 1,
+        "decoder_refreshes": 1,
+        "queue_overflows": 0,
+        "decoder_lifecycle_failures": 0,
+        "decoder_recreations": 1,
+        "unrecoverable_frames": 0
+      },
+      "encoder": [
+        "hevc_nvenc"
+      ],
+      "metrics": {
+        "measurement_seconds": 30.005697,
+        "unique_presented_fps": 59.921954154239444,
+        "received_fps": 59.95528115877461,
+        "actual_mbps": 1.157653228318609,
+        "decode_call_us": {
+          "count": 1799,
+          "mean": 1702.142301278488,
+          "median": 1699,
+          "p95": 1743,
+          "p99": 1765,
+          "max": 3079
+        },
+        "callback_to_ready_us": {
+          "count": 1799,
+          "mean": 1709.7676486937187,
+          "median": 1706,
+          "p95": 1751,
+          "p99": 1773,
+          "max": 3090
+        },
+        "callback_to_flip_observed_us": {
+          "count": 1799,
+          "mean": 11104.094496942746,
+          "median": 11121,
+          "p95": 11446,
+          "p99": 11538,
+          "max": 11589
+        },
+        "frame_age_us": {
+          "count": 1799,
+          "mean": 11118.982768204558,
+          "median": 11136,
+          "p95": 11461,
+          "p99": 11554,
+          "max": 11603
+        },
+        "flip_interarrival_us": {
+          "count": 1797,
+          "mean": 16683.332776850308,
+          "median": 16683,
+          "p95": 16697,
+          "p99": 16707,
+          "max": 17139
+        },
+        "pending_max": 0,
+        "superseded": 0,
+        "refused": 0
+      },
+      "lifecycle": {
+        "available": true,
+        "valid": true,
+        "state": "stopping",
+        "decoder_initialized": true,
+        "first_decoded": true,
+        "first_presented": true,
+        "ready_to_first_decode_us": 282050,
+        "decode_to_first_present_us": 15323,
+        "reason": null,
+        "counters": {
+          "decoder_generation": 2,
+          "decoder_initialization_us": 335024,
+          "decoder_reconfiguration_count": 1,
+          "decoder_reconfiguration_us": 39441,
+          "decoder_recovery_attempts": 1,
+          "decoder_recovery_successes": 1,
+          "decoder_recovery_failures": 0,
+          "decoder_ready_us": 234840865036,
+          "decoder_first_decoded_us": 234841147086,
+          "decoder_first_presented_us": 234841162409,
+          "stream_coded_width": 1920,
+          "stream_coded_height": 1088,
+          "stream_required_dpb_frames": 2,
+          "max_dpb_frames": 7,
+          "decoder_cpu_memory_bytes": 23281664,
+          "decoder_gpu_memory_bytes": 52625408,
+          "decoder_shared_memory_bytes": 27017216,
+          "decoder_frame_pool_bytes": 23511040,
+          "decoder_test_capacity_errors": 1,
+          "decoder_test_capacity_decoded_before": 0,
+          "decoder_test_capacity_presented_before": 0,
+          "decoder_parameter_transition_waits": 0
+        },
+        "clock": "PS5 monotonic software timestamps; not physical scanout"
+      },
+      "title_exit_verified": true,
+      "installation_files_verified": 133,
+      "issues": [
+        "DEVELOPER_DECODER_CAPACITY_PROBE",
+        "DECODER_RECONFIGURED",
+        "RECOVERED_DECODER_FAULT",
+        "DECODER_RECREATED"
+      ],
+      "raw_report_sha256": "1105ee82ae31b513eea523b36368e076c7a29972edc8751cf0be9b5574e0bc65",
+      "export_sha256": "fe19394e983dcb8d67e4aa4d5b91b99023271792c8bc82c6b28565a34b24e5be",
+      "integrity": {
+        "manifest_files": 51,
+        "export_verified": true,
+        "receipt_run_id_matches": true
+      },
+      "cleanup_errors": 0
+    }
+  ],
+  "native_observations": {
+    "decoder_create_attempts": 2,
+    "decoder_refreshes": 1,
+    "decode_errors": 1,
+    "decoder_recovery_failures": 0,
+    "decoder_cpu_affinity": 63,
+    "decoder_cpu_affinity_requested": 63,
+    "decode_cpu_mask": 4096,
+    "present_cpu_mask": 2048,
+    "receive_cpu_mask": 64,
+    "other_cpu_mask": 8064,
+    "decode_placement_result": 0,
+    "present_placement_result": 0
+  },
+  "final_cleanup": {
+    "configuration_pairing_unchanged": true,
+    "original_shader_cache_restored_and_readback_verified": true,
+    "ps5_title_idle": true,
+    "remote_lease_present": false,
+    "active_host_clients": 0,
+    "active_rtsp_sessions": 0,
+    "owned_windows_worker": "normal shutdown; task Ready, result 0"
+  },
+  "limitations": [
+    "One synthetic first-AU capacity failure; not a spontaneous native fault or Intel reproduction.",
+    "Functional integration evidence; measurement intentionally inconclusive.",
+    "No new full matrix or A/B benchmark; prior evidence reused for unchanged paths.",
+    "No hardware software-encoder test or real encoder-driven SPS switch.",
+    "Cancellation during synchronous SDK calls is observed at checkpoints after those calls return."
+  ]
+}

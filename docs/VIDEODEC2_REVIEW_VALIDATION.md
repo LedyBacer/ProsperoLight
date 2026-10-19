@@ -103,6 +103,62 @@ compatibility. The native ceiling remains an operational bound subject to Query/
 
 ## Final targeted results
 
-Results and exact hardware identity/run ID are added after focused tests and the
-single final developer SDK build. The previous startup-cancel run occurred after
-first output and is not evidence of cancellation inside native initialization.
+Runtime code: `4709463d7c8870120a384e0de0ae55001bd19fa9`.
+Build: OpenGL SDK 1.0.2, `test-lab-review-4709463`.
+Eboot SHA256: `85594298a09653924a0a325d478a99aac8330e1555803639ca58fe9b1726ad02`.
+
+Focused software validation:
+
+- `make test-video-lifecycle`: SPS/parser/planner and parameter-ID cases under ASan/UBSan,
+  including the added real x264 fixtures and retained malformed-input corpus.
+- Existing `tests/test_decoder_pipeline.cpp`: pending advertisement/activation/no-op/cancel,
+  requested/fallback/recreated affinity, first-AU failure, eight cancellation checkpoints,
+  no-packet timeout, waiting-for-SPS/first-output cancellation and retained ownership guards.
+  The corrected recovery IDR latch is asserted after resumed output.
+- The owner test also passed ASan/UBSan with RFI enabled. As with the previous included-source
+  test, `-mllvm -asan-globals=0` avoids retaining unrelated callback sections; heap/stack
+  instrumentation remains enabled. The standalone parser uses normal ASan/UBSan.
+- 28 targeted Python tests: profile (compiles C++ with TEST_LAB=0 and 1), lifecycle evidence
+  and Test Lab analysis. Broad regression coverage comes from successful code CI at `4709463`.
+- Final developer SDK image built successfully. An earlier `4beb84b` build was superseded,
+  without deployment, after review found an IDR request latch that needed clearing on resume.
+  Only the corrected image was deployed and only one new hardware run was performed.
+
+Real PS5 Test Lab run: **`6bc088f1-ae52-40c1-b831-6407101443b3`**, HEVC SDR
+1080p60 / 20-Mbps ceiling, 10-second warmup / 30-second measurement.
+
+| Observation | Result |
+|---|---|
+| Execution / functional / measurement | COMPLETED / PASS / INCONCLUSIVE |
+| Synthetic failures | 1; decoded=0 and presented=0 at injection |
+| Accepted decoder configurations | generation 1 capacity3; generation 2 capacity7 |
+| Create attempts / refresh requests | 2 / 1 |
+| Local recovery attempts / successes / failures | 1 / 1 / 0 |
+| Reconfiguration time | 39.441 ms, PS5 software timestamp |
+| First decoded and first presented after recovery | verified |
+| Decode / present affinity application | readback success; masks 0x1000 / 0x800 |
+| Normal title exit | verified |
+
+The measurement and overall verdict are intentionally INCONCLUSIVE because the run
+contains an injected fault and recreation. It is a functional recovery result, not
+performance evidence or independent Intel validation. Software times are not physical
+actuator/scanout/input latency.
+
+All 133 installation files passed final-destination SIZE/SHA256 readback. Matching
+receipt and raw/export artifact integrity were checked. Saved configuration/pairing
+are unchanged, the original shader cache was restored/read back, the remote lease is
+absent and host inventory is zero clients/RTSP sessions. The owned Windows worker
+exited normally (task Ready, result0). Private raw evidence remains in ignored storage.
+See [the redacted evidence and report/export hashes](VIDEODEC2_REVIEW_VALIDATION.json).
+
+No separate cancellation hardware run was needed: the eight deterministic interruption
+cases and real first-output replacement barrier cover the changed ownership paths.
+The previous startup-cancel run is retained only as normal cancellation evidence;
+it did not prove interruption inside native initialization. Previous nine-mode NVENC
+matrix and three-pair screening are reused for unchanged paths, with their original
+source identity and limitations. No matrix, A/B, HDR, VRR, 4K120 or PyroWave run was repeated.
+
+Remaining boundaries: Intel VAAPI/QSV is delegated and pending before merge; no live
+encoder-driven SPS change or software-encoded Moonlight session is claimed. Safe
+session reconnect remains unavailable under the existing ownership/API contracts.
+Native capacities above the observed range remain Query/Create-dependent assumptions.
