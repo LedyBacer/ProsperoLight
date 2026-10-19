@@ -112,7 +112,7 @@ Contributions and testing across different TVs, firmwares and network setups are
 
 ## Credits
 
-**Original creator and maintainer:** [BlackBearReloaded](https://github.com/blackbearreloaded).
+**Original creator:** [BlackBearReloaded](https://github.com/blackbearreloaded).
 
 **Current maintainer (since October 2026):** [LedyBacer](https://github.com/LedyBacer).
 

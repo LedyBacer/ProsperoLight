@@ -28,12 +28,15 @@ $files += @(
 $files = @($files | Sort-Object -Unique)
 $markers = @(
     "ps5-native-app-boilerplate",
-    "Copyright (C) 2026 BlackBearReloaded",
     "SPDX-License-Identifier: GPL-3.0-or-later"
 )
 $missing = @()
 
 foreach ($file in $files) {
+    # Match lint.sh's project scope; dependencies retain their own licenses.
+    if ($file -match '^(vendor/|third_party/|assets/|ui/|\.github/ISSUE_TEMPLATE/)') {
+        continue
+    }
     $path = Join-Path $root $file
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         $missing += "$file (missing file)"
@@ -41,6 +44,16 @@ foreach ($file in $files) {
     }
 
     $header = (Get-Content -LiteralPath $path -TotalCount 20) -join "`n"
+    if ($file -match '^(src/pyrowave/|tools/pyrowave/|include/stream_profile\.hpp$|include/ps5_videoout_formats\.h$)') {
+        if ($header -cnotmatch 'SPDX-License-Identifier: (MIT|GPL-3.0-or-later)') {
+            $missing += "$file (missing permitted SPDX license)"
+        }
+        continue
+    }
+    # Preserve historical attribution; new files may credit any contributor.
+    if ($header -cnotmatch 'Copyright \(C\) [0-9]{4}(-[0-9]{4})? [^\s].*') {
+        $missing += "$file (missing copyright year and author)"
+    }
     foreach ($marker in $markers) {
         if (-not $header.Contains($marker)) {
             $missing += "$file (missing '$marker')"

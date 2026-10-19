@@ -35,9 +35,8 @@ for file in "${repository_files[@]}"; do
                     ;;
             esac
             grep -Fq ps5-native-app-boilerplate <<<"$header"
-            # Historical files keep BlackBearReloaded; new work may name LedyBacer
-            # and/or contributors without rewriting prior attribution.
-            grep -Eq 'Copyright \(C\) 202[0-9] .*(BlackBearReloaded|LedyBacer)' <<<"$header"
+            # Preserve historical attribution; new files may credit any contributor.
+            grep -Eq 'Copyright \(C\) [0-9]{4}(-[0-9]{4})? [^[:space:]].*' <<<"$header"
             grep -Fq 'SPDX-License-Identifier: GPL-3.0-or-later' <<<"$header"
             ((checked += 1))
             ;;

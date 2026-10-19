@@ -2427,8 +2427,8 @@ void View::draw_about(ui::Canvas &canvas, ui::Painter &paint) const
     list.rounded_rect({left.x, left.y + 426.0f, left.w, 1.0f}, 0.0f, rule);
     paint.label(ui::upper(i18n::tr("PS5 edition")), left.x, left.y + 462.0f, 19.0f, t.text_muted);
     ui::paragraph(list, regular,
-                  i18n::tr("ProsperoLight is an unofficial PS5 client brought to you by "
-                           "BlackBearReloaded."),
+                  i18n::tr("Original creator: BlackBearReloaded\n"
+                           "Current maintainer: LedyBacer"),
                   left.x, left.y + 496.0f, 22.0f, left.w, 30.0f, t.text, 2);
     ui::paragraph(list, regular,
                   i18n::tr("Thanks to ProsperoLight contributors: Nikita Dybov, KrisEnigma."),

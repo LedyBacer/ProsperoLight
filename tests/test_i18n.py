@@ -14,6 +14,18 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 
 class I18nTests(unittest.TestCase):
+    def test_rendered_language_labels(self):
+        language_array=(ROOT/'include/i18n.hpp').read_text().split('languages[] = {',1)[1].split('};',1)[0]
+        labels=[name for _,name in re.findall(r'\{\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\}',language_array)]
+        self.assertEqual(len(labels),31)
+        catalogs=list((ROOT/'assets/locales/rendered').glob('*.json'))
+        self.assertEqual(len(catalogs),31)
+        for path in catalogs:
+            rendered=json.loads(path.read_text())
+            for label in labels:
+                self.assertIn(label,rendered,(path.name,label))
+                self.assertTrue(rendered[label].strip(),(path.name,label))
+
     def test_catalogs_and_font_coverage(self):
         base=json.loads((ROOT/'assets/locales/en.json').read_text())
         catalogs=list((ROOT/'assets/locales').glob('*.json'))
@@ -36,6 +48,41 @@ class I18nTests(unittest.TestCase):
             count=struct.unpack_from('<I',data,32)[0]
             glyphs={struct.unpack_from('<I',data,40+24*i)[0] for i in range(count)}
             self.assertFalse(required-glyphs,(font,sorted(required-glyphs)))
+
+    def test_about_credits_fit(self):
+        # Use the renderer's actual wrapping and baked metrics: the existing
+        # About block has two 30px lines at 22px, inside an 852px panel.
+        compiler=shutil.which('clang++') or shutil.which('g++')
+        self.assertIsNotNone(compiler)
+        code=r'''
+#include "gfx/font.hpp"
+#include <cassert>
+#include <fstream>
+#include <iterator>
+int main(int argc,char **argv) {
+ std::ifstream input(argv[1],std::ios::binary);
+ std::string data((std::istreambuf_iterator<char>(input)),{});
+ hui::gfx::Font font;
+ assert(font.load(data));
+ for(int i=2;i<argc;++i) {
+  std::ifstream text(argv[i]);
+  std::string value((std::istreambuf_iterator<char>(text)),{});
+  const auto lines=font.wrap(value,22,852-2*24-2*14);
+  assert(lines.size()==2);
+  for(const auto &line:lines) assert(font.measure(line,22)<=852-2*24-2*14);
+ }
+}
+'''
+        key="Original creator: BlackBearReloaded\nCurrent maintainer: LedyBacer"
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder);(path/'check.cpp').write_text(code)
+            texts=[]
+            for catalog in sorted((ROOT/'assets/locales/rendered').glob('*.json')):
+                target=path/(catalog.stem+'.txt')
+                target.write_text(json.loads(catalog.read_text())[key])
+                texts.append(str(target))
+            subprocess.run([compiler,'-std=c++17','-I'+str(ROOT/'third_party/ps5-homebrew-ui'),str(path/'check.cpp'),str(ROOT/'third_party/ps5-homebrew-ui/gfx/font.cpp'),'-o',str(path/'check')],check=True)
+            subprocess.run([str(path/'check'),str(ROOT/'assets/fonts/inter-regular.huifont'),*texts],check=True)
 
     def test_parser_selection_and_fallback(self):
         compiler=shutil.which('clang++') or shutil.which('g++')
