@@ -2032,6 +2032,7 @@ static bool configure_stream_decoder(native_renderer_state_t *state,
         lifecycle_failure(state, Error::Allocation, result);
         return false;
     }
+    state->parameter_sets.forget_submitted();
     state->decoder_needs_reset = false;
     state->decoder_lost = false;
     state->pipeline_faults = 0;
@@ -2067,15 +2068,19 @@ static bool configure_stream_decoder(native_renderer_state_t *state,
 }
 
 // A changed parameter advertisement is not an activation. PPS/slice IDs select
-// the stream facts; when a prefix is unavailable, only an unambiguous SPS in an
-// IDR may select a configuration. Never replay cached raw parameter NALs.
+// the stream facts. New/reset instances require fresh matching SPS/PPS at an
+// actual IDR boundary. Never replay cached raw parameter NALs.
 static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT unit)
 {
     using namespace moonlight::video;
     const Codec codec = state->mode->codec_type == 1 ? Codec::H264 : Codec::Hevc;
-    unsigned fragments = 0, sps_count = 0;
-    Requirements sole{};
-    std::array<bool, 32> supplied{};
+    auto &sets = state->parameter_sets;
+    unsigned fragments = 0;
+    std::array<uint64_t, 32> supplied{};
+    std::array<uint64_t, 256> supplied_pps{};
+    sets.selected_pps = 256;
+    sets.supplied_sps = sets.supplied_pps = false;
+    bool conflict = false;
     for (auto *entry = unit->bufferList; entry; entry = entry->next)
     {
         if (++fragments > 1024 || !entry->data || entry->length <= 0)
@@ -2084,111 +2089,98 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
             return false;
         }
         const auto *data = reinterpret_cast<const uint8_t *>(entry->data);
-        if (entry->bufferType == BUFFER_TYPE_PPS)
+        if (entry->bufferType == BUFFER_TYPE_SPS)
         {
-            if (!state->parameter_sets.pps(codec, data, entry->length))
+            Requirements r{};
+            const auto parsed = parse_sps(codec, data, entry->length, r);
+            if (parsed == ParseResult::Unsupported && unit->frameType != FRAME_TYPE_IDR)
+            {
+                if (!state->transition_wait_since)
+                {
+                    state->transition_wait_since = monotonic_us();
+                    ++state->parameter_transition_waits;
+                }
+                return false;
+            }
+            if (parsed != ParseResult::Valid)
+            {
+                lifecycle_failure(state,
+                                  parsed == ParseResult::Unsupported ? Error::Unsupported
+                                                                     : Error::Parameters,
+                                  -30);
+                return false;
+            }
+            conflict |= supplied[r.parameter_id] && supplied[r.parameter_id] != r.identity;
+            sets.remember(r);
+            supplied[r.parameter_id] = r.identity;
+        }
+        else if (entry->bufferType == BUFFER_TYPE_PPS)
+        {
+            uint32_t id{}, parent{};
+            if (!parameter_ids(codec, data, entry->length, false, id, parent) ||
+                !sets.pps(codec, data, entry->length))
             {
                 lifecycle_failure(state, Error::Parameters, -30);
                 return false;
             }
-            uint32_t id{}, parent{};
-            if (parameter_ids(codec, data, entry->length, false, id, parent) &&
-                (!state->parameter_sets.sps[parent].verified ||
-                 state->lifecycle.changed(state->parameter_sets.sps[parent])))
-                state->parameter_sets.advertised_change = true;
+            conflict |= supplied_pps[id] && supplied_pps[id] != sets.pps_identity[id];
+            supplied_pps[id] = sets.pps_identity[id];
         }
-        if (entry->bufferType != BUFFER_TYPE_SPS)
-            continue;
-        Requirements r{};
-        const auto parsed = parse_sps(codec, data, entry->length, r);
-        if (parsed == ParseResult::Unsupported && unit->frameType != FRAME_TYPE_IDR)
-        {
-            // Unsupported future advertisements are not active configurations.
-            // Retain the instance; a complete IDR resolves or rejects the change.
-            state->parameter_sets.advertised_change = true;
-            if (!state->transition_wait_since)
-            {
-                state->transition_wait_since = monotonic_us();
-                ++state->parameter_transition_waits;
-            }
-            return false;
-        }
-        if (parsed != ParseResult::Valid)
-        {
-            lifecycle_failure(
-                state, parsed == ParseResult::Unsupported ? Error::Unsupported : Error::Parameters,
-                -30);
-            return false;
-        }
-        if (state->lifecycle.changed(r) || r.parameter_id != state->lifecycle.stream.parameter_id)
-            state->parameter_sets.advertised_change = true;
-        state->parameter_sets.remember(r);
-        supplied[r.parameter_id] = true;
-        sole = r;
-        ++sps_count;
     }
-    if (state->decoder && !state->await_keyframe && !state->parameter_sets.advertised_change &&
-        !state->transition_wait_since && !sps_count)
-        return true;
     const Requirements *selected = nullptr;
+    bool safe_idr = true, unknown = false;
     for (auto *entry = unit->bufferList; entry; entry = entry->next)
         if (entry->bufferType == BUFFER_TYPE_PICDATA)
         {
-            auto *candidate = state->parameter_sets.picture(
-                codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length);
-            if (candidate)
+            uint32_t id{}, unused{};
+            bool idr = false, found = false;
+            if (!parameter_ids(codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length,
+                               true, id, unused, &idr, &found))
             {
-                if (selected && selected->parameter_id != candidate->parameter_id)
-                {
-                    lifecycle_failure(state, Error::Parameters, -30);
-                    return false;
-                }
-                selected = candidate;
+                unknown |= found;
+                continue;
+            } // Continuation fragments have no Annex-B slice header.
+            safe_idr &= idr;
+            if (!sets.pps_valid[id])
+            {
+                unknown = true;
+                continue;
             }
+            const auto *candidate = &sets.sps[sets.pps_sps[id]];
+            if (selected && sets.selected_pps != id)
+                conflict = true;
+            selected = candidate;
+            sets.selected_pps = id;
         }
-    if (!selected && unit->frameType == FRAME_TYPE_IDR && sps_count == 1)
-        selected = &sole;
-    if (!selected)
+    const bool activation =
+        selected && (!state->decoder || state->lifecycle.parameters_changed(*selected) ||
+                     !sets.native_ready(sets.selected_pps, *selected));
+    if (selected)
     {
-        // A normal continuation without pending advertisements needs no parsing.
-        if (state->decoder && !state->await_keyframe && !state->transition_wait_since &&
-            !state->parameter_sets.advertised_change)
-            return true;
+        sets.supplied_sps = supplied[selected->parameter_id] == selected->identity;
+        sets.supplied_pps = supplied_pps[sets.selected_pps] == sets.pps_identity[sets.selected_pps];
     }
-    else if (!state->lifecycle.changed(*selected) && state->decoder &&
-             selected->parameter_id == state->lifecycle.stream.parameter_id)
+    const bool complete_required =
+        activation || state->await_keyframe || state->decoder_needs_reset;
+    if (!selected || unknown || conflict ||
+        (complete_required && (!safe_idr || unit->frameType != FRAME_TYPE_IDR ||
+                               !sets.supplied_sps || !sets.supplied_pps)))
     {
-        state->lifecycle.stream = *selected;
-        if (state->await_keyframe && !supplied[selected->parameter_id])
-            return false;
-        if (!state->await_keyframe &&
-            (unit->frameType == FRAME_TYPE_IDR || !state->transition_wait_since))
-        {
-            state->transition_wait_since = 0;
-            state->parameters_requested = false;
-        }
-        state->parameter_sets.advertised_change = false;
-        for (const auto &r : state->parameter_sets.sps)
-            if (r.verified && (state->lifecycle.changed(r) ||
-                               r.parameter_id != state->lifecycle.stream.parameter_id))
-                state->parameter_sets.advertised_change = true;
-        for (size_t i = 0; i < state->parameter_sets.pps_valid.size(); ++i)
-            if (state->parameter_sets.pps_valid[i] &&
-                !state->parameter_sets.sps[state->parameter_sets.pps_sps[i]].verified)
-                state->parameter_sets.advertised_change = true;
-        return true;
-    }
-    if (!selected || unit->frameType != FRAME_TYPE_IDR || !supplied[selected->parameter_id])
-    {
-        // Unknown/reused identifiers or a newly active configuration outside an
-        // IDR cannot safely use the old references. Hold, request once, then fail
-        // on a decode-worker deadline even if no more packets arrive.
         if (!state->transition_wait_since)
         {
             state->transition_wait_since = monotonic_us();
             ++state->parameter_transition_waits;
         }
         return false;
+    }
+    if (!complete_required)
+    {
+        if (safe_idr && unit->frameType == FRAME_TYPE_IDR)
+        {
+            state->transition_wait_since = 0;
+            state->parameters_requested = false;
+        }
+        return true;
     }
     Limits limits{};
     limits.width = state->mode->max_width;
@@ -2210,18 +2202,13 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
             return false;
     }
     else
+    {
+        if (activation)
+            state->decoder_needs_reset = true;
         state->lifecycle.stream = *selected;
+    }
     state->transition_wait_since = 0;
     state->parameters_requested = false;
-    state->parameter_sets.advertised_change = false;
-    for (const auto &r : state->parameter_sets.sps)
-        if (r.verified &&
-            (state->lifecycle.changed(r) || r.parameter_id != state->lifecycle.stream.parameter_id))
-            state->parameter_sets.advertised_change = true;
-    for (size_t i = 0; i < state->parameter_sets.pps_valid.size(); ++i)
-        if (state->parameter_sets.pps_valid[i] &&
-            !state->parameter_sets.sps[state->parameter_sets.pps_sps[i]].verified)
-            state->parameter_sets.advertised_change = true;
     return true;
 }
 
@@ -2248,16 +2235,17 @@ static bool future_parameter(native_renderer_state_t *state, PLENTRY entry)
         Requirements r{};
         return parse_sps(codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length, r) ==
                    ParseResult::Valid &&
-               (r.parameter_id != state->lifecycle.stream.parameter_id ||
-                state->lifecycle.changed(r));
+               state->lifecycle.parameters_changed(r);
     }
     if (entry->bufferType == BUFFER_TYPE_PPS)
     {
         uint32_t id{}, parent{};
         return parameter_ids(codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length,
                              false, id, parent) &&
-               (parent != state->lifecycle.stream.parameter_id ||
-                state->lifecycle.changed(state->parameter_sets.sps[parent]));
+               (!state->parameter_sets.pps_valid[id] ||
+                state->lifecycle.parameters_changed(state->parameter_sets.sps[parent]) ||
+                (id != state->parameter_sets.selected_pps &&
+                 !state->parameter_sets.native_ready(id, state->parameter_sets.sps[parent])));
     }
     return false;
 }
@@ -2393,6 +2381,7 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
             return decode_refused(state, reset_result, nullptr);
         }
         abandon_decoder_pictures(state);
+        state->parameter_sets.forget_submitted();
     }
     // Every error exit requires reset before consuming the requested IDR.
     state->decoder_needs_reset = true;
@@ -2581,6 +2570,8 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
         report_decoder_call(state, phase, result, decode_unit->frameNumber, offered, frame, output);
         return decode_refused(state, result != 0 ? result : -15, trace);
     }
+    if (state->stream_aware)
+        state->parameter_sets.submitted();
     if (state->submission_count == SUBMISSION_QUEUE_CAPACITY)
         return decode_refused(state, -16, trace);
     {

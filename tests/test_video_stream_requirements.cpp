@@ -110,6 +110,30 @@ int main()
         auto picture = slice.nal(codec);
         picture[4] = codec == Codec::H264 ? 0x65 : 0x26;
         assert(parameter_ids(codec, picture.data(), picture.size(), true, id, parent) && id == 3);
+        bool idr = false;
+        assert(parameter_ids(codec, picture.data(), picture.size(), true, id, parent, &idr) && idr);
+        assert(!parameter_ids(codec, picture.data() + 4, picture.size() - 4, true, id, parent));
+        ParameterSets sets;
+        auto r = parsed(codec, codec == Codec::H264 ? h264(1920, 1080, 1, 42, true, 2, 1)
+                                                    : hevc(1920, 1080, 8, 2));
+        r.parameter_id = 1;
+        sets.remember(r);
+        assert(sets.pps(codec, pps.data(), pps.size()));
+        assert(sets.picture(codec, picture.data(), picture.size()));
+        sets.selected_pps = 3;
+        sets.supplied_sps = sets.supplied_pps = true;
+        assert(!sets.native_ready(3, r));
+        sets.submitted();
+        assert(sets.native_ready(3, r));
+        sets.remember(r); // Identical SPS keeps the PPS binding.
+        assert(sets.native_ready(3, r));
+        ++r.identity;
+        sets.remember(r);
+        assert(!sets.picture(codec, picture.data(), picture.size()));
+        assert(!sets.native_ready(3, r));
+        assert(sets.pps(codec, pps.data(), pps.size()));
+        sets.forget_submitted();
+        assert(!sets.native_ready(3, r));
         fixture::Writer invalid;
         invalid.ue(256);
         invalid.ue(0);

@@ -35,6 +35,7 @@ static bool cancel_query, cancel_create, fail_source_idle;
 static unsigned cancel_at, direct_maps;
 static uint64_t reject_affinity, accepted_affinity;
 static int32_t first_decode_error;
+static bool native_requires_headers;
 
 static std::atomic<unsigned> native_allocations;
 static std::atomic<bool> hold_presentation, presentation_entered;
@@ -163,12 +164,26 @@ extern "C"
         held.clear();
         internal_pictures = 0;
         flushing = false;
+        native_requires_headers = true;
         return 0;
     }
-    int32_t sceVideodec2Decode(void *, videodec2_input_t *, videodec2_frame_t *frame,
+    int32_t sceVideodec2Decode(void *, videodec2_input_t *input, videodec2_frame_t *frame,
                                videodec2_output_t *output)
     {
         ++decodes;
+        if (mock_state->stream_aware && native_requires_headers)
+        {
+            bool sps = false, pps = false;
+            const auto *bytes = static_cast<const uint8_t *>(input->au);
+            for (size_t i = 0; i + 3 < input->au_size; ++i)
+                if (!bytes[i] && !bytes[i + 1] && bytes[i + 2] == 1)
+                {
+                    sps |= (bytes[i + 3] & 31) == 7;
+                    pps |= (bytes[i + 3] & 31) == 8;
+                }
+            assert(sps && pps); // Client knowledge cannot bootstrap a native instance.
+            native_requires_headers = false;
+        }
         if (first_decode_error)
         {
             auto e = first_decode_error;
@@ -749,6 +764,21 @@ static native_renderer_state_t *uninitialized_owner()
     state->lifecycle.wait(monotonic_us());
     return state;
 }
+static std::vector<uint8_t> id_nal(bool pps, unsigned id, unsigned parent = 0)
+{
+    fixture::Writer w;
+    if (!pps)
+    {
+        w.ue(0);
+        w.ue(2);
+    }
+    w.ue(id);
+    if (pps)
+        w.ue(parent);
+    auto bytes = w.nal(moonlight::video::Codec::H264);
+    bytes[4] = pps ? 0x68 : 0x65;
+    return bytes;
+}
 static void stream_aware_owner()
 {
     using namespace moonlight::video;
@@ -758,6 +788,16 @@ static void stream_aware_owner()
     parameters.bufferType = BUFFER_TYPE_SPS;
     parameters.data = reinterpret_cast<char *>(sps.data());
     parameters.length = sps.size();
+    auto pp = id_nal(true, 0), pic = id_nal(false, 0);
+    LENTRY pps{}, picture{};
+    pps.bufferType = BUFFER_TYPE_PPS;
+    pps.data = reinterpret_cast<char *>(pp.data());
+    pps.length = pp.size();
+    picture.bufferType = BUFFER_TYPE_PICDATA;
+    picture.data = reinterpret_cast<char *>(pic.data());
+    picture.length = pic.size();
+    parameters.next = &pps;
+    pps.next = &picture;
     DECODE_UNIT unit{};
     unit.bufferList = &parameters;
     unit.frameType = FRAME_TYPE_IDR;
@@ -848,21 +888,6 @@ static void dispose_owner(native_renderer_state_t *state)
     renderer_sync_destroy(state);
     delete state;
 }
-static std::vector<uint8_t> id_nal(bool pps, unsigned id, unsigned parent = 0)
-{
-    fixture::Writer w;
-    if (!pps)
-    {
-        w.ue(0);
-        w.ue(2);
-    }
-    w.ue(id);
-    if (pps)
-        w.ue(parent);
-    auto bytes = w.nal(moonlight::video::Codec::H264);
-    bytes[4] = pps ? 0x68 : 0x65;
-    return bytes;
-}
 static void pending_parameters_and_placement()
 {
     auto *state = uninitialized_owner();
@@ -890,6 +915,7 @@ static void pending_parameters_and_placement()
     update(a, p0);
     assert(prepare_stream_decoder(state, &unit));
     assert(creates == 1);
+    state->parameter_sets.submitted();
     unit.frameType = FRAME_TYPE_PFRAME;
     update(b, p1);
     // A future SPS/PPS is advertised while the picture still uses PPS0.
@@ -923,7 +949,7 @@ static void pending_parameters_and_placement()
     unit.frameType = FRAME_TYPE_PFRAME;
     assert(!prepare_stream_decoder(state, &unit));
     join_video_workers(state);
-    assert(!state->transition_wait_since && !state->parameter_sets.advertised_change);
+    assert(!state->transition_wait_since && !state->parameter_sets.sps[2].verified);
     dispose_owner(state);
     // Requested 5-core layout and safe stable receive/audio reservation.
     for (bool fallback : {false, true})
@@ -957,7 +983,17 @@ static void first_access_unit_and_cancellation()
     parameter.bufferType = BUFFER_TYPE_SPS;
     DECODE_UNIT unit{};
     unit.bufferList = &parameter;
-    unit.fullLength = sps.size();
+    auto pp = id_nal(true, 0), pic = id_nal(false, 0);
+    LENTRY pps{}, picture{};
+    pps.bufferType = BUFFER_TYPE_PPS;
+    pps.data = reinterpret_cast<char *>(pp.data());
+    pps.length = pp.size();
+    picture.bufferType = BUFFER_TYPE_PICDATA;
+    picture.data = reinterpret_cast<char *>(pic.data());
+    picture.length = pic.size();
+    parameter.next = &pps;
+    pps.next = &picture;
+    unit.fullLength = sps.size() + pp.size() + pic.size();
     unit.frameType = FRAME_TYPE_IDR;
     auto *state = uninitialized_owner();
     first_decode_error = int32_t(0x811d0302u);
@@ -1007,11 +1043,93 @@ static void first_access_unit_and_cancellation()
     dispose_owner(state);
 }
 
+static void parameter_activation_regressions()
+{
+    using namespace moonlight::video;
+    auto *state = uninitialized_owner();
+    auto sp = fixture::h264(1920, 1080, 1, 42, true, 2);
+    auto pp = id_nal(true, 0), pic = id_nal(false, 0);
+    LENTRY sps{}, pps{}, picture{};
+    sps.bufferType = BUFFER_TYPE_SPS;
+    pps.bufferType = BUFFER_TYPE_PPS;
+    picture.bufferType = BUFFER_TYPE_PICDATA;
+    sps.next = &pps;
+    pps.next = &picture;
+    DECODE_UNIT unit{};
+    unit.bufferList = &sps;
+    auto update = [&]
+    {
+        sps.data = reinterpret_cast<char *>(sp.data());
+        sps.length = sp.size();
+        pps.data = reinterpret_cast<char *>(pp.data());
+        pps.length = pp.size();
+        picture.data = reinterpret_cast<char *>(pic.data());
+        picture.length = pic.size();
+        unit.fullLength = sp.size() + pp.size() + pic.size();
+    };
+    update();
+    assert(decode(state, &unit, 1, FRAME_TYPE_IDR) == DR_OK);
+    assert(state->parameter_sets.native_ready(0, state->lifecycle.stream));
+    const auto initial_resets = resets;
+    assert(decode(state, &unit, 2, FRAME_TYPE_IDR) == DR_OK);
+    assert(creates == 1 && resets == initial_resets);
+    // Same ID and resources; changed POC syntax requires a complete IDR/reset.
+    const auto old = state->lifecycle.stream;
+    sp = fixture::h264(1920, 1080, 1, 42, true, 2, 0, 1);
+    pic[4] = 0x41;
+    update();
+    assert(decode(state, &unit, 3, FRAME_TYPE_PFRAME) == DR_NEED_IDR);
+    assert(state->lifecycle.stream.identity == old.identity && creates == 1);
+    assert(!state->parameter_sets.native_ready(0, state->parameter_sets.sps[0]));
+    // Even a promoted unit.frameType is not an actual IDR NAL.
+    assert(decode(state, &unit, 4, FRAME_TYPE_IDR) == DR_OK);
+    assert(resets == initial_resets);
+    pic[4] = 0x65;
+    update();
+    assert(decode(state, &unit, 5, FRAME_TYPE_IDR) == DR_OK);
+    assert(creates == 1 && resets == initial_resets + 1);
+    assert(!state->lifecycle.changed(old) && state->lifecycle.stream.identity != old.identity);
+    // Advertised future PPS must be freshly supplied to the replacement.
+    sp = fixture::h264(1920, 1080, 2, 42, true, 3, 1);
+    pp = id_nal(true, 1, 1);
+    update();
+    assert(decode(state, &unit, 6, FRAME_TYPE_PFRAME) == DR_OK);
+    pic = id_nal(false, 1);
+    update();
+    sps.next = &picture;
+    unit.fullLength = sp.size() + pic.size();
+    assert(decode(state, &unit, 7, FRAME_TYPE_IDR) == DR_NEED_IDR);
+    assert(creates == 1);
+    assert(decode(state, &unit, 8, FRAME_TYPE_IDR) == DR_OK && creates == 1);
+    sps.next = &pps;
+    update();
+    assert(decode(state, &unit, 9, FRAME_TYPE_IDR) == DR_OK && creates == 2);
+    assert(state->parameter_sets.native_ready(1, state->lifecycle.stream));
+    // Unknown PPS never falls back to the only supplied SPS.
+    pic = id_nal(false, 7);
+    update();
+    assert(decode(state, &unit, 10, FRAME_TYPE_IDR) == DR_NEED_IDR);
+    assert(creates == 2);
+    pic = id_nal(false, 1);
+    update();
+    auto conflicting = id_nal(true, 1, 0);
+    LENTRY conflict{};
+    conflict.bufferType = BUFFER_TYPE_PPS;
+    conflict.data = reinterpret_cast<char *>(conflicting.data());
+    conflict.length = conflicting.size();
+    pps.next = &conflict;
+    conflict.next = &picture;
+    assert(!prepare_stream_decoder(state, &unit) && creates == 2);
+    assert(!decoder_deadline(state, state->transition_wait_since + Lifecycle::startup_timeout_us));
+    dispose_owner(state);
+}
+
 int main()
 {
     stream_aware_owner();
     pending_parameters_and_placement();
     first_access_unit_and_cancellation();
+    parameter_activation_regressions();
     fragment.data = reinterpret_cast<char *>(access_unit);
     fragment.length = sizeof(access_unit);
     pipelined_then_drained(Model::Queued);

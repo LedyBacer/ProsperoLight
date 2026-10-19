@@ -63,14 +63,18 @@ struct Lifecycle
     }
     bool changed(const Requirements &r) const
     {
-        // Semantic configuration equality: replacement is unnecessary for a new
-        // parameter identity with the same decoding requirements.
+        // Resource equality only: changed syntax can still require an IDR/reset
+        // without replacing allocations (see parameters_changed).
         return !stream.verified || r.codec != stream.codec || r.profile != stream.profile ||
                r.level != stream.level || r.width != stream.width || r.height != stream.height ||
                r.visible_width != stream.visible_width ||
                r.visible_height != stream.visible_height || r.chroma != stream.chroma ||
                r.bit_depth != stream.bit_depth || r.buffering != stream.buffering ||
                r.references != stream.references || r.reorder != stream.reorder;
+    }
+    bool parameters_changed(const Requirements &r) const
+    {
+        return changed(r) || r.parameter_id != stream.parameter_id || r.identity != stream.identity;
     }
     void fail(Error e)
     {

@@ -59,7 +59,8 @@ struct Writer
     }
 };
 inline std::vector<uint8_t> h264(unsigned width, unsigned height, unsigned refs, unsigned level,
-                                 bool vui = true, unsigned dpb = 10, unsigned parameter_id = 0)
+                                 bool vui = true, unsigned dpb = 10, unsigned parameter_id = 0,
+                                 unsigned poc_bits_minus4 = 0)
 {
     Writer w;
     w.put(100, 8);
@@ -73,7 +74,7 @@ inline std::vector<uint8_t> h264(unsigned width, unsigned height, unsigned refs,
     w.put(0);
     w.ue(0);
     w.ue(0);
-    w.ue(0);
+    w.ue(poc_bits_minus4);
     w.ue(refs);
     w.put(0);
     w.ue(width / 16 - 1);

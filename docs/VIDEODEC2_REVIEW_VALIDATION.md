@@ -18,14 +18,31 @@ reused SPS that a picture needs outside an IDR is held. Request one IDR per unre
 transition, retain the old instance, and enforce a ten-second deadline independently
 of packet arrivals. Returning old pictures cannot reset that pending request/deadline.
 
-An IDR with the selected SPS supplied activates a supported configuration. Semantic
-repeats do not recreate; a different parameter identity with identical requirements
-updates identity at the safe boundary without allocation. Ambiguous slice prefixes
-can only fall back to a single unambiguous SPS in an IDR. Multiple unresolved sets
-wait/fail instead of guessing. Unsupported non-IDR advertisements retain the instance
-and request a complete IDR; malformed syntax and unsupported active IDRs fail closed.
-No raw cached SPS/PPS is replayed into a new instance. Recovery requests fresh sets;
-cancellation clears pending maps only after joining the decode owner.
+A new, recreated, or reset native instance requires the selected SPS and its matching
+PPS in the same access unit as an actual IDR slice (H.264 type 5, HEVC type 19/20).
+The unit's IDR label alone is insufficient: Moonlight can promote an AU beginning
+with parameter sets to IDR, and its SPS/PPS ordering assertions do not repair missing
+sets. Missing/unknown/conflicting mappings wait under the existing bounded deadline;
+there is no sole-SPS fallback and no replay of cached raw NALs.
+
+Resource equality and parameter activation identity are separate. Identical repeated
+sets are a no-op. Different SPS content invalidates PPS bindings to that SPS ID;
+a fresh PPS must bind the new generation. Resource-equivalent activation uses the
+existing native Reset at a complete IDR, clearing reference/submission state without
+reallocating decoder memory. Resource changes retain the existing replacement path.
+The conservative Reset is needed because native in-place reference compatibility
+for changed POC/scaling syntax is not established. CRA/BLA alone do not activate a
+new configuration under this policy.
+
+Learned mappings are distinct from sets successfully submitted to the native
+instance. Creation/reset clears submitted knowledge; only successful Decode records
+fresh selected sets. Unselected future PPS versions remain filtered. Cancellation
+clears the bounded tracker after joining the decode owner. No new queues, threads,
+raw-NAL caches, or pixel copies are introduced.
+
+This final hardening is validated by focused parser/tracker and native-owner mocks,
+not a new PS5 hardware run. Earlier hardware reports below retain their original
+source/build identities. Intel VAAPI/QSV 1440p60 remains an external premerge gate.
 
 ## Effective affinity
 
