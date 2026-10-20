@@ -1135,6 +1135,8 @@ static void parameter_activation_regressions()
     // Build an actual mock-accepted depth3 owner, then exercise the existing
     // safe replacement path rather than only changing a configuration struct.
     policy_depths_allowed = true;
+    state->requested_cpu_mask = moonlight::decoder_cpu_mask(5, state->process_cpu_mask);
+    reject_affinity = state->requested_cpu_mask;
     auto deeper = state->lifecycle.effective;
     deeper.depth = 3;
     assert(configure_stream_decoder(state, state->lifecycle.stream, deeper));
@@ -1172,8 +1174,10 @@ static void parameter_activation_regressions()
     assert(creates == creates_before_policy + 3 && state->stream_policy.evaluating &&
            state->pipeline_depth == 1 &&
            state->parameter_sets.native_ready(1, state->lifecycle.stream));
+    assert(state->decoder_cpu_mask == moonlight::kClassicDecoderCpuMask);
     const auto final_creates = creates;
     policy_depths_allowed = false;
+    reject_affinity = 0;
     // Unknown PPS never falls back to the only supplied SPS.
     pic = id_nal(false, 7);
     update();

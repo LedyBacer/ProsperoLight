@@ -122,3 +122,9 @@ Optional depth changes preserve the **effective** validated DPB capacity, includ
 any larger capacity accepted by native recovery; they never shrink back to the
 initial SPS minimum as a side effect. Native rejection and comparison uncertainty
 are observable rather than silently declared performance improvements.
+
+Native faults invalidate trial evaluation and lock further depth tuning for that
+session; parameter identity includes both SPS and PPS generations. A changed PPS
+cannot be compared against an older CABAC/tile/WPP baseline. Depth-only trials
+also retain the already accepted effective CPU affinity rather than retrying a
+larger previously rejected requested mask.

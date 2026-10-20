@@ -25,7 +25,8 @@ inline const char *name(Bottleneck b)
 struct PipelineCounters
 {
     uint64_t submitted{}, decoded{}, presented{}, bytes{}, busy_us{}, ready_us{}, queue_us{};
-    uint64_t losses{}, overflows{}, errors{}, ready_calls{};
+    uint64_t losses{}, overflows{}, errors{}, ready_calls{}, stream_identity{},
+        parameter_identity{};
     uint32_t pending{}, in_flight{}, generation{}, recovery_epoch{};
 };
 struct PipelineWindow
@@ -78,6 +79,8 @@ struct PipelineSampler
         if (!due(now))
             return false;
         if (!initialized || now < since || c.generation != previous.generation ||
+            c.stream_identity != previous.stream_identity ||
+            c.parameter_identity != previous.parameter_identity ||
             (c.recovery_epoch != previous.recovery_epoch &&
              (c.recovery_epoch < previous.recovery_epoch || c.overflows < previous.overflows ||
               c.recovery_epoch - previous.recovery_epoch != c.overflows - previous.overflows)) ||
@@ -157,7 +160,7 @@ inline const char *name(PolicyAction a)
 struct RuntimePolicy
 {
     PipelineWindow baseline{};
-    uint64_t identity{}, previous_window_us{}, cooldown_until{}, trial_started{};
+    uint64_t identity{}, pps_identity{}, previous_window_us{}, cooldown_until{}, trial_started{};
     uint32_t pressure_windows{}, trial_windows{}, pending_depth{}, original_depth{};
     uint32_t trials{}, rollbacks{}, resyncs{}, rejected{}, kept{};
     bool evaluating{}, depth_locked{}, throughput_exceeded{};
@@ -171,6 +174,19 @@ struct RuntimePolicy
         depth_locked = true;
         pressure_windows = 0;
         ++rejected;
+    }
+    void discontinuity(uint64_t now, bool native_fault)
+    {
+        pressure_windows = trial_windows = 0;
+        if (native_fault)
+        {
+            // A decoder fault invalidates a performance comparison. Never undo
+            // a fault-driven fallback based on an older successful sample.
+            if (evaluating || pending_depth)
+                reject();
+            depth_locked = true;
+            cooldown_until = now + cooldown_us;
+        }
     }
     void configured(uint64_t now, uint32_t effective_depth)
     {
@@ -199,19 +215,21 @@ struct RuntimePolicy
         }
     }
     PolicyAction observe(uint64_t now, const PipelineWindow &w, const Requirements &r, uint32_t fps,
-                         uint32_t depth)
+                         uint32_t depth, uint64_t pps_version = 0)
     {
         if (!r.verified || !fps || pending_depth)
             return PolicyAction::None;
-        if (identity && identity != r.identity)
+        if (identity && (identity != r.identity || pps_identity != pps_version))
         {
             // Do not compare different SPS generations or retune indefinitely.
             reject();
             identity = r.identity;
+            pps_identity = pps_version;
             previous_window_us = now;
             return PolicyAction::None;
         }
         identity = r.identity;
+        pps_identity = pps_version;
         if (previous_window_us && (now < previous_window_us || now - previous_window_us > 5000000))
         {
             pressure_windows = trial_windows = 0;

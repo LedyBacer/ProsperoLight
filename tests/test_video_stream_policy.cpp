@@ -121,6 +121,18 @@ int main()
     reordered.reorder = 2;
     policy.observe(2000000, w, reordered, 60, 3);
     assert(policy.observe(4000000, w, reordered, 60, 3) == PolicyAction::None && !policy.trials);
+    policy = {};
+    policy.observe(2000000, w, r, 60, 3, 123);
+    policy.observe(4000000, w, r, 60, 3, 123);
+    policy.configured(4000000, 1);
+    policy.discontinuity(6000000, true);
+    assert(!policy.evaluating && policy.depth_locked && !policy.pending_depth);
+    policy = {};
+    policy.observe(2000000, w, r, 60, 3, 123);
+    assert(policy.observe(4000000, w, r, 60, 3, 124) == PolicyAction::None);
+    assert(!policy.pending_depth && policy.depth_locked);
+    c.parameter_identity = 124;
+    assert(!sampler.update(9000000, c, 60));
     fixture::Writer avc;
     avc.ue(0);
     avc.ue(0);

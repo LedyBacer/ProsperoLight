@@ -2011,6 +2011,8 @@ static bool configure_stream_decoder(native_renderer_state_t *state,
 {
     using namespace moonlight::video;
     const uint64_t started = monotonic_us();
+    const uint64_t preferred_affinity =
+        restore_depth ? state->decoder_cpu_mask : state->requested_cpu_mask;
     state->policy_keyframe_wait = false;
     const bool replacement = state->decoder != nullptr;
     const bool recovering = state->lifecycle.state == State::Recovering;
@@ -2044,8 +2046,8 @@ static bool configure_stream_decoder(native_renderer_state_t *state,
                  attempt < 2 && !state->owned_resources.decoder && state->running; ++attempt)
             {
                 const uint64_t affinity =
-                    attempt ? moonlight::kClassicDecoderCpuMask : state->requested_cpu_mask;
-                if (attempt && affinity == state->requested_cpu_mask)
+                    attempt ? moonlight::kClassicDecoderCpuMask : preferred_affinity;
+                if (attempt && affinity == preferred_affinity)
                     continue;
                 config.pipeline_depth = depth;
                 config.cpu_affinity = affinity;
@@ -2916,18 +2918,26 @@ static void observe_pipeline(native_renderer_state_t *state, uint64_t now)
     c.losses = state->drops.network;
     c.overflows = video_queue_overflows.load(std::memory_order_relaxed);
     c.errors = state->decode_errors + state->drain_faults;
+    c.stream_identity = state->lifecycle.stream.identity;
+    c.parameter_identity =
+        state->active_pps < 256 ? state->parameter_sets.pps_identity[state->active_pps] : 0;
     c.pending = std::max(0, LiGetPendingVideoFrames());
     c.in_flight = state->submission_count;
     c.generation = state->lifecycle.generation;
     c.recovery_epoch = video_recovery_epoch.load(std::memory_order_relaxed);
+    const bool native_fault =
+        state->pipeline_sampler.initialized && c.errors != state->pipeline_sampler.previous.errors;
     if (!state->pipeline_sampler.update(now, c, state->stream_fps))
+    {
+        state->stream_policy.discontinuity(now, native_fault);
         return;
+    }
     if (!state->decoder || state->await_keyframe || state->transition_wait_since ||
         state->decoder_needs_reset || state->lifecycle.state != moonlight::video::State::Ready)
         return;
-    const auto action =
-        state->stream_policy.observe(now, state->pipeline_sampler.last, state->lifecycle.stream,
-                                     state->stream_fps, state->pipeline_depth);
+    const auto action = state->stream_policy.observe(now, state->pipeline_sampler.last,
+                                                     state->lifecycle.stream, state->stream_fps,
+                                                     state->pipeline_depth, c.parameter_identity);
     if (action == moonlight::video::PolicyAction::None)
         return;
     state->policy_keyframe_wait = true;
