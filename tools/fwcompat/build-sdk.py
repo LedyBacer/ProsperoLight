@@ -34,7 +34,7 @@ def build(folder, payload, archive=None):
     folder.mkdir(parents=True)
     archive=archive or folder/'upstream-1.0.2.tar.gz'
     if not archive.exists():
-        run('curl','-fL','--retry','3','-o',archive,'https://github.com/blackbearreloaded/ps5-opengl/releases/download/v1.0.2/ps5-opengl-sdk-1.0.2.tar.gz')
+        run('curl','-fL','--retry','3','-o',archive,'https://github.com/LedyBacer/ps5-opengl/releases/download/v1.0.2/ps5-opengl-sdk-1.0.2.tar.gz')
     if digest(archive)!=ARCHIVE_SHA:raise ValueError('SDK release archive checksum mismatch')
     with tarfile.open(archive) as tar:tar.extractall(folder,filter='data')
     release=folder/'ps5-opengl-sdk-1.0.2'
