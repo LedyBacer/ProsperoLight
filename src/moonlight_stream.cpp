@@ -530,14 +530,21 @@ extern "C" void moonlight_native_decoder_warmup(int results[4])
 {
     videodec2_compute_memory_t compute{};
     compute.size = sizeof(compute);
-    if (FWCOMPAT_WARMUP_MASK & 1)
+    auto query_compute = [&]
     {
         FWCOMPAT_POINT("decoder.query_compute.begin", 0);
         results[0] = sceVideodec2QueryComputeMemoryInfo(&compute);
         FWCOMPAT_POINT("decoder.query_compute.end", results[0]);
-    }
+#if FWCOMPAT_QUERY_SNAPSHOTS
+        ps5_agc_fwcompat_query_snapshot(0);
+#endif
+    };
+    if ((FWCOMPAT_WARMUP_MASK & 1) && !FWCOMPAT_COMPUTE_LAST)
+        query_compute();
     for (unsigned index = 0; (FWCOMPAT_WARMUP_MASK & 2) && index < 3; ++index)
     {
+        if (!(FWCOMPAT_CODEC_MASK & (1u << index)))
+            continue;
         const native_video_mode_t *mode =
             find_video_mode(index == 0 ? MOONLIGHT_VIDEO_CODEC_H264 : MOONLIGHT_VIDEO_CODEC_HEVC,
                             MOONLIGHT_STREAM_RESOLUTION_2160P, index == 2);
@@ -565,7 +572,12 @@ extern "C" void moonlight_native_decoder_warmup(int results[4])
 #if FWCOMPAT_DIAGNOSTICS
         fwcompat_decoder_query(index, 0, results[index + 1]);
 #endif
+#if FWCOMPAT_QUERY_SNAPSHOTS
+        ps5_agc_fwcompat_query_snapshot(index + 1);
+#endif
     }
+    if ((FWCOMPAT_WARMUP_MASK & 1) && FWCOMPAT_COMPUTE_LAST)
+        query_compute();
 }
 
 static notification_request_t notification;

@@ -37,17 +37,18 @@ sdk_id=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("ps5
 printf '%s\n' "$sha" > "$out/source-sha.txt"
 python3 - "${1:-}" > "$out/variants.txt" <<'PY'
 import json,sys
-variants=json.load(open('tools/fwcompat/variants.json'))
-if not sys.argv[1] or sys.argv[1]=='round2':
-    variants=[v for v in variants if v['id'] in ('00-control','07-compute-only','08-codecs-only','09-agc-first')]
+with open('tools/fwcompat/variants.json') as f: variants=json.load(f)
+if not sys.argv[1] or sys.argv[1] in ('round2','round3'):
+    ids=('00-control','09-agc-first',*[v['id'] for v in variants[10:]]) if sys.argv[1]=='round3' else ('00-control','07-compute-only','08-codecs-only','09-agc-first')
+    variants=[v for v in variants if v['id'] in ids]
     sys.argv[1]=''
 if sys.argv[1] and sys.argv[1]!='all':
     variants=[v for v in variants if v['id']==sys.argv[1]]
     if not variants:raise SystemExit('Unknown variant')
 for v in variants:
-    print(v['id'],1-v['warmup'],1-v['preload'],1-v['cache'],v['force_1080p'],v['pyrowave'],v.get('warmup_mask',3),v.get('agc_first',0))
+    print(v['id'],1-v['warmup'],1-v['preload'],1-v['cache'],v['force_1080p'],v['pyrowave'],v.get('warmup_mask',3),v.get('agc_first',0),v.get('codec_mask',7),v.get('query_snapshots',0),v.get('compute_last',0))
 PY
-while read -r id warmup preload cache mode pyrowave mask agc_first; do
+while read -r id warmup preload cache mode pyrowave mask agc_first codec_mask snapshots compute_last; do
     folder="$out/$id"; mkdir "$folder"
     printf 'Building %s\n' "$id"
     # build.sh always recompiles every TU; also discard objects explicitly before flag changes.
@@ -57,6 +58,8 @@ while read -r id warmup preload cache mode pyrowave mask agc_first; do
         FWCOMPAT_DISABLE_SHADER_CACHE="$cache" FWCOMPAT_FORCE_1080P="$mode"
         FWCOMPAT_SDK_ID="$sdk_id" PYROWAVE="$pyrowave"
         FWCOMPAT_WARMUP_MASK="$mask" FWCOMPAT_AGC_FIRST="$agc_first"
+        FWCOMPAT_CODEC_MASK="$codec_mask" FWCOMPAT_QUERY_SNAPSHOTS="$snapshots"
+        FWCOMPAT_COMPUTE_LAST="$compute_last"
         TEST_LAB=0 LAUNCH_PROOF=0 LAN_TELEMETRY=0 UPDATE_DEV_OFFER=0 UPDATE_AUTO_ACCEPT=0
         STREAM_SELF_TEST_FPS=0 VIDEO_OUTPUT_SELF_TEST_FPS=0 STOP_ACTIVE_APP_SELF_TEST=0
         BUILD_LABEL="FWCompat $id ${sha:0:7}")

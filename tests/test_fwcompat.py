@@ -16,12 +16,12 @@ class FWCompat(unittest.TestCase):
  def test_actual_preprocessor_configuration_and_production_defaults(self):
   compiler=shutil.which('clang++') or shutil.which('c++')
   variants=json.loads((ROOT/'tools/fwcompat/variants.json').read_text())
-  self.assertEqual(len(variants),10)
+  self.assertEqual(len(variants),18)
   with tempfile.TemporaryDirectory() as d:
    source=Path(d)/'test.cpp';exe=Path(d)/'test'
    for v in [None,*variants]:
-    values=[0,0,0,0,0,3,0] if v is None else [1,1-v['warmup'],1-v['preload'],1-v['cache'],v['force_1080p'],v.get('warmup_mask',3),v.get('agc_first',0)]
-    names=['FWCOMPAT_DIAGNOSTICS','FWCOMPAT_SKIP_DECODER_WARMUP','FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD','FWCOMPAT_DISABLE_SHADER_CACHE','FWCOMPAT_FORCE_1080P','FWCOMPAT_WARMUP_MASK','FWCOMPAT_AGC_FIRST']
+    values=[0,0,0,0,0,3,0,7,0,0] if v is None else [1,1-v['warmup'],1-v['preload'],1-v['cache'],v['force_1080p'],v.get('warmup_mask',3),v.get('agc_first',0),v.get('codec_mask',7),v.get('query_snapshots',0),v.get('compute_last',0)]
+    names=['FWCOMPAT_DIAGNOSTICS','FWCOMPAT_SKIP_DECODER_WARMUP','FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD','FWCOMPAT_DISABLE_SHADER_CACHE','FWCOMPAT_FORCE_1080P','FWCOMPAT_WARMUP_MASK','FWCOMPAT_AGC_FIRST','FWCOMPAT_CODEC_MASK','FWCOMPAT_QUERY_SNAPSHOTS','FWCOMPAT_COMPUTE_LAST']
     source.write_text('#include "fwcompat.h"\n'+''.join(f'static_assert({n}=={x});\n' for n,x in zip(names,values))+'int main(){}\n')
     flags=[] if v is None else [f'-D{n}={x}' for n,x in zip(names,values)]
     subprocess.run([compiler,'-std=c++20','-I'+str(ROOT/'include'),*flags,str(source),'-o',str(exe)],check=True)
@@ -47,7 +47,8 @@ struct videodec2_decoder_config_t {
  max_dpb_frames,pipeline_depth,cpu_affinity,cpu_priority,optimize_progressive;
 };
 struct native_video_mode_t {unsigned codec_type,profile,max_level,max_width,max_height;};
-static unsigned events[4],n;
+static unsigned events[4],n,snapshots;
+extern "C" void ps5_agc_fwcompat_query_snapshot(unsigned i) {assert(n && events[n-1]==i);++snapshots;}
 static const native_video_mode_t *find_video_mode(int codec,int resolution,bool hdr) {
  assert(resolution==2160);static native_video_mode_t mode;
  mode={unsigned(codec),hdr?10u:8u,51,3840,2160};return &mode;
@@ -69,21 +70,41 @@ static int sceVideodec2QueryDecoderMemoryInfo(videodec2_decoder_config_t *c,vide
 int main() {
  int r[4]={-1,-1,-1,-1};moonlight_native_decoder_warmup(r);
  unsigned expected=0;
- if(FWCOMPAT_WARMUP_MASK&1) {assert(events[expected++]==0 && r[0]==0);}
- else assert(r[0]==-1);
- if(FWCOMPAT_WARMUP_MASK&2) {
-  for(unsigned i=1;i<4;i++)assert(events[expected++]==i);
-  assert(r[1]==0 && r[2]==-77 && r[3]==0);
- } else assert(r[1]==-1 && r[2]==-1 && r[3]==-1);
- assert(n==expected);
- assert(bool(FWCOMPAT_LAUNCHER_ONLY)==(FWCOMPAT_WARMUP_MASK!=3));
+ if((FWCOMPAT_WARMUP_MASK&1) && !FWCOMPAT_COMPUTE_LAST) assert(events[expected++]==0);
+ assert(r[0]==((FWCOMPAT_WARMUP_MASK&1)?0:-1));
+ for(unsigned i=1;i<4;i++) {
+  if((FWCOMPAT_WARMUP_MASK&2) && (FWCOMPAT_CODEC_MASK&(1u<<(i-1)))) {
+   assert(events[expected++]==i);assert(r[i]==(i==2?-77:0));
+  } else assert(r[i]==-1);
+ }
+ if((FWCOMPAT_WARMUP_MASK&1) && FWCOMPAT_COMPUTE_LAST) assert(events[expected++]==0);
+ assert(n==expected && snapshots==(FWCOMPAT_QUERY_SNAPSHOTS?n:0));
+ assert(bool(FWCOMPAT_LAUNCHER_ONLY)==(FWCOMPAT_WARMUP_MASK!=3 || FWCOMPAT_CODEC_MASK!=7 || FWCOMPAT_QUERY_SNAPSHOTS || FWCOMPAT_COMPUTE_LAST));
 }
 '''
   with tempfile.TemporaryDirectory() as d:
    p=Path(d);(p/'warmup.cpp').write_text(code)
-   for mask in (1,2,3):
-    subprocess.run([compiler,'-std=c++20','-I'+str(ROOT/'include'),'-DFWCOMPAT_DIAGNOSTICS=1',f'-DFWCOMPAT_WARMUP_MASK={mask}',str(p/'warmup.cpp'),'-o',str(p/'test')],check=True)
+   variants=json.loads((ROOT/'tools/fwcompat/variants.json').read_text())
+   for v in [dict(warmup_mask=1),dict(warmup_mask=2),dict(warmup_mask=3),*variants[10:]]:
+    mask=v.get('warmup_mask',3)
+    extra=[f'-D{k}={v.get(field,default)}' for k,field,default in [('FWCOMPAT_CODEC_MASK','codec_mask',7),('FWCOMPAT_QUERY_SNAPSHOTS','query_snapshots',0),('FWCOMPAT_COMPUTE_LAST','compute_last',0),('FWCOMPAT_AGC_FIRST','agc_first',0)]]
+    subprocess.run([compiler,'-std=c++20','-I'+str(ROOT/'include'),'-DFWCOMPAT_DIAGNOSTICS=1',f'-DFWCOMPAT_WARMUP_MASK={mask}',*extra,str(p/'warmup.cpp'),'-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True)
+ def test_matrix_groups_and_invalid_snapshot_configuration(self):
+  import contextlib,io,sys
+  source=(ROOT/'tools/build-fw-compat-matrix.sh').read_text()
+  body=source[source.index('import json,sys\nwith open('):].split('\nPY',1)[0]
+  old=sys.argv
+  try:
+   for group,expected in [('round3',['00-control','09-agc-first',*[v['id'] for v in json.loads((ROOT/'tools/fwcompat/variants.json').read_text())[10:]]]),('round2',['00-control','07-compute-only','08-codecs-only','09-agc-first']),('11-h264-only',['11-h264-only'])]:
+    sys.argv=['select',group];out=io.StringIO()
+    with contextlib.redirect_stdout(out):exec(body,{})
+    self.assertEqual([line.split()[0] for line in out.getvalue().splitlines()],expected)
+  finally:sys.argv=old
+  compiler=shutil.which('clang++') or shutil.which('c++')
+  for flags in (['-DFWCOMPAT_QUERY_SNAPSHOTS=1','-DFWCOMPAT_DIAGNOSTICS=1'],['-DFWCOMPAT_CODEC_MASK=1'],['-DFWCOMPAT_COMPUTE_LAST=1']):
+   result=subprocess.run([compiler,'-x','c++','-std=c++20','-fsyntax-only','-I'+str(ROOT/'include'),*flags,'-'],input='#include "fwcompat.h"\n',text=True,capture_output=True)
+   self.assertNotEqual(result.returncode,0)
  def test_synchronous_diagnostics_ignore_saved_debug_setting(self):
   compiler=shutil.which('clang++') or shutil.which('c++')
   with tempfile.TemporaryDirectory() as d:

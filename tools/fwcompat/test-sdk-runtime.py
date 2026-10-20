@@ -58,9 +58,11 @@ code=r'''
 #include <string.h>
 static int failed, calls, getters, load_error, init_result, reused=-1;
 static void *defaults=(void *)1;
+static char snapshot_stage[128];static long long snapshot_value;
 static int runtime_agc_initialized;
 void fwcompat_checkpoint(const char *s,long long n) {
  if (!strcmp(s,"agc.runtime.reused_early")) reused=(int)n;
+ if (!strncmp(s,"agc.after_query.",16)) {strcpy(snapshot_stage,s);snapshot_value=n;}
 }
 void fwcompat_gpu_failure(void) {failed=1;}
 static int stub_init(uint32_t v) {assert(v==8);calls++;return init_result;}
@@ -85,6 +87,15 @@ int main(void) {
  init_result=(int)0x8a6c0004u;
  assert(ps5_agc_fwcompat_early_init()==init_result && failed && !runtime_agc_initialized && getters==0);
  init_result=0;failed=0;assert(ps5_agc_fwcompat_early_init()==0 && failed && runtime_agc_initialized);
+ int init_before=calls;int getter_before=getters;
+ defaults=(void *)1;failed=0;
+ const char *names[]={"agc.after_query.compute","agc.after_query.h264_sdr","agc.after_query.hevc_sdr","agc.after_query.hevc_main10_hdr"};
+ for(unsigned i=0;i<4;i++) {ps5_agc_fwcompat_query_snapshot(i);assert(!strcmp(snapshot_stage,names[i]) && snapshot_value==1);}
+ assert(!failed && calls==init_before && getters==getter_before+4);
+ defaults=0;ps5_agc_fwcompat_query_snapshot(2);assert(failed && calls==init_before && snapshot_value==0 && !strcmp(snapshot_stage,names[2]));
+ getter_before=getters;ps5_agc_fwcompat_query_snapshot(99);assert(getters==getter_before);
+ runtime_agc_initialized=0;fwcompat_early_initialized=0;failed=0;
+ ps5_agc_fwcompat_query_snapshot(0);assert(failed && getters==getter_before);
  runtime_agc_initialized=0;failed=0;load_error=-1;int before=calls;
  assert(ps5_agc_fwcompat_early_init()==-1 && failed && calls==before);
  return 0;

@@ -32,8 +32,30 @@
 #if !FWCOMPAT_DIAGNOSTICS && (FWCOMPAT_WARMUP_MASK != 3 || FWCOMPAT_AGC_FIRST)
 #error AGC experiment options require diagnostics
 #endif
+// Codec bits: H.264 SDR, HEVC SDR, HEVC Main10 HDR. Original mask retained.
+#ifndef FWCOMPAT_CODEC_MASK
+#define FWCOMPAT_CODEC_MASK 7
+#endif
+#ifndef FWCOMPAT_QUERY_SNAPSHOTS
+#define FWCOMPAT_QUERY_SNAPSHOTS 0
+#endif
+#ifndef FWCOMPAT_COMPUTE_LAST
+#define FWCOMPAT_COMPUTE_LAST 0
+#endif
+#if FWCOMPAT_CODEC_MASK < 0 || FWCOMPAT_CODEC_MASK > 7
+#error Invalid codec query mask
+#endif
+#if !FWCOMPAT_DIAGNOSTICS &&                                                                       \
+    (FWCOMPAT_CODEC_MASK != 7 || FWCOMPAT_QUERY_SNAPSHOTS || FWCOMPAT_COMPUTE_LAST)
+#error Query experiments require diagnostics
+#endif
+#if FWCOMPAT_QUERY_SNAPSHOTS && !FWCOMPAT_AGC_FIRST
+#error Query snapshots require successful early AGC initialization
+#endif
 #define FWCOMPAT_LAUNCHER_ONLY                                                                     \
-    (FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD || (FWCOMPAT_DIAGNOSTICS && FWCOMPAT_WARMUP_MASK != 3))
+    (FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD ||                                                         \
+     (FWCOMPAT_DIAGNOSTICS && (FWCOMPAT_WARMUP_MASK != 3 || FWCOMPAT_CODEC_MASK != 7 ||            \
+                               FWCOMPAT_QUERY_SNAPSHOTS || FWCOMPAT_COMPUTE_LAST)))
 #ifndef FWCOMPAT_VARIANT_ID
 #define FWCOMPAT_VARIANT_ID production
 #endif
@@ -56,6 +78,7 @@ extern "C"
 #if FWCOMPAT_AGC_FIRST
     int ps5_agc_fwcompat_early_init(void);
     void ps5_agc_fwcompat_after_warmup(void);
+    void ps5_agc_fwcompat_query_snapshot(unsigned index);
 #endif
     void fwcompat_gpu_failure(void);
     int fwcompat_gpu_failed(void);

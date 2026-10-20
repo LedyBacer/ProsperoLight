@@ -42,7 +42,7 @@ diff --git a/src/platform/ps5_agc_native_runtime.c b/src/platform/ps5_agc_native
              return -1;
          runtime_agc_initialized = 1;
      }
-@@ -3070,6 +3095,44 @@
+@@ -3070,6 +3095,65 @@
  #endif
  }
  
@@ -81,13 +81,34 @@ diff --git a/src/platform/ps5_agc_native_runtime.c b/src/platform/ps5_agc_native
 +    void *defaults = fwcompat_agc_defaults(agc.get_defaults);
 +    fwcompat_checkpoint("agc.after_warmup.defaults", (long long)(uintptr_t)defaults);
 +}
++/* Snapshot getter only: no init, version change, dereference or recovery.
++ * Continue the remaining selected queries even after NULL; sticky failure
++ * prevents rendering afterwards. This variant measures observer effects too. */
++void ps5_agc_fwcompat_query_snapshot(unsigned index)
++{
++    static const char *const stages[] = {
++        "agc.after_query.compute", "agc.after_query.h264_sdr",
++        "agc.after_query.hevc_sdr", "agc.after_query.hevc_main10_hdr"
++    };
++    if (index >= 4) return;
++    agc_api_t agc = {0};
++    video_api_t video = {0};
++    if (!fwcompat_early_initialized ||
++        load_apis(NULL, NULL, NULL, &agc, &video) != 0) {
++        fwcompat_checkpoint("agc.snapshot.state_or_api_error", -1);
++        fwcompat_gpu_failure();
++        return;
++    }
++    void *defaults = fwcompat_agc_defaults(agc.get_defaults);
++    fwcompat_checkpoint(stages[index], (long long)(uintptr_t)defaults);
++}
 +#endif
 +/* End FWCompat round 2 hooks. */
 +
  static int append_target_state(agc_register_t *cx, uint32_t *cx_count,
                                 void *defaults, void *target)
  {
-@@ -3077,12 +3140,27 @@
+@@ -3077,12 +3161,27 @@
          0x318, 0x31b, 0x31c, 0x31d, 0x31e, 0x31f, 0x321, 0x323,
          0x324, 0x325, 0x390, 0x398, 0x3a0, 0x3a8, 0x3b0, 0x3b8
      };
@@ -117,7 +138,7 @@ diff --git a/src/platform/ps5_agc_native_runtime.c b/src/platform/ps5_agc_native
      for (index = 0; index < 16; ++index)
          cx[index] = (agc_register_t){target_offsets[index], 0, 0};
      /* Read each default once instead of rescanning the table for every target
-@@ -3113,8 +3191,11 @@
+@@ -3113,8 +3212,11 @@
              found |= 1u << index;
          }
      }
@@ -131,7 +152,7 @@ diff --git a/src/platform/ps5_agc_native_runtime.c b/src/platform/ps5_agc_native
  
      cx[0].value = (uint32_t)((uintptr_t)target >> 8);
      cx[1].value &= 0xfc001fffu;
-@@ -3399,7 +3480,7 @@
+@@ -3399,7 +3501,7 @@
      uint32_t vertex_user_data[GATE3_BIND_USER_SGPR_COUNT];
      uint32_t pixel_user_data[GATE3_TEXTURE_PS_USER_SGPR_COUNT];
  
@@ -140,7 +161,7 @@ diff --git a/src/platform/ps5_agc_native_runtime.c b/src/platform/ps5_agc_native
          append_shader_state(shared_memory, vertex, pixel, cx, &cx_count,
                              sh, &sh_count) != 0)
          return -1;
-@@ -3835,15 +3916,18 @@
+@@ -3835,15 +3937,18 @@
  #endif
  
  #ifdef AGC_RUNTIME_PACKAGES
@@ -163,7 +184,7 @@ diff --git a/src/platform/ps5_agc_native_runtime.c b/src/platform/ps5_agc_native
  #endif
      if (init_rc == 0)
          direct_limit = sceKernelGetDirectMemorySize();
-@@ -4364,7 +4448,7 @@
+@@ -4364,7 +4469,7 @@
      cx = (agc_register_t *)(memory + 0x7000);
      sh = (agc_register_t *)(memory + 0x7800);
      words = (uint32_t *)(memory + 0x8000);
@@ -172,7 +193,7 @@ diff --git a/src/platform/ps5_agc_native_runtime.c b/src/platform/ps5_agc_native
  #ifdef AGC_OFFSCREEN_COLOR_VARIANT
                              offscreen) != 0 ||
  #else
-@@ -4394,7 +4478,7 @@
+@@ -4394,7 +4499,7 @@
  #ifdef AGC_RENDER_TO_TEXTURE_VARIANT
      scanout_cx = (agc_register_t *)(memory + 0x4800);
      if (append_target_state(scanout_cx, &scanout_cx_count,
