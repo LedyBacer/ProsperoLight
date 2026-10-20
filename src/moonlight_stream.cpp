@@ -530,10 +530,13 @@ extern "C" void moonlight_native_decoder_warmup(int results[4])
 {
     videodec2_compute_memory_t compute{};
     compute.size = sizeof(compute);
-    FWCOMPAT_POINT("decoder.query_compute.begin", 0);
-    results[0] = sceVideodec2QueryComputeMemoryInfo(&compute);
-    FWCOMPAT_POINT("decoder.query_compute.end", results[0]);
-    for (unsigned index = 0; index < 3; ++index)
+    if (FWCOMPAT_WARMUP_MASK & 1)
+    {
+        FWCOMPAT_POINT("decoder.query_compute.begin", 0);
+        results[0] = sceVideodec2QueryComputeMemoryInfo(&compute);
+        FWCOMPAT_POINT("decoder.query_compute.end", results[0]);
+    }
+    for (unsigned index = 0; (FWCOMPAT_WARMUP_MASK & 2) && index < 3; ++index)
     {
         const native_video_mode_t *mode =
             find_video_mode(index == 0 ? MOONLIGHT_VIDEO_CODEC_H264 : MOONLIGHT_VIDEO_CODEC_HEVC,
@@ -553,9 +556,15 @@ extern "C" void moonlight_native_decoder_warmup(int results[4])
         config.cpu_priority = DECODER_CPU_PRIORITY;
         config.optimize_progressive = 1;
         memory.size = sizeof(memory);
+#if FWCOMPAT_DIAGNOSTICS
+        fwcompat_decoder_query(index, 1, 0);
+#endif
         FWCOMPAT_POINT("decoder.query_memory.begin", index);
         results[index + 1] = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
         FWCOMPAT_POINT("decoder.query_memory.end", results[index + 1]);
+#if FWCOMPAT_DIAGNOSTICS
+        fwcompat_decoder_query(index, 0, results[index + 1]);
+#endif
     }
 }
 

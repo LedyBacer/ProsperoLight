@@ -19,6 +19,21 @@
 #ifndef FWCOMPAT_FORCE_1080P
 #define FWCOMPAT_FORCE_1080P 0
 #endif
+// Bit 0: compute query; bit 1: the original three decoder queries.
+#ifndef FWCOMPAT_WARMUP_MASK
+#define FWCOMPAT_WARMUP_MASK 3
+#endif
+#ifndef FWCOMPAT_AGC_FIRST
+#define FWCOMPAT_AGC_FIRST 0
+#endif
+#if FWCOMPAT_WARMUP_MASK < 0 || FWCOMPAT_WARMUP_MASK > 3
+#error Invalid diagnostic warmup mask
+#endif
+#if !FWCOMPAT_DIAGNOSTICS && (FWCOMPAT_WARMUP_MASK != 3 || FWCOMPAT_AGC_FIRST)
+#error AGC experiment options require diagnostics
+#endif
+#define FWCOMPAT_LAUNCHER_ONLY                                                                     \
+    (FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD || (FWCOMPAT_DIAGNOSTICS && FWCOMPAT_WARMUP_MASK != 3))
 #ifndef FWCOMPAT_VARIANT_ID
 #define FWCOMPAT_VARIANT_ID production
 #endif
@@ -37,6 +52,11 @@ extern "C"
     void fwcompat_checkpoint(const char *stage, long long value);
     void fwcompat_operation(const char *stage, int begin, long long value);
     void fwcompat_start(void);
+    void fwcompat_decoder_query(unsigned index, int begin, int result);
+#if FWCOMPAT_AGC_FIRST
+    int ps5_agc_fwcompat_early_init(void);
+    void ps5_agc_fwcompat_after_warmup(void);
+#endif
     void fwcompat_gpu_failure(void);
     int fwcompat_gpu_failed(void);
     void fwcompat_attach(int fd, const char *folder);

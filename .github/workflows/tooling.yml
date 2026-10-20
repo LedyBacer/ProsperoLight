@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       firmware_compat:
-        description: "Build the seven legacy-firmware startup experiments instead of a release build"
+        description: "Build the four second-round legacy-firmware startup experiments instead of a release build"
         type: boolean
         default: false
       snapshot:
@@ -38,7 +38,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.firmware_compat
     uses: ./.github/workflows/fw-compat.yml
     with:
-      variant: all
+      variant: round2
   build:
     if: github.event_name != 'workflow_dispatch' || !inputs.firmware_compat
     name: Lint, test, and build release artifacts

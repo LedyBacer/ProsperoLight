@@ -276,14 +276,25 @@ int main(int argc, char **argv)
     prosperolight::native_modules::PrepareBeforeStorage();
     FWCOMPAT_POINT("modules.end", 0);
     const long long modules_ms = since_entry();
+    bool early_agc_failed = false;
+#if FWCOMPAT_AGC_FIRST
+    FWCOMPAT_POINT("agc.early.attempted", 1);
+    const int early_agc_rc = ps5_agc_fwcompat_early_init();
+    early_agc_failed = early_agc_rc != 0 || fwcompat_gpu_failed();
+    FWCOMPAT_POINT("agc.early.result", early_agc_rc);
+#endif
     int decoder_warmup[4] = {-1, -1, -1, -1};
-    if (!FWCOMPAT_SKIP_DECODER_WARMUP &&
+    if (!early_agc_failed && !FWCOMPAT_SKIP_DECODER_WARMUP &&
         prosperolight::native_modules::Result(prosperolight::native_modules::video_decoder) == 0)
     {
         FWCOMPAT_POINT("decoder.warmup.begin", 0);
         moonlight_native_decoder_warmup(decoder_warmup);
         FWCOMPAT_POINT("decoder.warmup.end", 0);
     }
+#if FWCOMPAT_AGC_FIRST
+    if (!early_agc_failed)
+        ps5_agc_fwcompat_after_warmup();
+#endif
     const long long warmup_ms = since_entry();
     FWCOMPAT_POINT("storage.elevation.begin", 0);
     storage::Initialize();
@@ -301,6 +312,15 @@ int main(int argc, char **argv)
                 static_cast<unsigned>(decoder_warmup[2]), static_cast<unsigned>(decoder_warmup[3]));
     // From here a fault leaves a report beside the log.
     crash::Install(storage::paths().logs, storage::log_descriptor());
+#if FWCOMPAT_AGC_FIRST
+    if (early_agc_failed || fwcompat_gpu_failed())
+    {
+        FWCOMPAT_POINT("RESULT=GRAPHICS_FAILURE", -1);
+        // No renderer or further initialization attempt after early AGC failure.
+        (void)sceSystemServiceLoadExec("exit", nullptr);
+        KeepProcessAlive();
+    }
+#endif
     // A home-screen forwarder names the stream to start (docs/FORWARDER.md).
     prosperolight::pending_forwarded_launch() = prosperolight::parse_forwarded_launch(argc, argv);
 #if PROSPEROLIGHT_TEST_LAB
@@ -389,7 +409,7 @@ int main(int argc, char **argv)
     char stream_error[192]{};
     bool first_start = true;
     unsigned streams = 0;
-    if (FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD)
+    if (FWCOMPAT_LAUNCHER_ONLY)
         prosperolight::pending_forwarded_launch() = {};
     unsigned launcher_failures = 0;
     bool awaiting_display_handoff = false;
@@ -436,7 +456,7 @@ int main(int argc, char **argv)
             Log("[PL] main: the launcher could not run; waiting to be closed");
             KeepProcessAlive();
         }
-        if (FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD)
+        if (FWCOMPAT_LAUNCHER_ONLY)
         {
             FWCOMPAT_POINT("stream.unsupported_launcher_only", 0);
             continue;

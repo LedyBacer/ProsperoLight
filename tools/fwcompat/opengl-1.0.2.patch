@@ -1,11 +1,11 @@
 diff --git a/src/platform/ps5_agc_native_runtime.c b/src/platform/ps5_agc_native_runtime.c
-index c70c19f..fcbd381 100644
 --- a/src/platform/ps5_agc_native_runtime.c
 +++ b/src/platform/ps5_agc_native_runtime.c
-@@ -65,6 +65,31 @@ static unsigned runtime_batch_probe_repeats(void)
+@@ -64,6 +64,31 @@
+     return counts[runtime_batch_probe_sequence++ % 3];
  }
  #endif
- 
++
 +/* FWCompat: normal call sites only; never probe defaults before AGC init. */
 +extern void fwcompat_checkpoint(const char *, long long);
 +extern void fwcompat_gpu_failure(void);
@@ -30,11 +30,10 @@ index c70c19f..fcbd381 100644
 +    if (!result) fwcompat_gpu_failure();
 +    return result;
 +}
-+
+ 
  static _Thread_local uint32_t runtime_ngg_ge_pc_alloc;
  static _Thread_local uint32_t runtime_ngg_ge_pc_alloc_valid;
- 
-@@ -2500,7 +2525,7 @@ static int runtime_async_prepare_draw(void)
+@@ -2500,7 +2525,7 @@
      if (!runtime_agc_initialized) {
          agc_api_t agc = {0};
          video_api_t video = {0};
@@ -43,7 +42,52 @@ index c70c19f..fcbd381 100644
              return -1;
          runtime_agc_initialized = 1;
      }
-@@ -3077,12 +3102,27 @@ static int append_target_state(agc_register_t *cx, uint32_t *cx_count,
+@@ -3070,6 +3095,44 @@
+ #endif
+ }
+ 
++/* FWCompat round 2: only the explicitly selected app invokes these hooks.
++ * Share the runtime's real state; never retry a failed init or change its ABI. */
++#ifdef AGC_RUNTIME_PACKAGES
++static int fwcompat_early_initialized;
++int ps5_agc_fwcompat_early_init(void)
++{
++    agc_api_t agc = {0};
++    video_api_t video = {0};
++    if (runtime_agc_initialized ||
++        load_apis(NULL, NULL, NULL, &agc, &video) != 0) {
++        fwcompat_checkpoint("agc.early.state_or_api_error", -1);
++        fwcompat_gpu_failure();
++        return -1;
++    }
++    int rc = fwcompat_agc_init(agc.init, 8);
++    if (rc != 0) return rc;
++    runtime_agc_initialized = 1;
++    fwcompat_early_initialized = 1;
++    void *defaults = fwcompat_agc_defaults(agc.get_defaults);
++    fwcompat_checkpoint("agc.early.defaults", (long long)(uintptr_t)defaults);
++    return 0;
++}
++void ps5_agc_fwcompat_after_warmup(void)
++{
++    agc_api_t agc = {0};
++    video_api_t video = {0};
++    if (!fwcompat_early_initialized ||
++        load_apis(NULL, NULL, NULL, &agc, &video) != 0) {
++        fwcompat_checkpoint("agc.after_warmup.state_or_api_error", -1);
++        fwcompat_gpu_failure();
++        return;
++    }
++    void *defaults = fwcompat_agc_defaults(agc.get_defaults);
++    fwcompat_checkpoint("agc.after_warmup.defaults", (long long)(uintptr_t)defaults);
++}
++#endif
++/* End FWCompat round 2 hooks. */
++
+ static int append_target_state(agc_register_t *cx, uint32_t *cx_count,
+                                void *defaults, void *target)
+ {
+@@ -3077,12 +3140,27 @@
          0x318, 0x31b, 0x31c, 0x31d, 0x31e, 0x31f, 0x321, 0x323,
          0x324, 0x325, 0x390, 0x398, 0x3a0, 0x3a8, 0x3b0, 0x3b8
      };
@@ -59,10 +103,11 @@ index c70c19f..fcbd381 100644
      uint32_t index;
  
 -    if (!blocks || !blocks[0])
+-        return -1;
 +    if (!blocks || !blocks[0]) {
 +        fwcompat_checkpoint("agc.target.blocks_null", -1);
 +        fwcompat_gpu_failure();
-         return -1;
++        return -1;
 +    }
 +    static atomic_uint reports;
 +    if (atomic_fetch_add(&reports, 1) < 16) {
@@ -72,20 +117,21 @@ index c70c19f..fcbd381 100644
      for (index = 0; index < 16; ++index)
          cx[index] = (agc_register_t){target_offsets[index], 0, 0};
      /* Read each default once instead of rescanning the table for every target
-@@ -3113,8 +3153,11 @@ static int append_target_state(agc_register_t *cx, uint32_t *cx_count,
+@@ -3113,8 +3191,11 @@
              found |= 1u << index;
          }
      }
 -    if (found != 0xffffu)
+-        return -1;
 +    if (found != 0xffffu) {
 +        fwcompat_checkpoint("agc.target.missing_registers", found);
 +        fwcompat_gpu_failure();
-         return -1;
++        return -1;
 +    }
  
      cx[0].value = (uint32_t)((uintptr_t)target >> 8);
      cx[1].value &= 0xfc001fffu;
-@@ -3399,7 +3442,7 @@ static int build_frame_slot_command(const agc_api_t *agc, int video_handle,
+@@ -3399,7 +3480,7 @@
      uint32_t vertex_user_data[GATE3_BIND_USER_SGPR_COUNT];
      uint32_t pixel_user_data[GATE3_TEXTURE_PS_USER_SGPR_COUNT];
  
@@ -94,11 +140,19 @@ index c70c19f..fcbd381 100644
          append_shader_state(shared_memory, vertex, pixel, cx, &cx_count,
                              sh, &sh_count) != 0)
          return -1;
-@@ -3838,12 +3881,12 @@ int main(void)
-     if (runtime_agc_initialized)
+@@ -3835,15 +3916,18 @@
+ #endif
+ 
+ #ifdef AGC_RUNTIME_PACKAGES
+-    if (runtime_agc_initialized)
++    if (runtime_agc_initialized) {
++        static atomic_uint reuse_reports;
++        if (atomic_fetch_add(&reuse_reports, 1) == 0)
++            fwcompat_checkpoint("agc.runtime.reused_early", fwcompat_early_initialized);
          init_rc = 0;
-     else {
+-    else {
 -        init_rc = agc.init(8);
++    } else {
 +        init_rc = fwcompat_agc_init(agc.init, 8);
          if (init_rc == 0)
              runtime_agc_initialized = 1;
@@ -109,7 +163,7 @@ index c70c19f..fcbd381 100644
  #endif
      if (init_rc == 0)
          direct_limit = sceKernelGetDirectMemorySize();
-@@ -4364,7 +4407,7 @@ int main(void)
+@@ -4364,7 +4448,7 @@
      cx = (agc_register_t *)(memory + 0x7000);
      sh = (agc_register_t *)(memory + 0x7800);
      words = (uint32_t *)(memory + 0x8000);
@@ -118,7 +172,7 @@ index c70c19f..fcbd381 100644
  #ifdef AGC_OFFSCREEN_COLOR_VARIANT
                              offscreen) != 0 ||
  #else
-@@ -4394,7 +4437,7 @@ int main(void)
+@@ -4394,7 +4478,7 @@
  #ifdef AGC_RENDER_TO_TEXTURE_VARIANT
      scanout_cx = (agc_register_t *)(memory + 0x4800);
      if (append_target_state(scanout_cx, &scanout_cx_count,

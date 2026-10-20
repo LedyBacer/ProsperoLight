@@ -111,14 +111,22 @@ extern "C" void fwcompat_attach(int fd, const char *folder)
     std::snprintf(identity, sizeof(identity),
                   "{\"experiment\":\"legacy-fw-startup\",\"variant\":\"%s\",\"source_sha\":\"%s\","
                   "\"sdk\":\"%s\",\"pyrowave\":%d,\"preload\":%d,\"warmup\":%d,\"shader_cache\":%d,"
-                  "\"force_1080p\":%d}\n",
+                  "\"force_1080p\":%d,\"warmup_mask\":%d,\"agc_first\":%d}\n",
                   variant(), FWCOMPAT_STRING(FWCOMPAT_SOURCE_SHA), FWCOMPAT_STRING(FWCOMPAT_SDK_ID),
                   PROSPEROLIGHT_PYROWAVE, !FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD,
                   !FWCOMPAT_SKIP_DECODER_WARMUP && !FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD,
-                  !FWCOMPAT_DISABLE_SHADER_CACHE, FWCOMPAT_FORCE_1080P);
+                  !FWCOMPAT_DISABLE_SHADER_CACHE, FWCOMPAT_FORCE_1080P, FWCOMPAT_WARMUP_MASK,
+                  FWCOMPAT_AGC_FIRST);
     write_all(receipt_fd, identity, std::strlen(identity));
     if (receipt_fd >= 0)
         (void)fsync(receipt_fd);
+}
+extern "C" void fwcompat_decoder_query(unsigned index, int begin, int result)
+{
+    static const char *const names[] = {"decoder.h264_sdr", "decoder.hevc_sdr",
+                                        "decoder.hevc_main10_hdr"};
+    if (index < 3)
+        fwcompat_operation(names[index], begin, result);
 }
 extern "C" void fwcompat_start()
 {
@@ -132,5 +140,8 @@ extern "C" void fwcompat_start()
                         !FWCOMPAT_SKIP_DECODER_WARMUP && !FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD);
     fwcompat_checkpoint("shader_cache", !FWCOMPAT_DISABLE_SHADER_CACHE);
     fwcompat_checkpoint("force_1080p", FWCOMPAT_FORCE_1080P);
+    fwcompat_checkpoint("warmup_mask", FWCOMPAT_WARMUP_MASK);
+    fwcompat_checkpoint("agc.early.enabled", FWCOMPAT_AGC_FIRST);
+    fwcompat_checkpoint("firmware.runtime_unavailable_operator_required", 1);
 }
 #endif

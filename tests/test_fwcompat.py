@@ -16,17 +16,74 @@ class FWCompat(unittest.TestCase):
  def test_actual_preprocessor_configuration_and_production_defaults(self):
   compiler=shutil.which('clang++') or shutil.which('c++')
   variants=json.loads((ROOT/'tools/fwcompat/variants.json').read_text())
-  self.assertEqual(len(variants),7)
+  self.assertEqual(len(variants),10)
   with tempfile.TemporaryDirectory() as d:
    source=Path(d)/'test.cpp';exe=Path(d)/'test'
    for v in [None,*variants]:
-    values=[0,0,0,0,0] if v is None else [1,1-v['warmup'],1-v['preload'],1-v['cache'],v['force_1080p']]
-    names=['FWCOMPAT_DIAGNOSTICS','FWCOMPAT_SKIP_DECODER_WARMUP','FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD','FWCOMPAT_DISABLE_SHADER_CACHE','FWCOMPAT_FORCE_1080P']
+    values=[0,0,0,0,0,3,0] if v is None else [1,1-v['warmup'],1-v['preload'],1-v['cache'],v['force_1080p'],v.get('warmup_mask',3),v.get('agc_first',0)]
+    names=['FWCOMPAT_DIAGNOSTICS','FWCOMPAT_SKIP_DECODER_WARMUP','FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD','FWCOMPAT_DISABLE_SHADER_CACHE','FWCOMPAT_FORCE_1080P','FWCOMPAT_WARMUP_MASK','FWCOMPAT_AGC_FIRST']
     source.write_text('#include "fwcompat.h"\n'+''.join(f'static_assert({n}=={x});\n' for n,x in zip(names,values))+'int main(){}\n')
     flags=[] if v is None else [f'-D{n}={x}' for n,x in zip(names,values)]
     subprocess.run([compiler,'-std=c++20','-I'+str(ROOT/'include'),*flags,str(source),'-o',str(exe)],check=True)
    bad=subprocess.run([compiler,'-std=c++20','-I'+str(ROOT/'include'),'-DFWCOMPAT_FORCE_1080P=1',str(source),'-o',str(exe)],capture_output=True)
    self.assertNotEqual(bad.returncode,0)
+ def test_actual_warmup_query_subsets_order_and_errors(self):
+  compiler=shutil.which('clang++') or shutil.which('c++')
+  source=(ROOT/'src/moonlight_stream.cpp').read_text()
+  start=source.index('extern "C" void moonlight_native_decoder_warmup(')
+  function=source[start:source.index('\n}\n',start)+3]
+  code=r'''#include "fwcompat.h"
+#include <cassert>
+#include <cstddef>
+#define MOONLIGHT_VIDEO_CODEC_H264 1
+#define MOONLIGHT_VIDEO_CODEC_HEVC 2
+#define MOONLIGHT_STREAM_RESOLUTION_2160P 2160
+#define DECODER_CPU_PRIORITY 777
+namespace moonlight {constexpr unsigned kClassicDecoderCpuMask=123;}
+struct videodec2_compute_memory_t {size_t size;};
+struct videodec2_decoder_memory_t {size_t size;};
+struct videodec2_decoder_config_t {
+ size_t size;unsigned resource_type,codec_type,profile,max_level,max_width,max_height,
+ max_dpb_frames,pipeline_depth,cpu_affinity,cpu_priority,optimize_progressive;
+};
+struct native_video_mode_t {unsigned codec_type,profile,max_level,max_width,max_height;};
+static unsigned events[4],n;
+static const native_video_mode_t *find_video_mode(int codec,int resolution,bool hdr) {
+ assert(resolution==2160);static native_video_mode_t mode;
+ mode={unsigned(codec),hdr?10u:8u,51,3840,2160};return &mode;
+}
+extern "C" void fwcompat_checkpoint(const char*,long long) {}
+extern "C" void fwcompat_decoder_query(unsigned,int,int) {}
+static int sceVideodec2QueryComputeMemoryInfo(videodec2_compute_memory_t *p) {
+ assert(p->size==sizeof(*p));events[n++]=0;return 0;
+}
+static int sceVideodec2QueryDecoderMemoryInfo(videodec2_decoder_config_t *c,videodec2_decoder_memory_t *m) {
+ assert(c->size==sizeof(*c) && m->size==sizeof(*m));
+ assert(c->resource_type==1 && c->max_dpb_frames==4 && c->pipeline_depth==1);
+ assert(c->max_width==3840 && c->max_height==2160 && c->max_level==51);
+ assert(c->cpu_affinity==123 && c->cpu_priority==777 && c->optimize_progressive==1);
+ unsigned i=c->codec_type==1?1:c->profile==8?2:3;events[n++]=i;
+ return i==2?-77:0;
+}
+''' + function + r'''
+int main() {
+ int r[4]={-1,-1,-1,-1};moonlight_native_decoder_warmup(r);
+ unsigned expected=0;
+ if(FWCOMPAT_WARMUP_MASK&1) {assert(events[expected++]==0 && r[0]==0);}
+ else assert(r[0]==-1);
+ if(FWCOMPAT_WARMUP_MASK&2) {
+  for(unsigned i=1;i<4;i++)assert(events[expected++]==i);
+  assert(r[1]==0 && r[2]==-77 && r[3]==0);
+ } else assert(r[1]==-1 && r[2]==-1 && r[3]==-1);
+ assert(n==expected);
+ assert(bool(FWCOMPAT_LAUNCHER_ONLY)==(FWCOMPAT_WARMUP_MASK!=3));
+}
+'''
+  with tempfile.TemporaryDirectory() as d:
+   p=Path(d);(p/'warmup.cpp').write_text(code)
+   for mask in (1,2,3):
+    subprocess.run([compiler,'-std=c++20','-I'+str(ROOT/'include'),'-DFWCOMPAT_DIAGNOSTICS=1',f'-DFWCOMPAT_WARMUP_MASK={mask}',str(p/'warmup.cpp'),'-o',str(p/'test')],check=True)
+    subprocess.run([str(p/'test')],check=True)
  def test_synchronous_diagnostics_ignore_saved_debug_setting(self):
   compiler=shutil.which('clang++') or shutil.which('c++')
   with tempfile.TemporaryDirectory() as d:

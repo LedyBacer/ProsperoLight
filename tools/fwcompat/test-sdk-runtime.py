@@ -43,3 +43,55 @@ with tempfile.TemporaryDirectory() as d:
  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(p/'test.c'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)
 print('PASS actual SDK target-state: NULL/default-block/missing-register failure and valid table')
+
+# Compile the actual early hooks and actual later runtime state branch together.
+helpers=source[source.index('static atomic_uint fwcompat_agc_init_calls;'):source.index('static _Thread_local uint32_t runtime_ngg_ge_pc_alloc;')]
+hooks=source[source.index('static int fwcompat_early_initialized;'):source.index('/* End FWCompat round 2 hooks. */')]
+hooks=hooks.removesuffix('#endif\n')
+branch_start=source.index('    if (runtime_agc_initialized) {\n        static atomic_uint reuse_reports;')
+branch=source[branch_start:source.index('\n#else',branch_start)]
+code=r'''
+#include <assert.h>
+#include <stdint.h>
+#include <stdatomic.h>
+#include <stddef.h>
+#include <string.h>
+static int failed, calls, getters, load_error, init_result, reused=-1;
+static void *defaults=(void *)1;
+static int runtime_agc_initialized;
+void fwcompat_checkpoint(const char *s,long long n) {
+ if (!strcmp(s,"agc.runtime.reused_early")) reused=(int)n;
+}
+void fwcompat_gpu_failure(void) {failed=1;}
+static int stub_init(uint32_t v) {assert(v==8);calls++;return init_result;}
+static void *stub_defaults(void) {getters++;return defaults;}
+typedef struct {int (*init)(uint32_t);void *(*get_defaults)(void);} agc_api_t;
+typedef struct {int unused;} video_api_t;
+static int load_apis(void *a,void *b,void *c,agc_api_t *agc,video_api_t *v) {
+ (void)a;(void)b;(void)c;(void)v;agc->init=stub_init;agc->get_defaults=stub_defaults;return load_error;
+}
+''' + helpers + hooks + '\nstatic int later(void) { agc_api_t agc={stub_init,stub_defaults}; int init_rc;\n' + branch + r'''
+return init_rc;
+}
+int main(void) {
+ assert(calls==0 && getters==0); // Control has not invoked the hooks.
+ assert(later()==0 && calls==1 && getters==0 && reused==-1);
+ runtime_agc_initialized=0;calls=0;
+ assert(ps5_agc_fwcompat_early_init()==0 && runtime_agc_initialized && calls==1 && getters==1);
+ ps5_agc_fwcompat_after_warmup();assert(!failed && getters==2);
+ assert(later()==0 && calls==1 && reused==1);
+ defaults=0;ps5_agc_fwcompat_after_warmup();assert(failed && calls==1);
+ runtime_agc_initialized=0;fwcompat_early_initialized=0;failed=0;getters=0;
+ init_result=(int)0x8a6c0004u;
+ assert(ps5_agc_fwcompat_early_init()==init_result && failed && !runtime_agc_initialized && getters==0);
+ init_result=0;failed=0;assert(ps5_agc_fwcompat_early_init()==0 && failed && runtime_agc_initialized);
+ runtime_agc_initialized=0;failed=0;load_error=-1;int before=calls;
+ assert(ps5_agc_fwcompat_early_init()==-1 && failed && calls==before);
+ return 0;
+}
+'''
+with tempfile.TemporaryDirectory() as d:
+ p=Path(d);(p/'hooks.c').write_text(code)
+ subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(p/'hooks.c'),'-o',str(p/'hooks')],check=True)
+ subprocess.run([str(p/'hooks')],check=True)
+print('PASS actual SDK early hooks and runtime reuse: one init, raw failure, NULL before/after warmup, API failure, control')

@@ -7,15 +7,15 @@ on:
     inputs:
       variant:
         type: string
-        default: all
+        default: round2
         required: false
   workflow_dispatch:
     inputs:
       variant:
-        description: 'One variant ID, or all (no release or deployment)'
-        default: all
+        description: 'Round 2 (four builds), one ID, or all (no release/deployment)'
+        default: round2
         type: choice
-        options: [all, 00-control, 01-no-warmup, 02-no-videodec2, 03-no-shader-cache, 04-force-1080p, 05-no-pyrowave, 06-combined]
+        options: [round2, all, 00-control, 01-no-warmup, 02-no-videodec2, 03-no-shader-cache, 04-force-1080p, 05-no-pyrowave, 06-combined, 07-compute-only, 08-codecs-only, 09-agc-first]
 permissions:
   contents: read
 jobs:
@@ -32,7 +32,9 @@ jobs:
           python3 - <<'PY'
           import json,os
           ids=[v['id'] for v in json.load(open('tools/fwcompat/variants.json'))]
-          if os.environ['VARIANT']!='all':
+          if os.environ['VARIANT']=='round2':
+              ids=[i for i in ids if i in ('00-control','07-compute-only','08-codecs-only','09-agc-first')]
+          elif os.environ['VARIANT']!='all':
               assert os.environ['VARIANT'] in ids
               ids=[os.environ['VARIANT']]
           with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('variants='+json.dumps(ids)+'\n')
