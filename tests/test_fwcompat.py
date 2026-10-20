@@ -17,6 +17,7 @@ class FWCompat(unittest.TestCase):
   compiler=shutil.which('clang++') or shutil.which('c++')
   variants=json.loads((ROOT/'tools/fwcompat/variants.json').read_text())
   self.assertEqual(len(variants),18)
+  self.assertTrue(all(len(f"FWCompat {v['id']} 1234567")<=40 for v in variants))
   with tempfile.TemporaryDirectory() as d:
    source=Path(d)/'test.cpp';exe=Path(d)/'test'
    for v in [None,*variants]:

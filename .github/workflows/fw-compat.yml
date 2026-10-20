@@ -15,7 +15,7 @@ on:
         description: 'Round 3 (ten builds), round 2, one ID, or all (no release/deployment)'
         default: round3
         type: choice
-        options: [round3, round2, all, 00-control, 01-no-warmup, 02-no-videodec2, 03-no-shader-cache, 04-force-1080p, 05-no-pyrowave, 06-combined, 07-compute-only, 08-codecs-only, 09-agc-first, 10-query-snapshots, 11-h264-only, 12-hevc-only, 13-main10-only, 14-compute-h264, 15-compute-hevc, 16-compute-main10, 17-codecs-before-compute]
+        options: [round3, round2, all, 00-control, 01-no-warmup, 02-no-videodec2, 03-no-shader-cache, 04-force-1080p, 05-no-pyrowave, 06-combined, 07-compute-only, 08-codecs-only, 09-agc-first, 10-query-snapshots, 11-h264-only, 12-hevc-only, 13-main10-only, 14-compute-h264, 15-compute-hevc, 16-compute-main10, 17-codecs-first]
 permissions:
   contents: read
 jobs:

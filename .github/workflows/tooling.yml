@@ -21,6 +21,10 @@ on:
         description: "Build expanded FW 3.00 diagnostics (matched controls and eight new variants)"
         type: boolean
         default: false
+      firmware_variant:
+        description: "Firmware diagnostic group or individual variant ID"
+        type: string
+        default: round3
       snapshot:
         description: "Also upload this run's compiler cache as the next build-cache snapshot (run it on main)"
         type: boolean
@@ -30,7 +34,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.workflow }}-${{ github.ref }}
+  group: build-${{ github.workflow }}-${{ github.ref }}-${{ inputs.firmware_variant || 'default' }}
   cancel-in-progress: true
 
 jobs:
@@ -38,7 +42,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.firmware_compat
     uses: ./.github/workflows/fw-compat.yml
     with:
-      variant: round3
+      variant: ${{ inputs.firmware_variant || 'round3' }}
   build:
     if: github.event_name != 'workflow_dispatch' || !inputs.firmware_compat
     name: Lint, test, and build release artifacts

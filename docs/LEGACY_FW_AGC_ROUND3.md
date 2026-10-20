@@ -21,7 +21,7 @@ and one-argument AGC init ABI. Normal production defaults remain unchanged.
 | 14-compute-h264 | Compute → H.264 SDR |
 | 15-compute-hevc | Compute → HEVC SDR |
 | 16-compute-main10 | Compute → HEVC Main10 HDR |
-| 17-codecs-before-compute | H.264 → HEVC → Main10 → compute; ordinary later AGC init |
+| 17-codecs-first | H.264 → HEVC → Main10 → compute; ordinary later AGC init |
 
 Only 09/10 initialize AGC early, and both reuse the SDK's actual existing init
 state. No second init, ABI/version experiment, synthetic defaults or recovery.
