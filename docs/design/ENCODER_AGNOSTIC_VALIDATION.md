@@ -221,3 +221,10 @@ documentation commit records these results without changing the measured code.
 Recommendation: suitable for merge with the depth-trial gate disabled, after
 current CI passes. No merge is performed by this task. Enabling the experimental
 gate or claiming a hardware tuning benefit is not part of that recommendation.
+
+The review CI repeated the previously recorded coordinator heartbeat test flake.
+The test now deterministically ages leases before one real heartbeat/recovery
+iteration, uses a fixed wall clock, and verifies both live-owner preservation
+and orphan recovery. This removes the API-thread write race and 60ms runner-load
+assumption; no production scheduler, TTL or verdict behavior was changed. Only
+this affected coordinator case was rerun locally after the CI finding.

@@ -782,22 +782,40 @@ int main(void) {
                 self.assertEqual(current['report']['cleanup_errors'], [])
 
     def test_delayed_heartbeat_does_not_recover_its_live_task(self):
+        import asyncio
+        from unittest.mock import AsyncMock
         with tempfile.TemporaryDirectory() as directory:
             store = RunStore(directory); scheduler = Scheduler(store, lease_ttl=.06)
-            with TestClient(create_app(directory, scheduler=scheduler)) as client:
-                value = client.post('/api/v1/runs', json={'suite': 'fake-smoke',
-                    'profile': profile(fake_stage_delay_seconds=.1)}).json()
-                client.post(f"/api/v1/runs/{value['run_id']}/start")
+            async def scenario():
+                live = await scheduler.create('fake-smoke', profile())
+                orphan = await scheduler.create('fake-smoke', profile())
+                self.assertEqual(store.claim(live['run_id']), 'claimed')
+                self.assertTrue(store.acquire(orphan['run_id'], name='orphan-test'))
+                # Model an event-loop stall before its next heartbeat iteration.
+                # Mutating this from the API thread could instead race *between*
+                # refresh and recovery, which is not a delayed heartbeat.
                 with store.connect() as connection:
-                    connection.execute('UPDATE leases SET heartbeat=0 WHERE run_id=?', (value['run_id'],))
-                deadline = time.monotonic() + 3
-                while time.monotonic() < deadline:
-                    current = store.get(value['run_id'])
-                    if current['state'] in ('INCONCLUSIVE', 'COMPLETED', 'FAILED'): break
-                    time.sleep(.01)
-                self.assertEqual(current['state'], 'COMPLETED')
-                self.assertEqual(current['verdict'], 'SIMULATED')
-                self.assertNotEqual(current['reason_code'], 'COORDINATOR_RESTART')
+                    connection.execute('UPDATE leases SET heartbeat=0')
+                scheduler.tasks[live['run_id']] = asyncio.current_task()
+                async def stop_after_one_iteration(_):
+                    scheduler.closed = True
+                # Fixed wall clock makes the 60ms TTL independent of runner load.
+                # Both real store heartbeat and orphan recovery still execute.
+                with patch('pltest.coordinator.store.time.time', return_value=100), \
+                        patch('pltest.coordinator.scheduler.asyncio.sleep',
+                              new=AsyncMock(side_effect=stop_after_one_iteration)):
+                    await scheduler._heartbeat_loop()
+                current = store.get(live['run_id'])
+                self.assertEqual(current['state'], 'PREFLIGHT')
+                self.assertIsNone(current['reason_code'])
+                self.assertEqual(store.get(orphan['run_id'])['reason_code'], 'COORDINATOR_RESTART')
+                with store.connect() as connection:
+                    lease = connection.execute('SELECT heartbeat FROM leases WHERE run_id=?',
+                                               (live['run_id'],)).fetchone()
+                self.assertEqual(lease['heartbeat'], 100)
+                self.assertNotIn(live['run_id'], scheduler.lost_leases)
+                scheduler.tasks.clear()
+            asyncio.run(scenario())
 
     def test_api_token_and_schema_validation(self):
         with tempfile.TemporaryDirectory() as directory:
