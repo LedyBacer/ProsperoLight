@@ -117,3 +117,8 @@ as exceeding observed throughput, with no bitrate/resolution/FPS reduction.
 The existing packet-independent transition deadline, stop/cancel and native error
 budgets remain in effect. Policy counters distinguish attempts, rejection, kept
 candidate, rollback requests and policy-discarded AUs.
+
+Optional depth changes preserve the **effective** validated DPB capacity, including
+any larger capacity accepted by native recovery; they never shrink back to the
+initial SPS minimum as a side effect. Native rejection and comparison uncertainty
+are observable rather than silently declared performance improvements.

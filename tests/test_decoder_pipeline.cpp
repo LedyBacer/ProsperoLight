@@ -77,7 +77,10 @@ static void checkpoint(unsigned at)
 
 extern "C"
 {
-    void LiRequestIdrFrame(void) { ++policy_idr_requests; }
+    void LiRequestIdrFrame(void)
+    {
+        ++policy_idr_requests;
+    }
     void gs_logf(const char *, const char *, ...)
     {
     }
@@ -251,7 +254,11 @@ extern "C"
     int32_t sceVideodec2QueryDecoderMemoryInfo(const videodec2_decoder_config_t *,
                                                videodec2_decoder_memory_t *m)
     {
-        if (reject_next_policy_query) { reject_next_policy_query = false; return -95; }
+        if (reject_next_policy_query)
+        {
+            reject_next_policy_query = false;
+            return -95;
+        }
         checkpoint(1);
         m->cpu_size = m->gpu_size = m->cpu_gpu_size = 16384;
         m->max_frame_size = 64;
@@ -326,7 +333,11 @@ extern "C"
             mock_state->running = 0;
         if (fail_create)
             return -95;
-        if (reject_next_policy_create) { reject_next_policy_create = false; return -95; }
+        if (reject_next_policy_create)
+        {
+            reject_next_policy_create = false;
+            return -95;
+        }
         assert(config->pipeline_depth == 1 || policy_depths_allowed);
         held.clear();
         internal_pictures = 0;
@@ -1124,11 +1135,13 @@ static void parameter_activation_regressions()
     // Build an actual mock-accepted depth3 owner, then exercise the existing
     // safe replacement path rather than only changing a configuration struct.
     policy_depths_allowed = true;
-    auto deeper = state->lifecycle.effective; deeper.depth = 3;
+    auto deeper = state->lifecycle.effective;
+    deeper.depth = 3;
     assert(configure_stream_decoder(state, state->lifecycle.stream, deeper));
     assert(decode(state, &unit, 10, FRAME_TYPE_IDR) == DR_OK && state->pipeline_depth == 3);
     const auto creates_before_policy = creates;
-    auto request_trial = [&] {
+    auto request_trial = [&]
+    {
         state->stream_policy.pending_depth = 1;
         state->stream_policy.pending_action = PolicyAction::DepthOne;
         state->policy_keyframe_wait = state->await_keyframe = true;
@@ -1136,22 +1149,29 @@ static void parameter_activation_regressions()
     };
     // Cached PPS cannot bootstrap a replacement. This IDR is usable by the old
     // native instance, so reject only the optional optimization and keep playing.
-    request_trial(); unit.bufferList = &picture; unit.fullLength = pic.size();
+    request_trial();
+    unit.bufferList = &picture;
+    unit.fullLength = pic.size();
     assert(decode(state, &unit, 11, FRAME_TYPE_IDR) == DR_OK);
     assert(creates == creates_before_policy && !state->stream_policy.pending_depth &&
-           state->stream_policy.rejected == 1 && !state->policy_keyframe_wait && state->pipeline_depth == 3);
-    unit.bufferList = &sps; update();
-    request_trial(); reject_next_policy_query = true;
+           state->stream_policy.rejected == 1 && !state->policy_keyframe_wait &&
+           state->pipeline_depth == 3);
+    unit.bufferList = &sps;
+    update();
+    request_trial();
+    reject_next_policy_query = true;
     assert(decode(state, &unit, 12, FRAME_TYPE_IDR) == DR_OK);
     assert(creates == creates_before_policy && state->pipeline_depth == 3 && state->running);
     // Candidate failure after retirement retries the previous accepted mode.
-    request_trial(); reject_next_policy_create = true;
+    request_trial();
+    reject_next_policy_create = true;
     assert(decode(state, &unit, 13, FRAME_TYPE_IDR) == DR_OK);
     assert(creates == creates_before_policy + 2 && state->pipeline_depth == 3 && state->running);
     request_trial();
     assert(decode(state, &unit, 14, FRAME_TYPE_IDR) == DR_OK);
     assert(creates == creates_before_policy + 3 && state->stream_policy.evaluating &&
-           state->pipeline_depth == 1 && state->parameter_sets.native_ready(1, state->lifecycle.stream));
+           state->pipeline_depth == 1 &&
+           state->parameter_sets.native_ready(1, state->lifecycle.stream));
     const auto final_creates = creates;
     policy_depths_allowed = false;
     // Unknown PPS never falls back to the only supplied SPS.

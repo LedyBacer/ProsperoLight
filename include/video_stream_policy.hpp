@@ -7,7 +7,14 @@
 #include "video_stream_requirements.hpp"
 namespace moonlight::video
 {
-enum class Bottleneck { Insufficient, Healthy, Network, Decode, Presentation };
+enum class Bottleneck
+{
+    Insufficient,
+    Healthy,
+    Network,
+    Decode,
+    Presentation
+};
 inline const char *name(Bottleneck b)
 {
     constexpr const char *names[]{"insufficient-evidence", "healthy", "network-limited",
@@ -44,8 +51,10 @@ inline Bottleneck classify(const PipelineWindow &w, uint32_t fps)
     const bool buffered = w.in_flight > 1 && w.ready_mean_us > budget * 2;
     const bool decode = backlog && (busy || buffered);
     // Loss and local pressure can coexist; do not assign a single root cause.
-    if (w.losses) return decode ? Bottleneck::Insufficient : Bottleneck::Network;
-    if (decode) return Bottleneck::Decode;
+    if (w.losses)
+        return decode ? Bottleneck::Insufficient : Bottleneck::Network;
+    if (decode)
+        return Bottleneck::Decode;
     if (behind(w.presented, w.decoded) && w.pending_end < 2)
         return Bottleneck::Presentation;
     if (!w.overflows && !backlog && !behind(w.decoded, w.submitted) &&
@@ -60,22 +69,29 @@ struct PipelineSampler
     PipelineWindow last{};
     uint64_t since{}, windows{};
     bool initialized{};
-    bool due(uint64_t now) const { return !initialized || now < since || now - since >= window_us; }
+    bool due(uint64_t now) const
+    {
+        return !initialized || now < since || now - since >= window_us;
+    }
     bool update(uint64_t now, const PipelineCounters &c, uint32_t fps)
     {
-        if (!due(now)) return false;
+        if (!due(now))
+            return false;
         if (!initialized || now < since || c.generation != previous.generation ||
             (c.recovery_epoch != previous.recovery_epoch &&
              (c.recovery_epoch < previous.recovery_epoch || c.overflows < previous.overflows ||
               c.recovery_epoch - previous.recovery_epoch != c.overflows - previous.overflows)) ||
-            c.errors != previous.errors ||
-            c.submitted < previous.submitted || c.decoded < previous.decoded ||
-            c.presented < previous.presented || c.bytes < previous.bytes ||
-            c.busy_us < previous.busy_us || c.ready_us < previous.ready_us ||
-            c.queue_us < previous.queue_us || c.ready_calls < previous.ready_calls ||
-            c.losses < previous.losses || c.overflows < previous.overflows)
+            c.errors != previous.errors || c.submitted < previous.submitted ||
+            c.decoded < previous.decoded || c.presented < previous.presented ||
+            c.bytes < previous.bytes || c.busy_us < previous.busy_us ||
+            c.ready_us < previous.ready_us || c.queue_us < previous.queue_us ||
+            c.ready_calls < previous.ready_calls || c.losses < previous.losses ||
+            c.overflows < previous.overflows)
         {
-            initialized = true; previous = c; since = now; last = {};
+            initialized = true;
+            previous = c;
+            since = now;
+            last = {};
             return false;
         }
         PipelineWindow w{};
@@ -87,7 +103,8 @@ struct PipelineSampler
         w.busy_us = c.busy_us - previous.busy_us;
         w.losses = c.losses - previous.losses;
         w.overflows = c.overflows - previous.overflows;
-        w.pending_begin = previous.pending; w.pending_end = c.pending;
+        w.pending_begin = previous.pending;
+        w.pending_end = c.pending;
         w.in_flight = c.in_flight;
         const auto outputs = c.ready_calls - previous.ready_calls;
         w.ready_mean_us = outputs ? (c.ready_us - previous.ready_us) / outputs : 0;
@@ -101,7 +118,10 @@ struct PipelineSampler
         w.decoded_fps_x100 = w.decoded * 100000000 / w.elapsed_us;
         w.presented_fps_x100 = w.presented * 100000000 / w.elapsed_us;
         w.bottleneck = classify(w, fps);
-        last = w; previous = c; since = now; ++windows;
+        last = w;
+        previous = c;
+        since = now;
+        ++windows;
         return true;
     }
 };
@@ -110,12 +130,23 @@ struct PipelineSampler
 inline Plan initial_plan(const Requirements &r, Limits limits, uint32_t input_slots,
                          uint32_t frame_slots)
 {
-    limits.depth = std::min(3u, std::min(limits.depth, std::min(input_slots, frame_slots > 1 ? frame_slots - 1 : 0)));
+    limits.depth = std::min(
+        3u, std::min(limits.depth, std::min(input_slots, frame_slots > 1 ? frame_slots - 1 : 0)));
     auto p = plan(r, limits);
-    if (!limits.depth) { p.supported = false; p.reason = "insufficient frame/input slots"; }
+    if (!limits.depth)
+    {
+        p.supported = false;
+        p.reason = "insufficient frame/input slots";
+    }
     return p;
 }
-enum class PolicyAction { None, Resync, DepthOne, RestoreDepth };
+enum class PolicyAction
+{
+    None,
+    Resync,
+    DepthOne,
+    RestoreDepth
+};
 inline const char *name(PolicyAction a)
 {
     constexpr const char *names[]{"none", "bounded-resync", "try-depth-one", "restore-depth"};
@@ -134,48 +165,75 @@ struct RuntimePolicy
     static constexpr uint64_t cooldown_us = 30000000, evaluation_us = 20000000;
     void reject()
     {
-        pending_depth = 0; pending_action = PolicyAction::None;
-        evaluating = false; depth_locked = true; pressure_windows = 0; ++rejected;
+        pending_depth = 0;
+        pending_action = PolicyAction::None;
+        evaluating = false;
+        depth_locked = true;
+        pressure_windows = 0;
+        ++rejected;
     }
     void configured(uint64_t now, uint32_t effective_depth)
     {
         const auto action = pending_action;
         const auto target = pending_depth;
-        pending_depth = 0; pending_action = PolicyAction::None; pressure_windows = 0;
-        if (effective_depth != target) { reject(); return; }
+        pending_depth = 0;
+        pending_action = PolicyAction::None;
+        pressure_windows = 0;
+        if (effective_depth != target)
+        {
+            reject();
+            return;
+        }
         if (action == PolicyAction::DepthOne)
         {
-            evaluating = true; trial_started = now; trial_windows = 0;
+            evaluating = true;
+            trial_started = now;
+            trial_windows = 0;
             cooldown_until = now + 6000000; // Exclude reconfiguration/startup.
         }
-        else { evaluating = false; depth_locked = true; cooldown_until = now + cooldown_us; }
+        else
+        {
+            evaluating = false;
+            depth_locked = true;
+            cooldown_until = now + cooldown_us;
+        }
     }
-    PolicyAction observe(uint64_t now, const PipelineWindow &w, const Requirements &r,
-                         uint32_t fps, uint32_t depth)
+    PolicyAction observe(uint64_t now, const PipelineWindow &w, const Requirements &r, uint32_t fps,
+                         uint32_t depth)
     {
-        if (!r.verified || !fps || pending_depth) return PolicyAction::None;
+        if (!r.verified || !fps || pending_depth)
+            return PolicyAction::None;
         if (identity && identity != r.identity)
         {
             // Do not compare different SPS generations or retune indefinitely.
-            reject(); identity = r.identity; previous_window_us = now;
+            reject();
+            identity = r.identity;
+            previous_window_us = now;
             return PolicyAction::None;
         }
         identity = r.identity;
         if (previous_window_us && (now < previous_window_us || now - previous_window_us > 5000000))
-        { pressure_windows = trial_windows = 0; }
+        {
+            pressure_windows = trial_windows = 0;
+        }
         previous_window_us = now;
         if (now < cooldown_until || w.elapsed_us < 2000000 || w.elapsed_us > 5000000 ||
             w.submitted < 16 || w.losses)
-        { pressure_windows = 0; return PolicyAction::None; }
+        {
+            pressure_windows = 0;
+            return PolicyAction::None;
+        }
         if (evaluating)
         {
-            const bool comparable = w.incoming_estimate_valid && baseline.incoming_estimate_valid &&
+            const bool comparable =
+                w.incoming_estimate_valid && baseline.incoming_estimate_valid &&
                 uint64_t(w.incoming_fps_x100) * 10 >= uint64_t(baseline.incoming_fps_x100) * 9 &&
                 uint64_t(w.incoming_fps_x100) * 10 <= uint64_t(baseline.incoming_fps_x100) * 11 &&
                 w.submitted && baseline.submitted &&
                 (w.bytes / w.submitted) * 4 >= (baseline.bytes / baseline.submitted) * 3 &&
                 (w.bytes / w.submitted) * 4 <= (baseline.bytes / baseline.submitted) * 5;
-            if (comparable) ++trial_windows;
+            if (comparable)
+                ++trial_windows;
             const uint64_t old_age = baseline.queue_mean_us + baseline.ready_mean_us;
             const uint64_t age = w.queue_mean_us + w.ready_mean_us;
             const bool delivery_ok = uint64_t(w.presented_fps_x100) * 100 + 200 >=
@@ -183,37 +241,55 @@ struct RuntimePolicy
             const bool improvement = age + std::max<uint64_t>(1000, old_age / 10) <= old_age;
             if (comparable && trial_windows >= 2 && delivery_ok && improvement &&
                 w.pending_end <= baseline.pending_end && !w.overflows)
-            { evaluating = false; depth_locked = true; ++kept; return PolicyAction::None; }
-            const bool worse = comparable && (!delivery_ok ||
-                age > old_age + std::max<uint64_t>(1000, old_age / 10));
+            {
+                evaluating = false;
+                depth_locked = true;
+                ++kept;
+                return PolicyAction::None;
+            }
+            const bool worse =
+                comparable &&
+                (!delivery_ok || age > old_age + std::max<uint64_t>(1000, old_age / 10));
             if ((trial_windows >= 2 && worse) || now - trial_started >= evaluation_us)
             {
                 // No demonstrated latency/delivery benefit: restore the user's
                 // previous working mode once, at another complete IDR.
-                pending_depth = original_depth; pending_action = last_action = PolicyAction::RestoreDepth;
-                evaluating = false; depth_locked = true; ++rollbacks;
+                pending_depth = original_depth;
+                pending_action = last_action = PolicyAction::RestoreDepth;
+                evaluating = false;
+                depth_locked = true;
+                ++rollbacks;
                 return pending_action;
             }
             return PolicyAction::None;
         }
         if (w.bottleneck != Bottleneck::Decode)
-        { pressure_windows = 0; return PolicyAction::None; }
-        if (++pressure_windows < 2) return PolicyAction::None; // >=4s, not one slow picture.
+        {
+            pressure_windows = 0;
+            return PolicyAction::None;
+        }
+        if (++pressure_windows < 2)
+            return PolicyAction::None; // >=4s, not one slow picture.
         throughput_exceeded = true;
         const uint64_t budget = 1000000 / fps;
-        if (depth > 1 && !r.reorder && !depth_locked && !trials &&
-            w.ready_mean_us > budget * 2)
+        if (depth > 1 && !r.reorder && !depth_locked && !trials && w.ready_mean_us > budget * 2)
         {
-            baseline = w; original_depth = depth; pending_depth = 1;
-            pending_action = last_action = PolicyAction::DepthOne; ++trials;
-            pressure_windows = 0; return pending_action;
+            baseline = w;
+            original_depth = depth;
+            pending_depth = 1;
+            pending_action = last_action = PolicyAction::DepthOne;
+            ++trials;
+            pressure_windows = 0;
+            return pending_action;
         }
         if (depth == 1 && !resyncs && w.queue_mean_us > std::max<uint64_t>(100000, budget * 4) &&
             (w.pending_end >= 4 || w.overflows))
         {
             // Drop obsolete queued pictures via the existing IDR path. This
             // bounds latency once; it does not claim more decoder throughput.
-            ++resyncs; pressure_windows = 0; cooldown_until = now + cooldown_us;
+            ++resyncs;
+            pressure_windows = 0;
+            cooldown_until = now + cooldown_us;
             return last_action = PolicyAction::Resync;
         }
         return PolicyAction::None;

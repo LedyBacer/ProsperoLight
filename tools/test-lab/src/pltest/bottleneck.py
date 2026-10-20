@@ -65,7 +65,8 @@ def diagnose(profile, report, rows, performance, begin, end, omitted=0):
     queue_mean = sum(queue) / len(queue) if queue else None
     busy = sum(r['decode_us'] for r in submitted) / (seconds * 1e6)
     pending_end = submitted[-1]['pending']
-    backlog = pending_end >= 2 and queue_mean is not None and queue_mean > budget
+    discards = performance.get('queue_overflows', 0)
+    backlog = (pending_end >= 2 or discards > 0) and queue_mean is not None and queue_mean > budget
     ready = distribution([r['ready_us'] for r in submitted if r['ready_us']])
     buffered = performance.get('decoder_pipeline_depth', 1) > 1 and ready.get('mean', 0) > 2 * budget
     local_pressure = backlog and (busy >= .7 or buffered)
@@ -101,6 +102,8 @@ def diagnose(profile, report, rows, performance, begin, end, omitted=0):
         result['reasons'].append('HOST_SEND_RATE_EXCEEDS_OBSERVED_INPUT_WITH_NETWORK_LOSS')
     elif loss:
         result['reasons'].append('NETWORK_LOSS_PRESENT_WITHOUT_CONCLUSIVE_RATE_SEPARATION')
+    elif discards:
+        result['reasons'].append('SESSION_QUEUE_DISCARD_INPUT_COMPLETENESS_UNVERIFIED')
     elif len(decoded) > len(shown) + max(2, len(decoded) * .05):
         result.update(classification='presentation-limited', confidence='suspected')
         result['reasons'].append('DECODED_OUTPUT_EXCEEDS_UNIQUE_PRESENTATION')

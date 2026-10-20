@@ -1022,46 +1022,63 @@ static void save_performance_summary(const native_renderer_state_t &state,
                              (unsigned long long)state.parameter_transition_waits);
     const auto &window = state.pipeline_sampler.last;
     const auto features = state.active_pps < 256 ? state.parameter_sets.features[state.active_pps]
-                                               : moonlight::video::PpsFeatures{};
-    ok = ok && report_append(report, sizeof(report), &length,
-        "\"stream_bit_depth\":%u,\"stream_reorder_frames\":%u,\"stream_vps_id\":%u,"
-        "\"stream_poc_type\":%u,\"stream_scaling_lists\":%u,\"stream_pps_features_known\":%s,"
-        "\"stream_cabac\":%u,\"stream_hevc_tiles\":%u,\"stream_hevc_wpp\":%u,"
-        "\"stream_hevc_tile_columns\":%u,\"stream_hevc_tile_rows\":%u,"
-        "\"h264_p_pictures\":%llu,\"h264_b_pictures\":%llu,\"h264_i_pictures\":%llu,"
-        "\"au_size_bytes_p50_upper\":%llu,\"au_size_bytes_p95_upper\":%llu,\"au_size_bytes_max\":%llu,\n",
-        state.lifecycle.stream.bit_depth, state.lifecycle.stream.reorder, state.lifecycle.stream.vps_id,
-        state.lifecycle.stream.poc_type, state.lifecycle.stream.scaling_lists ? 1u : 0u,
-        features.known ? "true" : "false", features.cabac ? 1u : 0u, features.tiles ? 1u : 0u,
-        features.wpp ? 1u : 0u, features.tile_columns, features.tile_rows,
-        (unsigned long long)state.h264_picture_types[0], (unsigned long long)state.h264_picture_types[1],
-        (unsigned long long)state.h264_picture_types[2], (unsigned long long)state.au_size.percentile(50),
-        (unsigned long long)state.au_size.percentile(95), (unsigned long long)state.au_size.max_us);
-    ok = ok && report_append(report, sizeof(report), &length,
-        "\"pipeline_diagnostics\":{\"classification\":\"%s\",\"confidence\":\"%s\","
-        "\"window_us\":%llu,\"window_count\":%llu,\"submitted\":%llu,\"decoded\":%llu,\"presented\":%llu,"
-        "\"arrival_estimate_valid\":%s,\"arrival_fps_x100\":%u,\"decoded_fps_x100\":%u,"
-        "\"presented_fps_x100\":%u,\"decode_busy_us\":%llu,\"ready_mean_us\":%llu,"
-        "\"queue_mean_us\":%llu,\"pending_begin\":%u,\"pending_end\":%u,"
-        "\"semantics\":\"last client-only window; no independent host FPS; suspected stage, not physical latency\"},\n",
-        moonlight::video::name(window.bottleneck),
-        window.bottleneck == moonlight::video::Bottleneck::Insufficient ? "unknown" :
-        window.bottleneck == moonlight::video::Bottleneck::Healthy ? "observed-delivery" : "suspected",
-        (unsigned long long)window.elapsed_us, (unsigned long long)state.pipeline_sampler.windows,
-        (unsigned long long)window.submitted, (unsigned long long)window.decoded,
-        (unsigned long long)window.presented, window.incoming_estimate_valid ? "true" : "false",
-        window.incoming_fps_x100, window.decoded_fps_x100, window.presented_fps_x100,
-        (unsigned long long)window.busy_us, (unsigned long long)window.ready_mean_us,
-        (unsigned long long)window.queue_mean_us, window.pending_begin, window.pending_end);
+                                                 : moonlight::video::PpsFeatures{};
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"stream_bit_depth\":%u,\"stream_reorder_frames\":%u,\"stream_vps_id\":%u,"
+             "\"stream_poc_type\":%u,\"stream_scaling_lists\":%u,\"stream_pps_features_known\":%s,"
+             "\"stream_cabac\":%u,\"stream_hevc_tiles\":%u,\"stream_hevc_wpp\":%u,"
+             "\"stream_hevc_tile_columns\":%u,\"stream_hevc_tile_rows\":%u,"
+             "\"h264_p_pictures\":%llu,\"h264_b_pictures\":%llu,\"h264_i_pictures\":%llu,"
+             "\"au_size_bytes_p50_upper\":%llu,\"au_size_bytes_p95_upper\":%llu,\"au_size_bytes_"
+             "max\":%llu,\n",
+             state.lifecycle.stream.bit_depth, state.lifecycle.stream.reorder,
+             state.lifecycle.stream.vps_id, state.lifecycle.stream.poc_type,
+             state.lifecycle.stream.scaling_lists ? 1u : 0u, features.known ? "true" : "false",
+             features.cabac ? 1u : 0u, features.tiles ? 1u : 0u, features.wpp ? 1u : 0u,
+             features.tile_columns, features.tile_rows,
+             (unsigned long long)state.h264_picture_types[0],
+             (unsigned long long)state.h264_picture_types[1],
+             (unsigned long long)state.h264_picture_types[2],
+             (unsigned long long)state.au_size.percentile(50),
+             (unsigned long long)state.au_size.percentile(95),
+             (unsigned long long)state.au_size.max_us);
+    ok =
+        ok &&
+        report_append(
+            report, sizeof(report), &length,
+            "\"pipeline_diagnostics\":{\"classification\":\"%s\",\"confidence\":\"%s\","
+            "\"window_us\":%llu,\"window_count\":%llu,\"submitted\":%llu,\"decoded\":%llu,"
+            "\"presented\":%llu,"
+            "\"arrival_estimate_valid\":%s,\"arrival_fps_x100\":%u,\"decoded_fps_x100\":%u,"
+            "\"presented_fps_x100\":%u,\"decode_busy_us\":%llu,\"ready_mean_us\":%llu,"
+            "\"queue_mean_us\":%llu,\"pending_begin\":%u,\"pending_end\":%u,"
+            "\"semantics\":\"last client-only window; no independent host FPS; suspected stage, "
+            "not physical latency\"},\n",
+            moonlight::video::name(window.bottleneck),
+            window.bottleneck == moonlight::video::Bottleneck::Insufficient ? "unknown"
+            : window.bottleneck == moonlight::video::Bottleneck::Healthy    ? "observed-delivery"
+                                                                            : "suspected",
+            (unsigned long long)window.elapsed_us,
+            (unsigned long long)state.pipeline_sampler.windows,
+            (unsigned long long)window.submitted, (unsigned long long)window.decoded,
+            (unsigned long long)window.presented, window.incoming_estimate_valid ? "true" : "false",
+            window.incoming_fps_x100, window.decoded_fps_x100, window.presented_fps_x100,
+            (unsigned long long)window.busy_us, (unsigned long long)window.ready_mean_us,
+            (unsigned long long)window.queue_mean_us, window.pending_begin, window.pending_end);
     const auto &policy = state.stream_policy;
-    ok = ok && report_append(report, sizeof(report), &length,
-        "\"stream_policy\":{\"last_action\":\"%s\",\"depth_trials\":%u,\"rollbacks\":%u,"
-        "\"resyncs\":%u,\"rejected\":%u,\"kept\":%u,\"evaluating\":%s,\"throughput_exceeded\":%s,"
-        "\"pending_depth\":%u,\"discarded_aus\":%llu,\"quality_changed\":false},\n",
-        moonlight::video::name(policy.last_action), policy.trials, policy.rollbacks,
-        policy.resyncs, policy.rejected, policy.kept, policy.evaluating ? "true" : "false",
-        policy.throughput_exceeded ? "true" : "false", policy.pending_depth,
-        (unsigned long long)state.policy_dropped_aus);
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"stream_policy\":{\"last_action\":\"%s\",\"depth_trials\":%u,\"rollbacks\":%u,"
+             "\"resyncs\":%u,\"rejected\":%u,\"kept\":%u,\"evaluating\":%s,\"throughput_exceeded\":"
+             "%s,"
+             "\"pending_depth\":%u,\"discarded_aus\":%llu,\"quality_changed\":false},\n",
+             moonlight::video::name(policy.last_action), policy.trials, policy.rollbacks,
+             policy.resyncs, policy.rejected, policy.kept, policy.evaluating ? "true" : "false",
+             policy.throughput_exceeded ? "true" : "false", policy.pending_depth,
+             (unsigned long long)state.policy_dropped_aus);
     const auto &life = state.lifecycle;
     ok = ok &&
          report_append(
@@ -2016,28 +2033,38 @@ static bool configure_stream_decoder(native_renderer_state_t *state,
     const uint32_t depths[]{plan.depth, restore_depth};
     // An optional performance trial may fail after retirement. Make one bounded
     // attempt to restore the original accepted depth, using the same owner path.
-    for (unsigned phase = 0; phase < (restore_depth ? 2u : 1u) &&
-                             !state->owned_resources.decoder && state->running; ++phase)
+    for (unsigned phase = 0;
+         phase < (restore_depth ? 2u : 1u) && !state->owned_resources.decoder && state->running;
+         ++phase)
     {
         bool restore = false;
-        for (uint32_t depth = depths[phase]; depth && !restore &&
-                      !state->owned_resources.decoder && state->running; --depth)
-            for (unsigned attempt = 0; attempt < 2 && !state->owned_resources.decoder && state->running; ++attempt)
+        for (uint32_t depth = depths[phase];
+             depth && !restore && !state->owned_resources.decoder && state->running; --depth)
+            for (unsigned attempt = 0;
+                 attempt < 2 && !state->owned_resources.decoder && state->running; ++attempt)
             {
-                const uint64_t affinity = attempt ? moonlight::kClassicDecoderCpuMask : state->requested_cpu_mask;
-                if (attempt && affinity == state->requested_cpu_mask) continue;
-                config.pipeline_depth = depth; config.cpu_affinity = affinity;
+                const uint64_t affinity =
+                    attempt ? moonlight::kClassicDecoderCpuMask : state->requested_cpu_mask;
+                if (attempt && affinity == state->requested_cpu_mask)
+                    continue;
+                config.pipeline_depth = depth;
+                config.cpu_affinity = affinity;
                 ++state->create_attempts;
                 bool retryable = false;
-                result = create_stream_decoder(&state->owned_resources, &config, state->direct_limit,
-                                               &state->running, &retryable);
+                result = create_stream_decoder(&state->owned_resources, &config,
+                                               state->direct_limit, &state->running, &retryable);
                 if (result != 0)
                 {
                     release_decoder_resources(&state->owned_resources);
                     if (!retryable)
                     {
-                        if (restore_depth && phase == 0) { restore = true; break; }
-                        if (state->running) lifecycle_failure(state, Error::Allocation, result);
+                        if (restore_depth && phase == 0)
+                        {
+                            restore = true;
+                            break;
+                        }
+                        if (state->running)
+                            lifecycle_failure(state, Error::Allocation, result);
                         return false;
                     }
                 }
@@ -2218,14 +2245,17 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
     }
     bool optional_transition = state->stream_policy.pending_depth != 0;
     const bool retained_idr = selected && state->decoder && state->policy_keyframe_wait &&
-        !state->decoder_needs_reset && !activation && safe_idr && unit->frameType == FRAME_TYPE_IDR;
+                              !state->decoder_needs_reset && !activation && safe_idr &&
+                              unit->frameType == FRAME_TYPE_IDR;
     if (optional_transition && retained_idr && (!sets.supplied_sps || !sets.supplied_pps))
     {
         // Optimization must not turn an already usable IDR into a missing-PPS
         // failure. Keep the old instance, which actually received these sets.
-        state->stream_policy.reject(); optional_transition = false;
+        state->stream_policy.reject();
+        optional_transition = false;
     }
-    const bool complete_required = activation || state->await_keyframe || state->decoder_needs_reset || optional_transition;
+    const bool complete_required =
+        activation || state->await_keyframe || state->decoder_needs_reset || optional_transition;
     const bool fresh_required = !retained_idr || optional_transition;
     if (!selected || unknown || conflict ||
         (complete_required && (!safe_idr || unit->frameType != FRAME_TYPE_IDR ||
@@ -2255,10 +2285,14 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
     limits.bit_depth = state->mode->hdr ? 10 : 8;
     if (optional_transition && state->lifecycle.parameters_changed(*selected))
     {
-        state->stream_policy.reject(); optional_transition = false;
+        state->stream_policy.reject();
+        optional_transition = false;
     }
-    limits.depth = optional_transition ? state->stream_policy.pending_depth : state->requested_depth;
-    const auto configuration = initial_plan(*selected, limits, INPUT_SLOT_COUNT, FRAME_SLOT_COUNT);
+    limits.depth =
+        optional_transition ? state->stream_policy.pending_depth : state->requested_depth;
+    auto configuration = initial_plan(*selected, limits, INPUT_SLOT_COUNT, FRAME_SLOT_COUNT);
+    if (optional_transition)
+        configuration.dpb = std::max(configuration.dpb, state->lifecycle.effective.dpb);
     if (!configuration.supported || selected->visible_width != state->mode->visible_width ||
         selected->visible_height != state->mode->visible_height)
     {
@@ -2269,13 +2303,18 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
     {
         auto candidate = state->decoder_config;
         candidate.pipeline_depth = configuration.depth;
-        videodec2_decoder_memory_t memory{}; memory.size = sizeof(memory);
+        candidate.max_dpb_frames = configuration.dpb;
+        videodec2_decoder_memory_t memory{};
+        memory.size = sizeof(memory);
         if (sceVideodec2QueryDecoderMemoryInfo(&candidate, &memory) != 0)
             state->stream_policy.reject(); // Existing instance remains usable.
         else
         {
+            if (!state->running)
+                return false;
             const auto previous_depth = state->pipeline_depth;
-            if (!configure_stream_decoder(state, *selected, configuration, previous_depth)) return false;
+            if (!configure_stream_decoder(state, *selected, configuration, previous_depth))
+                return false;
             state->stream_policy.configured(monotonic_us(), state->pipeline_depth);
         }
     }
@@ -2421,7 +2460,8 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     }
     if (state->stream_aware && !prepare_stream_decoder(state, decode_unit))
     {
-        if (state->policy_keyframe_wait) ++state->policy_dropped_aus;
+        if (state->policy_keyframe_wait)
+            ++state->policy_dropped_aus;
         if (!state->running || state->parameters_requested)
             return DR_OK;
         state->parameters_requested = true;
@@ -2862,32 +2902,43 @@ static uint64_t drain_decoder(native_renderer_state_t *state)
 // presenter locks, clocks per picture, or cross-thread reads of plain counters.
 static void observe_pipeline(native_renderer_state_t *state, uint64_t now)
 {
-    if (!state->stream_aware || !state->pipeline_sampler.due(now)) return;
+    if (!state->stream_aware || !state->pipeline_sampler.due(now))
+        return;
     moonlight::video::PipelineCounters c{};
-    c.submitted = state->access_units; c.decoded = state->decoded;
+    c.submitted = state->access_units;
+    c.decoded = state->decoded;
     c.presented = state->presented.load(std::memory_order_relaxed);
     c.bytes = state->stream_bytes;
     c.busy_us = state->decode_total_us + state->flush_total_us;
-    c.ready_us = state->callback_to_decode_total_us; c.ready_calls = state->ready_calls;
+    c.ready_us = state->callback_to_decode_total_us;
+    c.ready_calls = state->ready_calls;
     c.queue_us = state->queue_timing.total_us;
     c.losses = state->drops.network;
     c.overflows = video_queue_overflows.load(std::memory_order_relaxed);
     c.errors = state->decode_errors + state->drain_faults;
     c.pending = std::max(0, LiGetPendingVideoFrames());
-    c.in_flight = state->submission_count; c.generation = state->lifecycle.generation;
+    c.in_flight = state->submission_count;
+    c.generation = state->lifecycle.generation;
     c.recovery_epoch = video_recovery_epoch.load(std::memory_order_relaxed);
-    if (!state->pipeline_sampler.update(now, c, state->stream_fps)) return;
-    if (!state->decoder || state->await_keyframe || state->transition_wait_since || state->decoder_needs_reset ||
-        state->lifecycle.state != moonlight::video::State::Ready) return;
-    const auto action = state->stream_policy.observe(now, state->pipeline_sampler.last,
-        state->lifecycle.stream, state->stream_fps, state->pipeline_depth);
-    if (action == moonlight::video::PolicyAction::None) return;
-    state->policy_keyframe_wait = true; state->await_keyframe = true;
-    state->parameters_requested = true; state->transition_wait_since = now;
+    if (!state->pipeline_sampler.update(now, c, state->stream_fps))
+        return;
+    if (!state->decoder || state->await_keyframe || state->transition_wait_since ||
+        state->decoder_needs_reset || state->lifecycle.state != moonlight::video::State::Ready)
+        return;
+    const auto action =
+        state->stream_policy.observe(now, state->pipeline_sampler.last, state->lifecycle.stream,
+                                     state->stream_fps, state->pipeline_depth);
+    if (action == moonlight::video::PolicyAction::None)
+        return;
+    state->policy_keyframe_wait = true;
+    state->await_keyframe = true;
+    state->parameters_requested = true;
+    state->transition_wait_since = now;
     ++state->decoder_refreshes;
     video_recovery_epoch.fetch_add(1u, std::memory_order_relaxed);
     char line[224];
-    snprintf(line, sizeof(line), "Native stream policy: action=%s depth=%u->%u queue=%llu ready=%llu us",
+    snprintf(
+        line, sizeof(line), "Native stream policy: action=%s depth=%u->%u queue=%llu ready=%llu us",
         moonlight::video::name(action), state->pipeline_depth, state->stream_policy.pending_depth,
         (unsigned long long)state->pipeline_sampler.last.queue_mean_us,
         (unsigned long long)state->pipeline_sampler.last.ready_mean_us);

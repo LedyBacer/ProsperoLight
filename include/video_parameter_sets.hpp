@@ -9,7 +9,8 @@ namespace moonlight::video
 {
 // Only the bounded prefix needed for PPS/slice IDs. No full slice decoding.
 inline bool parameter_ids(Codec codec, const uint8_t *p, size_t n, bool picture, uint32_t &id,
-                          uint32_t &sps, bool *idr = nullptr, bool *found = nullptr, uint32_t *picture_type = nullptr)
+                          uint32_t &sps, bool *idr = nullptr, bool *found = nullptr,
+                          uint32_t *picture_type = nullptr)
 {
     if (!p || !n)
         return false;
@@ -46,7 +47,8 @@ inline bool parameter_ids(Codec codec, const uint8_t *p, size_t n, bool picture,
             {
                 b.ue();
                 const auto type = b.ue(9);
-                if (picture_type) *picture_type = type % 5;
+                if (picture_type)
+                    *picture_type = type % 5;
             }
             else
             {
@@ -75,23 +77,40 @@ struct PpsFeatures
 inline PpsFeatures pps_features(Codec codec, const uint8_t *p, size_t n)
 {
     PpsFeatures f{};
-    if (parameter_nal(codec, p, n) != ParseResult::Valid) return f;
+    if (parameter_nal(codec, p, n) != ParseResult::Valid)
+        return f;
     const auto header = codec == Codec::H264 ? 1u : 2u;
     Bits b(p + header, std::min<size_t>(128, n - header));
-    b.ue(codec == Codec::H264 ? 255 : 63); b.ue(codec == Codec::H264 ? 31 : 15);
+    b.ue(codec == Codec::H264 ? 255 : 63);
+    b.ue(codec == Codec::H264 ? 31 : 15);
     if (codec == Codec::H264)
     {
-        f.cabac = b.read(1); b.skip(1);
-        if (b.ue(7) != 0) return {}; // FMO syntax is not inspected.
-        b.ue(31); b.ue(31); // Default active reference counts.
+        f.cabac = b.read(1);
+        b.skip(1);
+        if (b.ue(7) != 0)
+            return {}; // FMO syntax is not inspected.
+        b.ue(31);
+        b.ue(31); // Default active reference counts.
     }
     else
     {
-        b.skip(7); b.ue(14); b.ue(14); b.se(); b.skip(2);
-        if (b.read(1)) b.ue(6);
-        b.se(); b.se(); b.skip(4);
-        f.tiles = b.read(1); f.wpp = b.read(1);
-        if (f.tiles) { f.tile_columns = b.ue(19) + 1; f.tile_rows = b.ue(21) + 1; }
+        b.skip(7);
+        b.ue(14);
+        b.ue(14);
+        b.se();
+        b.skip(2);
+        if (b.read(1))
+            b.ue(6);
+        b.se();
+        b.se();
+        b.skip(4);
+        f.tiles = b.read(1);
+        f.wpp = b.read(1);
+        if (f.tiles)
+        {
+            f.tile_columns = b.ue(19) + 1;
+            f.tile_rows = b.ue(21) + 1;
+        }
     }
     f.known = b.ok;
     return f;
@@ -156,7 +175,8 @@ struct ParameterSets
         pps_sps[id] = parent;
         pps_valid[id] = sps[parent].verified;
         const auto version = identity(p, n);
-        if (pps_identity[id] != version) features[id] = pps_features(codec, p, n);
+        if (pps_identity[id] != version)
+            features[id] = pps_features(codec, p, n);
         pps_identity[id] = version;
         return true;
     }
