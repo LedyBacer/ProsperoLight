@@ -1,5 +1,10 @@
 # Legacy firmware experiment validation — 2026-10-18
 
+Historical round-1 build report. Subsequent FW 3.00 hardware results and the
+focused round-2 experiments are documented in
+[LEGACY_FW_AGC_ANALYSIS.md](LEGACY_FW_AGC_ANALYSIS.md); use the
+[new tester guide](LEGACY_FW_AGC_TESTING.md) rather than repeating seven builds.
+
 Application build source: `9aad3d3a095a075c7cb29c1d300df461752500f0`.
 Subsequent branch commits update evidence parsing/tests and this report, not the
 application or SDK patch used in these seven builds.

@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "run_url": "https://github.com/LedyBacer/ProsperoLight/actions/runs/39515915112",
+  "tested_source_sha": "d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+  "hardware_validation": "Round 2 NOT RUN; awaiting external logs and visible-menu reports",
+  "artifacts": [
+    {
+      "variant": "00-control",
+      "source_sha": "d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "zip": "ProsperoLight-FWCompat-00-control.zip",
+      "zip_sha256": "c1baaf8e491dbe9ee45df700b708a069e4c49887e3603e027f0876e7497b11bf",
+      "eboot_sha256": "3b1f4b6f8a838316d809680c305558370b8564688090780eb6edba2207d16bf8",
+      "elf_sha256": "5c71dcf4481a950fce357971f0e23115b9a8765652da7add39c89e8a5ffd777c",
+      "sdk_patch_sha256": "0e00dc05f4f4270887d59f84b90ca1bb2e7fef2a5dd1bf63afed7da985531722",
+      "files": 133,
+      "install_artifact": "ProsperoLight-FWCompat-00-control-d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "evidence_artifact": "FWCompat-symbols-evidence-00-control-d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "validation": "CRC, modes, title, label, options, checksums, receipt, eboot and exact debug ELF verified; hardware NOT RUN",
+      "install_artifact_url": "https://github.com/LedyBacer/ProsperoLight/actions/runs/39515915112/artifacts/12309335477",
+      "evidence_artifact_url": "https://github.com/LedyBacer/ProsperoLight/actions/runs/39515915112/artifacts/12308306400"
+    },
+    {
+      "variant": "07-compute-only",
+      "source_sha": "d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "zip": "ProsperoLight-FWCompat-07-compute-only.zip",
+      "zip_sha256": "308b87e05c9d1894c48dd22544ef35effcc54c28c8eff37d0c01cbc42de70f48",
+      "eboot_sha256": "1583ef2850ddd15da13c7ccb12ca778cacb5556bd4d1b9bf5584f7f448a5c8db",
+      "elf_sha256": "8f6afd2fe02f4cb43b24ea183f86d8e3af2097803d4342cd7ac437676f37beca",
+      "sdk_patch_sha256": "0e00dc05f4f4270887d59f84b90ca1bb2e7fef2a5dd1bf63afed7da985531722",
+      "files": 133,
+      "install_artifact": "ProsperoLight-FWCompat-07-compute-only-d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "evidence_artifact": "FWCompat-symbols-evidence-07-compute-only-d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "validation": "CRC, modes, title, label, options, checksums, receipt, eboot and exact debug ELF verified; hardware NOT RUN",
+      "install_artifact_url": "https://github.com/LedyBacer/ProsperoLight/actions/runs/39515915112/artifacts/12306839440",
+      "evidence_artifact_url": "https://github.com/LedyBacer/ProsperoLight/actions/runs/39515915112/artifacts/12308635153"
+    },
+    {
+      "variant": "08-codecs-only",
+      "source_sha": "d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "zip": "ProsperoLight-FWCompat-08-codecs-only.zip",
+      "zip_sha256": "c0dab5fe9bf91381d25b085f100e54b2a0e078b6658aea62a9a1bc7ed692cc3a",
+      "eboot_sha256": "31611b917310858cc7b09001a25b9b7e270050273eac0d9a12c22317f22b0300",
+      "elf_sha256": "c17ba4faa9ac333e8edcc0ba8174420dc0ac6779961d92a9c12be30f0a6ba995",
+      "sdk_patch_sha256": "0e00dc05f4f4270887d59f84b90ca1bb2e7fef2a5dd1bf63afed7da985531722",
+      "files": 133,
+      "install_artifact": "ProsperoLight-FWCompat-08-codecs-only-d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "evidence_artifact": "FWCompat-symbols-evidence-08-codecs-only-d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "validation": "CRC, modes, title, label, options, checksums, receipt, eboot and exact debug ELF verified; hardware NOT RUN",
+      "install_artifact_url": "https://github.com/LedyBacer/ProsperoLight/actions/runs/39515915112/artifacts/12308545678",
+      "evidence_artifact_url": "https://github.com/LedyBacer/ProsperoLight/actions/runs/39515915112/artifacts/12308395860"
+    },
+    {
+      "variant": "09-agc-first",
+      "source_sha": "d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "zip": "ProsperoLight-FWCompat-09-agc-first.zip",
+      "zip_sha256": "b3ddcf606795beb80f39b0c1fc0cb27d8a73a4aa13bcd47bac20dcc544b3c495",
+      "eboot_sha256": "09f5d48d8d318e794e1857027eb9fc3908fea0f9ea141ddeac83b5e6680dca26",
+      "elf_sha256": "4cc445cb45efdc31bde9450c17bd4af236cf87fbe951f68d7b2510250af80def",
+      "sdk_patch_sha256": "0e00dc05f4f4270887d59f84b90ca1bb2e7fef2a5dd1bf63afed7da985531722",
+      "files": 133,
+      "install_artifact": "ProsperoLight-FWCompat-09-agc-first-d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "evidence_artifact": "FWCompat-symbols-evidence-09-agc-first-d2fddd25ca9990dc894a01968c791c992ae1fa6c",
+      "validation": "CRC, modes, title, label, options, checksums, receipt, eboot and exact debug ELF verified; hardware NOT RUN",
+      "install_artifact_url": "https://github.com/LedyBacer/ProsperoLight/actions/runs/39515915112/artifacts/12308143254",
+      "evidence_artifact_url": "https://github.com/LedyBacer/ProsperoLight/actions/runs/39515915112/artifacts/12308500200"
+    }
+  ]
+}

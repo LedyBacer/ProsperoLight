@@ -34,7 +34,7 @@ No streaming or performance result follows from a working menu.
 
 ## Controlled experiments and interpretation
 
-All four new artifacts share one patched SDK derived from checksum-pinned
+All four new artifacts use the same SDK source and patch, derived from checksum-pinned
 OpenGL 1.0.2/source `a519561626933257213d64a4a8bd5e02b55dceb2`.
 Production defaults and the original seven selectable variants are retained.
 Only 09 invokes the new early hook. It uses the SDK's existing API table,
@@ -78,8 +78,9 @@ proof of firmware ABI compatibility.
 
 ## Verification boundary
 
-Focused host tests execute the actual warm-up function with query stubs and the
-patched SDK's real target-state, early-hook and later reuse code under ASan/UBSan.
+Focused host tests execute the actual warm-up function with query stubs.
+The patched SDK's real target-state, early-hook and later reuse code execute
+under ASan/UBSan in a host harness.
 They cover subsets, order/configuration, error propagation, NULL handling, early
 failure and one-init reuse. Compile-time tests retain production defaults.
 Build/ZIP provenance verifies software artifacts, not firmware compatibility.
