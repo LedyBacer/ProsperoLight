@@ -118,7 +118,7 @@ if [[ -z $zlib_library ]]; then
 fi
 
 if ! $skip_sdk && [[ ! -f $lapy_source/source/lapy_elevation_protocol.h ]]; then
-    git clone -q https://github.com/blackbearreloaded/PS5-Lapy-JB-Daemon.git "$lapy_source"
+    git clone -q https://github.com/LedyBacer/PS5-Lapy-JB-Daemon.git "$lapy_source"
     git -C "$lapy_source" fetch -q origin "$lapy_commit"
     git -C "$lapy_source" checkout -q --detach "$lapy_commit"
 fi
