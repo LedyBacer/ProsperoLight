@@ -56,4 +56,55 @@ class BottleneckTests(unittest.TestCase):
         value=self.classify(rows(48,decode_us=20000,pending=7,queue=140000),{'decode_errors':1})
         self.assertEqual(value['classification'],'insufficient-evidence')
 
+    def test_missing_enqueue_preserves_client_observations_but_not_input_claims(self):
+        samples=rows()
+        for r in samples:r['enqueue_us']=0
+        value=self.classify(samples)
+        self.assertEqual(value['classification'],'insufficient-evidence')
+        self.assertIsNone(value['evidence']['observed_arrival_fps'])
+        self.assertIsNone(value['evidence']['actual_compressed_mbps'])
+        self.assertGreater(value['evidence']['decoded_output_fps'],50)
+        self.assertTrue(value['client_delivery']['keeps_up_with_submissions'])
+        self.assertFalse(value['evidence']['input_trace_complete'])
+    def test_invalid_and_partial_arrival_evidence_is_not_zero_traffic(self):
+        for kind in ('network-before-enqueue','negative-local-arrival','one-missing'):
+            samples=rows()
+            if kind=='network-before-enqueue': samples[0]['callback_network_us']=1
+            elif kind=='negative-local-arrival': samples[0]['callback_network_us']=1000000000
+            else:samples[0]['enqueue_us']=0
+            value=self.classify(samples)
+            self.assertEqual(value['classification'],'insufficient-evidence')
+            self.assertIsNone(value['evidence']['actual_compressed_mbps'])
+            self.assertEqual(value['evidence']['invalid_arrival_timestamp_rows'],1)
+    def test_known_zero_arrivals_is_distinct_from_unknown(self):
+        samples=rows()
+        # All these AUs arrived before the measured window and were dequeued later.
+        for r in samples:r['enqueue_us']=1
+        value=self.classify(samples)
+        self.assertEqual(value['evidence']['observed_arrival_fps'],0)
+        self.assertEqual(value['evidence']['actual_compressed_mbps'],0)
+        self.assertTrue(value['evidence']['arrival_timestamps_available'])
+        self.assertEqual(value['classification'],'insufficient-evidence')
+    def test_no_rows_cannot_establish_zero_arrival_rate(self):
+        value=self.classify([])
+        self.assertIsNone(value['evidence']['observed_arrival_fps'])
+        self.assertIsNone(value['evidence']['actual_compressed_mbps'])
+        self.assertEqual(value['evidence']['dequeue_fps'],0)
+    def test_complete_evidence_measures_input_and_health(self):
+        value=self.classify(rows())
+        self.assertEqual(value['classification'],'healthy')
+        self.assertEqual(value['evidence']['observed_arrival_fps'],60)
+        self.assertGreater(value['evidence']['actual_compressed_mbps'],0)
+    def test_independent_host_counter_cannot_replace_missing_client_arrivals(self):
+        host={'verified':True,'ps5_inner_begin_us':1000000,'ps5_inner_end_us':5000000,
+              'rates':{'frames_sent':{'lower_per_second':29.9,'upper_per_second':30.1}}}
+        samples=rows(30)
+        for r in samples:r['enqueue_us']=0
+        report={'host_measurement':{'scene':'low-motion','measurement_validity':'VALID'}}
+        with patch('pltest.bottleneck.measured_host_transport',return_value=host):
+            value=self.classify(samples,report=report)
+        self.assertEqual(value['classification'],'insufficient-evidence')
+        self.assertTrue(value['host_transport']['verified'])
+        self.assertIsNone(value['evidence']['actual_compressed_mbps'])
+
 if __name__=='__main__':unittest.main()

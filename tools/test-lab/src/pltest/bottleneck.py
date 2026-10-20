@@ -48,23 +48,23 @@ def diagnose(profile, report, rows, performance, begin, end, omitted=0):
         result['reasons'].append('TRACE_INCOMPLETE_OR_INVALID_WINDOW')
         return result
     def enqueue_time(r):
-        if not r['enqueue_us'] or r['callback_network_us'] < r['enqueue_us']:
+        if r['enqueue_us'] <= 0 or r['callback_network_us'] < r['enqueue_us']:
             return None
-        return r['callback_us'] - (r['callback_network_us'] - r['enqueue_us'])
-    arrived = [r for r in rows if (t := enqueue_time(r)) is not None and left <= t < right]
+        value = r['callback_us'] - (r['callback_network_us'] - r['enqueue_us'])
+        return value if value > 0 else None
+    arrivals = [(r, enqueue_time(r)) for r in rows]
+    arrival_evidence = bool(rows) and all(t is not None for _, t in arrivals)
+    arrived = [r for r, t in arrivals if t is not None and left <= t < right]
     submitted = [r for r in rows if left <= r['callback_us'] < right]
     decoded = [r for r in rows if r['ready_us'] and left <= r['callback_us'] + r['ready_us'] < right]
     shown = {r['completion_us'] for r in rows if r['outcome'] == 1 and left <= r['completion_us'] < right}
     seconds = (right - left) / 1e6
-    if len(submitted) < 16 or seconds < 2:
-        result['reasons'].append('TOO_FEW_ACTIVE_SAMPLES')
-        return result
     queue = [r['callback_network_us'] - r['enqueue_us'] for r in submitted
              if r['enqueue_us'] and r['callback_network_us'] >= r['enqueue_us']]
     budget = 1e6 / profile['client']['fps']
     queue_mean = sum(queue) / len(queue) if queue else None
     busy = sum(r['decode_us'] for r in submitted) / (seconds * 1e6)
-    pending_end = submitted[-1]['pending']
+    pending_end = submitted[-1]['pending'] if submitted else 0
     discards = performance.get('queue_overflows', 0)
     backlog = (pending_end >= 2 or discards > 0) and queue_mean is not None and queue_mean > budget
     ready = distribution([r['ready_us'] for r in submitted if r['ready_us']])
@@ -72,22 +72,40 @@ def diagnose(profile, report, rows, performance, begin, end, omitted=0):
     local_pressure = backlog and (busy >= .7 or buffered)
     loss = performance.get('network_frame_gaps', 0) + performance.get('unrecoverable_frames', 0)
     discards = performance.get('queue_overflows', 0)
-    facts = dict(window_seconds=seconds, observed_arrival_fps=len(arrived) / seconds,
+    facts = dict(window_seconds=seconds, observed_arrival_fps=len(arrived) / seconds if arrival_evidence else None,
                  dequeue_fps=len(submitted) / seconds, decoded_output_fps=len(decoded) / seconds,
                  unique_presented_fps=len(shown) / seconds, decode_call_busy_fraction=busy,
-                 frame_budget_us=budget, pending_begin=submitted[0]['pending'], pending_end=pending_end,
+                 frame_budget_us=budget, pending_begin=submitted[0]['pending'] if submitted else 0, pending_end=pending_end,
                  queue_delay_us=distribution(queue), callback_to_ready_us=ready,
                  decoded_to_flip_us=distribution([r['completion_us'] - r['callback_us'] - r['ready_us']
                      for r in submitted if r['outcome'] == 1 and r['ready_us'] and
                      r['completion_us'] >= r['callback_us'] + r['ready_us']]),
                  au_size_bytes=distribution([r['bytes'] for r in submitted]),
-                 actual_compressed_mbps=sum(r['bytes'] for r in arrived) * 8 / (seconds * 1e6),
-                 input_trace_complete=not discards and not omitted,
+                 actual_compressed_mbps=(sum(r['bytes'] for r in arrived) * 8 / (seconds * 1e6)
+                                         if arrival_evidence else None),
+                 arrival_timestamps_available=arrival_evidence,
+                 invalid_arrival_timestamp_rows=sum(t is None for _, t in arrivals),
+                 input_trace_complete=arrival_evidence and not discards and not omitted,
                  network_loss_session_total=loss, queue_overflows_session_total=discards)
     result['evidence'] = facts
     capture = report.get('host_measurement', {}).get('capture_evidence') or {}
     result['encoder_implementations'] = capture.get('encoders') if capture.get('verified') else None
     result['encoder_identity_semantics'] = 'current-session creation log names; multiple names mean selection is ambiguous'
+    result['client_delivery'] = {
+        'scope': 'observed submissions through unique presentation only; not host/network verification',
+        'keeps_up_with_submissions': bool(submitted) and
+            len(decoded) + max(2, len(submitted) * .05) >= len(submitted) and
+            len(shown) + max(2, len(decoded) * .05) >= len(decoded),
+    }
+    if not arrival_evidence:
+        result['reasons'].append('ARRIVAL_TIMESTAMPS_UNAVAILABLE_OR_INVALID')
+        return result
+    if len(submitted) < 16 or seconds < 2:
+        result['reasons'].append('TOO_FEW_ACTIVE_SAMPLES')
+        return result
+    if not arrived:
+        result['reasons'].append('NO_OBSERVED_ARRIVALS_IN_WINDOW_SUBMISSIONS_MAY_BE_QUEUED')
+        return result
     if performance.get('decode_errors', 0) or performance.get('drain_faults', 0):
         result['reasons'].append('DECODER_FAULT_OR_RECOVERY_REQUIRES_SEPARATE_ANALYSIS')
         return result
