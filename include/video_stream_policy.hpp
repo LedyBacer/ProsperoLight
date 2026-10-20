@@ -164,6 +164,7 @@ struct RuntimePolicy
     uint32_t pressure_windows{}, trial_windows{}, pending_depth{}, original_depth{};
     uint32_t trials{}, rollbacks{}, resyncs{}, rejected{}, kept{};
     bool evaluating{}, depth_locked{}, throughput_exceeded{};
+    bool allow_reconfiguration{}; // Experimental until a real native transition is validated.
     PolicyAction pending_action{PolicyAction::None}, last_action{PolicyAction::None};
     static constexpr uint64_t cooldown_us = 30000000, evaluation_us = 20000000;
     void reject()
@@ -214,6 +215,15 @@ struct RuntimePolicy
             cooldown_until = now + cooldown_us;
         }
     }
+    PolicyAction request_rollback()
+    {
+        pending_depth = original_depth;
+        pending_action = last_action = PolicyAction::RestoreDepth;
+        evaluating = false;
+        depth_locked = true;
+        ++rollbacks;
+        return pending_action;
+    }
     PolicyAction observe(uint64_t now, const PipelineWindow &w, const Requirements &r, uint32_t fps,
                          uint32_t depth, uint64_t pps_version = 0)
     {
@@ -235,6 +245,11 @@ struct RuntimePolicy
             pressure_windows = trial_windows = 0;
         }
         previous_window_us = now;
+        // Lifetime is independent of observation eligibility. The existing
+        // decode-owner loop reaches this on resumed input after a source pause.
+        // Startup is excluded from comparisons, not from this absolute bound.
+        if (evaluating && (now < trial_started || now - trial_started >= evaluation_us))
+            return request_rollback();
         if (now < cooldown_until || w.elapsed_us < 2000000 || w.elapsed_us > 5000000 ||
             w.submitted < 16 || w.losses)
         {
@@ -268,16 +283,11 @@ struct RuntimePolicy
             const bool worse =
                 comparable &&
                 (!delivery_ok || age > old_age + std::max<uint64_t>(1000, old_age / 10));
-            if ((trial_windows >= 2 && worse) || now - trial_started >= evaluation_us)
+            if (trial_windows >= 2 && worse)
             {
                 // No demonstrated latency/delivery benefit: restore the user's
                 // previous working mode once, at another complete IDR.
-                pending_depth = original_depth;
-                pending_action = last_action = PolicyAction::RestoreDepth;
-                evaluating = false;
-                depth_locked = true;
-                ++rollbacks;
-                return pending_action;
+                return request_rollback();
             }
             return PolicyAction::None;
         }
@@ -290,7 +300,8 @@ struct RuntimePolicy
             return PolicyAction::None; // >=4s, not one slow picture.
         throughput_exceeded = true;
         const uint64_t budget = 1000000 / fps;
-        if (depth > 1 && !r.reorder && !depth_locked && !trials && w.ready_mean_us > budget * 2)
+        if (allow_reconfiguration && depth > 1 && !r.reorder && !depth_locked && !trials &&
+            w.ready_mean_us > budget * 2)
         {
             baseline = w;
             original_depth = depth;

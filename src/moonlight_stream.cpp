@@ -1075,11 +1075,13 @@ static void save_performance_summary(const native_renderer_state_t &state,
              "\"stream_policy\":{\"last_action\":\"%s\",\"depth_trials\":%u,\"rollbacks\":%u,"
              "\"resyncs\":%u,\"rejected\":%u,\"kept\":%u,\"evaluating\":%s,\"throughput_exceeded\":"
              "%s,"
-             "\"pending_depth\":%u,\"discarded_aus\":%llu,\"quality_changed\":false},\n",
+             "\"pending_depth\":%u,\"discarded_aus\":%llu,\"quality_changed\":false,"
+             "\"reconfiguration_enabled\":%s},\n",
              moonlight::video::name(policy.last_action), policy.trials, policy.rollbacks,
              policy.resyncs, policy.rejected, policy.kept, policy.evaluating ? "true" : "false",
              policy.throughput_exceeded ? "true" : "false", policy.pending_depth,
-             (unsigned long long)state.policy_dropped_aus);
+             (unsigned long long)state.policy_dropped_aus,
+             policy.allow_reconfiguration ? "true" : "false");
     const auto &life = state.lifecycle;
     ok = ok &&
          report_append(
@@ -2934,7 +2936,8 @@ static void observe_pipeline(native_renderer_state_t *state, uint64_t now)
     if (!state->pipeline_sampler.update(now, c, state->stream_fps))
     {
         state->stream_policy.discontinuity(now, native_fault);
-        return;
+        // A reset/insufficient sampler window cannot suspend an active trial's
+        // absolute lifetime. Its empty window is ineligible for comparisons.
     }
     if (!state->decoder || state->await_keyframe || state->transition_wait_since ||
         state->decoder_needs_reset || state->lifecycle.state != moonlight::video::State::Ready)
@@ -5227,6 +5230,7 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     renderer.input_size = INPUT_SLOT_BYTES;
     renderer.direct_limit = direct_memory_limit;
     renderer.stream_aware = true;
+    renderer.stream_policy.allow_reconfiguration = MOONLIGHT_EXPERIMENTAL_DECODER_CONTROLS != 0;
     renderer.lifecycle.wait(0);
     renderer.slices_requested = stream_slices;
     renderer.vsync_requested = vsync_enabled;

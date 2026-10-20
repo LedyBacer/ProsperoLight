@@ -16,6 +16,12 @@ static PipelineWindow window()
     w.incoming_estimate_valid = true;
     return w;
 }
+static RuntimePolicy experimental_policy()
+{
+    RuntimePolicy p;
+    p.allow_reconfiguration = true;
+    return p;
+}
 int main()
 {
     auto w = window();
@@ -64,7 +70,7 @@ int main()
     assert(!initial_plan(r, limits, 5, 1).supported);
     // Source names do not exist in this interface. Healthy/source-limited input
     // cannot tune; pressure must persist, and a trial cannot oscillate.
-    RuntimePolicy policy;
+    auto policy = experimental_policy();
     w = window();
     w.pending_end = 8;
     w.queue_mean_us = 120000;
@@ -91,7 +97,7 @@ int main()
     for (uint64_t now = 18000000; now < 100000000; now += 2000000)
         assert(policy.observe(now, w, r, 60, 1) == PolicyAction::None);
     assert(policy.resyncs == 1 && policy.trials == 1);
-    policy = {};
+    policy = experimental_policy();
     policy.observe(2000000, w, r, 60, 3);
     policy.observe(4000000, w, r, 60, 3);
     policy.configured(4000000, 1);
@@ -104,33 +110,74 @@ int main()
     policy.configured(12000000, 3);
     for (uint64_t now = 14000000; now < 100000000; now += 2000000)
         assert(policy.observe(now, w, r, 60, 3) == PolicyAction::None);
-    policy = {};
+    policy = experimental_policy();
     auto no_pressure = window();
     no_pressure.submitted = no_pressure.decoded = no_pressure.presented = 50;
     no_pressure.bottleneck = classify(no_pressure, 60);
     for (uint64_t now = 2000000; now < 20000000; now += 2000000)
         assert(policy.observe(now, no_pressure, r, 60, 1) == PolicyAction::None);
     assert(!policy.throughput_exceeded && !policy.resyncs);
-    policy = {};
+    policy = experimental_policy();
     auto with_loss = w;
     with_loss.losses = 1;
     for (uint64_t now = 2000000; now < 20000000; now += 2000000)
         assert(policy.observe(now, with_loss, r, 60, 3) == PolicyAction::None);
-    policy = {};
+    policy = experimental_policy();
     auto reordered = r;
     reordered.reorder = 2;
     policy.observe(2000000, w, reordered, 60, 3);
     assert(policy.observe(4000000, w, reordered, 60, 3) == PolicyAction::None && !policy.trials);
-    policy = {};
+    policy = experimental_policy();
     policy.observe(2000000, w, r, 60, 3, 123);
     policy.observe(4000000, w, r, 60, 3, 123);
     policy.configured(4000000, 1);
     policy.discontinuity(6000000, true);
     assert(!policy.evaluating && policy.depth_locked && !policy.pending_depth);
-    policy = {};
+    policy = experimental_policy();
     policy.observe(2000000, w, r, 60, 3, 123);
     assert(policy.observe(4000000, w, r, 60, 3, 124) == PolicyAction::None);
     assert(!policy.pending_depth && policy.depth_locked);
+    // Production cannot start an unverified decoder recreation, even under pressure.
+    RuntimePolicy production;
+    for (uint64_t now = 2000000; now < 50000000; now += 2000000)
+        assert(production.observe(now, w, r, 60, 3) == PolicyAction::None);
+    assert(!production.trials && !production.pending_depth);
+    // Invalid observations never establish benefit, but cannot stop the deadline.
+    for (unsigned invalid = 0; invalid < 5; ++invalid)
+    {
+        policy = experimental_policy();
+        policy.observe(2000000, w, r, 60, 3);
+        policy.observe(4000000, w, r, 60, 3);
+        policy.configured(4000000, 1);
+        auto bad = w;
+        if (invalid == 0)
+            bad.losses = 1;
+        if (invalid == 1)
+            bad.submitted = 0;
+        if (invalid == 2)
+            bad.elapsed_us = 6000000;
+        if (invalid == 3)
+            bad.incoming_estimate_valid = false;
+        if (invalid == 4)
+            bad.elapsed_us = 0;
+        for (uint64_t now = 6000000; now < 24000000; now += 2000000)
+            assert(policy.observe(now, bad, r, 60, 1) == PolicyAction::None);
+        assert(policy.evaluating && !policy.kept);
+        assert(policy.observe(24000000, bad, r, 60, 1) == PolicyAction::RestoreDepth);
+        assert(policy.pending_depth == 3 && policy.rollbacks == 1 && !policy.evaluating);
+        assert(policy.observe(26000000, w, r, 60, 1) == PolicyAction::None);
+        policy.configured(26000000, 3);
+        for (uint64_t now = 28000000; now < 100000000; now += 2000000)
+            assert(policy.observe(now, w, r, 60, 3) == PolicyAction::None);
+        assert(policy.rollbacks == 1 && policy.trials == 1);
+    }
+    // No timer/worker spins during a source pause; first resumed observation expires it.
+    policy = experimental_policy();
+    policy.observe(2000000, w, r, 60, 3);
+    policy.observe(4000000, w, r, 60, 3);
+    policy.configured(4000000, 1);
+    policy.discontinuity(40000000, false);
+    assert(policy.observe(40000000, {}, r, 60, 1) == PolicyAction::RestoreDepth);
     c.parameter_identity = 124;
     assert(!sampler.update(9000000, c, 60));
     fixture::Writer avc;
