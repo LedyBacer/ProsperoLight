@@ -1,5 +1,7 @@
 # Encoder-independent native video policy
 
+[Final engineering review and hardware evidence](ENCODER_AGNOSTIC_VALIDATION.md).
+
 This extends the SPS/PPS-aware VideoDec2 owner from PR61. Encoder names are
 never configuration keys. The NVENC-compatible default remains depth1, the
 requested CPU mask, existing slice negotiation and the same AGC surface ownership.
