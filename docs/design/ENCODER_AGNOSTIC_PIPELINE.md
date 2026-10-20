@@ -6,6 +6,10 @@ This extends the SPS/PPS-aware VideoDec2 owner from PR61. Encoder names are
 never configuration keys. The NVENC-compatible default remains depth1, the
 requested CPU mask, existing slice negotiation and the same AGC surface ownership.
 No FFmpeg decoder, pixel conversion, additional frame queue or PyroWave change.
+Automatic depth reconfiguration is disabled by the existing
+`MOONLIGHT_EXPERIMENTAL_DECODER_CONTROLS=0` gate until a real native depth
+transition is validated. Diagnostics and bounded retained-instance IDR resync
+remain available. The summary exposes `stream_policy.reconfiguration_enabled`.
 
 ## Source review (2026-10-20)
 
@@ -105,8 +109,8 @@ complete parameter sets.
 
 After startup exclusion, comparable source-rate/payload windows must demonstrate
 lower queue+output-ready age, no delivery loss and no queue growth to keep the
-candidate. A worse candidate, or no demonstrated benefit within20s of active
-observation, requests one safe-boundary rollback; then depth is locked for the
+candidate. A worse candidate, or no demonstrated benefit within20s after successful
+configuration, requests one safe-boundary rollback; then depth is locked for the
 session. The previous mode can only be restored within native Query/Create limits.
 Stream-generation changes invalidate comparison. No repeated trial/rollback cycle.
 
@@ -130,3 +134,35 @@ session; parameter identity includes both SPS and PPS generations. A changed PPS
 cannot be compared against an older CABAC/tile/WPP baseline. Depth-only trials
 also retain the already accepted effective CPU affinity rather than retrying a
 larger previously rejected requested mask.
+
+## Final review corrections
+
+The 20s absolute trial lifetime is checked before measurement eligibility; the
+first 6s remains excluded from comparisons. Packet loss, fewer than 16 submitted
+frames, invalid windows and an uncomparable payload/rate cannot extend the
+lifetime or prove improvement. Sampler resets still reach deadline enforcement.
+During a source pause the decoder owner can remain blocked normally; the first
+safe observation after resumed input schedules at most one rollback. Existing
+IDR/fresh-bootstrap requirements, native-fault invalidation and transition/stop
+budgets remain unchanged. An unavailable/incomplete safe boundary does not
+justify replaying cached sets or repeatedly recreating the decoder.
+
+Test Lab preserves `observed_arrival_fps` and `actual_compressed_mbps` as JSON
+null when any trace row lacks a valid translated arrival timestamp. It records
+availability and invalid-row count, marks input completeness false, and returns
+`insufficient-evidence` for the full pipeline. Submission/output/presentation
+rates and an explicitly scoped `client_delivery` observation remain useful.
+Independent host counters do not substitute for missing client arrival evidence.
+Zero observed arrivals is reported numerically only with valid timestamp
+evidence, and cannot make queued submissions trivially prove a healthy pipeline.
+The added diagnosis fields have no arithmetic consumers outside this module;
+JSON report/export paths preserve null. Acceptance thresholds are unchanged.
+
+The existing Test Lab mechanisms expose capacity-error probes and requested
+initial modes, not a controlled native depth trial plus rollback. In the earlier
+native tests the depth1 healthy path never exercised recreation; native acceptance
+of a deeper starting mode cannot be assumed. Rather than add a new injection
+protocol/test framework in this correction pass, automatic depth trials remain
+behind the existing experimental gate. Deterministic policy and native-owner
+mocks are retained. A real native transition remains necessary before enabling
+this gate in production; no new PS5 launch is claimed here.

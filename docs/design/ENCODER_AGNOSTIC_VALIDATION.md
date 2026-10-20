@@ -117,7 +117,7 @@ or WPP proven disabled; it must not be reinterpreted as a bitstream measurement.
 
 ### Corrected software confirmation
 
-Final code commit: `8e7747c3b02ea028d22ec1d9cf471abf66ba9fe2`.
+Hardware-validated code commit: `8e7747c3b02ea028d22ec1d9cf471abf66ba9fe2`.
 SDK build completed successfully with label `test-lab-portability-8e7747c`,
 eboot SHA256 `06c0bcf3d1a4af60b19ed43095cc702f8bbdf28e5e61de5fcd28da45c1d0fbf5`.
 
@@ -189,3 +189,35 @@ Implementation history: `108d577` characterization/diagnosis; `61a7955` bounded
 policy; `0d0291a` isolated host support and integration; `955978b` comparison and
 effective-limit fixes; `8e7747c` final report/exit-confirmation fixes. The final
 documentation commit records these results without changing the measured code.
+
+## PR65 final review corrections
+
+- `d0f2d49`: absolute 20s trial expiry is enforced before invalid/loss/low-sample
+  filters, including sampler resets and the first safe resumed-source observation.
+  One rollback is scheduled without interpreting invalid data as a performance
+  regression; existing success, native-fault, IDR and retry rules are preserved.
+- `b5edf1f`: missing/invalid arrival evidence produces null input FPS/bitrate,
+  explicit unavailable/completeness fields and insufficient full-pipeline evidence.
+  Client submission-to-presentation observations remain separate. No report
+  consumer relied on arithmetic with these new diagnosis fields outside the
+  diagnosis module; JSON exports preserve null. Verdict thresholds are unchanged.
+- Focused final tests: 14 bottleneck Python cases PASS; policy and native-owner
+  mocks PASS under ASan/UBSan. New cases cover loss, insufficient/invalid windows,
+  uncomparable trials, timeout/one rollback/no oscillation, source pause, missing/
+  partial/invalid arrivals, real zero observed arrivals and independent-host limits.
+- Native reconfiguration was **not** hardware-validated in this pass. Existing
+  Test Lab has capacity probes but no ready controlled depth-transition/rollback
+  scenario, and deeper native creation cannot be assumed. Automatic depth trials
+  are now disabled in production by the existing experimental decoder-controls
+  gate. Reporting and retained-instance bounded IDR resync remain available.
+  The native transition gap is therefore gated, not relabeled as a hardware PASS.
+- New PS5 launches: **0**. Prior three-run evidence above is preserved unchanged;
+  no software/NVENC benchmark, HDR/VRR,4K120, PyroWave or matrix was repeated.
+- One final SDK build is performed for code `b5edf1f`; its result/build identity
+  and current CI status are recorded in the PR description. No deployment is
+  required to ship the gated implementation. A real native transition remains
+  required before enabling automatic decoder recreation in production.
+
+Recommendation: suitable for merge with the depth-trial gate disabled, after
+current CI passes. No merge is performed by this task. Enabling the experimental
+gate or claiming a hardware tuning benefit is not part of that recommendation.
