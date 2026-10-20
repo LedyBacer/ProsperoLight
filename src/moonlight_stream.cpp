@@ -644,6 +644,8 @@ typedef struct native_renderer_state
     uint64_t policy_dropped_aus{};
     moonlight::TimingHistogram au_size;
     uint32_t active_pps{256};
+    moonlight::video::PpsFeatures
+        active_pps_features{}; // Last successfully submitted facts survive shutdown.
     uint64_t h264_picture_types[5]{};
     uint32_t test_capacity_decoded_before, test_capacity_presented_before;
     void *decoder;
@@ -1021,8 +1023,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
                              "\"decoder_parameter_transition_waits\":%llu,\n",
                              (unsigned long long)state.parameter_transition_waits);
     const auto &window = state.pipeline_sampler.last;
-    const auto features = state.active_pps < 256 ? state.parameter_sets.features[state.active_pps]
-                                                 : moonlight::video::PpsFeatures{};
+    const auto &features = state.active_pps_features;
     ok = ok &&
          report_append(
              report, sizeof(report), &length,
@@ -2703,6 +2704,9 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     {
         state->parameter_sets.submitted();
         state->active_pps = state->parameter_sets.selected_pps;
+        state->active_pps_features = state->active_pps < 256
+                                         ? state->parameter_sets.features[state->active_pps]
+                                         : moonlight::video::PpsFeatures{};
         if (state->mode->codec_type == 1 && state->parameter_sets.picture_type < 5)
             ++state->h264_picture_types[state->parameter_sets.picture_type];
     }
@@ -5787,6 +5791,10 @@ done:
 #if PROSPEROLIGHT_TEST_LAB
         if (prosperolight::test_lab::active())
         {
+            // Restoring per-app encoder overrides can delay serverinfo after
+            // an acknowledged cancel. Allow the normal bounded HTTP budget
+            // for confirmation only; never retry cancellation or assume exit.
+            http_set_timeout_ms(7000);
             const int refresh_result =
                 quit_result == GS_OK ? gs_refresh_paired_status(&gs_server) : GS_WRONG_STATE;
             prosperolight::test_lab::context().host_exit_cleanup_result(

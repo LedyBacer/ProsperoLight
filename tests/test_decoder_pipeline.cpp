@@ -964,8 +964,10 @@ static void pending_parameters_and_placement()
     update(b, p1);
     unit.frameType = FRAME_TYPE_PFRAME;
     assert(!prepare_stream_decoder(state, &unit));
+    state->active_pps_features.known = state->active_pps_features.cabac = true;
     join_video_workers(state);
     assert(!state->transition_wait_since && !state->parameter_sets.sps[2].verified);
+    assert(state->active_pps_features.known && state->active_pps_features.cabac);
     dispose_owner(state);
     // Requested 5-core layout and safe stable receive/audio reservation.
     for (bool fallback : {false, true})
