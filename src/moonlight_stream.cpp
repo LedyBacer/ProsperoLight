@@ -639,6 +639,9 @@ typedef struct native_renderer_state
     uint64_t transition_wait_since;
     uint64_t parameter_transition_waits;
     moonlight::video::PipelineSampler pipeline_sampler;
+    moonlight::video::RuntimePolicy stream_policy;
+    bool policy_keyframe_wait{};
+    uint64_t policy_dropped_aus{};
     moonlight::TimingHistogram au_size;
     uint32_t active_pps{256};
     uint64_t h264_picture_types[5]{};
@@ -1050,6 +1053,15 @@ static void save_performance_summary(const native_renderer_state_t &state,
         window.incoming_fps_x100, window.decoded_fps_x100, window.presented_fps_x100,
         (unsigned long long)window.busy_us, (unsigned long long)window.ready_mean_us,
         (unsigned long long)window.queue_mean_us, window.pending_begin, window.pending_end);
+    const auto &policy = state.stream_policy;
+    ok = ok && report_append(report, sizeof(report), &length,
+        "\"stream_policy\":{\"last_action\":\"%s\",\"depth_trials\":%u,\"rollbacks\":%u,"
+        "\"resyncs\":%u,\"rejected\":%u,\"kept\":%u,\"evaluating\":%s,\"throughput_exceeded\":%s,"
+        "\"pending_depth\":%u,\"discarded_aus\":%llu,\"quality_changed\":false},\n",
+        moonlight::video::name(policy.last_action), policy.trials, policy.rollbacks,
+        policy.resyncs, policy.rejected, policy.kept, policy.evaluating ? "true" : "false",
+        policy.throughput_exceeded ? "true" : "false", policy.pending_depth,
+        (unsigned long long)state.policy_dropped_aus);
     const auto &life = state.lifecycle;
     ok = ok &&
          report_append(
@@ -1978,10 +1990,11 @@ static bool retire_stream_decoder(native_renderer_state_t *state)
 
 static bool configure_stream_decoder(native_renderer_state_t *state,
                                      const moonlight::video::Requirements &requirements,
-                                     moonlight::video::Plan plan)
+                                     moonlight::video::Plan plan, uint32_t restore_depth = 0)
 {
     using namespace moonlight::video;
     const uint64_t started = monotonic_us();
+    state->policy_keyframe_wait = false;
     const bool replacement = state->decoder != nullptr;
     const bool recovering = state->lifecycle.state == State::Recovering;
     state->recovery_pending = recovering;
@@ -2000,32 +2013,36 @@ static bool configure_stream_decoder(native_renderer_state_t *state,
     // The currently supported native profiles use H.264 profile_idc or HEVC profile_idc.
     config.profile = requirements.profile;
     int32_t result = -1;
-    for (uint32_t depth = plan.depth; depth && !state->owned_resources.decoder && state->running;
-         --depth)
-        for (unsigned attempt = 0; attempt < 2 && !state->owned_resources.decoder && state->running;
-             ++attempt)
-        {
-            const uint64_t affinity =
-                attempt ? moonlight::kClassicDecoderCpuMask : state->requested_cpu_mask;
-            if (attempt && affinity == state->requested_cpu_mask)
-                continue;
-            config.pipeline_depth = depth;
-            config.cpu_affinity = affinity;
-            ++state->create_attempts;
-            bool retryable = false;
-            result = create_stream_decoder(&state->owned_resources, &config, state->direct_limit,
-                                           &state->running, &retryable);
-            if (result != 0)
+    const uint32_t depths[]{plan.depth, restore_depth};
+    // An optional performance trial may fail after retirement. Make one bounded
+    // attempt to restore the original accepted depth, using the same owner path.
+    for (unsigned phase = 0; phase < (restore_depth ? 2u : 1u) &&
+                             !state->owned_resources.decoder && state->running; ++phase)
+    {
+        bool restore = false;
+        for (uint32_t depth = depths[phase]; depth && !restore &&
+                      !state->owned_resources.decoder && state->running; --depth)
+            for (unsigned attempt = 0; attempt < 2 && !state->owned_resources.decoder && state->running; ++attempt)
             {
-                release_decoder_resources(&state->owned_resources);
-                if (!retryable)
+                const uint64_t affinity = attempt ? moonlight::kClassicDecoderCpuMask : state->requested_cpu_mask;
+                if (attempt && affinity == state->requested_cpu_mask) continue;
+                config.pipeline_depth = depth; config.cpu_affinity = affinity;
+                ++state->create_attempts;
+                bool retryable = false;
+                result = create_stream_decoder(&state->owned_resources, &config, state->direct_limit,
+                                               &state->running, &retryable);
+                if (result != 0)
                 {
-                    if (state->running)
-                        lifecycle_failure(state, Error::Allocation, result);
-                    return false;
+                    release_decoder_resources(&state->owned_resources);
+                    if (!retryable)
+                    {
+                        if (restore_depth && phase == 0) { restore = true; break; }
+                        if (state->running) lifecycle_failure(state, Error::Allocation, result);
+                        return false;
+                    }
                 }
             }
-        }
+    }
     if (!state->owned_resources.decoder)
     {
         if (state->running)
@@ -2199,11 +2216,20 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
         sets.supplied_sps = supplied[selected->parameter_id] == selected->identity;
         sets.supplied_pps = supplied_pps[sets.selected_pps] == sets.pps_identity[sets.selected_pps];
     }
-    const bool complete_required =
-        activation || state->await_keyframe || state->decoder_needs_reset;
+    bool optional_transition = state->stream_policy.pending_depth != 0;
+    const bool retained_idr = selected && state->decoder && state->policy_keyframe_wait &&
+        !state->decoder_needs_reset && !activation && safe_idr && unit->frameType == FRAME_TYPE_IDR;
+    if (optional_transition && retained_idr && (!sets.supplied_sps || !sets.supplied_pps))
+    {
+        // Optimization must not turn an already usable IDR into a missing-PPS
+        // failure. Keep the old instance, which actually received these sets.
+        state->stream_policy.reject(); optional_transition = false;
+    }
+    const bool complete_required = activation || state->await_keyframe || state->decoder_needs_reset || optional_transition;
+    const bool fresh_required = !retained_idr || optional_transition;
     if (!selected || unknown || conflict ||
         (complete_required && (!safe_idr || unit->frameType != FRAME_TYPE_IDR ||
-                               !sets.supplied_sps || !sets.supplied_pps)))
+                               (fresh_required && (!sets.supplied_sps || !sets.supplied_pps)))))
     {
         if (!state->transition_wait_since)
         {
@@ -2227,7 +2253,11 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
     limits.level_h264 = 60;
     limits.level_hevc = 156;
     limits.bit_depth = state->mode->hdr ? 10 : 8;
-    limits.depth = state->requested_depth;
+    if (optional_transition && state->lifecycle.parameters_changed(*selected))
+    {
+        state->stream_policy.reject(); optional_transition = false;
+    }
+    limits.depth = optional_transition ? state->stream_policy.pending_depth : state->requested_depth;
     const auto configuration = initial_plan(*selected, limits, INPUT_SLOT_COUNT, FRAME_SLOT_COUNT);
     if (!configuration.supported || selected->visible_width != state->mode->visible_width ||
         selected->visible_height != state->mode->visible_height)
@@ -2235,7 +2265,21 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
         lifecycle_failure(state, Error::Unsupported, -31);
         return false;
     }
-    if (state->lifecycle.changed(*selected) || !state->decoder)
+    if (optional_transition)
+    {
+        auto candidate = state->decoder_config;
+        candidate.pipeline_depth = configuration.depth;
+        videodec2_decoder_memory_t memory{}; memory.size = sizeof(memory);
+        if (sceVideodec2QueryDecoderMemoryInfo(&candidate, &memory) != 0)
+            state->stream_policy.reject(); // Existing instance remains usable.
+        else
+        {
+            const auto previous_depth = state->pipeline_depth;
+            if (!configure_stream_decoder(state, *selected, configuration, previous_depth)) return false;
+            state->stream_policy.configured(monotonic_us(), state->pipeline_depth);
+        }
+    }
+    else if (state->lifecycle.changed(*selected) || !state->decoder)
     {
         if (!configure_stream_decoder(state, *selected, configuration))
             return false;
@@ -2315,6 +2359,7 @@ static bool recover_stream_capacity(native_renderer_state_t *state)
 static int decode_refused(native_renderer_state_t *state, int32_t code,
                           moonlight::FrameTrace::Sample *trace)
 {
+    state->policy_keyframe_wait = false;
     state->last_result = code;
     state->last_decode_error = code;
     ++state->decode_errors;
@@ -2376,6 +2421,7 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     }
     if (state->stream_aware && !prepare_stream_decoder(state, decode_unit))
     {
+        if (state->policy_keyframe_wait) ++state->policy_dropped_aus;
         if (!state->running || state->parameters_requested)
             return DR_OK;
         state->parameters_requested = true;
@@ -2404,6 +2450,7 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
         if (decode_unit->frameType != FRAME_TYPE_IDR)
             return state->stream_aware ? DR_OK : DR_NEED_IDR;
         state->await_keyframe = false;
+        state->policy_keyframe_wait = false;
         state->transition_wait_since = 0;
         state->parameters_requested = false;
     }
@@ -2829,7 +2876,23 @@ static void observe_pipeline(native_renderer_state_t *state, uint64_t now)
     c.pending = std::max(0, LiGetPendingVideoFrames());
     c.in_flight = state->submission_count; c.generation = state->lifecycle.generation;
     c.recovery_epoch = video_recovery_epoch.load(std::memory_order_relaxed);
-    state->pipeline_sampler.update(now, c, state->stream_fps);
+    if (!state->pipeline_sampler.update(now, c, state->stream_fps)) return;
+    if (!state->decoder || state->await_keyframe || state->transition_wait_since || state->decoder_needs_reset ||
+        state->lifecycle.state != moonlight::video::State::Ready) return;
+    const auto action = state->stream_policy.observe(now, state->pipeline_sampler.last,
+        state->lifecycle.stream, state->stream_fps, state->pipeline_depth);
+    if (action == moonlight::video::PolicyAction::None) return;
+    state->policy_keyframe_wait = true; state->await_keyframe = true;
+    state->parameters_requested = true; state->transition_wait_since = now;
+    ++state->decoder_refreshes;
+    video_recovery_epoch.fetch_add(1u, std::memory_order_relaxed);
+    char line[224];
+    snprintf(line, sizeof(line), "Native stream policy: action=%s depth=%u->%u queue=%llu ready=%llu us",
+        moonlight::video::name(action), state->pipeline_depth, state->stream_policy.pending_depth,
+        (unsigned long long)state->pipeline_sampler.last.queue_mean_us,
+        (unsigned long long)state->pipeline_sampler.last.ready_mean_us);
+    (void)lan_http_report_text(line);
+    LiRequestIdrFrame();
 }
 
 static void *video_decode_thread(void *context)
@@ -2864,7 +2927,7 @@ static void *video_decode_thread(void *context)
             ++state->decoder_refreshes;
             std::atomic_fetch_add_explicit(&video_recovery_epoch, 1u, std::memory_order_relaxed);
         }
-        else if (state->running && state->decoder)
+        else if (state->running && state->decoder && !state->await_keyframe)
             busy_us += drain_decoder(state);
         if (state->pipeline_depth > 1u && state->pipeline_faults >= PIPELINE_FAULT_LIMIT)
             fallback_to_classic_decoder(state, state->last_result);

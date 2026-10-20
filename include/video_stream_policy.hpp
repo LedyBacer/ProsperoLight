@@ -39,7 +39,7 @@ inline Bottleneck classify(const PipelineWindow &w, uint32_t fps)
     if (!fps || w.elapsed_us < 2000000 || w.elapsed_us > 5000000 || w.submitted < 16)
         return Bottleneck::Insufficient;
     const uint64_t budget = 1000000 / fps;
-    const bool backlog = w.pending_end >= 2 && w.queue_mean_us > budget;
+    const bool backlog = (w.pending_end >= 2 || w.overflows) && w.queue_mean_us > budget;
     const bool busy = w.busy_us >= w.elapsed_us * 7 / 10;
     const bool buffered = w.in_flight > 1 && w.ready_mean_us > budget * 2;
     const bool decode = backlog && (busy || buffered);
@@ -65,7 +65,10 @@ struct PipelineSampler
     {
         if (!due(now)) return false;
         if (!initialized || now < since || c.generation != previous.generation ||
-            c.recovery_epoch != previous.recovery_epoch || c.errors != previous.errors ||
+            (c.recovery_epoch != previous.recovery_epoch &&
+             (c.recovery_epoch < previous.recovery_epoch || c.overflows < previous.overflows ||
+              c.recovery_epoch - previous.recovery_epoch != c.overflows - previous.overflows)) ||
+            c.errors != previous.errors ||
             c.submitted < previous.submitted || c.decoded < previous.decoded ||
             c.presented < previous.presented || c.bytes < previous.bytes ||
             c.busy_us < previous.busy_us || c.ready_us < previous.ready_us ||
@@ -107,9 +110,113 @@ struct PipelineSampler
 inline Plan initial_plan(const Requirements &r, Limits limits, uint32_t input_slots,
                          uint32_t frame_slots)
 {
-    limits.depth = std::min(limits.depth, std::min(input_slots, frame_slots > 1 ? frame_slots - 1 : 0));
+    limits.depth = std::min(3u, std::min(limits.depth, std::min(input_slots, frame_slots > 1 ? frame_slots - 1 : 0)));
     auto p = plan(r, limits);
     if (!limits.depth) { p.supported = false; p.reason = "insufficient frame/input slots"; }
     return p;
 }
+enum class PolicyAction { None, Resync, DepthOne, RestoreDepth };
+inline const char *name(PolicyAction a)
+{
+    constexpr const char *names[]{"none", "bounded-resync", "try-depth-one", "restore-depth"};
+    return names[static_cast<unsigned>(a)];
+}
+// One optional depth trial, one rollback, one latency resync per stream. No
+// bitrate/FPS/resolution changes, core expansion or upward depth speculation.
+struct RuntimePolicy
+{
+    PipelineWindow baseline{};
+    uint64_t identity{}, previous_window_us{}, cooldown_until{}, trial_started{};
+    uint32_t pressure_windows{}, trial_windows{}, pending_depth{}, original_depth{};
+    uint32_t trials{}, rollbacks{}, resyncs{}, rejected{}, kept{};
+    bool evaluating{}, depth_locked{}, throughput_exceeded{};
+    PolicyAction pending_action{PolicyAction::None}, last_action{PolicyAction::None};
+    static constexpr uint64_t cooldown_us = 30000000, evaluation_us = 20000000;
+    void reject()
+    {
+        pending_depth = 0; pending_action = PolicyAction::None;
+        evaluating = false; depth_locked = true; pressure_windows = 0; ++rejected;
+    }
+    void configured(uint64_t now, uint32_t effective_depth)
+    {
+        const auto action = pending_action;
+        const auto target = pending_depth;
+        pending_depth = 0; pending_action = PolicyAction::None; pressure_windows = 0;
+        if (effective_depth != target) { reject(); return; }
+        if (action == PolicyAction::DepthOne)
+        {
+            evaluating = true; trial_started = now; trial_windows = 0;
+            cooldown_until = now + 6000000; // Exclude reconfiguration/startup.
+        }
+        else { evaluating = false; depth_locked = true; cooldown_until = now + cooldown_us; }
+    }
+    PolicyAction observe(uint64_t now, const PipelineWindow &w, const Requirements &r,
+                         uint32_t fps, uint32_t depth)
+    {
+        if (!r.verified || !fps || pending_depth) return PolicyAction::None;
+        if (identity && identity != r.identity)
+        {
+            // Do not compare different SPS generations or retune indefinitely.
+            reject(); identity = r.identity; previous_window_us = now;
+            return PolicyAction::None;
+        }
+        identity = r.identity;
+        if (previous_window_us && (now < previous_window_us || now - previous_window_us > 5000000))
+        { pressure_windows = trial_windows = 0; }
+        previous_window_us = now;
+        if (now < cooldown_until || w.elapsed_us < 2000000 || w.elapsed_us > 5000000 ||
+            w.submitted < 16 || w.losses)
+        { pressure_windows = 0; return PolicyAction::None; }
+        if (evaluating)
+        {
+            const bool comparable = w.incoming_estimate_valid && baseline.incoming_estimate_valid &&
+                uint64_t(w.incoming_fps_x100) * 10 >= uint64_t(baseline.incoming_fps_x100) * 9 &&
+                uint64_t(w.incoming_fps_x100) * 10 <= uint64_t(baseline.incoming_fps_x100) * 11 &&
+                w.submitted && baseline.submitted &&
+                (w.bytes / w.submitted) * 4 >= (baseline.bytes / baseline.submitted) * 3 &&
+                (w.bytes / w.submitted) * 4 <= (baseline.bytes / baseline.submitted) * 5;
+            if (comparable) ++trial_windows;
+            const uint64_t old_age = baseline.queue_mean_us + baseline.ready_mean_us;
+            const uint64_t age = w.queue_mean_us + w.ready_mean_us;
+            const bool delivery_ok = uint64_t(w.presented_fps_x100) * 100 + 200 >=
+                                     uint64_t(baseline.presented_fps_x100) * 95;
+            const bool improvement = age + std::max<uint64_t>(1000, old_age / 10) <= old_age;
+            if (comparable && trial_windows >= 2 && delivery_ok && improvement &&
+                w.pending_end <= baseline.pending_end && !w.overflows)
+            { evaluating = false; depth_locked = true; ++kept; return PolicyAction::None; }
+            const bool worse = comparable && (!delivery_ok ||
+                age > old_age + std::max<uint64_t>(1000, old_age / 10));
+            if ((trial_windows >= 2 && worse) || now - trial_started >= evaluation_us)
+            {
+                // No demonstrated latency/delivery benefit: restore the user's
+                // previous working mode once, at another complete IDR.
+                pending_depth = original_depth; pending_action = last_action = PolicyAction::RestoreDepth;
+                evaluating = false; depth_locked = true; ++rollbacks;
+                return pending_action;
+            }
+            return PolicyAction::None;
+        }
+        if (w.bottleneck != Bottleneck::Decode)
+        { pressure_windows = 0; return PolicyAction::None; }
+        if (++pressure_windows < 2) return PolicyAction::None; // >=4s, not one slow picture.
+        throughput_exceeded = true;
+        const uint64_t budget = 1000000 / fps;
+        if (depth > 1 && !r.reorder && !depth_locked && !trials &&
+            w.ready_mean_us > budget * 2)
+        {
+            baseline = w; original_depth = depth; pending_depth = 1;
+            pending_action = last_action = PolicyAction::DepthOne; ++trials;
+            pressure_windows = 0; return pending_action;
+        }
+        if (depth == 1 && !resyncs && w.queue_mean_us > std::max<uint64_t>(100000, budget * 4) &&
+            (w.pending_end >= 4 || w.overflows))
+        {
+            // Drop obsolete queued pictures via the existing IDR path. This
+            // bounds latency once; it does not claim more decoder throughput.
+            ++resyncs; pressure_windows = 0; cooldown_until = now + cooldown_us;
+            return last_action = PolicyAction::Resync;
+        }
+        return PolicyAction::None;
+    }
+};
 } // namespace moonlight::video

@@ -36,6 +36,8 @@ static unsigned cancel_at, direct_maps;
 static uint64_t reject_affinity, accepted_affinity;
 static int32_t first_decode_error;
 static bool native_requires_headers;
+static unsigned policy_idr_requests;
+static bool policy_depths_allowed, reject_next_policy_query, reject_next_policy_create;
 
 static std::atomic<unsigned> native_allocations;
 static std::atomic<bool> hold_presentation, presentation_entered;
@@ -75,6 +77,7 @@ static void checkpoint(unsigned at)
 
 extern "C"
 {
+    void LiRequestIdrFrame(void) { ++policy_idr_requests; }
     void gs_logf(const char *, const char *, ...)
     {
     }
@@ -248,6 +251,7 @@ extern "C"
     int32_t sceVideodec2QueryDecoderMemoryInfo(const videodec2_decoder_config_t *,
                                                videodec2_decoder_memory_t *m)
     {
+        if (reject_next_policy_query) { reject_next_policy_query = false; return -95; }
         checkpoint(1);
         m->cpu_size = m->gpu_size = m->cpu_gpu_size = 16384;
         m->max_frame_size = 64;
@@ -322,7 +326,8 @@ extern "C"
             mock_state->running = 0;
         if (fail_create)
             return -95;
-        assert(config->pipeline_depth == 1);
+        if (reject_next_policy_create) { reject_next_policy_create = false; return -95; }
+        assert(config->pipeline_depth == 1 || policy_depths_allowed);
         held.clear();
         internal_pictures = 0;
         flushing = false;
@@ -1116,11 +1121,44 @@ static void parameter_activation_regressions()
     update();
     assert(decode(state, &unit, 9, FRAME_TYPE_IDR) == DR_OK && creates == 2);
     assert(state->parameter_sets.native_ready(1, state->lifecycle.stream));
+    // Build an actual mock-accepted depth3 owner, then exercise the existing
+    // safe replacement path rather than only changing a configuration struct.
+    policy_depths_allowed = true;
+    auto deeper = state->lifecycle.effective; deeper.depth = 3;
+    assert(configure_stream_decoder(state, state->lifecycle.stream, deeper));
+    assert(decode(state, &unit, 10, FRAME_TYPE_IDR) == DR_OK && state->pipeline_depth == 3);
+    const auto creates_before_policy = creates;
+    auto request_trial = [&] {
+        state->stream_policy.pending_depth = 1;
+        state->stream_policy.pending_action = PolicyAction::DepthOne;
+        state->policy_keyframe_wait = state->await_keyframe = true;
+        state->parameters_requested = true;
+    };
+    // Cached PPS cannot bootstrap a replacement. This IDR is usable by the old
+    // native instance, so reject only the optional optimization and keep playing.
+    request_trial(); unit.bufferList = &picture; unit.fullLength = pic.size();
+    assert(decode(state, &unit, 11, FRAME_TYPE_IDR) == DR_OK);
+    assert(creates == creates_before_policy && !state->stream_policy.pending_depth &&
+           state->stream_policy.rejected == 1 && !state->policy_keyframe_wait && state->pipeline_depth == 3);
+    unit.bufferList = &sps; update();
+    request_trial(); reject_next_policy_query = true;
+    assert(decode(state, &unit, 12, FRAME_TYPE_IDR) == DR_OK);
+    assert(creates == creates_before_policy && state->pipeline_depth == 3 && state->running);
+    // Candidate failure after retirement retries the previous accepted mode.
+    request_trial(); reject_next_policy_create = true;
+    assert(decode(state, &unit, 13, FRAME_TYPE_IDR) == DR_OK);
+    assert(creates == creates_before_policy + 2 && state->pipeline_depth == 3 && state->running);
+    request_trial();
+    assert(decode(state, &unit, 14, FRAME_TYPE_IDR) == DR_OK);
+    assert(creates == creates_before_policy + 3 && state->stream_policy.evaluating &&
+           state->pipeline_depth == 1 && state->parameter_sets.native_ready(1, state->lifecycle.stream));
+    const auto final_creates = creates;
+    policy_depths_allowed = false;
     // Unknown PPS never falls back to the only supplied SPS.
     pic = id_nal(false, 7);
     update();
     assert(decode(state, &unit, 10, FRAME_TYPE_IDR) == DR_NEED_IDR);
-    assert(creates == 2);
+    assert(creates == final_creates);
     pic = id_nal(false, 1);
     update();
     auto conflicting = id_nal(true, 1, 0);
@@ -1130,7 +1168,7 @@ static void parameter_activation_regressions()
     conflict.length = conflicting.size();
     pps.next = &conflict;
     conflict.next = &picture;
-    assert(!prepare_stream_decoder(state, &unit) && creates == 2);
+    assert(!prepare_stream_decoder(state, &unit) && creates == final_creates);
     assert(!decoder_deadline(state, state->transition_wait_since + Lifecycle::startup_timeout_us));
     dispose_owner(state);
 }

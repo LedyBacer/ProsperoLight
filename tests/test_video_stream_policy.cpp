@@ -41,6 +41,49 @@ int main()
     Limits limits; limits.depth = 3;
     assert(initial_plan(r, limits, 2, 7).depth == 2);
     assert(!initial_plan(r, limits, 5, 1).supported);
+    // Source names do not exist in this interface. Healthy/source-limited input
+    // cannot tune; pressure must persist, and a trial cannot oscillate.
+    RuntimePolicy policy;
+    w = window(); w.pending_end = 8; w.queue_mean_us = 120000;
+    w.busy_us = 1900000; w.ready_mean_us = 40000; w.in_flight = 2;
+    w.incoming_fps_x100 = w.decoded_fps_x100 = w.presented_fps_x100 = 6000;
+    w.bytes = 1200000; w.bottleneck = Bottleneck::Decode;
+    assert(policy.observe(2000000,w,r,60,3) == PolicyAction::None);
+    assert(policy.observe(4000000,w,r,60,3) == PolicyAction::DepthOne);
+    assert(policy.trials == 1 && policy.pending_depth == 1);
+    policy.configured(4000000,1);
+    assert(policy.observe(6000000,w,r,60,1) == PolicyAction::None);
+    auto better=w; better.ready_mean_us=5000; better.queue_mean_us=1000;
+    better.pending_end=0; better.bottleneck=Bottleneck::Healthy;
+    assert(policy.observe(10000000,better,r,60,1) == PolicyAction::None);
+    assert(policy.observe(12000000,better,r,60,1) == PolicyAction::None && policy.kept == 1);
+    assert(policy.observe(14000000,w,r,60,1) == PolicyAction::None);
+    assert(policy.observe(16000000,w,r,60,1) == PolicyAction::Resync);
+    for(uint64_t now=18000000;now<100000000;now+=2000000)
+        assert(policy.observe(now,w,r,60,1) == PolicyAction::None);
+    assert(policy.resyncs == 1 && policy.trials == 1);
+    policy={};
+    policy.observe(2000000,w,r,60,3); policy.observe(4000000,w,r,60,3);
+    policy.configured(4000000,1);
+    auto worse=w; worse.queue_mean_us=200000; worse.presented_fps_x100=4800;
+    policy.observe(10000000,worse,r,60,1);
+    assert(policy.observe(12000000,worse,r,60,1) == PolicyAction::RestoreDepth);
+    assert(policy.pending_depth == 3 && policy.rollbacks == 1);
+    policy.configured(12000000,3);
+    for(uint64_t now=14000000;now<100000000;now+=2000000)
+        assert(policy.observe(now,w,r,60,3) == PolicyAction::None);
+    policy={}; auto no_pressure=window();
+    no_pressure.submitted=no_pressure.decoded=no_pressure.presented=50;
+    no_pressure.bottleneck=classify(no_pressure,60);
+    for(uint64_t now=2000000;now<20000000;now+=2000000)
+        assert(policy.observe(now,no_pressure,r,60,1)==PolicyAction::None);
+    assert(!policy.throughput_exceeded && !policy.resyncs);
+    policy={}; auto with_loss=w;with_loss.losses=1;
+    for(uint64_t now=2000000;now<20000000;now+=2000000)
+        assert(policy.observe(now,with_loss,r,60,3)==PolicyAction::None);
+    policy={}; auto reordered=r;reordered.reorder=2;
+    policy.observe(2000000,w,reordered,60,3);
+    assert(policy.observe(4000000,w,reordered,60,3)==PolicyAction::None && !policy.trials);
     fixture::Writer avc;
     avc.ue(0); avc.ue(0); avc.put(1); avc.put(0); avc.ue(0); avc.ue(0); avc.ue(0);
     auto pp = avc.nal(Codec::H264); pp[4] = 0x68;

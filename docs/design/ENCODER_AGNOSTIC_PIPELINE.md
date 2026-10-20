@@ -83,3 +83,37 @@ profile selects software/libx264, veryfast, zerolatency and min_threads4; all
 original app objects and list indices were verified unchanged after restoring
 the host's automatically sorted list order. Global NVENC settings are unchanged.
 Host log selection, not advertised readiness, must confirm the actual encoder.
+
+## Bounded runtime actions
+
+The pure RuntimePolicy consumes two-second windows. At least two consecutive
+active pressure windows (>=4s) with backlog and native service/buffered-output
+pressure are required. One slow IDR, sparse desktop, source FPS below target,
+network-loss ambiguity or a fault/recovery never independently triggers tuning.
+
+For depth>1, zero-reorder streams with measured buffered-output latency may try
+depth1 once. This is a latency trial, not a promise of higher throughput. It
+waits for an actual IDR and fresh matching SPS/PPS, queries the candidate before
+retiring resources, and uses the existing single-owner presenter/GPU join barrier.
+If Query refuses it, the old instance stays. If creation fails after retirement,
+the same bounded creation path tries the prior accepted depth. A usable old-instance
+IDR without fresh headers cancels the optional trial rather than treating native
+knowledge as bootstrap for a new instance. New/reset decoders still require fresh
+complete parameter sets.
+
+After startup exclusion, comparable source-rate/payload windows must demonstrate
+lower queue+output-ready age, no delivery loss and no queue growth to keep the
+candidate. A worse candidate, or no demonstrated benefit within20s of active
+observation, requests one safe-boundary rollback; then depth is locked for the
+session. The previous mode can only be restored within native Query/Create limits.
+Stream-generation changes invalidate comparison. No repeated trial/rollback cycle.
+
+At depth1, sustained queue age above max(100ms,4 frame budgets) can request one
+IDR to discard obsolete queued AUs, using the retained native instance and its
+actually submitted sets. This is latency recovery, not additional throughput.
+No native recreation or memory growth is needed. The session budget is one
+latency resync, one depth trial and one rollback; a persistent deficit is reported
+as exceeding observed throughput, with no bitrate/resolution/FPS reduction.
+The existing packet-independent transition deadline, stop/cancel and native error
+budgets remain in effect. Policy counters distinguish attempts, rejection, kept
+candidate, rollback requests and policy-discarded AUs.

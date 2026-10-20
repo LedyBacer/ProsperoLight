@@ -271,6 +271,8 @@ test-video-lifecycle:
 	@mkdir -p build/tests
 	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -Iinclude -fsanitize=address,undefined -fno-sanitize-recover=all tests/test_video_stream_requirements.cpp -o build/tests/video_stream_requirements
 	@build/tests/video_stream_requirements
+	@$(HOST_CXX) $(HOST_TEST_CXXFLAGS) -Iinclude -fsanitize=address,undefined -fno-sanitize-recover=all tests/test_video_stream_policy.cpp -o build/tests/video_stream_policy
+	@build/tests/video_stream_policy
 
 .PHONY: test-performance-guards
 test-performance-guards: test-video-lifecycle | transport-deps
