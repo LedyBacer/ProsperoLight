@@ -47,6 +47,7 @@
 #include "moonlight_pipeline.hpp"
 #include "video_decoder_lifecycle.hpp"
 #include "video_parameter_sets.hpp"
+#include "video_stream_policy.hpp"
 #include "moonlight_tuning.hpp"
 #include "../platform/ps5/ps5_network_metrics.h"
 #include "../platform/ps5/ps5_fec_cpu.h"
@@ -637,6 +638,10 @@ typedef struct native_renderer_state
     moonlight::video::ParameterSets parameter_sets;
     uint64_t transition_wait_since;
     uint64_t parameter_transition_waits;
+    moonlight::video::PipelineSampler pipeline_sampler;
+    moonlight::TimingHistogram au_size;
+    uint32_t active_pps{256};
+    uint64_t h264_picture_types[5]{};
     uint32_t test_capacity_decoded_before, test_capacity_presented_before;
     void *decoder;
     uint32_t pipeline_depth; // effective; one after a fallback
@@ -1012,6 +1017,39 @@ static void save_performance_summary(const native_renderer_state_t &state,
     ok = ok && report_append(report, sizeof(report), &length,
                              "\"decoder_parameter_transition_waits\":%llu,\n",
                              (unsigned long long)state.parameter_transition_waits);
+    const auto &window = state.pipeline_sampler.last;
+    const auto features = state.active_pps < 256 ? state.parameter_sets.features[state.active_pps]
+                                               : moonlight::video::PpsFeatures{};
+    ok = ok && report_append(report, sizeof(report), &length,
+        "\"stream_bit_depth\":%u,\"stream_reorder_frames\":%u,\"stream_vps_id\":%u,"
+        "\"stream_poc_type\":%u,\"stream_scaling_lists\":%u,\"stream_pps_features_known\":%s,"
+        "\"stream_cabac\":%u,\"stream_hevc_tiles\":%u,\"stream_hevc_wpp\":%u,"
+        "\"stream_hevc_tile_columns\":%u,\"stream_hevc_tile_rows\":%u,"
+        "\"h264_p_pictures\":%llu,\"h264_b_pictures\":%llu,\"h264_i_pictures\":%llu,"
+        "\"au_size_bytes_p50_upper\":%llu,\"au_size_bytes_p95_upper\":%llu,\"au_size_bytes_max\":%llu,\n",
+        state.lifecycle.stream.bit_depth, state.lifecycle.stream.reorder, state.lifecycle.stream.vps_id,
+        state.lifecycle.stream.poc_type, state.lifecycle.stream.scaling_lists ? 1u : 0u,
+        features.known ? "true" : "false", features.cabac ? 1u : 0u, features.tiles ? 1u : 0u,
+        features.wpp ? 1u : 0u, features.tile_columns, features.tile_rows,
+        (unsigned long long)state.h264_picture_types[0], (unsigned long long)state.h264_picture_types[1],
+        (unsigned long long)state.h264_picture_types[2], (unsigned long long)state.au_size.percentile(50),
+        (unsigned long long)state.au_size.percentile(95), (unsigned long long)state.au_size.max_us);
+    ok = ok && report_append(report, sizeof(report), &length,
+        "\"pipeline_diagnostics\":{\"classification\":\"%s\",\"confidence\":\"%s\","
+        "\"window_us\":%llu,\"window_count\":%llu,\"submitted\":%llu,\"decoded\":%llu,\"presented\":%llu,"
+        "\"arrival_estimate_valid\":%s,\"arrival_fps_x100\":%u,\"decoded_fps_x100\":%u,"
+        "\"presented_fps_x100\":%u,\"decode_busy_us\":%llu,\"ready_mean_us\":%llu,"
+        "\"queue_mean_us\":%llu,\"pending_begin\":%u,\"pending_end\":%u,"
+        "\"semantics\":\"last client-only window; no independent host FPS; suspected stage, not physical latency\"},\n",
+        moonlight::video::name(window.bottleneck),
+        window.bottleneck == moonlight::video::Bottleneck::Insufficient ? "unknown" :
+        window.bottleneck == moonlight::video::Bottleneck::Healthy ? "observed-delivery" : "suspected",
+        (unsigned long long)window.elapsed_us, (unsigned long long)state.pipeline_sampler.windows,
+        (unsigned long long)window.submitted, (unsigned long long)window.decoded,
+        (unsigned long long)window.presented, window.incoming_estimate_valid ? "true" : "false",
+        window.incoming_fps_x100, window.decoded_fps_x100, window.presented_fps_x100,
+        (unsigned long long)window.busy_us, (unsigned long long)window.ready_mean_us,
+        (unsigned long long)window.queue_mean_us, window.pending_begin, window.pending_end);
     const auto &life = state.lifecycle;
     ok = ok &&
          report_append(
@@ -2079,6 +2117,7 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
     std::array<uint64_t, 32> supplied{};
     std::array<uint64_t, 256> supplied_pps{};
     sets.selected_pps = 256;
+    sets.picture_type = UINT32_MAX;
     sets.supplied_sps = sets.supplied_pps = false;
     bool conflict = false;
     for (auto *entry = unit->bufferList; entry; entry = entry->next)
@@ -2135,7 +2174,7 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
             uint32_t id{}, unused{};
             bool idr = false, found = false;
             if (!parameter_ids(codec, reinterpret_cast<const uint8_t *>(entry->data), entry->length,
-                               true, id, unused, &idr, &found))
+                               true, id, unused, &idr, &found, &sets.picture_type))
             {
                 unknown |= found;
                 continue;
@@ -2189,7 +2228,7 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
     limits.level_hevc = 156;
     limits.bit_depth = state->mode->hdr ? 10 : 8;
     limits.depth = state->requested_depth;
-    const auto configuration = plan(*selected, limits);
+    const auto configuration = initial_plan(*selected, limits, INPUT_SLOT_COUNT, FRAME_SLOT_COUNT);
     if (!configuration.supported || selected->visible_width != state->mode->visible_width ||
         selected->visible_height != state->mode->visible_height)
     {
@@ -2562,6 +2601,7 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     ++state->access_units;
     state->fragments += fragment_count;
     state->stream_bytes += copied;
+    state->au_size.add(copied);
     if (busy_us)
         *busy_us = busy;
 
@@ -2571,7 +2611,12 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
         return decode_refused(state, result != 0 ? result : -15, trace);
     }
     if (state->stream_aware)
+    {
         state->parameter_sets.submitted();
+        state->active_pps = state->parameter_sets.selected_pps;
+        if (state->mode->codec_type == 1 && state->parameter_sets.picture_type < 5)
+            ++state->h264_picture_types[state->parameter_sets.picture_type];
+    }
     if (state->submission_count == SUBMISSION_QUEUE_CAPACITY)
         return decode_refused(state, -16, trace);
     {
@@ -2766,6 +2811,27 @@ static uint64_t drain_decoder(native_renderer_state_t *state)
     return spent;
 }
 
+// Two-second decode-owner snapshots reuse existing totals. No new receive hooks,
+// presenter locks, clocks per picture, or cross-thread reads of plain counters.
+static void observe_pipeline(native_renderer_state_t *state, uint64_t now)
+{
+    if (!state->stream_aware || !state->pipeline_sampler.due(now)) return;
+    moonlight::video::PipelineCounters c{};
+    c.submitted = state->access_units; c.decoded = state->decoded;
+    c.presented = state->presented.load(std::memory_order_relaxed);
+    c.bytes = state->stream_bytes;
+    c.busy_us = state->decode_total_us + state->flush_total_us;
+    c.ready_us = state->callback_to_decode_total_us; c.ready_calls = state->ready_calls;
+    c.queue_us = state->queue_timing.total_us;
+    c.losses = state->drops.network;
+    c.overflows = video_queue_overflows.load(std::memory_order_relaxed);
+    c.errors = state->decode_errors + state->drain_faults;
+    c.pending = std::max(0, LiGetPendingVideoFrames());
+    c.in_flight = state->submission_count; c.generation = state->lifecycle.generation;
+    c.recovery_epoch = video_recovery_epoch.load(std::memory_order_relaxed);
+    state->pipeline_sampler.update(now, c, state->stream_fps);
+}
+
 static void *video_decode_thread(void *context)
 {
     auto *state = static_cast<native_renderer_state_t *>(context);
@@ -2802,7 +2868,9 @@ static void *video_decode_thread(void *context)
             busy_us += drain_decoder(state);
         if (state->pipeline_depth > 1u && state->pipeline_faults >= PIPELINE_FAULT_LIMIT)
             fallback_to_classic_decoder(state, state->last_result);
-        state->decode_window.add(monotonic_us(), busy_us);
+        const uint64_t now = monotonic_us();
+        state->decode_window.add(now, busy_us);
+        observe_pipeline(state, now);
     }
     return nullptr;
 }

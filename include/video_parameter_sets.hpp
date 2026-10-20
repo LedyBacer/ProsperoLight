@@ -9,7 +9,7 @@ namespace moonlight::video
 {
 // Only the bounded prefix needed for PPS/slice IDs. No full slice decoding.
 inline bool parameter_ids(Codec codec, const uint8_t *p, size_t n, bool picture, uint32_t &id,
-                          uint32_t &sps, bool *idr = nullptr, bool *found = nullptr)
+                          uint32_t &sps, bool *idr = nullptr, bool *found = nullptr, uint32_t *picture_type = nullptr)
 {
     if (!p || !n)
         return false;
@@ -45,7 +45,8 @@ inline bool parameter_ids(Codec codec, const uint8_t *p, size_t n, bool picture,
             if (codec == Codec::H264)
             {
                 b.ue();
-                b.ue(9);
+                const auto type = b.ue(9);
+                if (picture_type) *picture_type = type % 5;
             }
             else
             {
@@ -64,15 +65,47 @@ inline bool parameter_ids(Codec codec, const uint8_t *p, size_t n, bool picture,
     }
     return false;
 }
+// Optional bounded PPS-prefix diagnostics. Unknown/unsupported syntax remains
+// unknown; these fields never reduce allocation or change activation acceptance.
+struct PpsFeatures
+{
+    bool known{}, cabac{}, tiles{}, wpp{};
+    uint32_t tile_columns{}, tile_rows{};
+};
+inline PpsFeatures pps_features(Codec codec, const uint8_t *p, size_t n)
+{
+    PpsFeatures f{};
+    if (parameter_nal(codec, p, n) != ParseResult::Valid) return f;
+    const auto header = codec == Codec::H264 ? 1u : 2u;
+    Bits b(p + header, std::min<size_t>(128, n - header));
+    b.ue(codec == Codec::H264 ? 255 : 63); b.ue(codec == Codec::H264 ? 31 : 15);
+    if (codec == Codec::H264)
+    {
+        f.cabac = b.read(1); b.skip(1);
+        if (b.ue(7) != 0) return {}; // FMO syntax is not inspected.
+        b.ue(31); b.ue(31); // Default active reference counts.
+    }
+    else
+    {
+        b.skip(7); b.ue(14); b.ue(14); b.se(); b.skip(2);
+        if (b.read(1)) b.ue(6);
+        b.se(); b.se(); b.skip(4);
+        f.tiles = b.read(1); f.wpp = b.read(1);
+        if (f.tiles) { f.tile_columns = b.ue(19) + 1; f.tile_rows = b.ue(21) + 1; }
+    }
+    f.known = b.ok;
+    return f;
+}
 struct ParameterSets
 {
     std::array<Requirements, 32> sps{};
     std::array<uint8_t, 256> pps_sps{};
     std::array<bool, 256> pps_valid{};
+    std::array<PpsFeatures, 256> features{};
     // Learned versions are distinct from headers accepted by this native instance.
     std::array<uint64_t, 256> pps_identity{}, submitted_pps{};
     uint64_t submitted_sps{};
-    uint32_t selected_pps{256};
+    uint32_t selected_pps{256}, picture_type{UINT32_MAX};
     bool supplied_sps{}, supplied_pps{};
     void forget_submitted()
     {
@@ -122,7 +155,9 @@ struct ParameterSets
             return false;
         pps_sps[id] = parent;
         pps_valid[id] = sps[parent].verified;
-        pps_identity[id] = identity(p, n);
+        const auto version = identity(p, n);
+        if (pps_identity[id] != version) features[id] = pps_features(codec, p, n);
+        pps_identity[id] = version;
         return true;
     }
     const Requirements *picture(Codec codec, const uint8_t *p, size_t n) const

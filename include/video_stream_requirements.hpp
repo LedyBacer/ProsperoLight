@@ -28,7 +28,8 @@ struct Requirements
     Codec codec{};
     uint32_t profile{}, level{}, width{}, height{}, visible_width{}, visible_height{};
     uint32_t chroma{1}, bit_depth{8}, references{}, buffering{}, reorder{}, standard_dpb{};
-    uint32_t parameter_id{};
+    uint32_t parameter_id{}, vps_id{}, poc_type{};
+    bool scaling_lists{};
     uint64_t identity{};
     bool verified{}, progressive{true};
 };
@@ -255,7 +256,8 @@ inline ParseResult h264_sps(const uint8_t *p, size_t n, Requirements &out)
         if (b.ue(6) + 8 != r.bit_depth)
             return ParseResult::Unsupported;
         b.skip(1);
-        if (b.read(1))
+        r.scaling_lists = b.read(1);
+        if (r.scaling_lists)
             for (unsigned i = 0; i < (r.chroma == 3 ? 12u : 8u) && b.ok; ++i)
                 if (b.read(1))
                 {
@@ -273,7 +275,7 @@ inline ParseResult h264_sps(const uint8_t *p, size_t n, Requirements &out)
         break;
     }
     b.ue(12); // log2_max_frame_num_minus4
-    const auto poc = b.ue(2);
+    const auto poc = r.poc_type = b.ue(2);
     if (poc == 0)
         b.ue(12);
     else if (poc == 1)
@@ -473,7 +475,8 @@ inline void hevc_tail(Bits &b, unsigned layers, unsigned poc_bits, Requirements 
     b.ue(3);
     b.ue(4);
     b.ue(4);
-    if (b.read(1) && b.read(1))
+    r.scaling_lists = b.read(1);
+    if (r.scaling_lists && b.read(1))
         hevc_scaling(b);
     b.skip(2);
     if (b.read(1))
@@ -540,7 +543,7 @@ inline ParseResult hevc_sps(const uint8_t *p, size_t n, Requirements &out)
     Bits b(p, n);
     Requirements r{};
     r.codec = Codec::Hevc;
-    b.skip(4);
+    r.vps_id = b.read(4);
     const auto layers = b.read(3);
     if (layers > 6)
         return ParseResult::Invalid;
