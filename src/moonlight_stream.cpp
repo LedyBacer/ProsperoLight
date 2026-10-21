@@ -5390,6 +5390,12 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     renderer.input_size = INPUT_SLOT_BYTES;
     renderer.direct_limit = direct_memory_limit;
     renderer.stream_aware = true;
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active() &&
+        prosperolight::test_lab::active_profile().native_queue_limit_ms)
+        renderer.overload_limit_us =
+            *prosperolight::test_lab::active_profile().native_queue_limit_ms * UINT64_C(1000);
+#endif
     renderer.stream_policy.allow_reconfiguration = MOONLIGHT_EXPERIMENTAL_DECODER_CONTROLS != 0;
     renderer.lifecycle.wait(0);
     renderer.slices_requested = stream_slices;

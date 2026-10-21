@@ -66,7 +66,9 @@ RTP -> receive/FEC/assembly -> bounded 15-AU Limelight queue -> pull decode owne
 slots -> newest-ready mailbox -> AGC/VideoOut. No new decoded-frame queue.
 VideoDec2-to-AGC stays zero-copy; retirement/reset owns all old allocations.
 
-`NATIVE_MAX_QUEUE_MS=80` is an explicit **developer candidate**. Production is
+`NATIVE_MAX_QUEUE_MS=80` is an explicit **developer candidate**. An active Test
+Lab profile may set `capture.native_queue_limit_ms` to 0 or 20–250 for a
+session-only control/candidate comparison on the same binary; it never persists. Production is
 `0` until native evidence supports promotion. With the candidate enabled:
 
 - Inspect a valid Limelight enqueue timestamp before native submission. Start
