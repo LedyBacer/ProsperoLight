@@ -30,6 +30,16 @@
 #ifndef FWCOMPAT_LEGACY_VIDEOOUT
 #define FWCOMPAT_LEGACY_VIDEOOUT 0
 #endif
+// Runtime firmware-aware VRR API policy. HFR remains independently selectable.
+#ifndef FWCOMPAT_AUTO_VIDEOOUT
+#define FWCOMPAT_AUTO_VIDEOOUT 0
+#endif
+#if FWCOMPAT_LEGACY_VIDEOOUT && FWCOMPAT_AUTO_VIDEOOUT
+#error Forced legacy and automatic VideoOut policies are mutually exclusive
+#endif
+#if FWCOMPAT_AUTO_VIDEOOUT && (!FWCOMPAT_DIAGNOSTICS || !FWCOMPAT_AGC_FIRST)
+#error Automatic VideoOut requires a diagnostic AGC-first build
+#endif
 #if FWCOMPAT_LEGACY_VIDEOOUT && (!FWCOMPAT_DIAGNOSTICS || !FWCOMPAT_AGC_FIRST)
 #error Legacy VideoOut requires a diagnostic AGC-first build
 #endif

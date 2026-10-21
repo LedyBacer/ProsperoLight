@@ -16,13 +16,13 @@ class FWCompat(unittest.TestCase):
  def test_actual_preprocessor_configuration_and_production_defaults(self):
   compiler=shutil.which('clang++') or shutil.which('c++')
   variants=json.loads((ROOT/'tools/fwcompat/variants.json').read_text())
-  self.assertEqual(len(variants),19)
+  self.assertEqual(len(variants),20)
   self.assertTrue(all(len(f"FWCompat {v['id']} 1234567")<=40 for v in variants))
   with tempfile.TemporaryDirectory() as d:
    source=Path(d)/'test.cpp';exe=Path(d)/'test'
    for v in [None,*variants]:
-    values=[0,0,0,0,0,3,0,7,0,0,0] if v is None else [1,1-v['warmup'],1-v['preload'],1-v['cache'],v['force_1080p'],v.get('warmup_mask',3),v.get('agc_first',0),v.get('codec_mask',7),v.get('query_snapshots',0),v.get('compute_last',0),v.get('legacy_videoout',0)]
-    names=['FWCOMPAT_DIAGNOSTICS','FWCOMPAT_SKIP_DECODER_WARMUP','FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD','FWCOMPAT_DISABLE_SHADER_CACHE','FWCOMPAT_FORCE_1080P','FWCOMPAT_WARMUP_MASK','FWCOMPAT_AGC_FIRST','FWCOMPAT_CODEC_MASK','FWCOMPAT_QUERY_SNAPSHOTS','FWCOMPAT_COMPUTE_LAST','FWCOMPAT_LEGACY_VIDEOOUT']
+    values=[0,0,0,0,0,3,0,7,0,0,0,0] if v is None else [1,1-v['warmup'],1-v['preload'],1-v['cache'],v['force_1080p'],v.get('warmup_mask',3),v.get('agc_first',0),v.get('codec_mask',7),v.get('query_snapshots',0),v.get('compute_last',0),v.get('legacy_videoout',0),v.get('auto_videoout',0)]
+    names=['FWCOMPAT_DIAGNOSTICS','FWCOMPAT_SKIP_DECODER_WARMUP','FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD','FWCOMPAT_DISABLE_SHADER_CACHE','FWCOMPAT_FORCE_1080P','FWCOMPAT_WARMUP_MASK','FWCOMPAT_AGC_FIRST','FWCOMPAT_CODEC_MASK','FWCOMPAT_QUERY_SNAPSHOTS','FWCOMPAT_COMPUTE_LAST','FWCOMPAT_LEGACY_VIDEOOUT','FWCOMPAT_AUTO_VIDEOOUT']
     source.write_text('#include "fwcompat.h"\n'+''.join(f'static_assert({n}=={x});\n' for n,x in zip(names,values))+'int main(){}\n')
     flags=[] if v is None else [f'-D{n}={x}' for n,x in zip(names,values)]
     subprocess.run([compiler,'-std=c++20','-I'+str(ROOT/'include'),*flags,str(source),'-o',str(exe)],check=True)
@@ -97,13 +97,13 @@ int main() {
   body=source[source.index('import json,sys\nwith open('):].split('\nPY',1)[0]
   old=sys.argv
   try:
-   for group,expected in [('round3',['00-control','07-compute-only','08-codecs-only','09-agc-first',*[v['id'] for v in json.loads((ROOT/'tools/fwcompat/variants.json').read_text())[10:] if int(v['id'][:2])<=17]]),('round2',['00-control','07-compute-only','08-codecs-only','09-agc-first']),('11-h264-only',['11-h264-only']),('18-legacy-videoout',['18-legacy-videoout']),('round3-partitions',['07-compute-only','08-codecs-only'])]:
+   for group,expected in [('round3',['00-control','07-compute-only','08-codecs-only','09-agc-first',*[v['id'] for v in json.loads((ROOT/'tools/fwcompat/variants.json').read_text())[10:] if int(v['id'][:2])<=17]]),('round2',['00-control','07-compute-only','08-codecs-only','09-agc-first']),('11-h264-only',['11-h264-only']),('18-legacy-videoout',['18-legacy-videoout']),('19-auto-videoout',['19-auto-videoout']),('round3-partitions',['07-compute-only','08-codecs-only'])]:
     sys.argv=['select',group];out=io.StringIO()
     with contextlib.redirect_stdout(out):exec(body,{})
     self.assertEqual([line.split()[0] for line in out.getvalue().splitlines()],expected)
   finally:sys.argv=old
   compiler=shutil.which('clang++') or shutil.which('c++')
-  for flags in (['-DFWCOMPAT_QUERY_SNAPSHOTS=1','-DFWCOMPAT_DIAGNOSTICS=1'],['-DFWCOMPAT_CODEC_MASK=1'],['-DFWCOMPAT_COMPUTE_LAST=1'],['-DFWCOMPAT_LEGACY_VIDEOOUT=1','-DFWCOMPAT_AGC_FIRST=1']):
+  for flags in (['-DFWCOMPAT_QUERY_SNAPSHOTS=1','-DFWCOMPAT_DIAGNOSTICS=1'],['-DFWCOMPAT_CODEC_MASK=1'],['-DFWCOMPAT_COMPUTE_LAST=1'],['-DFWCOMPAT_LEGACY_VIDEOOUT=1','-DFWCOMPAT_AGC_FIRST=1'],['-DFWCOMPAT_AUTO_VIDEOOUT=1'],['-DFWCOMPAT_AUTO_VIDEOOUT=1','-DFWCOMPAT_LEGACY_VIDEOOUT=1','-DFWCOMPAT_AGC_FIRST=1','-DFWCOMPAT_DIAGNOSTICS=1']):
    result=subprocess.run([compiler,'-x','c++','-std=c++20','-fsyntax-only','-I'+str(ROOT/'include'),*flags,'-'],input='#include "fwcompat.h"\n',text=True,capture_output=True)
    self.assertNotEqual(result.returncode,0)
  def test_legacy_videoout_isolated_fixed_rate_path(self):
@@ -127,13 +127,28 @@ int main() {
    begin=wrapper.index('extern "C" int '+signature)
    end=wrapper.index('\n}\n',begin)
    body=wrapper[begin:end]
-   self.assertIn('#if FWCOMPAT_LEGACY_VIDEOOUT',body)
-   legacy=body.split('#if FWCOMPAT_LEGACY_VIDEOOUT',1)[1].split('#else',1)[0]
+   self.assertIn('if (!ps5_videoout_vrr_api_available())',body)
+   legacy=body.split('if (!ps5_videoout_vrr_api_available())',1)[1].split('    }',1)[0]
    self.assertIn(checkpoint,legacy)
    self.assertNotIn('__real_sceVideoOutVrr',legacy)
   self.assertIn('Legacy VideoOut requires a diagnostic AGC-first build',header)
   for stage in ('stream_open.begin','stream_open.end','register_buffers.begin','register_buffers.end'):
    self.assertIn('videoout.'+stage,native)
+ def test_auto_videoout_runtime_gate_is_independent_of_hfr(self):
+  variants=json.loads((ROOT/'tools/fwcompat/variants.json').read_text())
+  v=next(x for x in variants if x['id']=='19-auto-videoout')
+  self.assertEqual((v['agc_first'],v['warmup_mask'],v['auto_videoout'],v.get('legacy_videoout',0)),(1,3,1,0))
+  makefile=(ROOT/'Makefile').read_text()
+  self.assertIn('APP_DEFINITIONS += FWCOMPAT_AUTO_VIDEOOUT=$(FWCOMPAT_AUTO_VIDEOOUT)',makefile)
+  source=(ROOT/'src/pyrowave/video/ps5_presentation_stats.cpp').read_text()
+  native=(ROOT/'src/native_agc_present.cpp').read_text()
+  self.assertIn('sysctlbyname("kern.sdk_version"',source)
+  self.assertIn('0x05100000u',source)
+  self.assertIn('static const bool allowed = probe_vrr_firmware()',source)
+  self.assertIn('if (!ps5_videoout_vrr_api_available())',native)
+  self.assertIn('sceVideoOutIsOutputSupported(handle, VIDEO_OUT_REQUEST_120_HZ',native)
+  self.assertIn('const bool variable = ps5_videoout_vrr_api_available()',native)
+  self.assertNotIn('FWCOMPAT_AUTO_VIDEOOUT\n    (void)handle',native)
  def test_synchronous_diagnostics_ignore_saved_debug_setting(self):
   compiler=shutil.which('clang++') or shutil.which('c++')
   with tempfile.TemporaryDirectory() as d:

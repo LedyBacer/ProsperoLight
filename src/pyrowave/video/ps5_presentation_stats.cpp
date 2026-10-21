@@ -18,6 +18,36 @@ extern "C" int sceKernelUsleep(uint32_t);
 extern "C" int sceVideoOutConfigureOutput(int32_t, uint32_t, const void *, const void *,
                                           const void *);
 extern "C" int __real_sceVideoOutVrrUnpegFromFixedRate(int32_t);
+extern "C" int sysctlbyname(const char *, void *, size_t *, const void *, size_t);
+
+// PS5 kernel sdk_version uses packed hex digits: FW 05.10 => 0x05100000.
+// FW 05.02 predates the April 2022 VRR rollout. Fail closed when unknown.
+static bool probe_vrr_firmware()
+{
+    uint32_t packed = 0;
+    size_t size = sizeof(packed);
+    const int rc = sysctlbyname("kern.sdk_version", &packed, &size, nullptr, 0);
+    const bool allowed = rc == 0 && size == sizeof(packed) &&
+                         (packed & 0xffff0000u) >= 0x05100000u;
+    std::fprintf(stderr, "VideoOut VRR version gate: rc=%08x packed=%08x size=%zu allowed=%u\n",
+                 static_cast<unsigned>(rc), packed, size, allowed ? 1u : 0u);
+    FWCOMPAT_POINT("videoout.vrr_firmware", packed);
+    FWCOMPAT_POINT("videoout.vrr_api_available", allowed ? 1 : 0);
+    return allowed;
+}
+
+bool ps5_videoout_vrr_api_available()
+{
+#if FWCOMPAT_LEGACY_VIDEOOUT
+    return false;
+#elif FWCOMPAT_AUTO_VIDEOOUT
+    static const bool allowed = probe_vrr_firmware();
+    return allowed;
+#else
+    return true;  // Preserve the production and earlier diagnostic paths.
+#endif
+}
+
 static std::atomic<bool> vrr_output{false};
 static std::atomic<int> video_handle{-1};
 static std::atomic<bool> launcher_output{false};
@@ -62,8 +92,9 @@ extern "C" int __real_sceVideoOutVrrPegToFixedRate(int32_t, uint64_t, uint64_t);
 extern "C" int __wrap_sceVideoOutVrrPegToFixedRate(int32_t handle, uint64_t reserved1,
                                                    uint64_t reserved2)
 {
-#if FWCOMPAT_LEGACY_VIDEOOUT
-    // FW 3.x has no VRR API. Its default scanout is already fixed-rate.
+    if (!ps5_videoout_vrr_api_available())
+    {
+    // Old firmware has no VRR API. Its default scanout is already fixed-rate.
     // RADV WSI calls this wrapper independently of the app's own VideoOut
     // setup: a caller's request to keep that fixed mode needs no OS call.
     (void)reserved1;
@@ -71,7 +102,7 @@ extern "C" int __wrap_sceVideoOutVrrPegToFixedRate(int32_t handle, uint64_t rese
     vrr_output.store(false);
     FWCOMPAT_POINT("videoout.legacy_wsi_peg_noop", handle);
     return 0;
-#else
+    }
     // Peg requires an Unpeg state transition. Even an unsuccessful Unpeg can
     // leave that state set in VideoOut, so finish the pair in all cases. Neither
     // return code alone proves a physically fixed HDMI refresh rate.
@@ -88,16 +119,16 @@ extern "C" int __wrap_sceVideoOutVrrPegToFixedRate(int32_t handle, uint64_t rese
         vrr_output.store(true);
     record_output_policy(handle, "peg", result);
     return result;
-#endif
 }
 extern "C" int __wrap_sceVideoOutVrrUnpegFromFixedRate(int32_t handle)
 {
-#if FWCOMPAT_LEGACY_VIDEOOUT
+    if (!ps5_videoout_vrr_api_available())
+    {
     // Do not claim VRR is supported; callers can fall back to fixed rate.
     vrr_output.store(false);
     FWCOMPAT_POINT("videoout.legacy_wsi_unpeg_unsupported", handle);
     return -1;
-#else
+    }
     int result = __real_sceVideoOutVrrUnpegFromFixedRate(handle);
     record_output_policy(handle, "unpeg-initial", result);
     // VideoOut rejects Unpeg when its process-local flag is already set.
@@ -122,7 +153,6 @@ extern "C" int __wrap_sceVideoOutVrrUnpegFromFixedRate(int32_t handle)
     vrr_output.store(result == 0);
     record_output_policy(handle, "unpeg", result);
     return result;
-#endif
 }
 static std::atomic<uint64_t> flips{0}, errors{0};
 extern "C" int __wrap_sceVideoOutOpen(int32_t user, int32_t bus, int32_t index, const void *p)
@@ -145,11 +175,13 @@ extern "C" int __wrap_sceVideoOutOpen(int32_t user, int32_t bus, int32_t index, 
         video_handle.store(handle);
         // Low-refresh RADV sessions do not enter the high-refresh preset
         // branch. They still need an explicit fixed-output request.
-#if FWCOMPAT_LEGACY_VIDEOOUT
-        // FW 3.x does not export VRR Unpeg/Peg: the fixed-rate output is
+#if FWCOMPAT_LEGACY_VIDEOOUT || FWCOMPAT_AUTO_VIDEOOUT
+        // VRR API may be absent: the fixed-rate output is
         // already usable without either transition. Do not dereference imports.
-        if (!launcher_output.load())
+        if (!launcher_output.load() && !ps5_videoout_vrr_api_available())
             FWCOMPAT_POINT("videoout.legacy_open_vrr_skipped", handle);
+        else if (!launcher_output.load() && output_policy() != 2)
+            (void)__wrap_sceVideoOutVrrPegToFixedRate(handle, 0, 0);
 #else
         if (!launcher_output.load() && output_policy() != 2)
             (void)__wrap_sceVideoOutVrrPegToFixedRate(handle, 0, 0);

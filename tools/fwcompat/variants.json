@@ -199,5 +199,16 @@
     "warmup_mask": 3,
     "agc_first": 1,
     "legacy_videoout": 1
+  },
+  {
+    "id": "19-auto-videoout",
+    "warmup": 1,
+    "preload": 1,
+    "cache": 1,
+    "force_1080p": 0,
+    "pyrowave": 1,
+    "warmup_mask": 3,
+    "agc_first": 1,
+    "auto_videoout": 1
   }
 ]

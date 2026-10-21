@@ -17,5 +17,8 @@ void ps5_launcher_output_policy(bool enabled);
 // Result of the actual RADV VRR request, rather than the selected UI mode.
 bool ps5_vrr_output_active();
 
+// Runtime policy for VRR API use. Independent of fixed 120 Hz VideoOut support.
+bool ps5_videoout_vrr_api_available();
+
 // Session-scoped policy supplied before the stream opens VideoOut.
 void ps5_stream_output_policy(unsigned mode);

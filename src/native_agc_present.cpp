@@ -1074,13 +1074,14 @@ static bool settle_refresh_policy(int32_t handle, bool variable, int32_t *unpeg_
                                   int32_t *peg_result)
 {
     *peg_result = 0;
-#if FWCOMPAT_LEGACY_VIDEOOUT
-    // No FW 3.x VRR exports. Leave the output in its default fixed-rate state.
-    (void)variable;
-    *unpeg_result = 0;
-    FWCOMPAT_POINT("videoout.legacy_refresh_vrr_skipped", handle);
-    return false;
-#else
+    if (!ps5_videoout_vrr_api_available())
+    {
+        // Fixed-rate output does not require the newer VRR Unpeg/Peg API.
+        (void)variable;
+        *unpeg_result = 0;
+        FWCOMPAT_POINT("videoout.legacy_refresh_vrr_skipped", handle);
+        return false;
+    }
     *unpeg_result = sceVideoOutVrrUnpegFromFixedRate(handle);
     const bool released =
         *unpeg_result == 0 || (uint32_t)*unpeg_result == VIDEO_OUT_ERROR_VRR_STATE;
@@ -1098,7 +1099,6 @@ static bool settle_refresh_policy(int32_t handle, bool variable, int32_t *unpeg_
         result ? 1 : 0);
     report_agc_receipt(policy);
     return result;
-#endif // FWCOMPAT_LEGACY_VIDEOOUT
 }
 
 static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
@@ -1112,7 +1112,7 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
 #if FWCOMPAT_LEGACY_VIDEOOUT
     (void)handle;
     FWCOMPAT_POINT("videoout.legacy_high_refresh_rejected", requested_fps);
-    return -1; // Legacy diagnostics are limited to fixed 60 Hz or less.
+    return -1; // Keep the known-good variant 18 limited to 60 FPS.
 #else
     *support_result =
         sceVideoOutIsOutputSupported(handle, VIDEO_OUT_REQUEST_120_HZ, NULL, NULL, NULL);
@@ -1121,9 +1121,9 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
     *preset_result = sceVideoOutConfigureOutput(handle, VIDEO_OUT_REQUEST_120_HZ, NULL, NULL, NULL);
     if (*preset_result != 0)
         return *preset_result;
-    const bool variable =
-        vrr_requested.load(std::memory_order_relaxed) ||
-        (requested_fps == 90u && unpaced_90_fps_unpeg.load(std::memory_order_relaxed));
+    const bool variable = ps5_videoout_vrr_api_available() &&
+        (vrr_requested.load(std::memory_order_relaxed) ||
+         (requested_fps == 90u && unpaced_90_fps_unpeg.load(std::memory_order_relaxed)));
     int32_t peg_result = 0;
     const bool released = settle_refresh_policy(handle, variable, vrr_result, &peg_result);
     vrr_active.store(released, std::memory_order_relaxed);
@@ -1132,7 +1132,8 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
         const uint32_t fixed_mode =
             requested_fps > 60u ? VIDEO_OUT_REQUEST_120_HZ : VIDEO_OUT_REQUEST_DEFAULT;
         const int fallback = sceVideoOutConfigureOutput(handle, fixed_mode, NULL, NULL, NULL);
-        const int fallback_peg = sceVideoOutVrrPegToFixedRate(handle, 0, 0);
+        const int fallback_peg = ps5_videoout_vrr_api_available()
+                                     ? sceVideoOutVrrPegToFixedRate(handle, 0, 0) : 0;
         char line[160];
         snprintf(line, sizeof(line), "VRR unpeg unavailable: rc=%08x preset_fallback=%08x peg=%08x",
                  (uint32_t)*vrr_result, (uint32_t)fallback, (uint32_t)fallback_peg);
@@ -1364,7 +1365,8 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
         open_flip_events();
     FWCOMPAT_POINT("videoout.flip_events.ready", presenter.flip_queue ? 1 : 0);
     if (presenter.video >= 0 &&
-        (requested_fps > 60u || vrr_requested.load(std::memory_order_relaxed)))
+        (requested_fps > 60u || (vrr_requested.load(std::memory_order_relaxed) &&
+                                 ps5_videoout_vrr_api_available())))
         mode_result =
             configure_high_refresh_output(presenter.video, requested_fps, &mode_support_result,
                                           &mode_preset_result, &mode_vrr_result);
