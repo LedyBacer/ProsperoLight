@@ -1,7 +1,7 @@
 /*
- * ps5-native-app-boilerplate / ProsperoLight - Decode and presentation worker checks.
- * Copyright (C) 2026 BlackBearReloaded
- * SPDX-License-Identifier: GPL-3.0-or-later
+ * ps5-native-app-boilerplate / ProsperoLight - Decode and presentation worker
+ * checks. Copyright (C) 2026 BlackBearReloaded SPDX-License-Identifier:
+ * GPL-3.0-or-later
  */
 #define PROSPEROLIGHT_LAN_TELEMETRY 0
 #define PROSPEROLIGHT_PERFORMANCE_DETAIL 1
@@ -1288,8 +1288,68 @@ static void qsv_stale_parameter_deadline_regressions()
     dispose_owner(state);
 }
 
+static void native_overload_requires_fresh_reference_chain()
+{
+    using namespace moonlight::video;
+    auto *state = uninitialized_owner();
+    auto sp = fixture::h264(1920, 1080, 1, 42, true, 2);
+    auto pp = id_nal(true, 0), pic = id_nal(false, 0);
+    LENTRY sps{}, pps{}, picture{};
+    sps.bufferType = BUFFER_TYPE_SPS;
+    pps.bufferType = BUFFER_TYPE_PPS;
+    picture.bufferType = BUFFER_TYPE_PICDATA;
+    sps.data = (char *)sp.data();
+    sps.length = sp.size();
+    pps.data = (char *)pp.data();
+    pps.length = pp.size();
+    picture.data = (char *)pic.data();
+    picture.length = pic.size();
+    sps.next = &pps;
+    pps.next = &picture;
+    DECODE_UNIT unit{};
+    unit.bufferList = &sps;
+    unit.fullLength = sp.size() + pp.size() + pic.size();
+    state->overload_limit_us = 80000;
+    assert(decode(state, &unit, 1, FRAME_TYPE_IDR) == DR_OK && state->decoded == 1);
+    const auto original_creates = creates;
+    for (unsigned episode = 0; episode < 3; ++episode)
+    {
+        pending_frames = 3;
+        unit.enqueueTimeUs = PltGetMicroseconds() - 90000;
+        const auto calls = decodes;
+        const auto status = decode(state, &unit, 2 + episode * 3, FRAME_TYPE_PFRAME);
+        assert(decodes == calls); // No stale AU reaches native Decode.
+        if (episode == 2)
+        {
+            assert(status == DR_OK && !state->running);
+            assert(state->lifecycle.reason == Error::Throughput && state->last_result == -35);
+            assert(state->overload.resyncs == 2 && state->overload.stops == 1);
+            break;
+        }
+        assert(status == DR_NEED_IDR && state->await_keyframe && state->decoder_needs_reset);
+        assert(state->transition_wait_since && state->parameters_requested);
+        pending_frames = 0;
+        unit.enqueueTimeUs = PltGetMicroseconds();
+        unit.bufferList = &picture;
+        unit.fullLength = pic.size();
+        assert(decode(state, &unit, 3 + episode * 3, FRAME_TYPE_PFRAME) == DR_OK);
+        assert(decodes == calls && state->await_keyframe); // Dependent P discarded.
+        // An IDR missing fresh SPS/PPS is insufficient after reset, too.
+        assert(decode(state, &unit, 3 + episode * 3, FRAME_TYPE_IDR) == DR_OK);
+        assert(decodes == calls && state->await_keyframe);
+        unit.bufferList = &sps;
+        unit.fullLength = sp.size() + pp.size() + pic.size();
+        assert(decode(state, &unit, 4 + episode * 3, FRAME_TYPE_IDR) == DR_OK);
+        assert(decodes == calls + 1 && !state->decoder_needs_reset && !state->await_keyframe);
+        assert(creates == original_creates); // No extra pool or recreation.
+    }
+    pending_frames = 0;
+    dispose_owner(state);
+}
+
 int main()
 {
+    native_overload_requires_fresh_reference_chain();
     stream_aware_owner();
     pending_parameters_and_placement();
     first_access_unit_and_cancellation();
