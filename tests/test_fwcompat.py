@@ -97,7 +97,7 @@ int main() {
   body=source[source.index('import json,sys\nwith open('):].split('\nPY',1)[0]
   old=sys.argv
   try:
-   for group,expected in [('round3',['00-control','09-agc-first',*[v['id'] for v in json.loads((ROOT/'tools/fwcompat/variants.json').read_text())[10:]]]),('round2',['00-control','07-compute-only','08-codecs-only','09-agc-first']),('11-h264-only',['11-h264-only'])]:
+   for group,expected in [('round3',['00-control','07-compute-only','08-codecs-only','09-agc-first',*[v['id'] for v in json.loads((ROOT/'tools/fwcompat/variants.json').read_text())[10:]]]),('round2',['00-control','07-compute-only','08-codecs-only','09-agc-first']),('11-h264-only',['11-h264-only']),('round3-partitions',['07-compute-only','08-codecs-only'])]:
     sys.argv=['select',group];out=io.StringIO()
     with contextlib.redirect_stdout(out):exec(body,{})
     self.assertEqual([line.split()[0] for line in out.getvalue().splitlines()],expected)

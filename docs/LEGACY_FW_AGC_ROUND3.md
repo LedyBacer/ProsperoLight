@@ -13,6 +13,8 @@ and one-argument AGC init ABI. Normal production defaults remain unchanged.
 | ID | Queries / instrumentation |
 |---|---|
 | 00-control | Matched full warm-up, ordinary AGC order; no early getter |
+| 07-compute-only | Matched compute query only |
+| 08-codecs-only | Matched three codec queries only |
 | 09-agc-first | Matched full warm-up, one early init; defaults before/after warm-up |
 | 10-query-snapshots | Same as 09, also defaults after compute, H.264, HEVC, Main10 |
 | 11-h264-only | H.264 SDR only |
@@ -44,9 +46,9 @@ from this same run; independent 11–16 have no early AGC/getter instrumentation
 
 ## Minimize tester launches
 
-Keep the prior 07-compute-only / 08-codecs-only results from round 2. If missing,
-run those two using the prior [verified downloads](LEGACY_FW_AGC_ARTIFACTS.md)
-first. Record that they belong to the earlier source/SDK patch identity.
+Run fresh **07 → 08** from this round first if you have not already tested
+these query partitions. Both are rebuilt with the same SDK patch as the new
+variants, so you do not need to mix round-2 binaries into this comparison.
 
 1. Run **09 → 10** from this new run. Compare visible menus, init count and
    defaults pointers. Run new **00** if the original failure needs reconfirmation
@@ -83,6 +85,8 @@ private host names and addresses. Restore the normal app folder when done.
 | Variant | Exact FW | Visible responsive menu | Query errors / first NULL stage | Exit/crash | Notes |
 |---|---|---|---|---|---|
 | 00 | | | | | |
+| 07 | | | | | |
+| 08 | | | | | |
 | 09 | | | | | |
 | 10 | | | | | |
 | 11 | | | | | |

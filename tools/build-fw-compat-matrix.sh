@@ -38,8 +38,8 @@ printf '%s\n' "$sha" > "$out/source-sha.txt"
 python3 - "${1:-}" > "$out/variants.txt" <<'PY'
 import json,sys
 with open('tools/fwcompat/variants.json') as f: variants=json.load(f)
-if not sys.argv[1] or sys.argv[1] in ('round2','round3'):
-    ids=('00-control','09-agc-first',*[v['id'] for v in variants[10:]]) if sys.argv[1]=='round3' else ('00-control','07-compute-only','08-codecs-only','09-agc-first')
+if not sys.argv[1] or sys.argv[1] in ('round2','round3','round3-partitions'):
+    ids=('07-compute-only','08-codecs-only') if sys.argv[1]=='round3-partitions' else ('00-control','07-compute-only','08-codecs-only','09-agc-first',*[v['id'] for v in variants[10:]]) if sys.argv[1]=='round3' else ('00-control','07-compute-only','08-codecs-only','09-agc-first')
     variants=[v for v in variants if v['id'] in ids]
     sys.argv[1]=''
 if sys.argv[1] and sys.argv[1]!='all':
