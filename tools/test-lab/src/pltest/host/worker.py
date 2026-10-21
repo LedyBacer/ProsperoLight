@@ -123,12 +123,29 @@ class Worker:
             raise RuntimeError(','.join(self.ready['reasons']))
         self.state = 'READY'
 
+    async def await_current_ready(self, timeout=3):
+        # A host launch can briefly change display/DPI after the original Ready.
+        # Wait for a current valid heartbeat; never accept stale/invalid evidence
+        # or change the readiness thresholds to make a benchmark start.
+        deadline = time.monotonic() + timeout
+        while True:
+            now = time.monotonic()
+            age = now - self.last_page_heartbeat
+            gate = (readiness(self.latest_page, self.monitor, self.settings['fps'], display.probe())
+                    if self.latest_page and 0 <= age <= 3 else
+                    {'ready': False, 'reasons': ['PAGE_HEARTBEAT_STALE']})
+            if gate['ready']:
+                return
+            if now >= deadline:
+                self.event('ready_expired', {'heartbeat_age_seconds': age,
+                                             'reasons': gate['reasons']})
+                raise RuntimeError('READY_EXPIRED')
+            await asyncio.sleep(min(.05, max(0, deadline - now)))
+
     async def start(self):
         if self.state != 'READY' or not self.page:
             raise RuntimeError('HOST_NOT_READY')
-        if not self.latest_page or time.monotonic() - self.last_page_heartbeat > 3 or not readiness(
-                self.latest_page, self.monitor, self.settings['fps'], display.probe())['ready']:
-            raise RuntimeError('READY_EXPIRED')
+        await self.await_current_ready()
         self.state = 'STARTING'
         self.started_event = asyncio.Event()
         import uuid
