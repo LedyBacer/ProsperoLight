@@ -1199,12 +1199,91 @@ static void parameter_activation_regressions()
     dispose_owner(state);
 }
 
+static void qsv_stale_parameter_deadline_regressions()
+{
+    using namespace moonlight::video;
+    auto *state = uninitialized_owner();
+    auto sp = fixture::h264(1920, 1080, 1, 42, true, 2);
+    auto pp = id_nal(true, 0), pic = id_nal(false, 0);
+    LENTRY sps{}, pps{}, picture{};
+    sps.bufferType = BUFFER_TYPE_SPS;
+    pps.bufferType = BUFFER_TYPE_PPS;
+    picture.bufferType = BUFFER_TYPE_PICDATA;
+    sps.next = &pps;
+    pps.next = &picture;
+    DECODE_UNIT unit{};
+    auto update = [&]
+    {
+        sps.data = (char *)sp.data();
+        sps.length = sp.size();
+        pps.data = (char *)pp.data();
+        pps.length = pp.size();
+        picture.data = (char *)pic.data();
+        picture.length = pic.size();
+        unit.fullLength = unit.bufferList == &picture ? pic.size() : sp.size() + pp.size() + pic.size();
+    };
+    update();
+    unit.bufferList = &picture;
+    // No fresh bootstrap: a P frame can never initialize the native owner.
+    pic[4] = 0x41;
+    assert(decode(state, &unit, 1, FRAME_TYPE_PFRAME) == DR_NEED_IDR && !state->decoder);
+    unit.bufferList = &sps;
+    pic[4] = 0x65;
+    update();
+    assert(decode(state, &unit, 2, FRAME_TYPE_IDR) == DR_OK && state->decoder);
+    const auto generation = state->lifecycle.generation;
+    unit.bufferList = &picture;
+    pic = id_nal(false, 7);
+    pic[4] = 0x41;
+    update();
+    // Incomplete/unrecognized AU requests IDR, but does not invalidate the
+    // already bootstrapped native instance or its accepted SPS/PPS generation.
+    assert(decode(state, &unit, 3, FRAME_TYPE_PFRAME) == DR_NEED_IDR);
+    const auto stale_since = state->transition_wait_since;
+    assert(stale_since && state->parameters_requested && !state->await_keyframe);
+    pic = id_nal(false, 0);
+    pic[4] = 0x41;
+    update();
+    for (int frame = 4; frame < 20; ++frame)
+        assert(decode(state, &unit, frame, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(!state->transition_wait_since && !state->parameters_requested);
+    assert(decoder_deadline(state, stale_since + Lifecycle::startup_timeout_us + 1));
+    assert(state->lifecycle.generation == generation && creates == 1 && !state->decode_errors);
+    // Optional refresh leaves this valid owner streaming and times out by
+    // cancelling only the optimization, without killing the session.
+    state->policy_keyframe_wait = true;
+    state->await_keyframe = false;
+    state->parameters_requested = true;
+    state->transition_wait_since = monotonic_us();
+    state->stream_policy.pending_depth = 1;
+    assert(decode(state, &unit, 21, FRAME_TYPE_PFRAME) == DR_OK && state->policy_keyframe_wait);
+    assert(
+        decoder_deadline(state, state->transition_wait_since + Lifecycle::startup_timeout_us + 1));
+    assert(state->running && !state->policy_keyframe_wait && !state->parameters_requested &&
+           !state->stream_policy.pending_depth && !state->transition_wait_since);
+    // A truly different selected SPS/PPS still requires a fresh safe boundary.
+    sp = fixture::h264(1920, 1080, 2, 42, true, 3, 1);
+    pp = id_nal(true, 1, 1);
+    pic = id_nal(false, 1);
+    pic[4] = 0x41;
+    unit.bufferList = &sps;
+    update();
+    assert(decode(state, &unit, 22, FRAME_TYPE_PFRAME) == DR_NEED_IDR);
+    assert(state->transition_wait_since && state->lifecycle.generation == generation);
+    assert(decode(state, &unit, 23, FRAME_TYPE_PFRAME) == DR_OK && state->transition_wait_since);
+    assert(
+        !decoder_deadline(state, state->transition_wait_since + Lifecycle::startup_timeout_us + 1));
+    assert(state->lifecycle.state == State::Failed && state->last_result == -32);
+    dispose_owner(state);
+}
+
 int main()
 {
     stream_aware_owner();
     pending_parameters_and_placement();
     first_access_unit_and_cancellation();
     parameter_activation_regressions();
+    qsv_stale_parameter_deadline_regressions();
     fragment.data = reinterpret_cast<char *>(access_unit);
     fragment.length = sizeof(access_unit);
     pipelined_then_drained(Model::Queued);

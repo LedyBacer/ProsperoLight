@@ -2183,6 +2183,13 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
             const auto parsed = parse_sps(codec, data, entry->length, r);
             if (parsed == ParseResult::Unsupported && unit->frameType != FRAME_TYPE_IDR)
             {
+                if (state->policy_keyframe_wait)
+                {
+                    if (state->stream_policy.pending_depth)
+                        state->stream_policy.reject();
+                    state->policy_keyframe_wait = false;
+                    state->transition_wait_since = 0;
+                }
                 if (!state->transition_wait_since)
                 {
                     state->transition_wait_since = monotonic_us();
@@ -2248,6 +2255,23 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
         sets.supplied_sps = supplied[selected->parameter_id] == selected->identity;
         sets.supplied_pps = supplied_pps[sets.selected_pps] == sets.pps_identity[sets.selected_pps];
     }
+    // A policy refresh retains a usable native owner. A genuinely changed
+    // picture configuration supersedes that optional wait and gets its own bound.
+    if (state->policy_keyframe_wait &&
+        (activation || state->decoder_needs_reset || !state->decoder))
+    {
+        if (state->stream_policy.pending_depth)
+            state->stream_policy.reject();
+        state->policy_keyframe_wait = false;
+        state->await_keyframe = true;
+        state->transition_wait_since = monotonic_us();
+    }
+    const bool verified_continuation = selected && !unknown && !conflict && state->decoder &&
+                                       !activation && !state->decoder_needs_reset &&
+                                       state->lifecycle.state == State::Ready;
+    if (verified_continuation && state->policy_keyframe_wait &&
+        (!safe_idr || unit->frameType != FRAME_TYPE_IDR))
+        return true; // Optional IDR request does not stop valid old-instance pictures.
     bool optional_transition = state->stream_policy.pending_depth != 0;
     const bool retained_idr = selected && state->decoder && state->policy_keyframe_wait &&
                               !state->decoder_needs_reset && !activation && safe_idr &&
@@ -2266,6 +2290,16 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
         (complete_required && (!safe_idr || unit->frameType != FRAME_TYPE_IDR ||
                                (fresh_required && (!sets.supplied_sps || !sets.supplied_pps)))))
     {
+        // Unknown/conflicting pictures cannot be treated as usable optional
+        // continuation. Keep their mandatory resolution bound until an exact
+        // old-instance continuation or a complete safe bootstrap proves safety.
+        if (state->policy_keyframe_wait)
+        {
+            if (state->stream_policy.pending_depth)
+                state->stream_policy.reject();
+            state->policy_keyframe_wait = false;
+            state->transition_wait_since = 0;
+        }
         if (!state->transition_wait_since)
         {
             state->transition_wait_since = monotonic_us();
@@ -2275,11 +2309,12 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
     }
     if (!complete_required)
     {
-        if (safe_idr && unit->frameType == FRAME_TYPE_IDR)
-        {
-            state->transition_wait_since = 0;
-            state->parameters_requested = false;
-        }
+        // selected is the verified, actually submitted SPS/PPS generation and
+        // no reset/recreation/keyframe operation remains. A prior rejected AU
+        // must not leave a fatal deadline armed until an unrelated future IDR.
+        state->transition_wait_since = 0;
+        state->parameters_requested = false;
+        state->policy_keyframe_wait = false;
         return true;
     }
     Limits limits{};
@@ -2336,11 +2371,24 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
     }
     state->transition_wait_since = 0;
     state->parameters_requested = false;
+    state->policy_keyframe_wait = false;
     return true;
 }
 
 static bool decoder_deadline(native_renderer_state_t *state, uint64_t now)
 {
+    if (state->policy_keyframe_wait && !state->await_keyframe && state->decoder &&
+        !state->decoder_needs_reset && state->lifecycle.state == moonlight::video::State::Ready &&
+        state->transition_wait_since && now >= state->transition_wait_since &&
+        now - state->transition_wait_since >= moonlight::video::Lifecycle::startup_timeout_us)
+    {
+        if (state->stream_policy.pending_depth)
+            state->stream_policy.reject();
+        state->policy_keyframe_wait = false;
+        state->await_keyframe = false;
+        state->transition_wait_since = 0;
+        state->parameters_requested = false;
+    }
     if (state->lifecycle.expired(now) ||
         (state->transition_wait_since && now >= state->transition_wait_since &&
          now - state->transition_wait_since >= moonlight::video::Lifecycle::startup_timeout_us))
@@ -2948,7 +2996,9 @@ static void observe_pipeline(native_renderer_state_t *state, uint64_t now)
     if (action == moonlight::video::PolicyAction::None)
         return;
     state->policy_keyframe_wait = true;
-    state->await_keyframe = true;
+    // The old native owner remains valid while an optional IDR is outstanding.
+    // Mandatory native recovery sets await_keyframe independently.
+    state->await_keyframe = false;
     state->parameters_requested = true;
     state->transition_wait_since = now;
     ++state->decoder_refreshes;
