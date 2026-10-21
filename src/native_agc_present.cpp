@@ -14,6 +14,7 @@
 #include "moonlight_stream_keyboard.hpp"
 #include "native_agc_output.hpp"
 #include "stream_overlay.hpp"
+#include "fwcompat.h"
 using namespace stream_overlay;
 
 #include <atomic>
@@ -1073,6 +1074,13 @@ static bool settle_refresh_policy(int32_t handle, bool variable, int32_t *unpeg_
                                   int32_t *peg_result)
 {
     *peg_result = 0;
+#if FWCOMPAT_LEGACY_VIDEOOUT
+    // No FW 3.x VRR exports. Leave the output in its default fixed-rate state.
+    (void)variable;
+    *unpeg_result = 0;
+    FWCOMPAT_POINT("videoout.legacy_refresh_vrr_skipped", handle);
+    return false;
+#else
     *unpeg_result = sceVideoOutVrrUnpegFromFixedRate(handle);
     const bool released =
         *unpeg_result == 0 || (uint32_t)*unpeg_result == VIDEO_OUT_ERROR_VRR_STATE;
@@ -1090,6 +1098,7 @@ static bool settle_refresh_policy(int32_t handle, bool variable, int32_t *unpeg_
         result ? 1 : 0);
     report_agc_receipt(policy);
     return result;
+#endif // FWCOMPAT_LEGACY_VIDEOOUT
 }
 
 static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
@@ -1100,6 +1109,11 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
     *support_result = 0;
     *preset_result = 0;
     *vrr_result = 0;
+#if FWCOMPAT_LEGACY_VIDEOOUT
+    (void)handle;
+    FWCOMPAT_POINT("videoout.legacy_high_refresh_rejected", requested_fps);
+    return -1; // Legacy diagnostics are limited to fixed 60 Hz or less.
+#else
     *support_result =
         sceVideoOutIsOutputSupported(handle, VIDEO_OUT_REQUEST_120_HZ, NULL, NULL, NULL);
     if (*support_result <= 0)
@@ -1126,6 +1140,7 @@ static int configure_high_refresh_output(int32_t handle, uint32_t requested_fps,
         return fallback;
     }
     return 0;
+#endif // FWCOMPAT_LEGACY_VIDEOOUT
 }
 
 static int configure_launcher_output(int32_t handle)
@@ -1260,6 +1275,12 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
     presenter.scanout_height = output.height;
     presenter.scanout_refresh_x100 = 0;
     presenter.requested_fps = requested_fps;
+#if FWCOMPAT_LEGACY_VIDEOOUT
+    if (requested_fps > 60u || vrr_requested.load(std::memory_order_relaxed)) {
+        FWCOMPAT_POINT("videoout.legacy_unsupported_fps_or_vrr", requested_fps);
+        return -8;
+    }
+#endif
     presenter.framebuffer_bytes = output.framebuffer_bytes;
     presenter.framebuffer_pool_bytes = framebuffer_pool_bytes;
 
@@ -1336,9 +1357,12 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
 
     flush_gpu_data(presenter.shader_memory, SHADER_STATIC_BYTES);
 
+    FWCOMPAT_POINT("videoout.stream_open.begin", 0);
     presenter.video = sceVideoOutOpen(0xff, 0, 0, NULL);
+    FWCOMPAT_POINT("videoout.stream_open.end", presenter.video);
     if (presenter.video >= 0)
         open_flip_events();
+    FWCOMPAT_POINT("videoout.flip_events.ready", presenter.flip_queue ? 1 : 0);
     if (presenter.video >= 0 &&
         (requested_fps > 60u || vrr_requested.load(std::memory_order_relaxed)))
         mode_result =
@@ -1350,8 +1374,10 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
         vrr_active.store(settle_refresh_policy(presenter.video, false, &unpeg_result, &peg_result),
                          std::memory_order_relaxed);
     }
+    FWCOMPAT_POINT("videoout.set_flip_rate.begin", presenter.video);
     if (presenter.video >= 0)
         result = sceVideoOutSetFlipRate(presenter.video, 0);
+    FWCOMPAT_POINT("videoout.set_flip_rate.end", result);
     else
         result = presenter.video;
     if (result == 0)
@@ -1389,8 +1415,10 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
         sceVideoOutSetBufferAttribute2(
             &attribute, hdr ? VIDEO_OUT_PIXEL_FORMAT_HDR : VIDEO_OUT_PIXEL_FORMAT_SDR, 0,
             output.width, output.height, 0, 0, 0);
+        FWCOMPAT_POINT("videoout.register_buffers.begin", presenter.video);
         result =
             sceVideoOutRegisterBuffers2(presenter.video, 0, 0, buffers, 2, &attribute, 0, NULL);
+        FWCOMPAT_POINT("videoout.register_buffers.end", result);
     }
     snprintf(receipt, sizeof(receipt),
              "Native AGC stage 4: register=%08x hdr=%u format=%016llx source=%p "

@@ -142,6 +142,7 @@ extern "C" void fwcompat_start()
                         !FWCOMPAT_SKIP_DECODER_WARMUP && !FWCOMPAT_SKIP_VIDEO_MODULE_PRELOAD);
     fwcompat_checkpoint("shader_cache", !FWCOMPAT_DISABLE_SHADER_CACHE);
     fwcompat_checkpoint("force_1080p", FWCOMPAT_FORCE_1080P);
+    fwcompat_checkpoint("legacy_videoout", FWCOMPAT_LEGACY_VIDEOOUT);
     fwcompat_checkpoint("warmup_mask", FWCOMPAT_WARMUP_MASK);
     fwcompat_checkpoint("codec_mask", FWCOMPAT_CODEC_MASK);
     fwcompat_checkpoint("query_snapshots", FWCOMPAT_QUERY_SNAPSHOTS);

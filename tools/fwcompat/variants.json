@@ -188,5 +188,16 @@
     "agc_first": 0,
     "query_snapshots": 0,
     "compute_last": 1
+  },
+  {
+    "id": "18-legacy-videoout",
+    "warmup": 1,
+    "preload": 1,
+    "cache": 1,
+    "force_1080p": 0,
+    "pyrowave": 1,
+    "warmup_mask": 3,
+    "agc_first": 1,
+    "legacy_videoout": 1
   }
 ]

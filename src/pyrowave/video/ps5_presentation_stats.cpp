@@ -6,6 +6,7 @@
 #include "lan_http_report.hpp"
 #include "app_storage.hpp"
 #include "presentation_preferences.hpp"
+#include "fwcompat.h"
 #include <atomic>
 #include <cstdio>
 #ifdef __PROSPERO__
@@ -126,8 +127,15 @@ extern "C" int __wrap_sceVideoOutOpen(int32_t user, int32_t bus, int32_t index, 
         video_handle.store(handle);
         // Low-refresh RADV sessions do not enter the high-refresh preset
         // branch. They still need an explicit fixed-output request.
+#if FWCOMPAT_LEGACY_VIDEOOUT
+        // FW 3.x does not export VRR Unpeg/Peg: the fixed-rate output is
+        // already usable without either transition. Do not dereference imports.
+        if (!launcher_output.load())
+            FWCOMPAT_POINT("videoout.legacy_open_vrr_skipped", handle);
+#else
         if (!launcher_output.load() && output_policy() != 2)
             (void)__wrap_sceVideoOutVrrPegToFixedRate(handle, 0, 0);
+#endif
         record_output_policy(handle, "open", 0);
         flips.store(0);
         errors.store(0);

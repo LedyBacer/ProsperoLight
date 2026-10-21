@@ -26,6 +26,13 @@
 #ifndef FWCOMPAT_AGC_FIRST
 #define FWCOMPAT_AGC_FIRST 0
 #endif
+// Experimental FW 3.x VideoOut: never call the newer VRR Unpeg/Peg API.
+#ifndef FWCOMPAT_LEGACY_VIDEOOUT
+#define FWCOMPAT_LEGACY_VIDEOOUT 0
+#endif
+#if FWCOMPAT_LEGACY_VIDEOOUT && (!FWCOMPAT_DIAGNOSTICS || !FWCOMPAT_AGC_FIRST)
+#error Legacy VideoOut requires a diagnostic AGC-first build
+#endif
 #if FWCOMPAT_WARMUP_MASK < 0 || FWCOMPAT_WARMUP_MASK > 3
 #error Invalid diagnostic warmup mask
 #endif
