@@ -1226,12 +1226,13 @@ static void qsv_stale_parameter_deadline_regressions()
         pps.length = pp.size();
         picture.data = (char *)pic.data();
         picture.length = pic.size();
-        unit.fullLength = unit.bufferList == &picture ? pic.size() : sp.size() + pp.size() + pic.size();
+        unit.fullLength =
+            unit.bufferList == &picture ? pic.size() : sp.size() + pp.size() + pic.size();
     };
-    update();
     unit.bufferList = &picture;
     // No fresh bootstrap: a P frame can never initialize the native owner.
     pic[4] = 0x41;
+    update();
     assert(decode(state, &unit, 1, FRAME_TYPE_PFRAME) == DR_NEED_IDR && !state->decoder);
     unit.bufferList = &sps;
     pic[4] = 0x65;
@@ -1250,8 +1251,10 @@ static void qsv_stale_parameter_deadline_regressions()
     pic = id_nal(false, 0);
     pic[4] = 0x41;
     update();
+    const auto decoded_before_continuation = state->decoded;
     for (int frame = 4; frame < 20; ++frame)
         assert(decode(state, &unit, frame, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(state->decoded == decoded_before_continuation + 16);
     assert(!state->transition_wait_since && !state->parameters_requested);
     assert(decoder_deadline(state, stale_since + Lifecycle::startup_timeout_us + 1));
     assert(state->lifecycle.generation == generation && creates == 1 && !state->decode_errors);
@@ -1262,7 +1265,9 @@ static void qsv_stale_parameter_deadline_regressions()
     state->parameters_requested = true;
     state->transition_wait_since = monotonic_us();
     state->stream_policy.pending_depth = 1;
+    const auto decoded_before_refresh = state->decoded;
     assert(decode(state, &unit, 21, FRAME_TYPE_PFRAME) == DR_OK && state->policy_keyframe_wait);
+    assert(state->decoded == decoded_before_refresh + 1);
     assert(
         decoder_deadline(state, state->transition_wait_since + Lifecycle::startup_timeout_us + 1));
     assert(state->running && !state->policy_keyframe_wait && !state->parameters_requested &&
