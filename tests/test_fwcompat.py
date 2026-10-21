@@ -119,6 +119,18 @@ int main() {
   self.assertIn('videoout.legacy_refresh_vrr_skipped',native)
   self.assertIn('videoout.legacy_high_refresh_rejected',native)
   self.assertIn('videoout.legacy_open_vrr_skipped',wrapper)
+  # RADV's linked WSI calls these wrappers directly, bypassing the Open shim.
+  for signature,checkpoint in [
+   ('__wrap_sceVideoOutVrrPegToFixedRate','videoout.legacy_wsi_peg_noop'),
+   ('__wrap_sceVideoOutVrrUnpegFromFixedRate','videoout.legacy_wsi_unpeg_unsupported')
+  ]:
+   begin=wrapper.index('extern "C" int '+signature)
+   end=wrapper.index('\n}\n',begin)
+   body=wrapper[begin:end]
+   self.assertIn('#if FWCOMPAT_LEGACY_VIDEOOUT',body)
+   legacy=body.split('#if FWCOMPAT_LEGACY_VIDEOOUT',1)[1].split('#else',1)[0]
+   self.assertIn(checkpoint,legacy)
+   self.assertNotIn('__real_sceVideoOutVrr',legacy)
   self.assertIn('Legacy VideoOut requires a diagnostic AGC-first build',header)
   for stage in ('stream_open.begin','stream_open.end','register_buffers.begin','register_buffers.end'):
    self.assertIn('videoout.'+stage,native)

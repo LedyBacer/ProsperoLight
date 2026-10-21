@@ -6,14 +6,21 @@ Experimental test of the FW 3.00 stream crash after working AGC-first launcher.
 
 - Retains full early Videodec2 warm-up and exactly one early AGC initialization.
 - Avoids all runtime calls to VideoOut VRR Unpeg/Peg from the stream opening
-  wrapper and from the native AGC presenter's fixed-refresh policy on this
+  wrapper, **both exported link-time VRR wrappers (also called directly by
+  RADV WSI)** and the native AGC presenter's fixed-refresh policy in this
   diagnostic build only; does not change production behavior.
+- On this build, a VRR Peg request is a no-op success (the older firmware is
+  already in fixed-rate mode); Unpeg returns unsupported, rather than falsely
+  claiming that variable refresh is available.
 - Rejects requested refresh rates over 60 FPS and VRR-enabled presentation.
 - Adds bounded launch/presenter checkpoints around VideoOut open, flip events,
   fixed-rate setup, and buffer registration.
 
-The suspected failure is a NULL indirect call to a missing VRR import on older
-firmware. The exact firmware-side cause remains unverified until the new test.
+The first variant 18 (commit 647a5bed) still crashed at RIP 0 when RADV WSI
+called the VRR Peg wrapper, which forwarded to a missing Unpeg import.
+The new variant 18 commit specifically guards both wrappers; compare the
+full source SHA in build-label.txt rather than reusing the old ZIP.
+The exact firmware-side cause remains unverified until the new hardware test.
 
 ## Test procedure (PS5 FW 3.00, optionally FW 4.x)
 

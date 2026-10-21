@@ -62,6 +62,16 @@ extern "C" int __real_sceVideoOutVrrPegToFixedRate(int32_t, uint64_t, uint64_t);
 extern "C" int __wrap_sceVideoOutVrrPegToFixedRate(int32_t handle, uint64_t reserved1,
                                                    uint64_t reserved2)
 {
+#if FWCOMPAT_LEGACY_VIDEOOUT
+    // FW 3.x has no VRR API. Its default scanout is already fixed-rate.
+    // RADV WSI calls this wrapper independently of the app's own VideoOut
+    // setup: a caller's request to keep that fixed mode needs no OS call.
+    (void)reserved1;
+    (void)reserved2;
+    vrr_output.store(false);
+    FWCOMPAT_POINT("videoout.legacy_wsi_peg_noop", handle);
+    return 0;
+#else
     // Peg requires an Unpeg state transition. Even an unsuccessful Unpeg can
     // leave that state set in VideoOut, so finish the pair in all cases. Neither
     // return code alone proves a physically fixed HDMI refresh rate.
@@ -78,9 +88,16 @@ extern "C" int __wrap_sceVideoOutVrrPegToFixedRate(int32_t handle, uint64_t rese
         vrr_output.store(true);
     record_output_policy(handle, "peg", result);
     return result;
+#endif
 }
 extern "C" int __wrap_sceVideoOutVrrUnpegFromFixedRate(int32_t handle)
 {
+#if FWCOMPAT_LEGACY_VIDEOOUT
+    // Do not claim VRR is supported; callers can fall back to fixed rate.
+    vrr_output.store(false);
+    FWCOMPAT_POINT("videoout.legacy_wsi_unpeg_unsupported", handle);
+    return -1;
+#else
     int result = __real_sceVideoOutVrrUnpegFromFixedRate(handle);
     record_output_policy(handle, "unpeg-initial", result);
     // VideoOut rejects Unpeg when its process-local flag is already set.
@@ -105,6 +122,7 @@ extern "C" int __wrap_sceVideoOutVrrUnpegFromFixedRate(int32_t handle)
     vrr_output.store(result == 0);
     record_output_policy(handle, "unpeg", result);
     return result;
+#endif
 }
 static std::atomic<uint64_t> flips{0}, errors{0};
 extern "C" int __wrap_sceVideoOutOpen(int32_t user, int32_t bus, int32_t index, const void *p)
