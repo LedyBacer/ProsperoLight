@@ -28,6 +28,16 @@ int main() {
     TestProfile profile; std::string error;
     assert(parse_profile(base,"run-1",profile,error));
     assert(!profile.decoder_capacity_probe);
+    for (const char *value : {"0", "80", "250"}) {
+        std::string queue=base; queue.insert(1,std::string("\"capture\":{\"native_queue_limit_ms\":")+value+"},");
+        assert(parse_profile(queue,"run-1",profile,error));
+        assert(profile.native_queue_limit_ms.has_value());
+    }
+    for (const char *value : {"true", "1", "251", "-1"}) {
+        std::string queue=base; queue.insert(1,std::string("\"capture\":{\"native_queue_limit_ms\":")+value+"},");
+        assert(!parse_profile(queue,"run-1",profile,error));
+    }
+    assert(parse_profile(base,"run-1",profile,error) && !profile.native_queue_limit_ms);
     std::string probe=base; probe.insert(1,"\"capture\":{\"decoder_capacity_probe\":true},");
     assert(parse_profile(probe,"run-1",profile,error) && profile.decoder_capacity_probe);
     auto early=probe;early.insert(early.find("decoder_capacity_probe")-1,"\"decoder_capacity_probe_first\":true,");

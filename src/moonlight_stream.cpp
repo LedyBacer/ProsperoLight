@@ -48,6 +48,7 @@
 #include "video_decoder_lifecycle.hpp"
 #include "video_parameter_sets.hpp"
 #include "video_stream_policy.hpp"
+#include "video_overload.hpp"
 #include "moonlight_tuning.hpp"
 #include "../platform/ps5/ps5_network_metrics.h"
 #include "../platform/ps5/ps5_fec_cpu.h"
@@ -709,6 +710,8 @@ typedef struct native_renderer_state
     moonlight::RateWindow decoded_rate;
     moonlight::WindowedTiming decode_window, queue_window;
     moonlight::CatchUpGuard catchup;
+    moonlight::video::OverloadGuard overload;
+    uint64_t overload_limit_us = PROSPEROLIGHT_NATIVE_MAX_QUEUE_MS * UINT64_C(1000);
     moonlight::TimingHistogram copy_timing, decode_timing, queue_timing, reassembly_timing;
     moonlight::TimingHistogram ready_timing, flush_timing, host_timing;
 
@@ -1128,9 +1131,21 @@ static void save_performance_summary(const native_renderer_state_t &state,
     }
     else
 #endif
-        ok = ok && report_append(
-                       report, sizeof(report), &length,
-                       "\"video_delivery\":{\"available\":false,\"scope\":\"whole-session\"},\n");
+        ok = ok && report_append(report, sizeof(report), &length,
+                                 "\"video_delivery\":{\"available\":false,"
+                                 "\"scope\":\"whole-session\"},\n");
+    ok = ok && report_append(report, sizeof(report), &length,
+                             "\"native_overload\":{\"enabled\":%s,\"queue_limit_us\":%llu,"
+                             "\"resyncs\":%u,\"stops\":%u,\"attempts\":%u,\"peak_queue_age_us\":%"
+                             "llu,"
+                             "\"last_action_age_us\":%llu,\"scope\":\"decode-owner observations; "
+                             "not a hard "
+                             "wall-clock bound on blocking native calls\"},\n",
+                             state.overload_limit_us ? "true" : "false",
+                             (unsigned long long)state.overload_limit_us, state.overload.resyncs,
+                             state.overload.stops, state.overload.attempts,
+                             (unsigned long long)state.overload.peak_age_us,
+                             (unsigned long long)state.overload.action_age_us);
     const auto &life = state.lifecycle;
     ok = ok &&
          report_append(
@@ -2524,6 +2539,44 @@ static int decode_refused(native_renderer_state_t *state, int32_t code,
     return DR_NEED_IDR;
 }
 
+// This is a recovery boundary, never selective reference-picture dropping.
+// LiCompleteVideoFrame(DR_NEED_IDR) discards the queued dependent AUs. Native
+// reset and fresh matching IDR headers are mandatory before any further submit.
+static moonlight::video::OverloadAction check_native_overload(native_renderer_state_t *state,
+                                                              PDECODE_UNIT unit, uint64_t now,
+                                                              uint64_t network_now)
+{
+    using namespace moonlight::video;
+    const bool valid = unit->enqueueTimeUs && network_now >= unit->enqueueTimeUs;
+    const bool usable = state->stream_aware && state->decoder && state->decoded &&
+                        !state->decoder_needs_reset && !state->await_keyframe &&
+                        !state->transition_wait_since && state->lifecycle.state == State::Ready;
+    const auto action =
+        state->overload.observe(now, valid ? network_now - unit->enqueueTimeUs : 0, valid,
+                                LiGetPendingVideoFrames(), state->overload_limit_us, usable);
+    if (action == OverloadAction::Continue)
+        return action;
+    state->stream_policy.throughput_exceeded = true;
+    if (state->stream_policy.pending_depth)
+        state->stream_policy.reject();
+    if (action == OverloadAction::Stop)
+    {
+#if PROSPEROLIGHT_TEST_LAB
+        if (prosperolight::test_lab::active())
+            prosperolight::test_lab::context().fail("NATIVE_THROUGHPUT_LIMIT");
+#endif
+        lifecycle_failure(state, Error::Throughput, -35);
+        return action;
+    }
+    state->policy_keyframe_wait = false;
+    state->await_keyframe = true;
+    state->decoder_needs_reset = true;
+    state->transition_wait_since = now;
+    state->parameters_requested = true;
+    ++state->catchup_refreshes;
+    return action;
+}
+
 // Copies one access unit into decoder input memory and submits it. Returns the
 // status for LiCompleteVideoFrame(); `busy_us` is the time spent in Videodec2.
 static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decode_unit,
@@ -2559,6 +2612,13 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
     {
         lifecycle_failure(state, moonlight::video::Error::Parameters, -30);
         return DR_OK;
+    }
+    if (state->overload_limit_us)
+    {
+        const auto action =
+            check_native_overload(state, decode_unit, arrival_us, callback_network_us);
+        if (action != moonlight::video::OverloadAction::Continue)
+            return action == moonlight::video::OverloadAction::Resync ? DR_NEED_IDR : DR_OK;
     }
     if (state->stream_aware && !prepare_stream_decoder(state, decode_unit))
     {
@@ -2701,7 +2761,8 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
         state->host_latency_total_tenths_ms += latency;
         ++state->host_latency_frames;
     }
-    if (state->catchup.update(arrival_us, pending_video, PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES,
+    if (!state->overload_limit_us &&
+        state->catchup.update(arrival_us, pending_video, PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES,
                               CATCHUP_HOLD_US))
     {
         // Opt-in bounded catch-up: trade one keyframe for the accumulated delay.
@@ -5329,6 +5390,12 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     renderer.input_size = INPUT_SLOT_BYTES;
     renderer.direct_limit = direct_memory_limit;
     renderer.stream_aware = true;
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active() &&
+        prosperolight::test_lab::active_profile().native_queue_limit_ms)
+        renderer.overload_limit_us =
+            *prosperolight::test_lab::active_profile().native_queue_limit_ms * UINT64_C(1000);
+#endif
     renderer.stream_policy.allow_reconfiguration = MOONLIGHT_EXPERIMENTAL_DECODER_CONTROLS != 0;
     renderer.lifecycle.wait(0);
     renderer.slices_requested = stream_slices;
@@ -5605,12 +5672,15 @@ configure_stream:
     if (result != 0 && !first_frame_timed_out)
     {
         if (renderer.lifecycle.state == moonlight::video::State::Failed)
-            gs_error =
-                renderer.lifecycle.reason == moonlight::video::Error::Capacity
-                    ? "Video decoder capacity does not support this stream"
-                : renderer.lifecycle.reason == moonlight::video::Error::Unsupported
-                    ? "The incoming stream has unsupported decoder parameters"
-                    : "Video decoder initialization or recovery failed; see decoder diagnostics";
+            gs_error = renderer.lifecycle.reason == moonlight::video::Error::Capacity
+                           ? "Video decoder capacity does not support this stream"
+                       : renderer.lifecycle.reason == moonlight::video::Error::Unsupported
+                           ? "The incoming stream has unsupported decoder parameters"
+                       : renderer.lifecycle.reason == moonlight::video::Error::Throughput
+                           ? "The native decoder cannot sustain this stream without "
+                             "excessive queue delay"
+                           : "Video decoder initialization or recovery failed; see decoder "
+                             "diagnostics";
         else if (renderer.decoder_lost)
             gs_error = "The video decoder could not be restarted";
         else if (result ==

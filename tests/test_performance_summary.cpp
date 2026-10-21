@@ -143,6 +143,8 @@ int main()
     input.add(2000);
     controller_summary = {3, 2, 1, 4, 5, 6};
     save_performance_summary(state, input, &options, 0);
+    assert(saved_report.find("\"native_overload\":{\"enabled\":false,\"queue_limit_us\":0,") !=
+           std::string::npos);
     assert(saved_report.find("\"requested_slices_per_frame\":8,") != std::string::npos);
     const std::string original = saved_report;
     // The same summary reaches klog in bounded parts that concatenate back.

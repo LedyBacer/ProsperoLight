@@ -29,7 +29,8 @@ enum class Error
     Reset,
     Allocation,
     Presentation,
-    Exhausted
+    Exhausted,
+    Throughput
 };
 inline const char *name(State s)
 {
