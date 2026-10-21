@@ -200,7 +200,12 @@ class ToolTests(unittest.TestCase):
         # Frame rate and bitrate keep their released widgets; nothing is typed.
         self.assertCodeContains('form_.add_slider(kBitrate, "Bitrate", 20.0f, kBitrateStep, kBitrateMax,', view)
         self.assertNotIn("number_prompt_", view)
-        self.assertIn("selection->stream_fps = config.stream_fps;", platform)
+        selection = (ROOT / "include/stream_selection.hpp").read_text(encoding="utf-8")
+        model = (ROOT / "src/launcher/launcher_model.cpp").read_text(encoding="utf-8")
+        self.assertIn("o.stream_fps = c.stream_fps;", selection)
+        self.assertIn("moonlight::saved_stream_options(config_)", model)
+        self.assertIn("model.ResolveStreamOptions(effective, error)", platform)
+        self.assertIn("selection->stream_fps = effective.stream_fps;", platform)
         self.assertIn("options.stream_fps = selection.stream_fps;", launcher)
         self.assertIn("stream_config.fps = (int)stream_fps;", stream)
         self.assertIn(
@@ -225,7 +230,9 @@ class ToolTests(unittest.TestCase):
 
         self.assertIn("#define MOONLIGHT_AUDIO_51_SURROUND 1U", config)
         self.assertCodeContains('form_.add_choice(kAudio, "Audio", {"Stereo", "5.1 surround"}, 0)', view)
-        self.assertIn("selection->audio_configuration = config.audio_configuration;", platform)
+        selection = (ROOT / "include/stream_selection.hpp").read_text(encoding="utf-8")
+        self.assertIn("o.audio_configuration = c.audio_configuration;", selection)
+        self.assertIn("selection->audio_configuration = effective.audio_configuration;", platform)
         self.assertIn("options.audio_configuration = selection.audio_configuration;", launcher)
         self.assertIn("audio_configuration = AUDIO_CONFIGURATION_51_SURROUND;", stream)
         self.assertIn("#define PS5_AUDIO_FORMAT_S16_8CH 2", stream)
