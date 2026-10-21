@@ -1377,9 +1377,9 @@ static int initialize_presenter(const void *source, size_t source_bytes, uint32_
     FWCOMPAT_POINT("videoout.set_flip_rate.begin", presenter.video);
     if (presenter.video >= 0)
         result = sceVideoOutSetFlipRate(presenter.video, 0);
-    FWCOMPAT_POINT("videoout.set_flip_rate.end", result);
     else
         result = presenter.video;
+    FWCOMPAT_POINT("videoout.set_flip_rate.end", result);
     if (result == 0)
         result = sceKernelAllocateDirectMemory(0, direct_limit, framebuffer_pool_bytes,
                                                FRAMEBUFFER_ALIGNMENT, DIRECT_MEMORY_TYPE,
