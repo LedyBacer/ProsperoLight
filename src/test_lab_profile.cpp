@@ -315,9 +315,9 @@ bool parse_profile(std::string_view json, std::string_view expected_id, TestProf
     }
     if (auto capture = field(root, "capture"))
     {
-        if (!known(*capture, {"detailed_frame_trace", "host_logs", "gpu_metrics",
-                              "decoder_capacity_probe", "decoder_capacity_probe_first",
-                              "native_queue_limit_ms"}))
+        if (!known(*capture,
+                   {"detailed_frame_trace", "host_logs", "gpu_metrics", "decoder_capacity_probe",
+                    "decoder_capacity_probe_first", "native_queue_limit_ms"}))
             return false;
         for (const auto &[key, val] : capture->fields)
         {
