@@ -157,6 +157,18 @@ int main(int,char **argv) {
  std::ifstream c(std::string(argv[1])+"/receipts/cancel.json");receipt.assign(std::istreambuf_iterator<char>(c),{});
  assert(receipt.find("CANCELLED")!=std::string::npos && receipt.find("\"stream_ready\":false")!=std::string::npos);
  assert(receipt.find("\"fresh\":false")!=std::string::npos); // old exports cannot qualify
+ active()=true;active_profile()=p;active_profile().run_id="launch-refused";
+ assert(prosperolight::test_lab::context().begin(active_profile()));
+ reject_launch("PYROWAVE_PROFILE_UNSUPPORTED");
+ assert(prosperolight::test_lab::context().stop_requested());
+ std::ifstream refused_status(std::string(argv[1])+"/status/launch-refused.json");
+ std::string refused((std::istreambuf_iterator<char>(refused_status)),{});
+ assert(refused.find("PYROWAVE_PROFILE_UNSUPPORTED")!=std::string::npos && refused.find("failed")!=std::string::npos);
+ assert(prosperolight::test_lab::context().finish(nullptr,-1));
+ std::ifstream refused_receipt(std::string(argv[1])+"/receipts/launch-refused.json");
+ refused.assign(std::istreambuf_iterator<char>(refused_receipt),{});
+ assert(refused.find("PYROWAVE_PROFILE_UNSUPPORTED")!=std::string::npos && refused.find("STARTUP_TIMEOUT")==std::string::npos);
+ active()=false;
  for (const char *reason : {"NO_CONTROLLER", "HOST_LOST", "UNSUPPORTED_MODE"}) {
   p.run_id=reason;assert(context.begin(p));context.fail(reason);assert(context.finish(nullptr,-1));
   std::ifstream failed(std::string(argv[1])+"/receipts/"+reason+".json");

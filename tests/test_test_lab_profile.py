@@ -19,6 +19,7 @@ class TestLabProfileTests(unittest.TestCase):
             (p / 'test.cpp').write_text(r'''
 #include "test_lab_profile.hpp"
 #include "forwarded_launch.hpp"
+#include "stream_selection.hpp"
 #include <cassert>
 #include <cstring>
 using namespace prosperolight::test_lab;
@@ -43,6 +44,23 @@ int main() {
     assert(parse_profile(base,"run-1",profile,error));
     moonlight_stream_options_t saved{}; saved.video_codec=2;saved.hdr_enabled=1;saved.stream_fps=120;
     saved.bitrate_kbps=80000;saved.decoder_cores=5;saved.vsync_enabled=0;
+    saved.chroma_sampling=MOONLIGHT_CHROMA_444;
+    moonlight_backend_snapshot_t caps{};
+    assert(moonlight::validate_stream_selection(saved,caps).code); // normal saved launch stays strict
+    TestProfile h264;h264.codec=0;h264.chroma=0;h264.hdr=false;
+    moonlight_stream_options_t lab{};prosperolight::HostPreferences defaults;
+    std::string why;
+    auto snapshot=saved;
+    assert(resolve_profile(h264,saved,defaults,1,0,lab,why));
+    assert(!moonlight::validate_stream_selection(lab,caps).code); // saved Pyro/HDR cannot veto H264 lab
+    assert(!memcmp(&saved,&snapshot,sizeof(saved)));
+    lab.video_codec=MOONLIGHT_VIDEO_CODEC_HEVC;
+    assert(!strcmp(moonlight::validate_stream_selection(lab,caps).code,"HEVC_UNSUPPORTED"));
+    caps.hevc_supported=true;lab.hdr_enabled=1;
+    assert(!strcmp(moonlight::validate_stream_selection(lab,caps).code,"HDR_UNSUPPORTED"));
+    caps.main10_supported=true;assert(!moonlight::validate_stream_selection(lab,caps).code);
+    lab.video_codec=MOONLIGHT_VIDEO_CODEC_PYROWAVE;
+    assert(!strcmp(moonlight::validate_stream_selection(lab,caps).code,"PYROWAVE_PROFILE_UNSUPPORTED"));
     auto before=saved; prosperolight::HostPreferences host;
     moonlight_stream_options_t resolved{};
     assert(resolve_profile(profile,saved,host,0,1,resolved,error));
@@ -86,6 +104,7 @@ int main() {
             for enabled in (0, 1):
                 subprocess.run([compiler, '-std=c++20', '-Wall', '-Wextra', '-Werror',
                                 '-DPROSPEROLIGHT_TEST_LAB=' + str(enabled), '-I', str(ROOT / 'include'),
+                                '-I', str(ROOT / 'third_party/moonlight-common-c/src'),
                                 str(p / 'test.cpp'), str(ROOT / 'src/test_lab_profile.cpp'),
                                 '-o', str(p / 'test')], check=True)
                 subprocess.run([str(p / 'test')], check=True)

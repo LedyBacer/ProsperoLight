@@ -26,6 +26,14 @@ Context &context()
     static Context value;
     return value;
 }
+void reject_launch(const char *reason)
+{
+    if (!active())
+        return;
+    context().fail(reason);
+    context().join();
+    (void)write_profile_status(active_profile().run_id, "failed", 3, nullptr, reason);
+}
 bool Context::begin(const TestProfile &profile, std::string *error)
 {
     if (error)

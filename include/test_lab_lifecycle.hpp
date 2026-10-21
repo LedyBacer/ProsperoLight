@@ -9,6 +9,8 @@
 #include <vector>
 namespace prosperolight::test_lab
 {
+// Publish a synchronous pre-stream refusal and stop the bounded lab lifecycle.
+void reject_launch(const char *reason);
 struct Observation
 {
     bool connected = false, output_valid = false;

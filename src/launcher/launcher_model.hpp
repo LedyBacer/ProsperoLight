@@ -10,6 +10,7 @@
 #include "moonlight_config.hpp"
 #include "moonlight_discovery.hpp"
 #include "moonlight_health.hpp"
+#include "moonlight_stream.hpp"
 
 #include <pthread.h>
 
@@ -211,6 +212,7 @@ class Model
     void StopApp();
     // True when the stream may start; otherwise a notice says why not.
     bool RequestStream();
+    bool ResolveStreamOptions(moonlight_stream_options_t &options, std::string &error) const;
     // Settings: change the returned config, then call SettingsChanged().
     moonlight_config_t &settings()
     {

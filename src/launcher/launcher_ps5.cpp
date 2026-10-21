@@ -155,7 +155,6 @@ bool LoadFont(gfx::Renderer &renderer, const char *name, gfx::Font *font, ui::Fo
 // What the player chose, for the stream. False when nothing can be streamed.
 bool FillSelection(const Model &model, Selection *selection)
 {
-    const moonlight_config_t &config = model.config();
     const moonlight_config_host_t *host = model.selected_host();
     const moonlight_backend_snapshot_t &backend = model.backend();
     if (!host || model.selected_app() >= backend.app_count)
@@ -165,57 +164,33 @@ bool FillSelection(const Model &model, Selection *selection)
     selection->host_port = moonlight_config_host_port(host);
     std::snprintf(selection->app_name, sizeof(selection->app_name), "%s", app.name);
     selection->app_id = app.id;
-    selection->bitrate_kbps = config.bitrate_mbps * 1000u;
-    selection->display_area = config.display_area;
-    selection->video_codec = config.video_codec;
-    selection->stream_resolution = config.stream_resolution;
-    selection->stream_fps = config.stream_fps;
-    selection->hdr_enabled = config.hdr_enabled;
-    selection->chroma_sampling = config.chroma_sampling;
-    selection->audio_configuration = config.audio_configuration;
-    selection->vsync_enabled = config.vsync_enabled;
-    selection->decoder_pipeline = config.decoder_pipeline;
-    selection->decoder_cores = config.decoder_cores;
-#if PROSPEROLIGHT_TEST_LAB
-    if (prosperolight::test_lab::active())
+    moonlight_stream_options_t effective{};
+    std::string error;
+    if (!model.ResolveStreamOptions(effective, error))
     {
-        moonlight_stream_options_t saved{};
-        saved.video_codec = selection->video_codec;
-        saved.chroma_sampling = selection->chroma_sampling;
-        saved.stream_resolution = selection->stream_resolution;
-        saved.stream_fps = selection->stream_fps;
-        saved.bitrate_kbps = selection->bitrate_kbps;
-        saved.hdr_enabled = selection->hdr_enabled;
-        saved.vsync_enabled = selection->vsync_enabled;
-        saved.decoder_pipeline = selection->decoder_pipeline;
-        saved.decoder_cores = selection->decoder_cores;
-        moonlight_stream_options_t resolved{};
-        std::string error;
-        if (!prosperolight::test_lab::resolve_profile(
-                prosperolight::test_lab::active_profile(), saved,
-                prosperolight::host_preferences(host, false), moonlight::presentation_mode(),
-                moonlight::vrr_profile(), resolved, error))
-        {
-            prosperolight::test_lab::context().fail(error.c_str());
-            prosperolight::test_lab::write_profile_status(
-                prosperolight::test_lab::active_profile().run_id, "failed", 2, nullptr, error);
-            prosperolight_debug_line("test-lab", "profile resolution failed: %s", error.c_str());
-            return false;
-        }
-        selection->video_codec = resolved.video_codec;
-        selection->chroma_sampling = resolved.chroma_sampling;
-        selection->stream_resolution = resolved.stream_resolution;
-        selection->stream_fps = resolved.stream_fps;
-        selection->bitrate_kbps = resolved.bitrate_kbps;
-        selection->hdr_enabled = resolved.hdr_enabled;
-        selection->vsync_enabled = resolved.vsync_enabled;
-        selection->decoder_pipeline = resolved.decoder_pipeline;
-        selection->decoder_cores = resolved.decoder_cores;
-        selection->session_overrides = resolved.session_overrides;
-        if (!prosperolight::test_lab::write_profile_status(
-                prosperolight::test_lab::active_profile().run_id, "launching", 2, &resolved))
-            return false;
+#if PROSPEROLIGHT_TEST_LAB
+        if (prosperolight::test_lab::active())
+            prosperolight::test_lab::reject_launch(error.c_str());
+#endif
+        return false;
     }
+    selection->bitrate_kbps = effective.bitrate_kbps;
+    selection->display_area = effective.display_area;
+    selection->video_codec = effective.video_codec;
+    selection->stream_resolution = effective.stream_resolution;
+    selection->stream_fps = effective.stream_fps;
+    selection->hdr_enabled = effective.hdr_enabled;
+    selection->chroma_sampling = effective.chroma_sampling;
+    selection->audio_configuration = effective.audio_configuration;
+    selection->vsync_enabled = effective.vsync_enabled;
+    selection->decoder_pipeline = effective.decoder_pipeline;
+    selection->decoder_cores = effective.decoder_cores;
+    selection->session_overrides = effective.session_overrides;
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active() &&
+        !prosperolight::test_lab::write_profile_status(
+            prosperolight::test_lab::active_profile().run_id, "launching", 2, &effective))
+        return false;
 #endif
     return true;
 }

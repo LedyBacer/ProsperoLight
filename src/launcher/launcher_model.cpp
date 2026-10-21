@@ -9,6 +9,11 @@
 #include "launcher/launcher_model.hpp"
 #include "host_preferences.hpp"
 #include "stream_profile.hpp"
+#include "stream_selection.hpp"
+#if PROSPEROLIGHT_TEST_LAB
+#include "test_lab_lifecycle.hpp"
+#include "presentation_preferences.hpp"
+#endif
 #include "lan_http_report.hpp"
 #include <chrono>
 
@@ -452,44 +457,47 @@ void Model::StopApp()
     requests_.push_back(job);
 }
 
+bool Model::ResolveStreamOptions(moonlight_stream_options_t &options, std::string &error) const
+{
+    options = moonlight::saved_stream_options(config_);
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active())
+        return prosperolight::test_lab::resolve_profile(
+            prosperolight::test_lab::active_profile(), options,
+            prosperolight::host_preferences(selected_host(), false), moonlight::presentation_mode(),
+            moonlight::vrr_profile(), options, error);
+#endif
+    error.clear();
+    return true;
+}
 bool Model::RequestStream()
 {
+    auto reject = [&](const char *code, const char *title, const char *body)
+    {
+#if PROSPEROLIGHT_TEST_LAB
+        if (prosperolight::test_lab::active())
+            prosperolight::test_lab::reject_launch(code);
+#else
+        (void)code;
+#endif
+        Notify(NoticeKind::error, i18n::tr(title), i18n::tr(body));
+        return false;
+    };
     if (pairing() || selected_app_ >= backend_.app_count)
-        return false;
+        return reject("STREAM_SELECTION_UNAVAILABLE", "The stream was not started",
+                      "Choose an available app.");
     if (!backend_.online)
-    {
-        Notify(NoticeKind::error,
-               health_.Reconnecting() ? i18n::tr("Sunshine is reconnecting")
-                                      : i18n::tr("Sunshine is not answering"),
-               health_.Reconnecting() ? i18n::tr("Try again in a moment.")
-                                      : i18n::tr("The PC is offline."));
-        return false;
-    }
-    if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_HEVC && !backend_.hevc_supported)
-    {
-        Notify(NoticeKind::error, i18n::tr("This PC cannot encode HEVC"),
-               i18n::tr("Choose H.264 in Settings, or change the encoder on the PC."));
-        return false;
-    }
-    if (config_.video_codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
-    {
-        const auto profile = moonlight::resolve_stream_profile(
-            config_.video_codec, config_.chroma_sampling, config_.hdr_enabled != 0);
-        if (!(backend_.pyrowave_profiles & profile.capability))
-        {
-            Notify(NoticeKind::error, i18n::tr("This PyroWave profile is unavailable"),
-                   i18n::tr(
-                       "Choose a supported chroma/HDR profile or configure Vibepollo on the PC."));
-            return false;
-        }
-    }
-    if (config_.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE && config_.hdr_enabled &&
-        !backend_.main10_supported)
-    {
-        Notify(NoticeKind::error, i18n::tr("This PC cannot encode HDR"),
-               i18n::tr("Turn HDR off in Settings, or enable HEVC Main10 on the PC."));
-        return false;
-    }
+        return reject("HOST_UNAVAILABLE",
+                      health_.Reconnecting() ? "Sunshine is reconnecting"
+                                             : "Sunshine is not answering",
+                      health_.Reconnecting() ? "Try again in a moment." : "The PC is offline.");
+    moonlight_stream_options_t effective{};
+    std::string error;
+    if (!ResolveStreamOptions(effective, error))
+        return reject(error.c_str(), "The stream was not started", "Check the Test Lab profile.");
+    const auto issue = moonlight::validate_stream_selection(effective, backend_);
+    if (issue.code)
+        return reject(issue.code, issue.title, issue.body);
     return true;
 }
 
