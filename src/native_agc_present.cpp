@@ -13,6 +13,7 @@
 #include "lan_http_report.hpp"
 #include "moonlight_stream_keyboard.hpp"
 #include "native_agc_output.hpp"
+#include "pyrowave/video/ps5_presentation_stats.hpp"
 #include "stream_overlay.hpp"
 #include "fwcompat.h"
 using namespace stream_overlay;
