@@ -1,5 +1,8 @@
 # Legacy firmware AGC tests — round 2
 
+For the expanded FW 3.00 query-isolation/snapshot set, use
+[round 3 instructions](LEGACY_FW_AGC_ROUND3.md). These round-2 artifacts remain frozen.
+
 Experimental launcher diagnostics for **FW 3.00 and reported FW 4.50 failures**.
 Please report the **actual exact firmware**, including other 4.x versions.
 These are not release builds or streaming/performance validation.
