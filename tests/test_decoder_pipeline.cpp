@@ -1,7 +1,7 @@
 /*
- * ps5-native-app-boilerplate / ProsperoLight - Decode and presentation worker
- * checks. Copyright (C) 2026 BlackBearReloaded SPDX-License-Identifier:
- * GPL-3.0-or-later
+ * ps5-native-app-boilerplate / ProsperoLight - Decode and presentation worker checks.
+ * Copyright (C) 2026 BlackBearReloaded
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #define PROSPEROLIGHT_LAN_TELEMETRY 0
 #define PROSPEROLIGHT_PERFORMANCE_DETAIL 1
