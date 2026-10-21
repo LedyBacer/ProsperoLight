@@ -110,6 +110,8 @@ int main() {
   variants=json.loads((ROOT/'tools/fwcompat/variants.json').read_text())
   v=next(x for x in variants if x['id']=='18-legacy-videoout')
   self.assertEqual((v['agc_first'],v['warmup_mask'],v['legacy_videoout']),(1,3,1))
+  makefile=(ROOT/'Makefile').read_text()
+  self.assertIn('APP_DEFINITIONS += FWCOMPAT_LEGACY_VIDEOOUT=$(FWCOMPAT_LEGACY_VIDEOOUT)',makefile)
   header=(ROOT/'include/fwcompat.h').read_text()
   native=(ROOT/'src/native_agc_present.cpp').read_text()
   wrapper=(ROOT/'src/pyrowave/video/ps5_presentation_stats.cpp').read_text()
