@@ -4,6 +4,7 @@
 from .decoder_analysis import distribution
 from .session_evidence import host_transport_rates
 from .phases import _offset, bounded_alignment
+from .delivery import session_delivery
 
 
 def measured_host_transport(report, begin, end):
@@ -40,6 +41,16 @@ def diagnose(profile, report, rows, performance, begin, end, omitted=0):
               'semantics': 'native video stage diagnosis; low source FPS is valid; decode call time is not output latency'}
     host = measured_host_transport(report, begin, end)
     result['host_transport'] = host
+    delivery = session_delivery(performance)
+    result['session_delivery'] = delivery
+    result['end_to_end_delivery_verified'] = False
+    result['frame_id_gaps'] = {
+        'network_observation': performance.get('network_frame_gaps'),
+        'decode_observation': performance.get('decoder_frame_gaps'),
+        'cause': 'unattributed; frame IDs alone cannot identify sender/network/local loss',
+    }
+    result['diagnostic_scope'] = 'client trace plus separately scoped host/session evidence; not all transmitted frames'
+    result['limitations_detected'] = []
     if host.get('verified'):
         left, right = host['ps5_inner_begin_us'], host['ps5_inner_end_us']
     else:
@@ -85,7 +96,8 @@ def diagnose(profile, report, rows, performance, begin, end, omitted=0):
                                          if arrival_evidence else None),
                  arrival_timestamps_available=arrival_evidence,
                  invalid_arrival_timestamp_rows=sum(t is None for _, t in arrivals),
-                 input_trace_complete=arrival_evidence and not discards and not omitted,
+                 input_trace_complete=arrival_evidence and not discards and not omitted and
+                     not (delivery.get('conservation_verified') and delivery.get('local_predecode_discards')),
                  network_loss_session_total=loss, queue_overflows_session_total=discards)
     result['evidence'] = facts
     capture = report.get('host_measurement', {}).get('capture_evidence') or {}
@@ -97,6 +109,24 @@ def diagnose(profile, report, rows, performance, begin, end, omitted=0):
             len(decoded) + max(2, len(submitted) * .05) >= len(submitted) and
             len(shown) + max(2, len(decoded) * .05) >= len(decoded),
     }
+    # These are independent session totals, not phase-local rates. Positive
+    # local discards rule out a blanket 'every received frame was shown' claim.
+    upstream_loss = (delivery.get('conservation_verified') and
+                     delivery['counters']['overflow_discarded_aus'] > 0)
+    if upstream_loss:
+        result['limitations_detected'].append('local-upstream-queue-loss')
+    host_below_target = (host.get('verified') and
+        host['rates']['frames_sent']['upper_per_second'] < profile['client']['fps'] * .95 and
+        report.get('host_measurement', {}).get('scene') not in ('static', 'static-keepalive') and
+        report.get('host_measurement', {}).get('measurement_validity') == 'VALID')
+    if host_below_target:
+        result['limitations_detected'].append('host-sender-below-target')
+    if local_pressure:
+        result['limitations_detected'].append('native-decode-pressure')
+    if arrival_evidence and host_below_target and (local_pressure or upstream_loss):
+        result.update(classification='concurrent-or-ambiguous', confidence='suspected')
+        result['reasons'].append('HOST_BELOW_TARGET_AND_CLIENT_BACKLOG_OR_SESSION_QUEUE_LOSS')
+        return result
     if not arrival_evidence:
         result['reasons'].append('ARRIVAL_TIMESTAMPS_UNAVAILABLE_OR_INVALID')
         return result
@@ -109,6 +139,9 @@ def diagnose(profile, report, rows, performance, begin, end, omitted=0):
     if performance.get('decode_errors', 0) or performance.get('drain_faults', 0):
         result['reasons'].append('DECODER_FAULT_OR_RECOVERY_REQUIRES_SEPARATE_ANALYSIS')
         return result
+    if performance.get('decoder_frame_gaps', 0) and not (loss or local_pressure or upstream_loss or discards):
+        result['reasons'].append('FRAME_ID_GAPS_WITHOUT_RELIABLE_CAUSE')
+        return result
     if loss and local_pressure:
         result['reasons'].append('NETWORK_LOSS_AND_CLIENT_PRESSURE_COEXIST')
         return result
@@ -120,6 +153,9 @@ def diagnose(profile, report, rows, performance, begin, end, omitted=0):
         result['reasons'].append('HOST_SEND_RATE_EXCEEDS_OBSERVED_INPUT_WITH_NETWORK_LOSS')
     elif loss:
         result['reasons'].append('NETWORK_LOSS_PRESENT_WITHOUT_CONCLUSIVE_RATE_SEPARATION')
+    elif upstream_loss:
+        result.update(classification='upstream-local-queue-loss', confidence='observed-session-loss')
+        result['reasons'].append('PREDECODE_DISCARDS_VERIFIED_FOR_SESSION_PHASE_CAUSALITY_UNRESOLVED')
     elif discards:
         result['reasons'].append('SESSION_QUEUE_DISCARD_INPUT_COMPLETENESS_UNVERIFIED')
     elif len(decoded) > len(shown) + max(2, len(decoded) * .05):
@@ -127,7 +163,7 @@ def diagnose(profile, report, rows, performance, begin, end, omitted=0):
         result['reasons'].append('DECODED_OUTPUT_EXCEEDS_UNIQUE_PRESENTATION')
     elif not backlog and len(decoded) + max(2, len(arrived) * .05) >= len(arrived) and len(shown) + max(2, len(decoded) * .05) >= len(decoded):
         result.update(classification='healthy', confidence='observed-delivery')
-        result['reasons'].append('CLIENT_DELIVERS_OBSERVED_SOURCE_RATE')
+        result['reasons'].append('CLIENT_DELIVERS_OBSERVED_DEQUEUED_AUS_ONLY')
         h = report.get('host_measurement') or {}
         if host.get('verified') and h.get('scene') not in ('static', 'static-keepalive') and h.get('measurement_validity') == 'VALID':
             lo = host['rates']['frames_sent']['lower_per_second']

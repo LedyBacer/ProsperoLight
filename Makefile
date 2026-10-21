@@ -132,7 +132,7 @@ HOST_ELEVATION_TEST := build/tests/elevation_client
 STREAM_ARCHIVES := build/stream-deps/libmoonlight-common-c.a \
 	build/stream-deps/libopus.a build/stream-deps/libmbedtls.a \
 	build/stream-deps/libmbedx509.a build/stream-deps/libmbedcrypto.a
-STREAM_INPUTS := tools/pyrowave/apply-transport.sh tools/pyrowave/patches/moonlight/0001-vibepollo-independent-record-protocol.patch tools/build-stream-deps.sh tools/native-toolchain.sh \
+STREAM_INPUTS := tools/pyrowave/apply-transport.sh tools/pyrowave/patches/moonlight/0001-vibepollo-independent-record-protocol.patch tools/pyrowave/patches/moonlight/0002-video-delivery-counters.patch tools/build-stream-deps.sh tools/native-toolchain.sh \
 	$(wildcard src/gamestream/* platform/ps5/*) \
 	$(wildcard third_party/moonlight-common-c/src/* third_party/moonlight-common-c/enet/*) \
 	$(wildcard third_party/mbedtls/library/* third_party/mbedtls/include/mbedtls/*) \

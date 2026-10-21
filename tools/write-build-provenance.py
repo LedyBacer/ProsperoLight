@@ -57,6 +57,7 @@ def main():
     }
     patch = ROOT / "tools/pyrowave/patches/moonlight/0001-vibepollo-independent-record-protocol.patch"
     receipt["moonlight_protocol_patch_sha256"] = digest(patch)
+    receipt["moonlight_delivery_patch_sha256"] = digest(ROOT / "tools/pyrowave/patches/moonlight/0002-video-delivery-counters.patch")
     if "PROSPEROLIGHT_PYROWAVE=1" in receipt["definitions"]:
         pins = {}
         for line in (ROOT / "tools/pyrowave/pins.sh").read_text().splitlines():

@@ -240,7 +240,10 @@ def _analyze_run(profile, report, directory):
             issues.append(result['progress']['classification'])
         if not completions:
             result['functional_verdict'] = 'FAIL'; issues.append('ZERO_PRESENTED_MEASURED_FRAMES')
+        # Compatibility key: this has always counted dequeued trace AUs.
         metrics['received_fps'] = len(samples) / span
+        metrics['dequeued_au_fps'] = len(samples) / span
+        result['trace_scope'] = 'dequeued AUs only; receive_us describes retained rows, not all network arrivals'
         metrics['actual_mbps'] = sum(r['bytes'] for r in samples) * 8 / (span * 1e6)
         metrics['decode_call_us'] = distribution([r['decode_us'] for r in samples])
         metrics['callback_to_ready_us'] = distribution([r['ready_us'] for r in samples if r['ready_us']])

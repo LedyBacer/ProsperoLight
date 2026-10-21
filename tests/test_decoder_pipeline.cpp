@@ -103,6 +103,12 @@ extern "C"
     {
         return monotonic_us();
     }
+#ifdef LI_VIDEO_DELIVERY_STATS_VERSION
+    bool LiGetVideoDeliveryStats(LI_VIDEO_DELIVERY_STATS *)
+    {
+        return false;
+    }
+#endif
     int LiGetPendingVideoFrames(void)
     {
         return pending_frames;

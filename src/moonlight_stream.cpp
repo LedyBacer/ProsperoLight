@@ -642,6 +642,7 @@ typedef struct native_renderer_state
     moonlight::video::RuntimePolicy stream_policy;
     bool policy_keyframe_wait{};
     uint64_t policy_dropped_aus{};
+    uint64_t delivery_session_floor_us{};
     moonlight::TimingHistogram au_size;
     uint32_t active_pps{256};
     moonlight::video::PpsFeatures
@@ -896,6 +897,7 @@ static void save_frame_trace(unsigned mode)
     size_t used = 0;
     int length = snprintf(batch, sizeof(batch),
                           "# schema=2,count=%zu,omitted=%zu\n"
+                          "# scope=dequeued_AUs_only;receive_us_excludes_upstream_discards\n"
                           "frame,bytes,pending,outcome,receive_us,enqueue_us,callback_network_us,"
                           "callback_us,pts_us,decode_us,ready_us,present_wait_us,submit_us,"
                           "completion_us,host_us\n",
@@ -1082,6 +1084,53 @@ static void save_performance_summary(const native_renderer_state_t &state,
              policy.throughput_exceeded ? "true" : "false", policy.pending_depth,
              (unsigned long long)state.policy_dropped_aus,
              policy.allow_reconfiguration ? "true" : "false");
+#ifdef LI_VIDEO_DELIVERY_STATS_VERSION
+    LI_VIDEO_DELIVERY_STATS delivery{};
+    if (LiGetVideoDeliveryStats(&delivery) && state.delivery_session_floor_us &&
+        delivery.start_us >= state.delivery_session_floor_us)
+    {
+        ok = ok &&
+             report_append(
+                 report, sizeof(report), &length,
+                 "\"video_delivery\":{\"available\":true,\"version\":1,\"scope\":\"whole-session\","
+                 "\"clock\":\"Limelight "
+                 "monotonic\",\"start_us\":%llu,\"end_us\":%llu,\"quiescent\":%s,"
+                 "\"video_packets\":%llu,"
+                 "\"video_bytes\":%llu,"
+                 "\"completed_frame_events\":%llu,"
+                 "\"recovery_filtered_aus\":%llu,"
+                 "\"empty_aus\":%llu,"
+                 "\"assembled_aus\":%llu,"
+                 "\"offered_aus\":%llu,"
+                 "\"queue_accepted_aus\":%llu,"
+                 "\"dequeued_aus\":%llu,"
+                 "\"overflow_discarded_aus\":%llu,"
+                 "\"refresh_discarded_aus\":%llu,"
+                 "\"shutdown_discarded_aus\":%llu,"
+                 "\"interrupted_discarded_aus\":%llu,"
+                 "\"allocation_discarded_aus\":%llu,"
+                 "\"direct_submit\":%s},\n",
+                 (unsigned long long)delivery.start_us, (unsigned long long)delivery.end_us,
+                 delivery.end_us ? "true" : "false", (unsigned long long)delivery.video_packets,
+                 (unsigned long long)delivery.video_bytes,
+                 (unsigned long long)delivery.completed_frame_events,
+                 (unsigned long long)delivery.recovery_filtered_aus,
+                 (unsigned long long)delivery.empty_aus, (unsigned long long)delivery.assembled_aus,
+                 (unsigned long long)delivery.offered_aus,
+                 (unsigned long long)delivery.queue_accepted_aus,
+                 (unsigned long long)delivery.dequeued_aus,
+                 (unsigned long long)delivery.overflow_discarded_aus,
+                 (unsigned long long)delivery.refresh_discarded_aus,
+                 (unsigned long long)delivery.shutdown_discarded_aus,
+                 (unsigned long long)delivery.interrupted_discarded_aus,
+                 (unsigned long long)delivery.allocation_discarded_aus,
+                 delivery.direct_submit ? "true" : "false");
+    }
+    else
+#endif
+        ok = ok && report_append(
+                       report, sizeof(report), &length,
+                       "\"video_delivery\":{\"available\":false,\"scope\":\"whole-session\"},\n");
     const auto &life = state.lifecycle;
     ok = ok &&
          report_append(
@@ -5441,6 +5490,7 @@ configure_stream:
         renderer.main_placement_result = ps5_thread_affinity_set(renderer.layout.other);
         main_mask_changed = renderer.main_placement_result == 0;
     }
+    renderer.delivery_session_floor_us = PltGetMicroseconds();
     connection_result = LiStartConnection(
         &gs_server.server_info, &stream_config, &moonlight_connection_callbacks,
 #if PROSPEROLIGHT_PYROWAVE

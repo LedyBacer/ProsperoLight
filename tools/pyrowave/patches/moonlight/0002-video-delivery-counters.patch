@@ -1,0 +1,243 @@
+diff --git a/src/Limelight-internal.h b/src/Limelight-internal.h
+index e1314c5..5332b1c 100644
+--- a/src/Limelight-internal.h
++++ b/src/Limelight-internal.h
+@@ -134,6 +134,7 @@ void queueRtpPacket(PRTPV_QUEUE_ENTRY queueEntry);
+ void stopVideoDepacketizer(void);
+ void requestDecoderRefresh(void);
+ void notifyFrameLost(unsigned int frameNumber, bool speculative);
++void notifyVideoDatagramReceived(unsigned int bytes);
+ 
+ void initializeVideoStream(void);
+ void destroyVideoStream(void);
+diff --git a/src/Limelight.h b/src/Limelight.h
+index 2f2c1c7..a93203f 100644
+--- a/src/Limelight.h
++++ b/src/Limelight.h
+@@ -926,6 +926,29 @@ int LiFindExternalAddressIP4(const char* stunServer, unsigned short stunPort, un
+ // if CAPABILITY_DIRECT_SUBMIT is not set for the video renderer.
+ int LiGetPendingVideoFrames(void);
+ 
++// Optional diagnostics only. Relaxed snapshots are not a cross-thread transaction.
++#define LI_VIDEO_DELIVERY_STATS_VERSION 1
++typedef struct _LI_VIDEO_DELIVERY_STATS {
++    uint64_t start_us, end_us;
++    uint64_t video_packets;
++    uint64_t video_bytes;
++    uint64_t completed_frame_events;
++    uint64_t recovery_filtered_aus;
++    uint64_t empty_aus;
++    uint64_t assembled_aus;
++    uint64_t offered_aus;
++    uint64_t queue_accepted_aus;
++    uint64_t dequeued_aus;
++    uint64_t overflow_discarded_aus;
++    uint64_t refresh_discarded_aus;
++    uint64_t shutdown_discarded_aus;
++    uint64_t interrupted_discarded_aus;
++    uint64_t allocation_discarded_aus;
++    bool direct_submit;
++} LI_VIDEO_DELIVERY_STATS;
++bool LiGetVideoDeliveryStats(LI_VIDEO_DELIVERY_STATS* stats);
++
++
+ // Returns the number of queued audio frames ready for delivery. Only relevant
+ // if CAPABILITY_DIRECT_SUBMIT is not set for the audio renderer. For most uses,
+ // LiGetPendingAudioDuration() is probably a better option than this function.
+diff --git a/src/VideoDepacketizer.c b/src/VideoDepacketizer.c
+index d36539b..2685d31 100644
+--- a/src/VideoDepacketizer.c
++++ b/src/VideoDepacketizer.c
+@@ -1,5 +1,39 @@
+ #include "Limelight-internal.h"
+ 
++#include <stdatomic.h>
++// Session-scoped, allocation-free diagnostics. No transport decisions depend on these.
++enum { VD_COMPLETED_FRAME_EVENTS, VD_RECOVERY_FILTERED_AUS, VD_EMPTY_AUS, VD_VIDEO_PACKETS, VD_VIDEO_BYTES, VD_ASSEMBLED_AUS, VD_OFFERED_AUS, VD_QUEUE_ACCEPTED_AUS, VD_DEQUEUED_AUS, VD_OVERFLOW_DISCARDED_AUS, VD_REFRESH_DISCARDED_AUS, VD_SHUTDOWN_DISCARDED_AUS, VD_INTERRUPTED_DISCARDED_AUS, VD_ALLOCATION_DISCARDED_AUS, VD_COUNT };
++static _Atomic uint64_t delivery[VD_COUNT];
++static _Atomic uint64_t deliveryStartUs, deliveryEndUs;
++static _Atomic bool deliveryDirect;
++#define VD_ADD(field, value) atomic_fetch_add_explicit(&delivery[VD_##field], (value), memory_order_relaxed)
++void notifyVideoDatagramReceived(unsigned int bytes) {
++    VD_ADD(VIDEO_PACKETS, 1);
++    VD_ADD(VIDEO_BYTES, bytes);
++}
++bool LiGetVideoDeliveryStats(LI_VIDEO_DELIVERY_STATS* stats) {
++    if (stats == NULL) return false;
++    stats->start_us = atomic_load_explicit(&deliveryStartUs, memory_order_relaxed);
++    stats->end_us = atomic_load_explicit(&deliveryEndUs, memory_order_relaxed);
++    stats->video_packets = atomic_load_explicit(&delivery[VD_VIDEO_PACKETS], memory_order_relaxed);
++    stats->video_bytes = atomic_load_explicit(&delivery[VD_VIDEO_BYTES], memory_order_relaxed);
++    stats->completed_frame_events = atomic_load_explicit(&delivery[VD_COMPLETED_FRAME_EVENTS], memory_order_relaxed);
++    stats->recovery_filtered_aus = atomic_load_explicit(&delivery[VD_RECOVERY_FILTERED_AUS], memory_order_relaxed);
++    stats->empty_aus = atomic_load_explicit(&delivery[VD_EMPTY_AUS], memory_order_relaxed);
++    stats->assembled_aus = atomic_load_explicit(&delivery[VD_ASSEMBLED_AUS], memory_order_relaxed);
++    stats->offered_aus = atomic_load_explicit(&delivery[VD_OFFERED_AUS], memory_order_relaxed);
++    stats->queue_accepted_aus = atomic_load_explicit(&delivery[VD_QUEUE_ACCEPTED_AUS], memory_order_relaxed);
++    stats->dequeued_aus = atomic_load_explicit(&delivery[VD_DEQUEUED_AUS], memory_order_relaxed);
++    stats->overflow_discarded_aus = atomic_load_explicit(&delivery[VD_OVERFLOW_DISCARDED_AUS], memory_order_relaxed);
++    stats->refresh_discarded_aus = atomic_load_explicit(&delivery[VD_REFRESH_DISCARDED_AUS], memory_order_relaxed);
++    stats->shutdown_discarded_aus = atomic_load_explicit(&delivery[VD_SHUTDOWN_DISCARDED_AUS], memory_order_relaxed);
++    stats->interrupted_discarded_aus = atomic_load_explicit(&delivery[VD_INTERRUPTED_DISCARDED_AUS], memory_order_relaxed);
++    stats->allocation_discarded_aus = atomic_load_explicit(&delivery[VD_ALLOCATION_DISCARDED_AUS], memory_order_relaxed);
++    stats->direct_submit = atomic_load_explicit(&deliveryDirect, memory_order_relaxed);
++    return stats->start_us != 0;
++}
++
++
+ // Uncomment to test 3 byte Annex B start sequences with GFE
+ //#define FORCE_3_BYTE_START_SEQUENCES
+ 
+@@ -61,6 +95,10 @@ typedef struct _LENTRY_INTERNAL {
+ 
+ // Init
+ void initializeVideoDepacketizer(int pktSize) {
++    for (unsigned i = 0; i < VD_COUNT; ++i) atomic_store_explicit(&delivery[i], 0, memory_order_relaxed);
++    atomic_store_explicit(&deliveryEndUs, 0, memory_order_relaxed);
++    atomic_store_explicit(&deliveryStartUs, PltGetMicroseconds(), memory_order_relaxed);
++    atomic_store_explicit(&deliveryDirect, (VideoCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) != 0, memory_order_relaxed);
+     LbqInitializeLinkedBlockingQueue(&decodeUnitQueue, 15);
+ 
+     nextFrameNumber = 1;
+@@ -134,11 +172,12 @@ static void dropFrameState(void) {
+ }
+ 
+ // Cleanup the list of decode units
+-static void freeDecodeUnitList(PLINKED_BLOCKING_QUEUE_ENTRY entry) {
++static void freeDecodeUnitList(PLINKED_BLOCKING_QUEUE_ENTRY entry, unsigned reason) {
+     PLINKED_BLOCKING_QUEUE_ENTRY nextEntry;
+ 
+     while (entry != NULL) {
+         nextEntry = entry->flink;
++        atomic_fetch_add_explicit(&delivery[reason], 1, memory_order_relaxed);
+ 
+         // Complete this with a failure status
+         LiCompleteVideoFrame(entry->data, DR_CLEANUP);
+@@ -153,7 +192,8 @@ void stopVideoDepacketizer(void) {
+ 
+ // Cleanup video depacketizer and free malloced memory
+ void destroyVideoDepacketizer(void) {
+-    freeDecodeUnitList(LbqDestroyLinkedBlockingQueue(&decodeUnitQueue));
++    freeDecodeUnitList(LbqDestroyLinkedBlockingQueue(&decodeUnitQueue), VD_SHUTDOWN_DISCARDED_AUS);
++    atomic_store_explicit(&deliveryEndUs, PltGetMicroseconds(), memory_order_relaxed);
+     cleanupFrameState();
+ }
+ 
+@@ -251,6 +291,7 @@ bool LiWaitForNextVideoFrame(VIDEO_FRAME_HANDLE* frameHandle, PDECODE_UNIT* deco
+ 
+     validateDecodeUnitForPlayback(&qdu->decodeUnit);
+ 
++    VD_ADD(DEQUEUED_AUS, 1);
+     *frameHandle = qdu;
+     *decodeUnit = &qdu->decodeUnit;
+     return true;
+@@ -266,6 +307,7 @@ bool LiPollNextVideoFrame(VIDEO_FRAME_HANDLE* frameHandle, PDECODE_UNIT* decodeU
+ 
+     validateDecodeUnitForPlayback(&qdu->decodeUnit);
+ 
++    VD_ADD(DEQUEUED_AUS, 1);
+     *frameHandle = qdu;
+     *decodeUnit = &qdu->decodeUnit;
+     return true;
+@@ -476,6 +518,7 @@ static bool isIdrFrameStart(PBUFFER_DESC buffer) {
+ // Reassemble the frame with the given frame number
+ static void reassembleFrame(int frameNumber, bool frameIsLTR) {
+     if (nalChainHead != NULL) {
++        VD_ADD(ASSEMBLED_AUS, 1);
+         QUEUED_DECODE_UNIT qduDS;
+         PQUEUED_DECODE_UNIT qdu;
+ 
+@@ -518,8 +561,11 @@ static void reassembleFrame(int frameNumber, bool frameIsLTR) {
+             nalChainHead = nalChainTail = NULL;
+             nalChainDataLength = 0;
+ 
++            VD_ADD(OFFERED_AUS, 1);
+             if ((VideoCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) == 0) {
+-                if (LbqOfferQueueItem(&decodeUnitQueue, qdu, &qdu->entry) == LBQ_BOUND_EXCEEDED) {
++                int offer = LbqOfferQueueItem(&decodeUnitQueue, qdu, &qdu->entry);
++                if (offer == LBQ_BOUND_EXCEEDED) {
++                    VD_ADD(OVERFLOW_DISCARDED_AUS, 1);
+                     Limelog("Video decode unit queue overflow\n");
+ 
+                     // RFI recovery is not supported here
+@@ -534,14 +580,21 @@ static void reassembleFrame(int frameNumber, bool frameIsLTR) {
+                     free(qdu);
+ 
+                     // Free all frames in the decode unit queue
+-                    freeDecodeUnitList(LbqFlushQueueItems(&decodeUnitQueue));
++                    freeDecodeUnitList(LbqFlushQueueItems(&decodeUnitQueue), VD_OVERFLOW_DISCARDED_AUS);
+ 
+                     // Request an IDR frame to recover
+                     LiRequestIdrFrame();
+                     return;
+                 }
++                else if (offer != LBQ_SUCCESS) {
++                    VD_ADD(INTERRUPTED_DISCARDED_AUS, 1);
++                    LiCompleteVideoFrame(qdu, DR_CLEANUP);
++                    return;
++                }
++                VD_ADD(QUEUE_ACCEPTED_AUS, 1);
+             }
+             else {
++                VD_ADD(DEQUEUED_AUS, 1);
+                 // Submit the frame to the decoder
+                 validateDecodeUnitForPlayback(&qdu->decodeUnit);
+                 LiCompleteVideoFrame(qdu, VideoCallbacks.submitDecodeUnit(&qdu->decodeUnit));
+@@ -556,6 +609,12 @@ static void reassembleFrame(int frameNumber, bool frameIsLTR) {
+             // Move the start of our (potential) RFI window to the next frame
+             startFrameNumber = nextFrameNumber;
+         }
++        else {
++            VD_ADD(ALLOCATION_DISCARDED_AUS, 1);
++        }
++    }
++    else {
++        VD_ADD(EMPTY_AUS, 1);
+     }
+ }
+ 
+@@ -730,7 +789,7 @@ void requestDecoderRefresh(void) {
+     waitingForIdrFrame = true;
+ 
+     // Flush the decode unit queue
+-    freeDecodeUnitList(LbqFlushQueueItems(&decodeUnitQueue));
++    freeDecodeUnitList(LbqFlushQueueItems(&decodeUnitQueue), VD_REFRESH_DISCARDED_AUS);
+ 
+     // Request the receive thread drop its state
+     // on the next call. We can't do it here because
+@@ -1093,6 +1152,7 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
+     }
+ 
+     if (lastPacket) {
++        VD_ADD(COMPLETED_FRAME_EVENTS, 1);
+         // Move on to the next frame
+         decodingFrame = false;
+         nextFrameNumber = frameIndex + 1;
+@@ -1119,6 +1179,7 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
+             }
+ 
+             waitingForNextSuccessfulFrame = false;
++            VD_ADD(RECOVERY_FILTERED_AUS, 1);
+             dropFrameState();
+             return;
+         }
+@@ -1140,6 +1201,7 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
+                 dropStatePending = false;
+             }
+             else {
++                VD_ADD(RECOVERY_FILTERED_AUS, 1);
+                 dropFrameState();
+                 return;
+             }
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+index 1a8268f..4d57887 100644
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -197,6 +197,7 @@ static void VideoReceiveThreadProc(void* context) {
+             continue;
+         }
+ 
++        notifyVideoDatagramReceived((unsigned int)err);
+         if (!receivedDataFromPeer) {
+             receivedDataFromPeer = true;
+             Limelog("Received first video packet after %d ms\n", waitingForVideoMs);
