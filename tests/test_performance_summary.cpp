@@ -222,7 +222,9 @@ int main()
     size_t rows = 0;
     for (char c : saved_report)
         rows += c == '\n';
-    assert(rows == moonlight::FrameTrace::capacity + 2);
+    assert(rows == moonlight::FrameTrace::capacity + 3);
+    assert(saved_report.find("# scope=dequeued_AUs_only;receive_us_excludes_upstream_discards\n") !=
+           std::string::npos);
     assert(saved_report.find("\n32767,0,0,0,1000000032767,") != std::string::npos);
     assert(write_calls < saved_report.size() / 7 + 64); // Short writes, but only a few batches.
     assert(frame_trace.append() == nullptr && frame_trace.omitted == 1);
