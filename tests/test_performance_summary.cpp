@@ -18,6 +18,12 @@ static bool diagnostic_logs = true;
 static std::vector<std::string> kernel_records;
 extern "C"
 {
+#ifdef LI_VIDEO_DELIVERY_STATS_VERSION
+    bool LiGetVideoDeliveryStats(LI_VIDEO_DELIVERY_STATS *)
+    {
+        return false;
+    }
+#endif
     int prosperolight_logs_enabled(void)
     {
         return diagnostic_logs;
