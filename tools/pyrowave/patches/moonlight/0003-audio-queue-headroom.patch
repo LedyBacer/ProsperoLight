@@ -5,7 +5,7 @@ diff --git a/src/AudioStream.c b/src/AudioStream.c
  // Initialize the audio stream and start
  int initializeAudioStream(void) {
 -    LbqInitializeLinkedBlockingQueue(&packetQueue, 30);
++    LbqInitializeLinkedBlockingQueue(&packetQueue, 100);
      RtpaInitializeQueue(&rtpAudioQueue);
      lastSeq = 0;
      receivedDataFromPeer = false;
-+    LbqInitializeLinkedBlockingQueue(&packetQueue, 100);
