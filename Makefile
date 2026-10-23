@@ -21,7 +21,7 @@ STOP_ACTIVE_APP_SELF_TEST ?= 0
 # Tested one-flip overlap is on; dependency and audio experiments remain off.
 FEC_SIMD ?= 0
 OPUS_SIMD ?= 0
-AUDIO_MAX_BACKLOG_MS ?= 0
+AUDIO_MAX_BACKLOG_MS ?= 100
 PRESENT_OVERLAP ?= 1
 FLIP_POLL_US ?= 500
 PERFORMANCE_DETAIL ?= 0

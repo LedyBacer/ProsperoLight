@@ -21,3 +21,13 @@ elif grep -Fq 'LI_VIDEO_DELIVERY_STATS_VERSION' "$common/src/Limelight.h"; then
 else
     git -C "$common" apply --check "$patch"
 fi
+
+# Preserve FEC recovery bursts without flushing the entire audio packet queue.
+patch="$root/tools/pyrowave/patches/moonlight/0003-audio-queue-headroom.patch"
+if git -C "$common" apply --check "$patch" 2>/dev/null; then
+    git -C "$common" apply "$patch"
+elif grep -Fq 'LbqInitializeLinkedBlockingQueue(&packetQueue, 100)' "$common/src/AudioStream.c"; then
+    : # already applied
+else
+    git -C "$common" apply --check "$patch"
+fi

@@ -1,0 +1,6 @@
+diff --git a/src/AudioStream.c b/src/AudioStream.c
+--- a/src/AudioStream.c
++++ b/src/AudioStream.c
+@@ -1,1 +1,1 @@
+-    LbqInitializeLinkedBlockingQueue(&packetQueue, 30);
++    LbqInitializeLinkedBlockingQueue(&packetQueue, 100);
