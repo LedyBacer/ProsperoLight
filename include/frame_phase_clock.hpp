@@ -32,8 +32,8 @@ class CadencePhaseClock
         int32_t skew_us{};
     } stats;
 
-    uint32_t observe(uint32_t frame, uint64_t source_us, uint64_t enqueue_us,
-                     uint32_t period_us, uint32_t network_budget_us)
+    uint32_t observe(uint32_t frame, uint64_t source_us, uint64_t enqueue_us, uint32_t period_us,
+                     uint32_t network_budget_us)
     {
         if (!source_us || !enqueue_us || !period_us)
         {
@@ -41,11 +41,10 @@ class CadencePhaseClock
             return 0;
         }
         const int64_t offset_sample = difference(enqueue_us, source_us);
-        const bool continuous = anchored_ && frame == last_frame_ + 1 &&
-                                source_us > last_source_us_ &&
-                                source_us - last_source_us_ <= UINT64_C(500000) &&
-                                enqueue_us >= last_enqueue_us_ &&
-                                enqueue_us - last_enqueue_us_ <= UINT64_C(500000);
+        const bool continuous =
+            anchored_ && frame == last_frame_ + 1 && source_us > last_source_us_ &&
+            source_us - last_source_us_ <= UINT64_C(500000) && enqueue_us >= last_enqueue_us_ &&
+            enqueue_us - last_enqueue_us_ <= UINT64_C(500000);
         if (!continuous)
         {
             if (anchored_)
@@ -72,14 +71,14 @@ class CadencePhaseClock
         // The measured arrival tail may request at most one source period;
         // never use a PS5 decoder stall as an excuse to grow the buffer.
         const uint32_t cap = std::min({period_us, network_budget_us, 30000u});
-        const int64_t cushion = std::min<int64_t>(cap, std::max<int64_t>(
-            500, std::max(mad_us_ * 2, tail_us_ + 500)));
-        const int64_t slack = offset_us_ + int64_t(source_us) + cushion -
-                              int64_t(enqueue_us);
+        const int64_t cushion =
+            std::min<int64_t>(cap, std::max<int64_t>(500, std::max(mad_us_ * 2, tail_us_ + 500)));
+        const int64_t slack = offset_us_ + int64_t(source_us) + cushion - int64_t(enqueue_us);
         if (slack < 0)
             ++stats.late;
-        stats.min_slack_us = std::min(
-            stats.min_slack_us, static_cast<int32_t>(std::clamp<int64_t>(slack, INT32_MIN, INT32_MAX)));
+        stats.min_slack_us =
+            std::min(stats.min_slack_us,
+                     static_cast<int32_t>(std::clamp<int64_t>(slack, INT32_MIN, INT32_MAX)));
         stats.mad_us = static_cast<uint32_t>(mad_us_);
         stats.tail_us = static_cast<uint32_t>(std::max<int64_t>(0, tail_us_));
         stats.cushion_us = static_cast<uint32_t>(cushion);

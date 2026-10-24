@@ -20,9 +20,8 @@ struct AudioGrainDecision
 // Unlike blocking the output worker, an empty PCM ring must not suspend the
 // hardware's own clock. During re-prime, retain buffered real PCM, not an
 // arbitrarily old zero-padded prefix which would make the resume stale.
-inline AudioGrainDecision audio_grain_decision(uint32_t depth, uint32_t grain,
-                                               uint32_t target, uint32_t packet,
-                                               bool priming)
+inline AudioGrainDecision audio_grain_decision(uint32_t depth, uint32_t grain, uint32_t target,
+                                               uint32_t packet, bool priming)
 {
     AudioGrainDecision answer{};
     answer.priming = priming;
@@ -52,8 +51,8 @@ inline void audio_crossfade_from_sample(int16_t *grain, uint32_t frames, uint32_
         {
             const int32_t old_sample = last[channel];
             const int32_t new_sample = grain[i * channels + channel];
-            const int64_t mix = int64_t(old_sample) * int64_t(n - i) +
-                                int64_t(new_sample) * int64_t(i + 1);
+            const int64_t mix =
+                int64_t(old_sample) * int64_t(n - i) + int64_t(new_sample) * int64_t(i + 1);
             grain[i * channels + channel] = static_cast<int16_t>(
                 std::clamp<int64_t>(mix / int64_t(n + 1), INT16_MIN, INT16_MAX));
         }
@@ -72,8 +71,8 @@ inline void audio_fade_to_silence(int16_t *grain, uint32_t valid_frames, uint32_
         for (uint32_t channel = 0; channel < channels; ++channel)
         {
             const uint32_t index = (start + i) * channels + channel;
-            grain[index] = static_cast<int16_t>(
-                int32_t(grain[index]) * int32_t(n - i - 1) / int32_t(n));
+            grain[index] =
+                static_cast<int16_t>(int32_t(grain[index]) * int32_t(n - i - 1) / int32_t(n));
         }
 }
 } // namespace moonlight

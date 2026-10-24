@@ -91,7 +91,7 @@
 #define AUDIO_STEREO_CHANNELS 2u
 #define AUDIO_51_CHANNELS 6u
 #define AUDIO_MAX_CHANNELS 8u
-#define AUDIO_RING_FRAMES 8640u // 180 ms hard cap; adaptive target remains <= 80 ms.
+#define AUDIO_RING_FRAMES 8640u    // 180 ms hard cap; adaptive target remains <= 80 ms.
 #define AUDIO_CROSSFADE_FRAMES 96u // 2 ms at 48 kHz.
 static_assert(moonlight::AudioPrebufferPolicy::kMinimumFrames == AUDIO_PREBUFFER_FRAMES &&
                   moonlight::AudioPrebufferPolicy::kMaximumFrames < AUDIO_RING_FRAMES,
@@ -1321,24 +1321,22 @@ static void save_performance_summary(const native_renderer_state_t &state,
                        "\"audio_ring_ewma_frames\":%u,\"audio_near_miss_events\":%u,"
                        "\"audio_failed_shrink_probes\":%u,\n",
                        AUDIO_RING_FRAMES, (unsigned long long)audio_state.first_pcm_output_us,
-                       audio_state.silence_grains, audio_state.short_grains,
-                       audio_state.crossfades, (unsigned long long)audio_state.drift_shed_frames,
+                       audio_state.silence_grains, audio_state.short_grains, audio_state.crossfades,
+                       (unsigned long long)audio_state.drift_shed_frames,
                        audio_state.drift_policy.mean_frames(),
                        audio_state.prebuffer_policy.near_miss_events(),
                        audio_state.prebuffer_policy.failed_shrinks());
     const auto &phase = state.phase_clock.stats;
-    ok = ok && report_append(
-                   report, sizeof(report), &length,
-                   "\"video_phase_clock\":{\"enabled\":%s,\"samples\":%llu,"
-                   "\"reanchors\":%llu,\"late\":%llu,\"min_slack_us\":%d,"
-                   "\"mad_us\":%u,\"tail_us\":%u,\"cushion_us\":%u,"
-                   "\"hold_us\":%u,\"skew_us\":%d},\n",
-                   state.phase_clock_enabled ? "true" : "false",
-                   (unsigned long long)phase.samples,
-                   (unsigned long long)phase.reanchors,
-                   (unsigned long long)phase.late,
-                   phase.samples ? phase.min_slack_us : 0, phase.mad_us, phase.tail_us,
-                   phase.cushion_us, phase.hold_us, phase.skew_us);
+    ok = ok &&
+         report_append(report, sizeof(report), &length,
+                       "\"video_phase_clock\":{\"enabled\":%s,\"samples\":%llu,"
+                       "\"reanchors\":%llu,\"late\":%llu,\"min_slack_us\":%d,"
+                       "\"mad_us\":%u,\"tail_us\":%u,\"cushion_us\":%u,"
+                       "\"hold_us\":%u,\"skew_us\":%d},\n",
+                       state.phase_clock_enabled ? "true" : "false",
+                       (unsigned long long)phase.samples, (unsigned long long)phase.reanchors,
+                       (unsigned long long)phase.late, phase.samples ? phase.min_slack_us : 0,
+                       phase.mad_us, phase.tail_us, phase.cushion_us, phase.hold_us, phase.skew_us);
     if (!ok)
         return;
     const struct
@@ -3298,18 +3296,16 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
     const bool successor_queued = state->mailbox.full;
     pthread_mutex_unlock(&state->lock);
     const uint64_t queue_age_us = started > item.ready_us ? started - item.ready_us : 0;
-    const uint32_t network_budget =
-        state->network_jitter_budget_us.load(std::memory_order_relaxed);
+    const uint32_t network_budget = state->network_jitter_budget_us.load(std::memory_order_relaxed);
     stream_pacer.set_network_jitter_budget_us(network_budget);
     // Developer-only A/B: the phase estimator samples the NETWORK timestamp
     // and source PTS, not decode/GPU readiness. It cannot add a second reserve
     // on top of FramePacing or affect VRR's separate source timeline.
     const uint32_t phase_hold =
         state->phase_clock_enabled && fixed && !native_agc_vrr_active()
-            ? state->phase_clock.observe(static_cast<uint32_t>(item.frame), item.pts_us,
-                                         item.enqueue_us,
-                                         UINT32_C(1000000) / std::max(1u, state->stream_fps),
-                                         network_budget)
+            ? state->phase_clock.observe(
+                  static_cast<uint32_t>(item.frame), item.pts_us, item.enqueue_us,
+                  UINT32_C(1000000) / std::max(1u, state->stream_fps), network_budget)
             : 0;
     uint64_t deadline =
         native_agc_vrr_active()
@@ -3962,8 +3958,8 @@ static void *ps5_audio_output_worker(void *)
             audio_ring_pop(state, output, decision.take);
             if (decision.silence)
             {
-                moonlight::audio_fade_to_silence(output, decision.take,
-                                                 state->output_channels, AUDIO_CROSSFADE_FRAMES);
+                moonlight::audio_fade_to_silence(output, decision.take, state->output_channels,
+                                                 AUDIO_CROSSFADE_FRAMES);
                 ++state->short_grains;
             }
             if (state->crossfade_pending)
@@ -3987,8 +3983,8 @@ static void *ps5_audio_output_worker(void *)
             if (audible_tail)
             {
                 moonlight::audio_crossfade_from_sample(
-                    output, AUDIO_GRAIN_FRAMES, state->output_channels,
-                    state->last_output_sample, AUDIO_CROSSFADE_FRAMES);
+                    output, AUDIO_GRAIN_FRAMES, state->output_channels, state->last_output_sample,
+                    AUDIO_CROSSFADE_FRAMES);
                 ++state->crossfades;
             }
         }

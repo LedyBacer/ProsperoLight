@@ -59,8 +59,7 @@ class AudioPrebufferPolicy
             target_frames_ = std::max(target_frames_, probe_previous_frames_);
             ++failed_shrinks_;
             backoff_until_us_ = now_us + shrink_backoff_us_;
-            shrink_backoff_us_ = std::min<uint64_t>(shrink_backoff_us_ * 2,
-                                                   UINT64_C(480000000));
+            shrink_backoff_us_ = std::min<uint64_t>(shrink_backoff_us_ * 2, UINT64_C(480000000));
             probe_until_us_ = 0;
             last_relax_us_ = 0;
             recent_underrun_us_ = now_us;
@@ -91,9 +90,8 @@ class AudioPrebufferPolicy
         }
         // Several nearly empty grains in a short window predict a dropout.
         // A single ordinary packet boundary must not enlarge latency on LAN.
-        if (++near_miss_streak_ >= 3 &&
-            (!last_near_miss_growth_us_ ||
-             now_us - last_near_miss_growth_us_ >= UINT64_C(10000000)))
+        if (++near_miss_streak_ >= 3 && (!last_near_miss_growth_us_ ||
+                                         now_us - last_near_miss_growth_us_ >= UINT64_C(10000000)))
         {
             grow();
             last_near_miss_growth_us_ = now_us;
@@ -170,9 +168,11 @@ class AudioRingDriftPolicy
         {
             // EWMA with a one-second time constant, update once per output
             // grain. Integral fixed point; no allocation or float in AudioOut.
-            const uint64_t weight = std::min<uint64_t>(256, (now_us - previous_us_) * 256 / 1000000);
+            const uint64_t weight =
+                std::min<uint64_t>(256, (now_us - previous_us_) * 256 / 1000000);
             const int64_t error = (int64_t(depth) << 8) - int64_t(average_q8_);
-            average_q8_ = uint64_t(std::max<int64_t>(0, int64_t(average_q8_) + error * int64_t(weight) / 256));
+            average_q8_ = uint64_t(
+                std::max<int64_t>(0, int64_t(average_q8_) + error * int64_t(weight) / 256));
         }
         previous_us_ = now_us;
         if (average_q8_ > (uint64_t(target + kHeadroomFrames) << 8) &&
@@ -193,8 +193,14 @@ class AudioRingDriftPolicy
         return 0;
     }
 
-    uint32_t mean_frames() const { return static_cast<uint32_t>(average_q8_ >> 8); }
-    uint32_t sheds() const { return sheds_; }
+    uint32_t mean_frames() const
+    {
+        return static_cast<uint32_t>(average_q8_ >> 8);
+    }
+    uint32_t sheds() const
+    {
+        return sheds_;
+    }
 
   private:
     uint64_t previous_us_{}, over_since_us_{}, average_q8_{};
