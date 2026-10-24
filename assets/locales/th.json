@@ -316,5 +316,8 @@
   "ends the stream and returns here": "ออกจากสตรีม",
   "left": "…",
   "the PC": "คอมพิวเตอร์",
-  "this PC": "คอมพิวเตอร์"
+  "this PC": "คอมพิวเตอร์",
+  "Wake PC": "ปลุกคอมพิวเตอร์",
+  "Wake packet sent": "ส่งแพ็กเก็ตปลุกแล้ว",
+  "Wake packet was not sent": "ไม่ได้ส่งแพ็กเก็ตปลุก"
 }

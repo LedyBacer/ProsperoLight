@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Thoát luồng",
   "left": "…",
   "the PC": "Máy tính",
-  "this PC": "Máy tính"
+  "this PC": "Máy tính",
+  "Wake PC": "Đánh thức PC",
+  "Wake packet sent": "Đã gửi gói đánh thức",
+  "Wake packet was not sent": "Chưa gửi gói đánh thức"
 }

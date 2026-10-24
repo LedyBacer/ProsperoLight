@@ -8,7 +8,7 @@ ProsperoLight aims to make PC game streaming feel natural on a PS5. The ideas be
 
 - In-stream quick menu for common host actions (for example, Alt+Tab, Escape and monitor selection).
 - Fast resume of a previous session and improved recovery from network disconnects.
-- Optional Wake-on-LAN and clearer connectivity diagnostics for offline PCs.
+- Clearer connectivity diagnostics for offline PCs.
 - Automatic bitrate selection informed by network conditions **and** the PS5 decoder's actual throughput.
 - More helpful latency metrics, with clear separation between software timing and input-to-photon measurement.
 

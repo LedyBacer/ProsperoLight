@@ -127,6 +127,7 @@ static int load_server_info(gs_server_t *server, bool https)
     char *codec_mode = NULL;
     char *hostname = NULL;
     char *unique_id = NULL;
+    char *mac = NULL;
     int result;
 
     uuid_v4(server->identity, uuid);
@@ -152,6 +153,7 @@ static int load_server_info(gs_server_t *server, bool https)
     (void)xml_search(response.body, response.length, "ServerCodecModeSupport", &codec_mode);
     (void)xml_search(response.body, response.length, "hostname", &hostname);
     (void)xml_search(response.body, response.length, "uniqueid", &unique_id);
+    (void)xml_search(response.body, response.length, "mac", &mac);
     server->host_capabilities = 0;
     {
         const char *tags[] = {"VirtualDisplayCapable", "VirtualDisplayDriverReady",
@@ -178,6 +180,8 @@ static int load_server_info(gs_server_t *server, bool https)
         snprintf(server->hostname, sizeof(server->hostname), "%s", hostname);
     if (unique_id)
         snprintf(server->unique_id, sizeof(server->unique_id), "%s", unique_id);
+    if (mac && moonlight_wol_parse_mac(mac, server->mac))
+        server->mac_valid = true;
     /* Older servers omit HttpsPort. Malformed values must not wrap to another port. */
     server->https_port = server->http_port > 5 ? server->http_port - 5 : 47984;
     uint16_t negotiated_https_port;
@@ -197,6 +201,7 @@ done:
     free(codec_mode);
     free(hostname);
     free(unique_id);
+    free(mac);
     http_response_free(&response);
     return result;
 }
@@ -542,6 +547,35 @@ int gs_applist(gs_server_t *server, app_entry_t **list)
     return result;
 }
 
+static void report_launch_status_error(const http_response_t *response, const char *action,
+                                       int status)
+{
+    static char error[320];
+    char host_message[192] = {0};
+    int has_message = xml_root_attribute(response->body, response->length, "status_message",
+                                         host_message, sizeof(host_message)) == GS_OK;
+
+    if (has_message && host_message[0])
+    {
+        // The host controls this attribute; keep it on one bounded log/UI line.
+        for (size_t i = 0; host_message[i]; ++i)
+        {
+            unsigned char c = (unsigned char)host_message[i];
+            if (c < 0x20 || c == 0x7f)
+                host_message[i] = ' ';
+        }
+        snprintf(error, sizeof(error), "Host rejected %s (NVHTTP %d): %s", action, status,
+                 host_message);
+    }
+    else if (status >= 0)
+        snprintf(error, sizeof(error), "Host rejected %s (NVHTTP %d)", action, status);
+    else
+        snprintf(error, sizeof(error), "Host returned an invalid %s response", action);
+
+    gs_error = error;
+    LOGW("%s", error);
+}
+
 int gs_start_app(gs_server_t *server, STREAM_CONFIGURATION *configuration, int app_id, bool sops,
                  bool local_audio, int gamepad_mask, const gs_host_options_t *options)
 {
@@ -597,11 +631,15 @@ int gs_start_app(gs_server_t *server, STREAM_CONFIGURATION *configuration, int a
                      gamepad_mask, hdr_capabilities, LiGetLaunchUrlQueryParameters(), host_query);
     if (result != GS_OK)
         return result;
-    if (xml_status(response.body, response.length) != 200)
     {
-        gs_error = "launch returned an error status";
-        result = GS_ERROR;
-        goto done;
+        int status = xml_status(response.body, response.length);
+        if (status != 200)
+        {
+            report_launch_status_error(&response, server->current_game ? "resume" : "launch",
+                                       status);
+            result = GS_ERROR;
+            goto done;
+        }
     }
     if (xml_search(response.body, response.length, "gamesession", &field) != GS_OK &&
         xml_search(response.body, response.length, "resume", &field) != GS_OK)

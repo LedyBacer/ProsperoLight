@@ -14,30 +14,87 @@
 #include <string.h>
 
 #define CONFIG_MAGIC UINT32_C(0x504c4346)
-#define CONFIG_VERSION 8U
+#define CONFIG_VERSION 9U
 #define CONFIG_PATH (storage::paths().config)
 #define CONFIG_TEMP_PATH (storage::paths().config_temporary)
 #define OPEN_READ_ONLY 0x0000
 #define OPEN_WRITE_CREATE_TRUNCATE 0x0601
 #define FILE_MODE_0666 0x01b6
 
-typedef struct config_file
-{
-    uint32_t magic;
-    uint32_t version;
-    uint32_t checksum;
-    uint32_t reserved;
-    moonlight_config_t config;
-} config_file_t;
-
-// Versions 1-6 stored a PC without its port.
+// Frozen on-disk PC records. Keep literal dimensions here so later public type
+// changes cannot alter historical file sizes or checksums.
 typedef struct legacy_config_host
 {
-    char address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
-    char name[MOONLIGHT_CONFIG_NAME_SIZE];
-    char unique_id[MOONLIGHT_CONFIG_UNIQUE_ID_SIZE];
+    char address[64];
+    char name[64];
+    char unique_id[48];
     uint32_t manual;
 } legacy_config_host_t;
+
+typedef struct legacy_config_host_with_port
+{
+    char address[64];
+    char name[64];
+    char unique_id[48];
+    uint32_t manual;
+    uint32_t http_port;
+} legacy_config_host_with_port_t;
+
+static_assert(sizeof(legacy_config_host_t) == 180);
+static_assert(sizeof(legacy_config_host_with_port_t) == 184);
+
+typedef struct config_disk_host_v9
+{
+    char address[64];
+    char name[64];
+    char unique_id[48];
+    uint32_t manual;
+    uint32_t http_port;
+    uint8_t mac[6];
+    uint8_t reserved[2];
+} config_disk_host_v9_t;
+
+typedef struct config_disk_v8
+{
+    uint32_t fields[13];
+    legacy_config_host_with_port_t hosts[8];
+} config_disk_v8_t;
+
+typedef struct config_disk_v9
+{
+    uint32_t host_count;
+    uint32_t selected_host;
+    uint32_t bitrate_mbps;
+    uint32_t display_area;
+    uint32_t video_codec;
+    uint32_t stream_resolution;
+    uint32_t stream_fps;
+    uint32_t hdr_enabled;
+    uint32_t audio_configuration;
+    uint32_t vsync_enabled;
+    uint32_t decoder_pipeline;
+    uint32_t decoder_cores;
+    uint32_t chroma_sampling;
+    config_disk_host_v9_t hosts[8];
+} config_disk_v9_t;
+
+typedef struct config_file_v8
+{
+    uint32_t magic, version, checksum, reserved;
+    config_disk_v8_t config;
+} config_file_v8_t;
+
+typedef struct config_file_v9
+{
+    uint32_t magic, version, checksum, reserved;
+    config_disk_v9_t config;
+} config_file_v9_t;
+
+static_assert(sizeof(config_disk_host_v9_t) == 192);
+static_assert(sizeof(config_disk_v8_t) == 1524);
+static_assert(sizeof(config_file_v8_t) == 1540);
+static_assert(sizeof(config_disk_v9_t) == 1588);
+static_assert(sizeof(config_file_v9_t) == 1604);
 
 typedef struct legacy_config_v1
 {
@@ -45,7 +102,7 @@ typedef struct legacy_config_v1
     uint32_t selected_host;
     uint32_t bitrate_mbps;
     uint32_t display_area;
-    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[8];
 } legacy_config_v1_t;
 
 typedef struct legacy_config_file_v1
@@ -65,7 +122,7 @@ typedef struct legacy_config_v2
     uint32_t display_area;
     uint32_t video_codec;
     uint32_t stream_resolution;
-    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[8];
 } legacy_config_v2_t;
 
 typedef struct legacy_config_file_v2
@@ -86,7 +143,7 @@ typedef struct legacy_config_v3
     uint32_t video_codec;
     uint32_t stream_resolution;
     uint32_t hdr_enabled;
-    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[8];
 } legacy_config_v3_t;
 
 typedef struct legacy_config_file_v3
@@ -108,7 +165,7 @@ typedef struct legacy_config_v4
     uint32_t stream_resolution;
     uint32_t stream_fps;
     uint32_t hdr_enabled;
-    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[8];
 } legacy_config_v4_t;
 
 typedef struct legacy_config_file_v4
@@ -131,7 +188,7 @@ typedef struct legacy_config_v5
     uint32_t stream_fps;
     uint32_t hdr_enabled;
     uint32_t audio_configuration;
-    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[8];
 } legacy_config_v5_t;
 
 typedef struct legacy_config_file_v5
@@ -157,7 +214,7 @@ typedef struct legacy_config_v6
     uint32_t vsync_enabled;
     uint32_t decoder_pipeline;
     uint32_t decoder_cores;
-    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[8];
 } legacy_config_v6_t;
 
 typedef struct legacy_config_file_v6
@@ -171,12 +228,12 @@ typedef struct legacy_config_file_v6
 typedef struct legacy_config_v7_upstream
 {
     uint32_t fields[12];
-    moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_with_port_t hosts[8];
 } legacy_config_v7_upstream_t;
 typedef struct legacy_config_v7_pyrowave
 {
     uint32_t fields[13];
-    legacy_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+    legacy_config_host_t hosts[8];
 } legacy_config_v7_pyrowave_t;
 typedef struct legacy_file_v7_upstream
 {
@@ -188,6 +245,16 @@ typedef struct legacy_file_v7_pyrowave
     uint32_t magic, version, checksum, reserved;
     legacy_config_v7_pyrowave_t config;
 } legacy_file_v7_pyrowave_t;
+
+static_assert(sizeof(legacy_config_v7_pyrowave_t) == 1492);
+static_assert(sizeof(legacy_file_v7_pyrowave_t) == 1508);
+static_assert(sizeof(legacy_config_v7_upstream_t) == 1520);
+static_assert(sizeof(legacy_file_v7_upstream_t) == 1536);
+static_assert(MOONLIGHT_CONFIG_MAX_HOSTS == 8);
+static_assert(MOONLIGHT_CONFIG_ADDRESS_SIZE == 64);
+static_assert(MOONLIGHT_CONFIG_NAME_SIZE == 64);
+static_assert(MOONLIGHT_CONFIG_UNIQUE_ID_SIZE == 48);
+static_assert(MOONLIGHT_WOL_MAC_BYTES == 6);
 
 extern "C"
 {
@@ -267,6 +334,41 @@ static void copy_text(char *destination, size_t capacity, const char *source)
     snprintf(destination, capacity, "%s", source ? source : "");
 }
 
+static void copy_settings(moonlight_config_t *config, const uint32_t *fields, size_t count)
+{
+    config->host_count = fields[0];
+    config->selected_host = fields[1];
+    config->bitrate_mbps = fields[2];
+    config->display_area = fields[3];
+    config->video_codec = fields[4];
+    config->stream_resolution = fields[5];
+    config->stream_fps = fields[6];
+    config->hdr_enabled = fields[7];
+    config->audio_configuration = fields[8];
+    config->vsync_enabled = fields[9];
+    config->decoder_pipeline = fields[10];
+    config->decoder_cores = fields[11];
+    if (count > 12)
+        config->chroma_sampling = fields[12];
+}
+
+static void copy_port_hosts(moonlight_config_t *config, const legacy_config_host_with_port_t *hosts)
+{
+    uint32_t index;
+
+    for (index = 0; index < MOONLIGHT_CONFIG_MAX_HOSTS; ++index)
+    {
+        moonlight_config_host_t *host = &config->hosts[index];
+
+        memset(host, 0, sizeof(*host));
+        memcpy(host->address, hosts[index].address, sizeof(host->address));
+        memcpy(host->name, hosts[index].name, sizeof(host->name));
+        memcpy(host->unique_id, hosts[index].unique_id, sizeof(host->unique_id));
+        host->manual = hosts[index].manual;
+        host->http_port = hosts[index].http_port;
+    }
+}
+
 static void copy_legacy_hosts(moonlight_config_t *config, const legacy_config_host_t *hosts)
 {
     uint32_t index;
@@ -275,6 +377,7 @@ static void copy_legacy_hosts(moonlight_config_t *config, const legacy_config_ho
     {
         moonlight_config_host_t *host = &config->hosts[index];
 
+        memset(host, 0, sizeof(*host));
         memcpy(host->address, hosts[index].address, sizeof(host->address));
         memcpy(host->name, hosts[index].name, sizeof(host->name));
         memcpy(host->unique_id, hosts[index].unique_id, sizeof(host->unique_id));
@@ -289,6 +392,66 @@ static void copy_legacy_hosts(moonlight_config_t *config, const legacy_config_ho
             copy_text(host->address, sizeof(host->address), address);
             host->http_port = port;
         }
+    }
+}
+
+static void copy_v9_to_live(moonlight_config_t *config, const config_disk_v9_t *disk)
+{
+    uint32_t index;
+    const uint32_t fields[] = {
+        disk->host_count,      disk->selected_host,    disk->bitrate_mbps,
+        disk->display_area,    disk->video_codec,      disk->stream_resolution,
+        disk->stream_fps,      disk->hdr_enabled,      disk->audio_configuration,
+        disk->vsync_enabled,   disk->decoder_pipeline, disk->decoder_cores,
+        disk->chroma_sampling,
+    };
+
+    copy_settings(config, fields, sizeof(fields) / sizeof(fields[0]));
+    for (index = 0; index < MOONLIGHT_CONFIG_MAX_HOSTS; ++index)
+    {
+        const config_disk_host_v9_t *source = &disk->hosts[index];
+        moonlight_config_host_t *host = &config->hosts[index];
+
+        memset(host, 0, sizeof(*host));
+        memcpy(host->address, source->address, sizeof(host->address));
+        memcpy(host->name, source->name, sizeof(host->name));
+        memcpy(host->unique_id, source->unique_id, sizeof(host->unique_id));
+        host->manual = source->manual;
+        host->http_port = source->http_port;
+        if (moonlight_wol_mac_is_valid(source->mac))
+            memcpy(host->mac, source->mac, sizeof(host->mac));
+    }
+}
+
+static void copy_live_to_v9(config_disk_v9_t *disk, const moonlight_config_t *config)
+{
+    uint32_t index;
+
+    disk->host_count = config->host_count;
+    disk->selected_host = config->selected_host;
+    disk->bitrate_mbps = config->bitrate_mbps;
+    disk->display_area = config->display_area;
+    disk->video_codec = config->video_codec;
+    disk->stream_resolution = config->stream_resolution;
+    disk->stream_fps = config->stream_fps;
+    disk->hdr_enabled = config->hdr_enabled;
+    disk->audio_configuration = config->audio_configuration;
+    disk->vsync_enabled = config->vsync_enabled;
+    disk->decoder_pipeline = config->decoder_pipeline;
+    disk->decoder_cores = config->decoder_cores;
+    disk->chroma_sampling = config->chroma_sampling;
+    for (index = 0; index < MOONLIGHT_CONFIG_MAX_HOSTS; ++index)
+    {
+        const moonlight_config_host_t *host = &config->hosts[index];
+        config_disk_host_v9_t *destination = &disk->hosts[index];
+
+        memcpy(destination->address, host->address, sizeof(destination->address));
+        memcpy(destination->name, host->name, sizeof(destination->name));
+        memcpy(destination->unique_id, host->unique_id, sizeof(destination->unique_id));
+        destination->manual = host->manual;
+        destination->http_port = host->http_port;
+        if (moonlight_wol_mac_is_valid(host->mac))
+            memcpy(destination->mac, host->mac, sizeof(destination->mac));
     }
 }
 
@@ -311,7 +474,8 @@ void moonlight_config_defaults(moonlight_config_t *config)
 
 bool moonlight_config_load(moonlight_config_t *config)
 {
-    config_file_t file;
+    config_file_v9_t file;
+    config_file_v8_t version_8;
     legacy_file_v7_upstream_t upstream_v7;
     legacy_file_v7_pyrowave_t pyrowave_v7;
     legacy_config_file_v6_t legacy_v6;
@@ -330,25 +494,33 @@ bool moonlight_config_load(moonlight_config_t *config)
         file.checksum == checksum(&file.config, sizeof(file.config)) &&
         file.config.host_count <= MOONLIGHT_CONFIG_MAX_HOSTS)
     {
-        *config = file.config;
+        copy_v9_to_live(config, &file.config);
+    }
+    else if (read_exact(CONFIG_PATH, &version_8, sizeof(version_8)) &&
+             version_8.magic == CONFIG_MAGIC && version_8.version == 8U &&
+             version_8.checksum == checksum(&version_8.config, sizeof(version_8.config)) &&
+             version_8.config.fields[0] <= MOONLIGHT_CONFIG_MAX_HOSTS)
+    {
+        copy_settings(config, version_8.config.fields,
+                      sizeof(version_8.config.fields) / sizeof(version_8.config.fields[0]));
+        copy_port_hosts(config, version_8.config.hosts);
     }
     else if (read_exact(CONFIG_PATH, &upstream_v7, sizeof(upstream_v7)) &&
              upstream_v7.magic == CONFIG_MAGIC && upstream_v7.version == 7U &&
              upstream_v7.checksum == checksum(&upstream_v7.config, sizeof(upstream_v7.config)) &&
              upstream_v7.config.fields[0] <= MOONLIGHT_CONFIG_MAX_HOSTS)
     {
-        static_assert(sizeof(upstream_v7.config.fields) ==
-                      offsetof(moonlight_config_t, chroma_sampling));
-        memcpy(config, upstream_v7.config.fields, sizeof(upstream_v7.config.fields));
-        memcpy(config->hosts, upstream_v7.config.hosts, sizeof(config->hosts));
+        copy_settings(config, upstream_v7.config.fields,
+                      sizeof(upstream_v7.config.fields) / sizeof(upstream_v7.config.fields[0]));
+        copy_port_hosts(config, upstream_v7.config.hosts);
     }
     else if (read_exact(CONFIG_PATH, &pyrowave_v7, sizeof(pyrowave_v7)) &&
              pyrowave_v7.magic == CONFIG_MAGIC && pyrowave_v7.version == 7U &&
              pyrowave_v7.checksum == checksum(&pyrowave_v7.config, sizeof(pyrowave_v7.config)) &&
              pyrowave_v7.config.fields[0] <= MOONLIGHT_CONFIG_MAX_HOSTS)
     {
-        static_assert(sizeof(pyrowave_v7.config.fields) == offsetof(moonlight_config_t, hosts));
-        memcpy(config, pyrowave_v7.config.fields, sizeof(pyrowave_v7.config.fields));
+        copy_settings(config, pyrowave_v7.config.fields,
+                      sizeof(pyrowave_v7.config.fields) / sizeof(pyrowave_v7.config.fields[0]));
         copy_legacy_hosts(config, pyrowave_v7.config.hosts);
     }
     else if (read_exact(CONFIG_PATH, &legacy_v6, sizeof(legacy_v6)) &&
@@ -489,14 +661,14 @@ bool moonlight_config_load(moonlight_config_t *config)
 
 bool moonlight_config_save(const moonlight_config_t *config)
 {
-    config_file_t file;
+    config_file_v9_t file;
 
     if (!config || config->host_count > MOONLIGHT_CONFIG_MAX_HOSTS)
         return false;
     memset(&file, 0, sizeof(file));
     file.magic = CONFIG_MAGIC;
     file.version = CONFIG_VERSION;
-    file.config = *config;
+    copy_live_to_v9(&file.config, config);
     file.checksum = checksum(&file.config, sizeof(file.config));
     return write_atomic(&file, sizeof(file));
 }
@@ -583,7 +755,7 @@ bool moonlight_config_parse_endpoint(const char *text, char address[MOONLIGHT_CO
 
 // Keeps the PC at `index` and folds every other entry for the same endpoint or
 // the same Sunshine identity into it. Returns the PC's index afterwards.
-static uint32_t merge_duplicates(moonlight_config_t *config, uint32_t index)
+static uint32_t merge_duplicates(moonlight_config_t *config, uint32_t index, bool inherit_mac)
 {
     moonlight_config_host_t *host = &config->hosts[index];
     uint32_t duplicate = 0;
@@ -603,6 +775,9 @@ static uint32_t merge_duplicates(moonlight_config_t *config, uint32_t index)
             continue;
         }
         host->manual = host->manual || other->manual;
+        if (inherit_mac && !moonlight_wol_mac_is_valid(host->mac) &&
+            moonlight_wol_mac_is_valid(other->mac))
+            memcpy(host->mac, other->mac, sizeof(host->mac));
         if (config->selected_host == duplicate || config->selected_host == index)
             config->selected_host = index - (duplicate < index ? 1U : 0U);
         else if (config->selected_host > duplicate)
@@ -618,9 +793,10 @@ static uint32_t merge_duplicates(moonlight_config_t *config, uint32_t index)
 
 int moonlight_config_upsert_host(moonlight_config_t *config, const char *address,
                                  uint16_t http_port, const char *name, const char *unique_id,
-                                 bool manual)
+                                 const uint8_t mac[MOONLIGHT_WOL_MAC_BYTES], bool manual)
 {
     uint32_t index;
+    bool identity_changed = false;
     char input_address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
     char input_name[MOONLIGHT_CONFIG_NAME_SIZE];
     char input_unique_id[MOONLIGHT_CONFIG_UNIQUE_ID_SIZE];
@@ -634,11 +810,16 @@ int moonlight_config_upsert_host(moonlight_config_t *config, const char *address
     for (index = 0; index < config->host_count; ++index)
     {
         host = &config->hosts[index];
-        if ((input_unique_id[0] && host->unique_id[0] &&
-             strcmp(host->unique_id, input_unique_id) == 0) ||
-            (strcmp(host->address, input_address) == 0 &&
-             (!http_port || moonlight_config_host_port(host) == http_port)))
+        if (input_unique_id[0] && host->unique_id[0] &&
+            strcmp(host->unique_id, input_unique_id) == 0)
             goto update;
+        if (strcmp(host->address, input_address) == 0 &&
+            (!http_port || moonlight_config_host_port(host) == http_port))
+        {
+            identity_changed = input_unique_id[0] && host->unique_id[0] &&
+                               strcmp(host->unique_id, input_unique_id) != 0;
+            goto update;
+        }
     }
     if (config->host_count >= MOONLIGHT_CONFIG_MAX_HOSTS)
         return -1;
@@ -649,6 +830,11 @@ int moonlight_config_upsert_host(moonlight_config_t *config, const char *address
 update:
     copy_text(host->address, sizeof(host->address), input_address);
     host->http_port = http_port ? http_port : moonlight_config_host_port(host);
+    if (identity_changed)
+        memset(host->mac, 0, sizeof(host->mac));
+    if (mac && moonlight_wol_mac_is_valid(mac))
+        memcpy(host->mac, mac, sizeof(host->mac));
+    memset(host->reserved, 0, sizeof(host->reserved));
     if (input_name[0])
         copy_text(host->name, sizeof(host->name), input_name);
     else if (!host->name[0])
@@ -656,7 +842,7 @@ update:
     if (input_unique_id[0])
         copy_text(host->unique_id, sizeof(host->unique_id), input_unique_id);
     host->manual = host->manual || manual;
-    return (int)merge_duplicates(config, index);
+    return (int)merge_duplicates(config, index, !identity_changed);
 }
 
 int moonlight_config_set_host_port(moonlight_config_t *config, uint32_t index, uint16_t http_port)
@@ -667,10 +853,12 @@ int moonlight_config_set_host_port(moonlight_config_t *config, uint32_t index, u
     if (moonlight_config_host_port(&config->hosts[index]) != http_port)
     {
         // Another port is another Sunshine instance until a refresh says otherwise.
-        config->hosts[index].unique_id[0] = 0;
+        memset(config->hosts[index].unique_id, 0, sizeof(config->hosts[index].unique_id));
+        memset(config->hosts[index].mac, 0, sizeof(config->hosts[index].mac));
+        memset(config->hosts[index].reserved, 0, sizeof(config->hosts[index].reserved));
         config->hosts[index].http_port = http_port;
     }
-    return (int)merge_duplicates(config, index);
+    return (int)merge_duplicates(config, index, false);
 }
 
 bool moonlight_config_remove_host(moonlight_config_t *config, uint32_t index)

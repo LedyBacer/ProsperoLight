@@ -65,6 +65,8 @@ struct ArtworkImage
 // Turns the picture the host sent (PNG, JPEG or WebP) into pixels. It runs on the worker thread.
 using ArtworkDecoder = bool (*)(const unsigned char *picture, std::size_t size,
                                 ArtworkImage *image);
+using WakeSender = int (*)(const std::uint8_t mac[MOONLIGHT_WOL_MAC_BYTES], const char *host,
+                           std::uint16_t http_base_port, moonlight_wol_send_result *out_result);
 
 // The job the player is waiting for, if any.
 enum class Busy
@@ -74,6 +76,15 @@ enum class Busy
     refreshing,
     unpairing,
     stopping,
+    waking,
+};
+
+// The wake request is queued/running, then the launcher watches for recovery.
+enum class WakeState : std::uint8_t
+{
+    none,
+    sending,
+    checking,
 };
 
 // Everything the launcher knows and does, with no drawing in it: saved PCs
@@ -172,6 +183,13 @@ class Model
         return health_.Reconnecting();
     }
     Busy busy() const;
+    WakeState wake_state() const
+    {
+        return wake_state_;
+    }
+    // True only for a selected saved PC known offline with a valid stored MAC
+    // and no wake request already in flight or queued.
+    bool can_wake_selected() const;
     // Changes whenever the PC list, a PC's state or the app list changed.
     unsigned revision() const
     {
@@ -210,6 +228,9 @@ class Model
     bool AddHost(const char *text, std::string *error);
     bool SetPort(const char *text, std::string *error);
     void StopApp();
+    // Queues one non-blocking wake request for the selected offline PC. Does
+    // nothing when can_wake_selected() is false or a wake is already active.
+    void WakeSelectedHost();
     // True when the stream may start; otherwise a notice says why not.
     bool RequestStream();
     bool ResolveStreamOptions(moonlight_stream_options_t &options, std::string &error) const;
@@ -241,6 +262,12 @@ class Model
     {
         worker_start_ = start;
     }
+    // The host launcher injects its deterministic sender; the console default
+    // is the production IPv4 sender and runs only on the worker.
+    void set_wake_sender(WakeSender sender)
+    {
+        wake_sender_ = sender ? sender : moonlight_wol_send;
+    }
     // Asks for one app's box art from the selected PC (once per app).
     void RequestArtwork(int app_id);
     // The view let go of this poster: it may be asked for again.
@@ -260,6 +287,7 @@ class Model
         discover,
         refresh, // the selected PC, asked for by the player
         health,  // the selected PC, on a timer
+        wake,    // the selected offline PC, once
         sweep,   // another saved PC, for the list
         unpair,
         stop,
@@ -274,6 +302,7 @@ class Model
         std::uint16_t port = 0;
         std::uint16_t https_port = 0;
         int app_id = 0;
+        std::uint8_t mac[MOONLIGHT_WOL_MAC_BYTES] = {};
         bool announce = false;     // tell the player when the PC does not answer
         bool catalog_only = false; // box art for the forwarder catalog: saved, not shown
         Picture picture;           // box art already fetched: decoded, not asked for again
@@ -286,6 +315,7 @@ class Model
         std::uint32_t found_count = 0;
         ArtworkImage image;
         Picture picture;
+        moonlight_wol_send_result wake{};
     };
     struct StatusEntry
     {
@@ -299,6 +329,8 @@ class Model
     void Apply(const Job &job, JobResult &result);
     void ApplyDiscovery(const JobResult &result);
     bool ApplySelected(const Job &job, const JobResult &result);
+    bool ApplyWake(const Job &job, const JobResult &result);
+    void ClearWakeState();
     void PollPairing();
     void QueueSelectedRefresh(bool announce = false);
     void QueueSweep();
@@ -321,6 +353,8 @@ class Model
     MoonlightHealthState health_{};
     std::uint64_t health_due_ms_ = 0;
     std::uint64_t now_ms_ = 0;
+    WakeState wake_state_ = WakeState::none;
+    std::uint64_t wake_check_deadline_ms_ = 0;
     unsigned selected_app_ = 0;
     unsigned revision_ = 1;
     std::vector<StatusEntry> statuses_;
@@ -348,6 +382,7 @@ class Model
     std::vector<int> catalog_asked_;
     ArtworkDecoder artwork_decoder_ = nullptr;
     WorkerStart worker_start_ = nullptr;
+    WakeSender wake_sender_ = moonlight_wol_send;
     UpdateCheck update_check_ = nullptr;
     bool update_checked_ = false;
     // The update check runs on a thread of its own: when the catalog cannot be

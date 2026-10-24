@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Avslutt strømmen",
   "left": "…",
   "the PC": "Datamaskiner",
-  "this PC": "Datamaskiner"
+  "this PC": "Datamaskiner",
+  "Wake PC": "Vekk PC",
+  "Wake packet sent": "Vekkepakke sendt",
+  "Wake packet was not sent": "Vekkepakke ikke sendt"
 }

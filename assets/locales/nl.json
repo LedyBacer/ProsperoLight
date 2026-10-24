@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Stream verlaten",
   "left": "…",
   "the PC": "Computers",
-  "this PC": "Computers"
+  "this PC": "Computers",
+  "Wake PC": "PC ontwaken",
+  "Wake packet sent": "Wakkerpakket verzonden",
+  "Wake packet was not sent": "Wakkerpakket niet verzonden"
 }

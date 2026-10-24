@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Έξοδος από τη ροή",
   "left": "…",
   "the PC": "Υπολογιστές",
-  "this PC": "Υπολογιστές"
+  "this PC": "Υπολογιστές",
+  "Wake PC": "Ξύπνημα PC",
+  "Wake packet sent": "Το πακέτο αφύπνισης στάλθηκε",
+  "Wake packet was not sent": "Το πακέτο αφύπνισης δεν στάλθηκε"
 }

@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Forlasi elsendon",
   "left": "…",
   "the PC": "Komputiloj",
-  "this PC": "Komputiloj"
+  "this PC": "Komputiloj",
+  "Wake PC": "Veki la komputilon",
+  "Wake packet sent": "Veka paketo sendita",
+  "Wake packet was not sent": "Veka paketo ne sendita"
 }

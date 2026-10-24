@@ -22,6 +22,7 @@ bash "$root/tools/pyrowave/apply-transport.sh"
 
 sources=("$root"/tools/launcher-host/*.cpp "$root/src/launcher/launcher_model.cpp"
     "$root/src/launcher/launcher_view.cpp" "$root/src/moonlight_config.cpp"
+    "$root/src/moonlight_wol.cpp"
     "$root/src/connecting_plate.cpp" "$root/src/lan_http_report.cpp")
 while IFS= read -r -d '' source; do
     sources+=("$source")

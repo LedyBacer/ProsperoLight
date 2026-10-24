@@ -316,5 +316,8 @@
   "ends the stream and returns here": "退出串流",
   "left": "…",
   "the PC": "计算机",
-  "this PC": "计算机"
+  "this PC": "计算机",
+  "Wake PC": "唤醒目标计算机",
+  "Wake packet sent": "唤醒数据包已发送",
+  "Wake packet was not sent": "唤醒数据包未发送"
 }

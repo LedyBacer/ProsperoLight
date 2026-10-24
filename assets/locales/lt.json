@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Baigti srautą",
   "left": "…",
   "the PC": "Kompiuteriai",
-  "this PC": "Kompiuteriai"
+  "this PC": "Kompiuteriai",
+  "Wake PC": "Pažadinti kompiuterį",
+  "Wake packet sent": "Pažadinimo paketas išsiųstas",
+  "Wake packet was not sent": "Pažadinimo paketas neišsiųstas"
 }

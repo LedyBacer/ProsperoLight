@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Salir de la transmisión",
   "left": "…",
   "the PC": "Ordenadores",
-  "this PC": "Ordenadores"
+  "this PC": "Ordenadores",
+  "Wake PC": "Despertar PC",
+  "Wake packet sent": "Paquete de activación enviado",
+  "Wake packet was not sent": "Paquete de activación no enviado"
 }

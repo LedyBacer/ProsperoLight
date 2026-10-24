@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Közvetítés elhagyása",
   "left": "…",
   "the PC": "Számítógépek",
-  "this PC": "Számítógépek"
+  "this PC": "Számítógépek",
+  "Wake PC": "Számítógép felébresztése",
+  "Wake packet sent": "Ébresztőcsomag elküldve",
+  "Wake packet was not sent": "Ébresztőcsomag nem elküldve"
 }

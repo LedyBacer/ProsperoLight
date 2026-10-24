@@ -14,6 +14,8 @@
 #include <tuple>
 #include <vector>
 
+#include "moonlight_wol.hpp"
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -57,7 +59,9 @@ extern "C"
         uint32_t main10_supported;
         uint32_t pyrowave_profiles;
         uint32_t host_capabilities;
+        uint32_t mac_valid;
         uint32_t app_count;
+        uint8_t mac[MOONLIGHT_WOL_MAC_BYTES];
         char host[128];
         char name[64];
         char unique_id[48];
@@ -71,11 +75,12 @@ extern "C"
         {
             return std::tie(result, online, paired, https_port, http_port, current_app_id,
                             hevc_supported, main10_supported, pyrowave_profiles, host_capabilities,
-                            app_count) == std::tie(other.result, other.online, other.paired,
-                                                   other.https_port, other.http_port,
-                                                   other.current_app_id, other.hevc_supported,
-                                                   other.main10_supported, other.pyrowave_profiles,
-                                                   other.host_capabilities, other.app_count) &&
+                            mac_valid, app_count) ==
+                       std::tie(other.result, other.online, other.paired, other.https_port,
+                                other.http_port, other.current_app_id, other.hevc_supported,
+                                other.main10_supported, other.pyrowave_profiles,
+                                other.host_capabilities, other.mac_valid, other.app_count) &&
+                   std::memcmp(mac, other.mac, sizeof(mac)) == 0 &&
                    std::strcmp(host, other.host) == 0 && std::strcmp(name, other.name) == 0 &&
                    std::strcmp(unique_id, other.unique_id) == 0 &&
                    std::strcmp(server_version, other.server_version) == 0 &&

@@ -7,6 +7,8 @@
 #ifndef MOONLIGHT_CONFIG_HPP
 #define MOONLIGHT_CONFIG_HPP
 
+#include "moonlight_wol.hpp"
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -53,6 +55,9 @@ extern "C"
         uint32_t manual;
         /* Sunshine's "Port" setting: the HTTP port every other port derives from. */
         uint32_t http_port;
+        uint8_t mac[MOONLIGHT_WOL_MAC_BYTES];
+        /* Explicitly zeroed for deterministic comparisons and persistence. */
+        uint8_t reserved[2];
     } moonlight_config_host_t;
 
     typedef struct moonlight_config
@@ -78,10 +83,11 @@ extern "C"
     bool moonlight_config_save(const moonlight_config_t *config);
     /* A PC is one Sunshine endpoint: an address and a port. http_port 0 means
        the port is not known: a saved PC at that address keeps its port and a
-       new one gets the default. */
+       new one gets the default. A valid MAC replaces the saved value; NULL or
+       invalid data means no MAC update. */
     int moonlight_config_upsert_host(moonlight_config_t *config, const char *address,
                                      uint16_t http_port, const char *name, const char *unique_id,
-                                     bool manual);
+                                     const uint8_t mac[MOONLIGHT_WOL_MAC_BYTES], bool manual);
     bool moonlight_config_remove_host(moonlight_config_t *config, uint32_t index);
     /* Returns the PC's new index (a PC already saved at that endpoint is merged), or -1. */
     int moonlight_config_set_host_port(moonlight_config_t *config, uint32_t index,

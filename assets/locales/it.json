@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Esci dallo streaming",
   "left": "…",
   "the PC": "Computer",
-  "this PC": "Computer"
+  "this PC": "Computer",
+  "Wake PC": "Sveglia PC",
+  "Wake packet sent": "Pacchetto di risveglio inviato",
+  "Wake packet was not sent": "Pacchetto di risveglio non inviato"
 }

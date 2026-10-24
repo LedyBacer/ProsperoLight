@@ -14,7 +14,8 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "ckb": [],
   "cs": [
@@ -27,7 +28,8 @@
     "Settings",
     "Unknown",
     "Unpaired",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "de": [
     "5.1 surround",
@@ -42,7 +44,8 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "el": [
     "5.1 surround",
@@ -54,7 +57,8 @@
     "Settings",
     "Stereo",
     "Tip:",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "eo": [
     "Automatic (console language)",
@@ -79,7 +83,8 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "et": [
     "Offline",
@@ -99,11 +104,13 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "he": [],
   "hi": [
-    "Offline"
+    "Offline",
+    "Wake PC"
   ],
   "hu": [
     "5.1 surround",
@@ -119,7 +126,8 @@
     "Tip:",
     "Unknown",
     "Unpaired",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "it": [
     "5.1 surround",
@@ -133,7 +141,8 @@
     "Tip:",
     "Unknown",
     "Unpaired",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "ja": [
     "5.1 surround",
@@ -150,7 +159,8 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "ko": [
     "5.1 surround",
@@ -167,12 +177,14 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "lt": [
     "Cancel",
     "Unknown",
-    "Unpaired"
+    "Unpaired",
+    "Wake PC"
   ],
   "nb_NO": [
     "5.1 surround",
@@ -187,7 +199,8 @@
     "Tip:",
     "Unknown",
     "Unpaired",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "nl": [
     "5.1 surround",
@@ -200,7 +213,8 @@
     "Settings",
     "Unknown",
     "Unpaired",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "pl": [
     "5.1 surround",
@@ -216,7 +230,8 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "pt": [
     "5.1 surround",
@@ -232,7 +247,8 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "pt_BR": [
     "5.1 surround",
@@ -248,7 +264,8 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "ru": [
     "5.1 surround",
@@ -265,7 +282,8 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "sv": [
     "5.1 surround",
@@ -280,7 +298,8 @@
     "Tip:",
     "Unknown",
     "Unpaired",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "ta": [
     "4K",
@@ -298,7 +317,8 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "th": [
     "Cancel",
@@ -306,7 +326,8 @@
     "Offline",
     "Settings",
     "Unknown",
-    "Unpaired"
+    "Unpaired",
+    "Wake PC"
   ],
   "tr": [
     "5.1 surround",
@@ -321,7 +342,8 @@
     "Tip:",
     "Unknown",
     "Unpaired",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "uk": [
     "5.1 surround",
@@ -336,7 +358,8 @@
     "Tip:",
     "Unknown",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "vi": [
     "5.1 surround",
@@ -349,7 +372,8 @@
     "Offline",
     "Settings",
     "Tip:",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "zh_CN": [
     "5.1 surround",
@@ -366,7 +390,8 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ],
   "zh_TW": [
     "5.1 surround",
@@ -383,6 +408,7 @@
     "Unknown",
     "Unpaired",
     "V-Sync",
-    "Video codec"
+    "Video codec",
+    "Wake PC"
   ]
 }

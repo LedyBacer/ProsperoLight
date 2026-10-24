@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Lämna strömmen",
   "left": "…",
   "the PC": "Datorer",
-  "this PC": "Datorer"
+  "this PC": "Datorer",
+  "Wake PC": "Väck PC",
+  "Wake packet sent": "Väckningspaket skickat",
+  "Wake packet was not sent": "Väckningspaket skickades inte"
 }

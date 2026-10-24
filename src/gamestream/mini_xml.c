@@ -242,6 +242,51 @@ int xml_status(const char *data, size_t length)
     }
 }
 
+int xml_root_attribute(const char *data, size_t length, const char *attribute, char *output,
+                       size_t output_size)
+{
+    xml_scanner_t scanner;
+    char name[XML_NAME_MAX];
+    const char *attributes;
+    size_t attributes_length;
+
+    if (!data || !attribute || !output || !output_size)
+        return GS_INVALID;
+    output[0] = '\0';
+    scanner.cursor = data;
+    scanner.end = data + length;
+    for (;;)
+    {
+        xml_token_t token = next_tag(&scanner, name, &attributes, &attributes_length);
+        if (token == XML_EOF)
+            return GS_INVALID;
+        if ((token == XML_OPEN || token == XML_SELF_CLOSE) && !strcmp(name, "root"))
+        {
+            char *raw = malloc(output_size);
+            char *decoded;
+            size_t decoded_length;
+            if (!raw)
+                return GS_OUT_OF_MEMORY;
+            if (attribute_value(attributes, attributes_length, attribute, raw, output_size) != 0)
+            {
+                free(raw);
+                return GS_INVALID;
+            }
+            decoded = decode_entities(raw, strlen(raw));
+            free(raw);
+            if (!decoded)
+                return GS_OUT_OF_MEMORY;
+            decoded_length = strlen(decoded);
+            if (decoded_length >= output_size)
+                decoded_length = output_size - 1;
+            memcpy(output, decoded, decoded_length);
+            output[decoded_length] = '\0';
+            free(decoded);
+            return GS_OK;
+        }
+    }
+}
+
 int xml_search(const char *data, size_t length, const char *node, char **result)
 {
     xml_scanner_t scanner = {data, data + length};

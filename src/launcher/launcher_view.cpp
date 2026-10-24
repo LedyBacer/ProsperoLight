@@ -815,6 +815,9 @@ void View::sync_host_panel()
     const unsigned index = static_cast<unsigned>(host_focus());
     const moonlight_config_host_t &host = config.hosts[index];
     const HostStatus status = model_.host_status(index);
+    const bool wake_active = model_.wake_state() != WakeState::none;
+    const bool wakeable =
+        !wake_active && status.known && !status.online && model_.can_wake_selected();
     const unsigned port = moonlight_config_host_port(&host);
     char text[256];
     std::vector<ui::DetailItem> items;
@@ -824,7 +827,7 @@ void View::sync_host_panel()
                                                              : "%u",
                   port);
     items.push_back({i18n::tr("Port"), text});
-    items.push_back({i18n::tr("Connection"), !status.known   ? i18n::tr("Checking")
+    items.push_back({i18n::tr("Connection"), wake_active || !status.known ? i18n::tr("Checking")
                                              : status.online ? i18n::tr("Local network")
                                                              : i18n::tr("Not answering")});
     items.push_back({i18n::tr("Pairing"), !status.known || !status.online ? i18n::tr("Unknown")
@@ -839,9 +842,12 @@ void View::sync_host_panel()
                                                                              : i18n::tr("An app")});
     }
     host_details_.set_items(std::move(items));
-    open_games_.label = status.online && status.paired ? i18n::tr("Open games")
-                        : status.online                ? i18n::tr("Pair this PC")
-                                                       : i18n::tr("Try again");
+    open_games_.label = wake_active                      ? i18n::tr("Checking")
+                        : status.online && status.paired ? i18n::tr("Open games")
+                        : status.online                  ? i18n::tr("Pair this PC")
+                        : wakeable                       ? i18n::tr("Wake PC")
+                                                         : i18n::tr("Try again");
+    open_games_.set_disabled(wake_active);
     host_actions_.item(1).label =
         status.online && status.paired ? i18n::tr("Unpair") : i18n::tr("Pair");
     host_actions_.item(1).disabled = !status.online;
@@ -1679,9 +1685,14 @@ void View::set_host_zone(int zone, ui::Feedback &feedback)
 // What Cross does for the PC in focus: its games, its pairing, or another try.
 void View::primary_host_action(ui::Feedback &feedback)
 {
+    if (model_.wake_state() != WakeState::none)
+        return;
     const moonlight_backend_snapshot_t &backend = model_.backend();
     if (!model_.backend_valid())
+    {
+        model_.Refresh(false);
         return;
+    }
     if (backend.online && backend.paired)
     {
         show(1, &feedback);
@@ -1689,6 +1700,10 @@ void View::primary_host_action(ui::Feedback &feedback)
     else if (backend.online)
     {
         model_.StartPairing();
+    }
+    else if (model_.can_wake_selected())
+    {
+        model_.WakeSelectedHost();
     }
     else
     {
@@ -2004,6 +2019,7 @@ void View::draw_footer(ui::Canvas &canvas, ui::Painter &paint) const
     const moonlight_backend_snapshot_t &backend = model_.backend();
     const moonlight_config_host_t *host = model_.selected_host();
     const Busy busy = model_.busy();
+    const WakeState wake = model_.wake_state();
 
     // What the selected PC is doing, at the leading end.
     if (busy == Busy::searching || !host)
@@ -2019,11 +2035,13 @@ void View::draw_footer(ui::Canvas &canvas, ui::Painter &paint) const
     {
         const bool valid = model_.backend_valid();
         const bool ready = valid && backend.online && backend.paired;
-        const Color dot = !valid || model_.reconnecting() ? t.text_muted
-                          : ready                         ? t.success
-                          : backend.online                ? t.warning
-                                                          : t.danger;
-        const char *state = busy == Busy::stopping     ? i18n::tr("Stopping the app")
+        const Color dot = wake != WakeState::none           ? t.warning
+                          : !valid || model_.reconnecting() ? t.text_muted
+                          : ready                           ? t.success
+                          : backend.online                  ? t.warning
+                                                            : t.danger;
+        const char *state = wake != WakeState::none    ? i18n::tr("Checking")
+                            : busy == Busy::stopping   ? i18n::tr("Stopping the app")
                             : busy == Busy::unpairing  ? i18n::tr("Unpairing")
                             : busy == Busy::refreshing ? i18n::tr("Checking")
                             : !valid                   ? i18n::tr("Checking")
@@ -2048,13 +2066,15 @@ void View::draw_footer(ui::Canvas &canvas, ui::Painter &paint) const
         const HostStatus status =
             on_host() ? model_.host_status(static_cast<unsigned>(host_focus())) : HostStatus{};
         hints[count++] = {ui::Button::dpad, i18n::tr("Choose")};
-        hints[count++] = {ui::Button::cross, !on_host() || model_.config().host_count == 0
-                                                 ? i18n::tr("Add a PC")
-                                             : host_zone_ == 3 ? i18n::tr("Hold to remove")
-                                             : host_zone_ == 2 ? i18n::tr("Select")
-                                             : status.online && status.paired ? i18n::tr("Open")
-                                             : status.online                  ? i18n::tr("Pair")
-                                                             : i18n::tr("Try again")};
+        hints[count++] = {ui::Button::cross,
+                          !on_host() || model_.config().host_count == 0 ? i18n::tr("Add a PC")
+                          : host_zone_ == 3                             ? i18n::tr("Hold to remove")
+                          : host_zone_ == 2                             ? i18n::tr("Select")
+                          : model_.wake_state() != WakeState::none      ? i18n::tr("Checking")
+                          : status.online && status.paired              ? i18n::tr("Open")
+                          : status.online                               ? i18n::tr("Pair")
+                          : model_.can_wake_selected()                  ? i18n::tr("Wake PC")
+                                                                        : i18n::tr("Try again")};
         hints[count++] = {ui::Button::triangle, i18n::tr("Search again")};
         if (can_hold_to_exit())
             hints[count++] = {ui::Button::circle, i18n::tr("Hold to close app")};

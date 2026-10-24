@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Ukončit stream",
   "left": "…",
   "the PC": "Počítače",
-  "this PC": "Počítače"
+  "this PC": "Počítače",
+  "Wake PC": "Probudit počítač",
+  "Wake packet sent": "Budicí paket odeslán",
+  "Wake packet was not sent": "Budicí paket nebyl odeslán"
 }

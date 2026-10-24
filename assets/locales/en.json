@@ -316,5 +316,8 @@
   "ends the stream and returns here": "ends the stream and returns here",
   "left": "left",
   "the PC": "the PC",
-  "this PC": "this PC"
+  "this PC": "this PC",
+  "Wake PC": "Wake PC",
+  "Wake packet sent": "Wake packet sent",
+  "Wake packet was not sent": "Wake packet was not sent"
 }
