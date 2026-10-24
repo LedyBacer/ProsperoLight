@@ -1,3 +1,6 @@
+# ps5-native-app-boilerplate - bounded network impairment for Test Lab.
+# Copyright (C) 2026 LedyBacer and contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Linux gateway egress impairment for paired PS5 network experiments.
 
 No persistent qdisc is left behind by a normal run. We never replace an

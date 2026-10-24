@@ -205,9 +205,8 @@ class FramePacing
                 burst_count_ = 0;
             }
         }
-        const uint64_t cap = extended_hold_
-                                 ? std::min<uint64_t>(30000, period_ * 2)
-                                 : std::min<uint64_t>(10000, period_);
+        const uint64_t cap = extended_hold_ ? std::min<uint64_t>(30000, period_ * 2)
+                                            : std::min<uint64_t>(10000, period_);
         if (demand > reserve_)
         {
             reserve_ = std::min(cap, demand + 250);

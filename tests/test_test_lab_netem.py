@@ -1,3 +1,6 @@
+# ps5-native-app-boilerplate - safe netem harness regression checks.
+# Copyright (C) 2026 LedyBacer and contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 """No root privilege, network access, or physical PS5 required."""
 import importlib
 import json
