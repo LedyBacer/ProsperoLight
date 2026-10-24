@@ -1,5 +1,5 @@
 /*
- * ProsperoLight - Bounded, clock-continuous PS5 PCM grain policy.
+ * ps5-native-app-boilerplate / ProsperoLight - Clock-continuous PCM grain policy.
  * Copyright (C) 2026 LedyBacer and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

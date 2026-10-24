@@ -1,5 +1,5 @@
 /*
- * ProsperoLight - Experimental source-cadence / network-arrival phase clock.
+ * ps5-native-app-boilerplate / ProsperoLight - Experimental source/network phase clock.
  * Copyright (C) 2026 LedyBacer and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
