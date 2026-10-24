@@ -32,7 +32,7 @@ Features and fixes in the `main` branch may not be available in the [latest publ
 - **Controllers and input:** up to four DualSense controllers, supported haptics/adaptive triggers, USB keyboard and mouse, plus on-screen keyboard and controller-driven mouse mode.
 - **Audio:** selectable stereo or 5.1-channel Opus playback.
 - **A console-first launcher:** automatic LAN discovery, multiple saved PCs, application artwork, persistent settings, and a UI available in 31 languages.
-- **Wake an offline PC:** after a saved Sunshine PC answers once while awake, its MAC is remembered; an offline PC with that MAC offers an explicit IPv4 **Wake PC** action. Packet emission and the PC coming online are reported separately.
+- **Wake an offline PC:** after pairing with Sunshine and refreshing once while the PC is awake, its MAC is remembered; an offline PC with that MAC offers an explicit IPv4 **Wake PC** action. Packet emission and the PC coming online are reported separately.
 - **Updates and diagnostics:** in-app update support for compatible folder installations, performance overlay, and optional timing/log capture.
 
 

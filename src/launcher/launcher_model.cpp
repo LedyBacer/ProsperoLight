@@ -480,7 +480,12 @@ bool Model::can_wake_selected() const
     if (session_only_ || pairing() || wake_state_ != WakeState::none)
         return false;
     const moonlight_config_host_t *host = selected_host();
-    if (!host || !backend_valid_ || backend_.online || !moonlight_wol_mac_is_valid(host->mac))
+    // Use the same confirmed offline status as the PC panel. During the
+    // first two failed health checks, backend_.online is already false while
+    // the launcher deliberately keeps the host online to avoid false alarms.
+    const HostStatus status = host_status(config_.selected_host);
+    if (!host || !backend_valid_ || backend_.online || !status.known || status.online ||
+        !moonlight_wol_mac_is_valid(host->mac))
         return false;
     if (worker_active_ && job_.kind == JobKind::wake)
         return false;

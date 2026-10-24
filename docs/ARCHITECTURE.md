@@ -72,8 +72,9 @@ thread, one at a time, because the compact NVHTTP transport has process-global
 timeout/error state; pairing waits for that thread to be idle. The screen keeps
 drawing while a PC is slow to answer.
 
-Wake-on-LAN follows the same model/worker boundary. A successful `/serverinfo`
-response may teach `moonlight_backend_snapshot_t` a valid six-byte MAC;
+Wake-on-LAN follows the same model/worker boundary. An authorized HTTPS
+`/serverinfo` response may teach `moonlight_backend_snapshot_t` a valid
+six-byte MAC (unpaired HTTP provides a zero placeholder);
 `Model::Upsert()` persists it into configuration version 9 without letting
 missing or malformed data erase a known value. `Model::can_wake_selected()`
 requires a selected saved host that is known offline and has a valid stored

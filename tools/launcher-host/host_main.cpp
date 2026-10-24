@@ -332,6 +332,25 @@ int main(int argc, char **argv)
             model.Initialize(now_ms);
             pump_until(model, now_ms, [&] { return model.backend_valid(); });
             expect(model.backend_valid(), "the wake-test PC answered");
+            if (model.backend_valid() && !model.backend().online)
+            {
+                // The launcher confirms offline after three failures. Advance
+                // its health clock rather than bypassing the production policy.
+                const int initial_refreshes = fake::refresh_calls();
+                for (int retry = 1; retry <= 2; ++retry)
+                {
+                    now_ms += 1000;
+                    model.Poll(now_ms);
+                    pump_until(model, now_ms,
+                               [&]
+                               {
+                                   return fake::refresh_calls() >= initial_refreshes + retry &&
+                                          (retry < 2 || model.host_status(0).known);
+                               });
+                }
+                expect(model.host_status(0).known && !model.host_status(0).online,
+                       "three failed checks confirm the offline wake-test PC");
+            }
         };
         const auto start_checking = [&](launcher::Model &model, std::uint64_t &now_ms)
         {
@@ -475,6 +494,45 @@ int main(int argc, char **argv)
             model.WakeSelectedHost();
             usleep(3000);
             expect(fake::wake_sends() == 0, "a no-MAC PC never sends a wake packet");
+            model.Shutdown();
+        }
+
+        // An intermittent failure must not wake a PC that the launcher still
+        // considers online. Its existing health policy requires three failures.
+        {
+            save_one_host(true, 47989);
+            fake::world() = {wake_pc(true, true)};
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_model(model, now_ms);
+            expect(model.host_status(0).online, "the initial host status is online");
+            fake::set_pc_online(0, false);
+            for (int failure = 1; failure <= 3; ++failure)
+            {
+                fake::reset_refresh_calls();
+                const std::uint64_t at =
+                    now_ms + 4000 + static_cast<std::uint64_t>(failure) * 1000;
+                model.Poll(at);
+                pump_until(model, at,
+                           [&]
+                           {
+                               return fake::refresh_calls() > 0 &&
+                                      (failure < 3 ? model.reconnecting()
+                                                   : !model.reconnecting());
+                           });
+                if (failure < 3)
+                {
+                    expect(model.host_status(0).online,
+                           "the host stays online during transient failures");
+                    expect(!model.can_wake_selected(),
+                           "WOL is unavailable during transient health failures");
+                    model.WakeSelectedHost();
+                    expect(fake::wake_sends() == 0,
+                           "transient failures never send wake packets");
+                }
+            }
+            expect(!model.host_status(0).online, "three failed checks confirm offline");
+            expect(model.can_wake_selected(), "confirmed offline enables Wake PC");
             model.Shutdown();
         }
 
@@ -930,7 +988,7 @@ int main(int argc, char **argv)
             "step06-wakeable",
             {
                 {20, back, Direction::none, nullptr, 0, nullptr, nullptr},
-                {90, 0, Direction::none, "wakeable", 0, nullptr,
+                {210, 0, Direction::none, "wakeable", 0, nullptr,
                  [](launcher::Model &model, launcher::View &view)
                  {
                      expect(model.can_wake_selected(),
@@ -1049,7 +1107,7 @@ int main(int argc, char **argv)
             "step06-send-failure",
             {
                 {20, back, Direction::none, nullptr, 0, nullptr, nullptr},
-                {90, 0, Direction::none, "send-failure-ready", 0, nullptr,
+                {210, 0, Direction::none, "send-failure-ready", 0, nullptr,
                  [](launcher::Model &model, launcher::View &)
                  {
                      expect(model.can_wake_selected(),

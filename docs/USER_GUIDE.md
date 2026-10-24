@@ -49,7 +49,7 @@ Sunshine normally uses **47989** as its base port. Discovered hosts advertise th
 
 ### Wake a saved PC
 
-ProsperoLight can wake one saved PC after it has learned a valid MAC from Sunshine while that PC is awake. Refresh the selected PC once it is online; the MAC is stored in configuration and survives restart. An older configuration that migrates to version 9 starts with no saved MAC, so each saved PC must answer successfully once while awake before it can be awakened later.
+ProsperoLight can wake a saved PC after learning a valid MAC from Sunshine. Pair with Sunshine first, then refresh the selected PC while it is awake; the MAC is stored in configuration and survives restart. Sunshine exposes the real MAC to authorized HTTPS clients, while unpaired HTTP `/serverinfo` returns a zero placeholder that ProsperoLight ignores. An older configuration that migrates to version 9 starts with no saved MAC, so each saved PC must answer a paired refresh once while awake before it can be awakened later.
 
 When a saved PC is known offline and has a valid learned MAC, the primary PC button changes from **Try again** to **Wake PC**. Confirming it sends IPv4 Wake-on-LAN packets in the background and changes the button to disabled **Checking**. Without a learned MAC, **Try again** performs the normal refresh and no wake packet is sent. ProsperoLight never wakes a PC automatically before connecting and never offers wake while the PC is online.
 
