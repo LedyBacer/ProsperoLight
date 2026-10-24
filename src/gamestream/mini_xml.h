@@ -23,6 +23,9 @@ extern "C"
     } app_entry_t;
 
     int xml_status(const char *data, size_t len);
+    // Read and decode an attribute from the XML root element into a bounded buffer.
+    int xml_root_attribute(const char *data, size_t len, const char *attribute, char *output,
+                           size_t output_size);
     int xml_search(const char *data, size_t len, const char *node, char **result);
     int xml_applist(const char *data, size_t len, app_entry_t **list);
     void xml_applist_free(app_entry_t *list);
