@@ -82,11 +82,13 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(rows[2][1:5], rows[1][1:5])
         self.assertEqual(rows[2][-2:], ["200", "1"])
 
-    def test_release_enables_only_tested_presentation_overlap(self):
+    def test_release_enables_tested_presentation_and_audio_defaults(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn("PRESENT_OVERLAP ?= 1", makefile)
         self.assertIn("FLIP_POLL_US ?= 500", makefile)
-        for option in ("FEC_SIMD", "OPUS_SIMD", "AUDIO_MAX_BACKLOG_MS", "PERFORMANCE_DETAIL",
+        # Issue #68: allow recovery bursts without dropping normal Wi-Fi jitter.
+        self.assertIn("AUDIO_MAX_BACKLOG_MS ?= 100", makefile)
+        for option in ("FEC_SIMD", "OPUS_SIMD", "PERFORMANCE_DETAIL",
                        "LAN_TELEMETRY", "STREAM_SELF_TEST_FPS",
                        "STREAM_SELF_TEST_RESOLUTION", "VIDEO_OUTPUT_SELF_TEST_FPS",
                        "STOP_ACTIVE_APP_SELF_TEST"):
@@ -100,6 +102,30 @@ class ToolTests(unittest.TestCase):
         restore = builder.split("# The build always recreates the folder.", 1)[1]
         self.assertIn("PRESENT_OVERLAP=1", restore)
         self.assertIn('$out/04-presentation-overlap/$title/eboot.bin', restore)
+
+    def test_audio_queue_patch_is_applied_by_transport_dependencies(self):
+        script = (ROOT / "tools/pyrowave/apply-transport.sh").read_text(encoding="utf-8")
+        patch_name = "0003-audio-queue-headroom.patch"
+        patch = (ROOT / "tools/pyrowave/patches/moonlight" / patch_name).read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(patch_name, script)
+        self.assertIn("-    LbqInitializeLinkedBlockingQueue(&packetQueue, 30);", patch)
+        self.assertIn("+    LbqInitializeLinkedBlockingQueue(&packetQueue, 100);", patch)
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+        self.assertIn("#define AUDIO_GRAIN_FRAMES 512u", stream)
+
+    def test_audio_output_cannot_block_opus_receive_callback(self):
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+        callback = stream.split("static void ps5_audio_sample(", 1)[1].split(
+            "static AUDIO_RENDERER_CALLBACKS", 1)[0]
+        worker = stream.split("static void *ps5_audio_output_worker(", 1)[1].split(
+            "static bool ps5_audio_surround_available", 1)[0]
+        self.assertNotIn("sceAudioOutOutput(", callback)
+        self.assertIn("pthread_cond_signal(&audio_state.ring_wake)", callback)
+        self.assertIn("sceAudioOutOutput(state->handle, output)", worker)
+        self.assertIn("pthread_join(audio_state.output_thread", stream)
+        self.assertIn('"audio_underruns"', stream.replace('\\"', '"'))
 
     def test_stream_archives_share_one_parallel_build_recipe(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")

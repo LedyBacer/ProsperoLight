@@ -46,6 +46,156 @@ class SourceTimestamp
     bool initialized_{};
 };
 
+// Bounded, allocation-free input-arrival controller inspired by Nonary's
+// measured-coverage approach. Compare completed-frame enqueue intervals to
+// source RTP intervals; decoder/GPU waits never enter this observation. The
+// result still includes host encoding and receiver scheduling variation: it
+// is not a per-packet network-jitter measurement. Use an observed tail, not a
+// fixed number of late frames, to authorize a modest fixed-refresh buffer.
+class VideoArrivalJitter
+{
+  public:
+    void observe(uint32_t frame, uint32_t rtp, uint64_t enqueue_us)
+    {
+        if (!rtp || !enqueue_us)
+        {
+            valid_ = false;
+            return;
+        }
+        if (valid_)
+        {
+            const uint32_t ticks = rtp - last_rtp_;
+            const uint64_t source_delta = uint64_t(ticks) * 1000000 / 90000;
+            if (frame != last_frame_ + 1 || !ticks || source_delta > 100000 ||
+                enqueue_us < last_enqueue_us_ || enqueue_us - last_enqueue_us_ > 250000)
+            {
+                // Missing frames and source pauses are not proof of network
+                // jitter. Ignore this pair, but keep trusted previous buffer
+                // protection until clean evidence ages it out.
+                if (frame > last_frame_ + 1 && frame - last_frame_ < 240)
+                    missing_frames_ += frame - last_frame_ - 1;
+                ++discontinuities_;
+            }
+            else
+            {
+                const uint64_t arrival_delta = enqueue_us - last_enqueue_us_;
+                const uint64_t excess =
+                    arrival_delta > source_delta ? arrival_delta - source_delta : 0;
+                samples_[next_] = {enqueue_us,
+                                   static_cast<uint32_t>(std::min<uint64_t>(excess, 100000))};
+                next_ = (next_ + 1) % samples_.size();
+                count_ = std::min(count_ + 1, samples_.size());
+                ++observed_;
+                if (observed_ % 8 == 0)
+                {
+                    evaluate(enqueue_us);
+                }
+            }
+        }
+        // Elapsed time, not source frame count, also permits the controller to
+        // release retained protection after an idle or lost-frame interval.
+        if (last_evaluation_us_ && enqueue_us > last_evaluation_us_ + 250000)
+            evaluate(enqueue_us);
+        last_frame_ = frame;
+        last_rtp_ = rtp;
+        last_enqueue_us_ = enqueue_us;
+        valid_ = true;
+    }
+
+    uint32_t budget_us() const
+    {
+        return budget_us_;
+    }
+    uint32_t peak_us() const
+    {
+        return peak_us_;
+    }
+    uint32_t bursts() const
+    {
+        return bursts_;
+    }
+    uint32_t p98_us() const
+    {
+        return p98_us_;
+    }
+    uint32_t samples() const
+    {
+        return sample_count_;
+    }
+    uint64_t missing_frames() const
+    {
+        return missing_frames_;
+    }
+    uint32_t discontinuities() const
+    {
+        return discontinuities_;
+    }
+
+    void reset()
+    {
+        *this = VideoArrivalJitter{};
+    }
+
+  private:
+    struct Sample
+    {
+        uint64_t at_us{};
+        uint32_t excess_us{};
+    };
+    // Maximum 256 samples, sampled at most once per completed frame. The
+    // evaluation sorts a small stack array only once per eight observations.
+    std::array<Sample, 256> samples_{};
+    size_t next_{}, count_{};
+    uint32_t last_frame_{}, last_rtp_{}, budget_us_{}, peak_us_{}, bursts_{};
+    uint32_t p98_us_{}, sample_count_{}, discontinuities_{};
+    uint64_t last_enqueue_us_{}, last_evaluation_us_{}, observed_{}, missing_frames_{};
+    bool valid_{};
+
+    void evaluate(uint64_t at_us)
+    {
+        if (last_evaluation_us_ && at_us <= last_evaluation_us_)
+            return;
+        std::array<uint32_t, 256> tail{};
+        size_t eligible = 0, late = 0;
+        for (size_t i = 0; i < count_; ++i)
+        {
+            const auto &sample = samples_[i];
+            if (!sample.at_us || sample.at_us > at_us || at_us - sample.at_us > 2000000)
+                continue;
+            tail[eligible++] = sample.excess_us;
+            late += sample.excess_us > 10000 ? 1u : 0u;
+        }
+        sample_count_ = static_cast<uint32_t>(eligible);
+        p98_us_ = 0;
+        uint32_t target = 0;
+        if (eligible >= 24)
+        {
+            std::sort(tail.begin(), tail.begin() + eligible);
+            p98_us_ = tail[(eligible - 1) * 98 / 100];
+            if (late >= 3 && p98_us_ > 10000)
+                target = std::min<uint32_t>(30000, p98_us_ + 500);
+        }
+        if (target > budget_us_)
+        {
+            budget_us_ = target;
+            peak_us_ = std::max(peak_us_, budget_us_);
+            ++bursts_;
+        }
+        else if (target < budget_us_ && last_evaluation_us_)
+        {
+            // Fast attack, bounded release: an isolated bad interval cannot
+            // permanently add input latency on a subsequently clean LAN.
+            // A genuinely idle desktop can stop producing frames for seconds.
+            // Release old, expired evidence by elapsed time on its next frame.
+            const uint64_t elapsed = std::min<uint64_t>(at_us - last_evaluation_us_, 5000000);
+            const uint32_t release =
+                static_cast<uint32_t>(std::max<uint64_t>(1, elapsed * 12000 / 1000000));
+            budget_us_ -= std::min<uint32_t>(budget_us_ - target, release);
+        }
+        last_evaluation_us_ = at_us;
+    }
+};
+
 // A target is a submission deadline. GPU completion and physical display
 // completion remain distinct measurements owned by the presentation backend.
 class FramePacing
@@ -56,6 +206,11 @@ class FramePacing
         uint64_t misses{}, resets{}, submissions{}, reserve_us{}, period_us{};
         uint64_t wait_total_us{}, late_max_us{}, spacing_error_max_us{};
     } stats;
+
+    void set_network_jitter_budget_us(uint32_t budget)
+    {
+        network_budget_us_ = std::min<uint32_t>(budget, 30000);
+    }
 
     void reset(unsigned fps)
     {
@@ -185,8 +340,13 @@ class FramePacing
         // Initial GPU/decoder setup must not become a permanent playout delay.
         if (stats.submissions < 3)
             slot_ = ready_us;
-        const uint64_t cap = std::min<uint64_t>(10000, period_);
         const uint64_t demand = ready_us > slot_ ? ready_us - slot_ : 0;
+        // Decoder/GPU stalls can increase readiness demand, but only measured
+        // RTP-to-network-enqueue jitter can authorize a larger waiting cap.
+        const uint64_t cap = network_budget_us_
+                                 ? std::min<uint64_t>(std::max<uint32_t>(10000, network_budget_us_),
+                                                      std::min<uint64_t>(30000, period_ * 2))
+                                 : std::min<uint64_t>(10000, period_);
         if (demand > reserve_)
         {
             reserve_ = std::min(cap, demand + 250);
@@ -223,8 +383,11 @@ class FramePacing
         if (fixed_refresh_x100 && flip_anchor_us && display_matches)
         {
             // VSync latches at the next vblank. Waiting until just before it
-            // misses that vblank and the output stays at half rate.
-            deadline = ready_us;
+            // misses that vblank and the output stays at half rate. Retain
+            // immediate presentation on LAN; only measured arrival bursts
+            // authorize the modest source-clock playout reserve on WAN.
+            if (!network_budget_us_)
+                deadline = ready_us;
             if (submitted_)
                 deadline = std::max(deadline, submitted_ + minimum);
         }
@@ -281,7 +444,7 @@ class FramePacing
     uint64_t period_ = 16666, nominal_period_ = 16666, slot_{}, submitted_{}, last_source_{},
              cadence_source_{};
     uint64_t reserve_ = 1500, candidate_{}, wake_lead_ = 100, fixed_fraction_{};
-    unsigned candidate_count_{}, clean_{};
+    unsigned candidate_count_{}, clean_{}, network_budget_us_{};
     int32_t last_frame_{}, cadence_frame_{};
     bool initialized_{}, resume_pending_{};
 };

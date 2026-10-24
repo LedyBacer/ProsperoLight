@@ -8,7 +8,9 @@ import tempfile
 import unittest
 import uuid
 
-from pltest.analysis import analyze_run, parse_trace, analyze_pyrowave
+from pltest.analysis import (analyze_run, parse_trace, analyze_pyrowave,
+                             network_audio_metrics, passive_link_quality,
+                             av_startup_observation)
 from pltest.comparison import compare_pairs
 from pltest.suites import apply_suite
 from pltest.report import archive_analysis
@@ -37,6 +39,46 @@ def run_fixture(fps=60, age=3000, ready=1500, variant='a'):
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_network_audio_metrics_only_reports_observed_rtt(self):
+        report = {'network_rtt_valid': 0, 'network_rtt_ms': 0,
+                  'network_rtt_variance_ms': 0, 'audio_underruns': 2,
+                  'audio_underrun_wait_total_us': 35000,
+                  'video_network_jitter_peak_us': 25000}
+        metrics = network_audio_metrics(report)
+        self.assertNotIn('network_rtt_ms_observed', metrics)
+        self.assertNotIn('network_rtt_variance_ms_observed', metrics)
+        self.assertEqual(metrics['audio_underrun_wait_total_us'], 35000)
+        report['network_rtt_valid'] = 1
+        report['network_rtt_ms'] = 51
+        self.assertEqual(network_audio_metrics(report)['network_rtt_ms_observed'], 51)
+
+    def test_passive_nonary_style_evidence_never_guesses_available_bandwidth(self):
+        report = {'rtp_video_stats_valid': 1, 'rtp_video_packets': 1000,
+                  'video_arrival_samples': 100, 'video_arrival_p98_us': 16000,
+                  'rtp_video_fec_recovered': 7, 'rtp_video_fec_failed': 2,
+                  'rtp_video_out_of_sequence': 3, 'network_rtt_valid': 1,
+                  'network_rtt_variance_ms': 22}
+        assessed = passive_link_quality(report)
+        self.assertEqual(assessed['classification'], 'FEC_RECOVERY_FAILURES_WITH_VARIATION')
+        self.assertEqual(assessed['confidence'], 'limited')
+        self.assertEqual(assessed['bitrate_adaptation'], 'disabled')
+        self.assertNotIn('available_mbps', assessed)
+        report['rtp_video_fec_failed'] = 0
+        report['video_arrival_p98_us'] = 2000
+        report['network_rtt_variance_ms'] = 1
+        self.assertEqual(passive_link_quality(report)['classification'],
+                         'RECOVERY_OR_REORDER_OBSERVED')
+        report['rtp_video_packets'] = 0
+        self.assertEqual(passive_link_quality(report)['classification'], 'UNKNOWN')
+
+    def test_startup_audio_video_clock_observation_is_not_lip_sync(self):
+        self.assertFalse(av_startup_observation({})['available'])
+        record = av_startup_observation({'audio_first_output_call_us': 1000000,
+                                         'video_first_present_observed_us': 1012000})
+        self.assertTrue(record['available'])
+        self.assertEqual(record['offset_us'], -12000)
+        self.assertIn('NOT lip-sync error', record['semantics'])
+
     def test_authenticated_counter_rates_keep_clock_bounds_and_capture_unknown(self):
         from pltest.session_evidence import host_transport_rates
         samples=[{'source':'Vibepollo /api/rtsp/sessions','verified':True,

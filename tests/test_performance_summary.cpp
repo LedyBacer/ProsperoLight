@@ -18,6 +18,11 @@ static bool diagnostic_logs = true;
 static std::vector<std::string> kernel_records;
 extern "C"
 {
+    const RTP_VIDEO_STATS *LiGetRTPVideoStats(void)
+    {
+        static const RTP_VIDEO_STATS stats{1000, 100, 7, 2, 3, 0, 0};
+        return &stats;
+    }
 #ifdef LI_VIDEO_DELIVERY_STATS_VERSION
     bool LiGetVideoDeliveryStats(LI_VIDEO_DELIVERY_STATS *)
     {
@@ -179,6 +184,11 @@ int main()
     assert(original.find("\"input_poll_us\":" + std::to_string(INPUT_POLL_US)) !=
            std::string::npos);
     assert(original.find("\"udp_packets\":0") != std::string::npos);
+    assert(original.find("\"rtp_video_stats_valid\":1,\"rtp_video_packets\":1000,") !=
+           std::string::npos);
+    assert(original.find("\"rtp_video_fec_recovered\":7,\"rtp_video_fec_failed\":2,") !=
+           std::string::npos);
+    assert(original.find("\"audio_prebuffer_target_frames\":960,") != std::string::npos);
     assert(!original.empty());
     write_failure = true;
     save_performance_summary(state, input, &options, -1);
