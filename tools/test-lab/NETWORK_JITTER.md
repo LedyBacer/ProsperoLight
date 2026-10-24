@@ -124,7 +124,11 @@ actual UDP traffic, and is only effective on a verified routed path.
   not the precise kernel-timestamp bandwidth calibration in Nonary. Normal
   Moonlight connections never send this probe: 404/405/501 from Sunshine or
   another host is `UNSUPPORTED`, not a streaming failure. No bitrate setting
-  is changed from its result.
+  is changed from its result. **The current receiver runs on the Linux Test
+  Lab coordinator**: it measures host→coordinator routing, *not automatically
+  the actual PS5 path*. Do not use its result to set PS5 bitrate unless the
+  shared route has been independently verified. A future native PS5 receiver
+  needs a separate hardware-validated implementation.
 - `av_startup_observation.offset_us` is the PS5 audio-output **call start**
   relative to first video-presentation **observation**. It helps identify
   gross startup regressions, but is **not measured lip sync**, since it lacks

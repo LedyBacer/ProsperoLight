@@ -182,7 +182,10 @@ def run_probe(url, kbps, packet_size, host_pem, client_cert, client_key):
         while time.monotonic() < deadline:
             now = time.monotonic()
             if (progress['port'] and authenticated == 0 and now >= next_handshake):
-                receiver.sendto(token, (address, progress['port']))
+                try:
+                    receiver.sendto(token, (address, progress['port']))
+                except BlockingIOError:
+                    pass  # Retry the same bounded handshake at the next tick.
                 next_handshake = now + .1
             ready, _, _ = select.select([receiver], [], [], min(.05, max(0, deadline-now)))
             if ready:
@@ -212,6 +215,9 @@ def run_probe(url, kbps, packet_size, host_pem, client_cert, client_key):
             return {'classification': 'INCONCLUSIVE', 'reason': progress['error']}
         if not complete.is_set() or progress['status'] != 200 or not progress['port']:
             return {'classification': 'INCONCLUSIVE', 'reason': 'HTTP rejected/timed out or no authenticated UDP handshake'}
+        if not any(timestamp is not None for timestamp in arrivals):
+            return {'classification': 'INCONCLUSIVE',
+                    'reason': 'host returned a probe response, but no valid sequenced UDP packet reached this receiver'}
         try:
             sent, elapsed = parse_host_result(progress['body'], expected)
             result = grade_probe(kbps, packet_size, arrivals, sent, elapsed)
