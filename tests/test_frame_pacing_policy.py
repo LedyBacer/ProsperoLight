@@ -71,6 +71,21 @@ int main() {
         assert(target>=previous+2000000 && target<=previous+2010000);
         assert(p.stats.resets);
     }
+    // Several genuine bursts, close together, earn a bounded extra reserve.
+    // Isolated LAN spikes retain the legacy 10 ms ceiling above.
+    moonlight::FramePacing unstable;
+    unstable.reset(60);
+    uint64_t peak_reserve=0;
+    for(int frame=1; frame<=160; ++frame) {
+        const uint64_t pts=uint64_t(frame)*1000000/60;
+        const uint64_t jitter=frame%7==0?25000:0;
+        const uint64_t ready=1000000+pts+jitter;
+        const auto target=unstable.target(frame,pts,ready);
+        assert(target>=ready && target<=ready+30000);
+        unstable.submitted(target,target,target-ready);
+        peak_reserve=std::max(peak_reserve,unstable.stats.reserve_us);
+    }
+    assert(peak_reserve>10000 && peak_reserve<=30000);
     // Capture jitter alternates long and short PTS deltas for twenty minutes.
     // The source is still 60 FPS; cadence must not drift into a 40 FPS cap.
     moonlight::FramePacing jittered;

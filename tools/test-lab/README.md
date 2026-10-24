@@ -13,6 +13,8 @@ Implemented as logical stages in one branch based on upstream/main
 - [PR7](PR7.md): local dashboard, read-only doctor and downloadable archives.
 
 Use [the onboarding guide](../../docs/TEST_LAB.md) for setup, real runs and exports.
+For controlled WAN/Wi-Fi impairment on a dedicated Linux network egress, see
+[the network jitter test plan](NETWORK_JITTER.md) and the `pltest netem` wrapper.
 Standalone PS5 and host-worker commands remain available; only coordinated runs
 provide combined evidence. Performance comparisons require separately valid measurements.
 

@@ -185,8 +185,29 @@ class FramePacing
         // Initial GPU/decoder setup must not become a permanent playout delay.
         if (stats.submissions < 3)
             slot_ = ready_us;
-        const uint64_t cap = std::min<uint64_t>(10000, period_);
         const uint64_t demand = ready_us > slot_ ? ready_us - slot_ : 0;
+        // A single late frame can be host scheduling noise. Only repeated
+        // lateness in a short window earns an extra source-frame reserve.
+        // Stable LAN remains at the original <=10 ms ceiling. The reserve is
+        // capped even on WAN to avoid slowly accumulating input latency.
+        if (burst_window_)
+            --burst_window_;
+        else
+            burst_count_ = 0;
+        if (extended_hold_)
+            --extended_hold_;
+        if (demand > 10000 && demand < 100000)
+        {
+            burst_window_ = 40;
+            if (++burst_count_ >= 3)
+            {
+                extended_hold_ = 240;
+                burst_count_ = 0;
+            }
+        }
+        const uint64_t cap = extended_hold_
+                                 ? std::min<uint64_t>(30000, period_ * 2)
+                                 : std::min<uint64_t>(10000, period_);
         if (demand > reserve_)
         {
             reserve_ = std::min(cap, demand + 250);
@@ -281,7 +302,7 @@ class FramePacing
     uint64_t period_ = 16666, nominal_period_ = 16666, slot_{}, submitted_{}, last_source_{},
              cadence_source_{};
     uint64_t reserve_ = 1500, candidate_{}, wake_lead_ = 100, fixed_fraction_{};
-    unsigned candidate_count_{}, clean_{};
+    unsigned candidate_count_{}, clean_{}, burst_count_{}, burst_window_{}, extended_hold_{};
     int32_t last_frame_{}, cadence_frame_{};
     bool initialized_{}, resume_pending_{};
 };

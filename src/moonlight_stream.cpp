@@ -83,6 +83,7 @@
 #define CONNECTION_SETUP_TIMEOUT_US UINT64_C(20000000)
 #define FIRST_VIDEO_FRAME_TIMEOUT_US UINT64_C(10000000)
 #define AUDIO_GRAIN_FRAMES 512u
+#define AUDIO_PREBUFFER_FRAMES 960u // 20 ms; enough for a normal two-packet Wi-Fi burst.
 #define AUDIO_STEREO_CHANNELS 2u
 #define AUDIO_51_CHANNELS 6u
 #define AUDIO_MAX_CHANNELS 8u
@@ -488,8 +489,12 @@ typedef struct ps5_audio_state
     moonlight::TimingHistogram decode_timing, output_timing;
     uint32_t pending_ms_high_water, ring_high_water, catchup_packets;
     uint64_t catchup_frames;
+    uint32_t underruns;
+    pthread_mutex_t ring_lock;
+    pthread_cond_t ring_wake;
+    pthread_t output_thread;
+    bool ring_sync_ready, output_started, stop_output;
     int16_t ring[AUDIO_RING_FRAMES * AUDIO_MAX_CHANNELS];
-    int16_t output[AUDIO_GRAIN_FRAMES * AUDIO_MAX_CHANNELS];
     int16_t decoded[AUDIO_DECODE_MAX_FRAMES * AUDIO_MAX_CHANNELS];
 } ps5_audio_state_t;
 
@@ -1206,7 +1211,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
              "\"audio_pending_ms_high_water\":%u,\"audio_ring_frames_high_water\":%u,"
              "\"audio_catchup_packets\":%u,\"audio_catchup_frames\":%llu,"
              "\"audio_decode_errors\":%u,\"audio_output_errors\":%u,"
-             "\"audio_ring_overruns\":%u,"
+             "\"audio_ring_overruns\":%u,\"audio_underruns\":%u,"
              "\"udp_packets\":%llu,\"udp_bytes\":%llu,\"udp_receive_errors\":%llu,"
              "\"socket_poll_calls\":%llu,\"socket_heap_polls\":%llu,"
              "\"rcvbuf_requests\":%llu,\"rcvbuf_failures\":%llu,"
@@ -1214,6 +1219,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
              audio_state.pending_ms_high_water, audio_state.ring_high_water,
              audio_state.catchup_packets, (unsigned long long)audio_state.catchup_frames,
              audio_state.decode_errors, audio_state.output_errors, audio_state.overruns,
+             audio_state.underruns,
              (unsigned long long)network.packets, (unsigned long long)network.bytes,
              (unsigned long long)network.receive_errors, (unsigned long long)network.poll_calls,
              (unsigned long long)network.heap_polls, (unsigned long long)network.buffer_requests,
@@ -3715,6 +3721,56 @@ static void audio_ring_pop(ps5_audio_state_t *state, int16_t *pcm, uint32_t fram
     state->ring_count -= frames;
 }
 
+// sceAudioOutOutput() can block for an entire hardware grain. It must never
+// block moonlight-common-c's Opus callback (and, indirectly, its packet queue).
+// The ring is bounded; a late burst evicts old PCM instead of growing latency.
+static void *ps5_audio_output_worker(void *)
+{
+    auto *state = &audio_state;
+    bool prebuffering = true;
+    int16_t output[AUDIO_GRAIN_FRAMES * AUDIO_MAX_CHANNELS];
+    for (;;)
+    {
+        pthread_mutex_lock(&state->ring_lock);
+        const uint32_t required = prebuffering ? AUDIO_PREBUFFER_FRAMES : AUDIO_GRAIN_FRAMES;
+        while (!state->stop_output && state->ring_count < required)
+        {
+            if (!prebuffering)
+            {
+                ++state->underruns;
+                prebuffering = true;
+            }
+            pthread_cond_wait(&state->ring_wake, &state->ring_lock);
+        }
+        if (state->stop_output)
+        {
+            pthread_mutex_unlock(&state->ring_lock);
+            break;
+        }
+        audio_ring_pop(state, output, AUDIO_GRAIN_FRAMES);
+        prebuffering = false;
+        pthread_mutex_unlock(&state->ring_lock);
+
+        const uint64_t started = monotonic_us();
+        const int result = sceAudioOutOutput(state->handle, output);
+        const uint64_t elapsed = monotonic_us() - started;
+        pthread_mutex_lock(&state->ring_lock);
+        state->output_total_us += elapsed;
+        state->output_timing.add(elapsed);
+        state->output_max_us = std::max(state->output_max_us, elapsed);
+        ++state->output_calls;
+        if (result < 0)
+        {
+            ++state->output_errors;
+            state->stop_output = true;
+        }
+        pthread_mutex_unlock(&state->ring_lock);
+        if (result < 0)
+            break;
+    }
+    return nullptr;
+}
+
 static bool ps5_audio_surround_available()
 {
     char receipt[192];
@@ -3782,6 +3838,18 @@ static int ps5_audio_init(int audio_configuration, const POPUS_MULTISTREAM_CONFI
     if (audio_state.handle <= 0)
         goto failed;
 
+    if (pthread_mutex_init(&audio_state.ring_lock, nullptr) != 0)
+        goto failed;
+    if (pthread_cond_init(&audio_state.ring_wake, nullptr) != 0)
+    {
+        pthread_mutex_destroy(&audio_state.ring_lock);
+        goto failed;
+    }
+    audio_state.ring_sync_ready = true;
+    if (pthread_create(&audio_state.output_thread, nullptr, ps5_audio_output_worker, nullptr) != 0)
+        goto failed;
+    audio_state.output_started = true;
+
     snprintf(receipt, sizeof(receipt),
              "Moonlight audio ready: rate=%d channels=%d output_channels=%d streams=%d coupled=%d "
              "frame_samples=%d opus=%d init=%08x handle=%08x grain=%u",
@@ -3803,6 +3871,14 @@ failed:
         opus_multistream_decoder_destroy(audio_state.decoder);
         audio_state.decoder = NULL;
     }
+    if (audio_state.ring_sync_ready)
+    {
+        pthread_cond_destroy(&audio_state.ring_wake);
+        pthread_mutex_destroy(&audio_state.ring_lock);
+        audio_state.ring_sync_ready = false;
+    }
+    if (audio_state.handle > 0)
+        (void)sceAudioOutClose(audio_state.handle);
     audio_state.handle = -1;
     return -1;
 }
@@ -3813,6 +3889,21 @@ static void ps5_audio_cleanup(void)
 
     if (rtp)
         audio_state.rtp = *rtp;
+    if (audio_state.output_started)
+    {
+        pthread_mutex_lock(&audio_state.ring_lock);
+        audio_state.stop_output = true;
+        pthread_cond_broadcast(&audio_state.ring_wake);
+        pthread_mutex_unlock(&audio_state.ring_lock);
+        (void)pthread_join(audio_state.output_thread, nullptr);
+        audio_state.output_started = false;
+    }
+    if (audio_state.ring_sync_ready)
+    {
+        pthread_cond_destroy(&audio_state.ring_wake);
+        pthread_mutex_destroy(&audio_state.ring_lock);
+        audio_state.ring_sync_ready = false;
+    }
     if (audio_state.handle > 0)
     {
         audio_state.drain_result = sceAudioOutOutput(audio_state.handle, NULL);
@@ -3904,35 +3995,18 @@ static void ps5_audio_sample(char *sample_data, int sample_length)
         audio_state.pending_ms_high_water = static_cast<uint32_t>(pending_ms);
     if (moonlight::discard_audio_backlog(pending_ms, PROSPEROLIGHT_AUDIO_MAX_BACKLOG_MS))
     {
-        // Match Moonlight Qt's decode-then-discard policy, also retiring any PCM
-        // we already buffered. Preserve Opus state, channel layout and PLC.
+        // Keep the already-buffered near-term PCM. Draining it from the callback
+        // caused long audible gaps; only discard this late decoded packet.
         ++audio_state.catchup_packets;
-        audio_state.catchup_frames += static_cast<uint32_t>(decoded) + audio_state.ring_count;
-        audio_state.ring_head = audio_state.ring_tail = audio_state.ring_count = 0;
+        audio_state.catchup_frames += static_cast<uint32_t>(decoded);
         return;
     }
+    pthread_mutex_lock(&audio_state.ring_lock);
     audio_ring_push(&audio_state, audio_state.decoded, (uint32_t)decoded);
     if (audio_state.ring_count > audio_state.ring_high_water)
         audio_state.ring_high_water = audio_state.ring_count;
-    while (audio_state.ring_count >= AUDIO_GRAIN_FRAMES)
-    {
-        int result;
-
-        audio_ring_pop(&audio_state, audio_state.output, AUDIO_GRAIN_FRAMES);
-        started = monotonic_us();
-        result = sceAudioOutOutput(audio_state.handle, audio_state.output);
-        elapsed = monotonic_us() - started;
-        audio_state.output_total_us += elapsed;
-        audio_state.output_timing.add(elapsed);
-        if (elapsed > audio_state.output_max_us)
-            audio_state.output_max_us = elapsed;
-        ++audio_state.output_calls;
-        if (result < 0)
-        {
-            ++audio_state.output_errors;
-            break;
-        }
-    }
+    pthread_cond_signal(&audio_state.ring_wake);
+    pthread_mutex_unlock(&audio_state.ring_lock);
 }
 
 static AUDIO_RENDERER_CALLBACKS moonlight_audio_callbacks = {
@@ -5781,6 +5855,7 @@ done:
         "packets=%u plc=%u packet_samples=%u-%u mismatches=%u callback_span_us=%llu "
         "callback_hz_x100=%llu interval_avg_us=%llu interval_min_us=%llu interval_max_us=%llu "
         "decode_errors=%u decoded_frames=%llu nonzero_samples=%llu peak=%u ring=%u overruns=%u "
+        "underruns=%u "
         "dropped=%llu output_calls=%u output_errors=%u decode_avg_us=%llu decode_max_us=%llu "
         "output_avg_us=%llu output_max_us=%llu rtp_audio=%u rtp_fec=%u recovered=%u failed=%u "
         "oos=%u invalid=%u fec_invalid=%u drain=%08x close=%08x",
@@ -5804,7 +5879,7 @@ done:
         (unsigned long long)audio_state.interval_max_us, audio_state.decode_errors,
         (unsigned long long)audio_state.decoded_frames,
         (unsigned long long)audio_state.nonzero_samples, audio_state.peak_sample,
-        audio_state.ring_count, audio_state.overruns,
+        audio_state.ring_count, audio_state.overruns, audio_state.underruns,
         (unsigned long long)audio_state.dropped_frames, audio_state.output_calls,
         audio_state.output_errors,
         (unsigned long long)(audio_state.packets ? audio_state.decode_total_us / audio_state.packets

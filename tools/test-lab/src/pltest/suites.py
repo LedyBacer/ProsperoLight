@@ -21,6 +21,9 @@ def apply_suite(suite, profile):
     if suite == 'decoder-matrix' and (host['scene'] != 'decoder-regression' or
             timing['warmup_seconds'] != 10 or timing['measure_seconds'] != 80):
         raise ValueError('decoder-matrix requires 10s warmup and 20/40/20s measured phases')
+    if suite == 'network-jitter' and (host['scene'] != 'decoder-regression' or
+            timing['warmup_seconds'] != 10 or timing['measure_seconds'] != 80):
+        raise ValueError('network-jitter requires 10s warmup and 20/40/20s measured phases')
     if suite == 'pyrowave-matrix' and result.get('client', {}).get('codec') != 'pyrowave':
         raise ValueError('pyrowave-matrix requires the pyrowave codec')
     if result.get('client', {}).get('codec') == 'pyrowave' and any(

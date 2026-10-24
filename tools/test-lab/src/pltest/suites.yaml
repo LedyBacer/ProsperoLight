@@ -9,6 +9,7 @@
     "bitrate-ramp": {"scene": "low-motion", "warmup_seconds": 10, "measure_seconds": 30},
     "pacing-vrr": {"scene": "static-keepalive", "warmup_seconds": 10, "measure_seconds": 30},
     "pyrowave-matrix": {"scene": "low-motion", "warmup_seconds": 10, "measure_seconds": 30},
+    "network-jitter": {"scene": "decoder-regression", "warmup_seconds": 10, "measure_seconds": 80, "phases": [{"scene": "low-motion", "seconds": 20}, {"scene": "noise", "seconds": 40}, {"scene": "low-motion", "seconds": 20}]},
     "soak": {"scene": "low-motion", "warmup_seconds": 10, "measure_seconds": 120, "segment_seconds_max": 120}
   },
   "screening": {"minimum_pairs": 3, "fps_drop_fraction": 0.02, "latency_increase_fraction": 0.10, "latency_increase_us": 1000}

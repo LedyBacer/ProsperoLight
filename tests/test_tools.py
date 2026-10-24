@@ -115,6 +115,18 @@ class ToolTests(unittest.TestCase):
         stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
         self.assertIn("#define AUDIO_GRAIN_FRAMES 512u", stream)
 
+    def test_audio_output_cannot_block_opus_receive_callback(self):
+        stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
+        callback = stream.split("static void ps5_audio_sample(", 1)[1].split(
+            "static AUDIO_RENDERER_CALLBACKS", 1)[0]
+        worker = stream.split("static void *ps5_audio_output_worker(", 1)[1].split(
+            "static bool ps5_audio_surround_available", 1)[0]
+        self.assertNotIn("sceAudioOutOutput(", callback)
+        self.assertIn("pthread_cond_signal(&audio_state.ring_wake)", callback)
+        self.assertIn("sceAudioOutOutput(state->handle, output)", worker)
+        self.assertIn("pthread_join(audio_state.output_thread", stream)
+        self.assertIn('"audio_underruns"', stream.replace('\\"', '"'))
+
     def test_stream_archives_share_one_parallel_build_recipe(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn("$(STREAM_ARCHIVES) &: $(STREAM_INPUTS)", makefile)
