@@ -39,6 +39,10 @@ int main() {
     assert(pcm[8] == 30000 && pcm[9] == -30000);
     audio_fade_to_silence(pcm, 8, 2, 4);
     assert(pcm[14] == 0 && pcm[15] == 0);
+    int16_t silence[8] = {};
+    audio_crossfade_from_sample(silence, 4, 2, last, 4);
+    assert(silence[0] < 0 && silence[1] > 0); // seamless fade on full silence
+    assert(silence[6] < 0 && silence[7] > 0);
 
     AudioPrebufferPolicy pre;
     pre.on_near_miss(1000000);

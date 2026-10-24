@@ -3976,7 +3976,22 @@ static void *ps5_audio_output_worker(void *)
             }
         }
         else
+        {
             ++state->silence_grains;
+            // A previously full grain may end at a non-zero sample before
+            // the next packet drought. Ramp into zero rather than cutting
+            // the hardware stream abruptly at the grain boundary.
+            bool audible_tail = false;
+            for (int channel = 0; channel < state->output_channels; ++channel)
+                audible_tail |= state->last_output_sample[channel] != 0;
+            if (audible_tail)
+            {
+                moonlight::audio_crossfade_from_sample(
+                    output, AUDIO_GRAIN_FRAMES, state->output_channels,
+                    state->last_output_sample, AUDIO_CROSSFADE_FRAMES);
+                ++state->crossfades;
+            }
+        }
         if (decision.silence)
             state->crossfade_pending = true;
         for (int channel = 0; channel < state->output_channels; ++channel)
