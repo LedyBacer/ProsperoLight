@@ -18,7 +18,8 @@ UPDATE_DEV_OFFER ?= 0
 UPDATE_AUTO_ACCEPT ?= 0
 VIDEO_OUTPUT_SELF_TEST_FPS ?= 0
 STOP_ACTIVE_APP_SELF_TEST ?= 0
-# Tested one-flip overlap is on; dependency and audio experiments remain off.
+# Tested presentation overlap and issue #68 audio jitter defaults are enabled;
+# other dependency and diagnostic experiments remain off.
 FEC_SIMD ?= 0
 OPUS_SIMD ?= 0
 AUDIO_MAX_BACKLOG_MS ?= 100
