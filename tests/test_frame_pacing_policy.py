@@ -109,6 +109,26 @@ int main() {
     }
     assert(peak_reserve>10000 && peak_reserve<=30000);
     assert(impaired_network.peak_us()>10000 && impaired_network.bursts()>0);
+    // A missing video frame must not erase protection learned during recent
+    // jitter. The estimator must rejoin consecutive pairs without treating
+    // their larger source clock delta as new measured jitter.
+    moonlight::VideoArrivalJitter lost_frame_network;
+    uint64_t lost_last=0;
+    for(int f=1;f<=100;++f) {
+        const uint64_t pts=uint64_t(f)*1000000/60;
+        const uint64_t jitter=f%7==0?25000:0;
+        const uint64_t arrival=std::max(1000000+pts+jitter,lost_last+1);
+        lost_last=arrival;
+        lost_frame_network.observe(f,f*1500,arrival);
+    }
+    const auto before_gap=lost_frame_network.budget_us();
+    assert(before_gap>10000);
+    lost_frame_network.observe(104,104*1500,lost_last+66667);
+    assert(lost_frame_network.budget_us()==before_gap);
+    assert(lost_frame_network.missing_frames()==3);
+    assert(lost_frame_network.discontinuities()>0);
+    lost_frame_network.observe(200,200*1500,lost_last+10000000);
+    assert(lost_frame_network.budget_us()==0); // expired evidence after long idle
     // Matching 60-on-60 fixed refresh normally submits immediately, but a
     // confirmed WAN burst is allowed a bounded reserve on that path too.
     moonlight::FramePacing fixed_wan;

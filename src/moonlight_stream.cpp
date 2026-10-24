@@ -34,6 +34,7 @@
 #include "stream_profile.hpp"
 #include "frame_cadence.hpp"
 #include "frame_pacing.hpp"
+#include "audio_jitter_policy.hpp"
 #include "presentation_preferences.hpp"
 #include "app_storage.hpp"
 #include "host_quit_preferences.hpp"
@@ -88,6 +89,9 @@
 #define AUDIO_51_CHANNELS 6u
 #define AUDIO_MAX_CHANNELS 8u
 #define AUDIO_RING_FRAMES (AUDIO_GRAIN_FRAMES * 6u)
+static_assert(moonlight::AudioPrebufferPolicy::kMinimumFrames == AUDIO_PREBUFFER_FRAMES &&
+                  moonlight::AudioPrebufferPolicy::kMaximumFrames < AUDIO_RING_FRAMES,
+              "audio recovery must fit the bounded PCM ring");
 #define AUDIO_DECODE_MAX_FRAMES 5760u
 #define AUDIO_OUT_ALREADY_INIT UINT32_C(0x8026000e)
 #define PS5_AUDIO_USER_SYSTEM 0xff
@@ -491,7 +495,9 @@ typedef struct ps5_audio_state
     uint64_t catchup_frames;
     uint32_t underruns;
     uint64_t startup_prebuffer_wait_us, underrun_wait_total_us, underrun_wait_max_us;
+    uint64_t first_output_call_us, last_output_call_us;
     uint64_t ring_frame_sum, ring_observations;
+    moonlight::AudioPrebufferPolicy prebuffer_policy;
     pthread_mutex_t ring_lock;
     pthread_cond_t ring_wake;
     pthread_t output_thread;
@@ -965,10 +971,13 @@ static void save_performance_summary(const native_renderer_state_t &state,
 {
     if (!prosperolight_logs_enabled() || !state.mode || !options)
         return;
-    static char report[16384];
+    // New network/FEC counters must never silently displace the tail of the
+    // performance JSON on a verbose decoder recovery session.
+    static char report[24576];
     const auto &agc = native_agc_performance();
     const auto network = ps5_network_metrics_read();
     const auto placement = ps5_thread_placement_stats();
+    const RTP_VIDEO_STATS *video_rtp = LiGetRTPVideoStats();
     uint32_t output_width = 0, output_height = 0, refresh_x100 = 0;
     size_t length = 0;
     native_agc_output_status(&output_width, &output_height, &refresh_x100);
@@ -999,7 +1008,9 @@ static void save_performance_summary(const native_renderer_state_t &state,
              "\"decoder_refreshes\":%u,\"decode_errors\":%u,\"last_decode_error\":%d,"
              "\"catchup_refreshes\":%u,\"unrecoverable_frames\":%u,"
              "\"pending_video_high_water\":%u,\"video_network_jitter_peak_us\":%u,"
-             "\"video_network_jitter_bursts\":%u,"
+             "\"video_network_jitter_bursts\":%u,\"video_arrival_p98_us\":%u,"
+             "\"video_arrival_samples\":%u,\"video_arrival_missing_frames\":%llu,"
+             "\"video_arrival_discontinuities\":%u,"
              "\"network_rtt_valid\":%u,\"network_rtt_ms\":%u,"
              "\"network_rtt_variance_ms\":%u,\n",
              state.access_units, state.decoded, state.presented.load(), state.not_displayed.load(),
@@ -1009,8 +1020,25 @@ static void save_performance_summary(const native_renderer_state_t &state,
              state.catchup_refreshes,
              std::atomic_load_explicit(&video_unrecoverable_frames, std::memory_order_relaxed),
              state.pending_video_high_water, state.network_jitter.peak_us(),
-             state.network_jitter.bursts(), state.rtt_valid ? 1u : 0u,
+             state.network_jitter.bursts(), state.network_jitter.p98_us(),
+             state.network_jitter.samples(),
+             (unsigned long long)state.network_jitter.missing_frames(),
+             state.network_jitter.discontinuities(), state.rtt_valid ? 1u : 0u,
              state.rtt_valid ? state.rtt_ms : 0u, state.rtt_valid ? state.rtt_variance_ms : 0u);
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"rtp_video_stats_valid\":%u,\"rtp_video_packets\":%u,\"rtp_video_fec_packets\":%u,"
+             "\"rtp_video_fec_recovered\":%u,\"rtp_video_fec_failed\":%u,"
+             "\"rtp_video_out_of_sequence\":%u,\"rtp_video_invalid\":%u,"
+             "\"rtp_video_fec_invalid\":%u,\n",
+             video_rtp ? 1u : 0u, video_rtp ? video_rtp->packetCountVideo : 0u,
+             video_rtp ? video_rtp->packetCountFec : 0u,
+             video_rtp ? video_rtp->packetCountFecRecovered : 0u,
+             video_rtp ? video_rtp->packetCountFecFailed : 0u,
+             video_rtp ? video_rtp->packetCountOOS : 0u,
+             video_rtp ? video_rtp->packetCountInvalid : 0u,
+             video_rtp ? video_rtp->packetCountFecInvalid : 0u);
     ok = ok &&
          report_append(
              report, sizeof(report), &length,
@@ -1224,6 +1252,12 @@ static void save_performance_summary(const native_renderer_state_t &state,
              "\"audio_startup_prebuffer_wait_us\":%llu,"
              "\"audio_underrun_wait_total_us\":%llu,"
              "\"audio_underrun_wait_max_us\":%llu,"
+             "\"audio_prebuffer_target_frames\":%u,\"audio_prebuffer_peak_frames\":%u,"
+             "\"audio_prebuffer_increases\":%u,\"audio_prebuffer_decreases\":%u,"
+             "\"audio_first_output_call_us\":%llu,\"audio_last_output_call_us\":%llu,"
+             "\"audio_first_packet_call_us\":%llu,\"video_first_present_observed_us\":%llu,"
+             "\"rtp_audio_packets\":%u,\"rtp_audio_fec_recovered\":%u,"
+             "\"rtp_audio_fec_failed\":%u,\"rtp_audio_out_of_sequence\":%u,"
              "\"audio_ring_mean_frames\":%llu,"
              "\"udp_packets\":%llu,\"udp_bytes\":%llu,\"udp_receive_errors\":%llu,"
              "\"socket_poll_calls\":%llu,\"socket_heap_polls\":%llu,"
@@ -1235,6 +1269,15 @@ static void save_performance_summary(const native_renderer_state_t &state,
              audio_state.underruns, (unsigned long long)audio_state.startup_prebuffer_wait_us,
              (unsigned long long)audio_state.underrun_wait_total_us,
              (unsigned long long)audio_state.underrun_wait_max_us,
+             audio_state.prebuffer_policy.target_frames(),
+             audio_state.prebuffer_policy.peak_frames(), audio_state.prebuffer_policy.increases(),
+             audio_state.prebuffer_policy.decreases(),
+             (unsigned long long)audio_state.first_output_call_us,
+             (unsigned long long)audio_state.last_output_call_us,
+             (unsigned long long)audio_state.first_packet_us,
+             (unsigned long long)state.first_present_us, audio_state.rtp.packetCountAudio,
+             audio_state.rtp.packetCountFecRecovered, audio_state.rtp.packetCountFecFailed,
+             audio_state.rtp.packetCountOOS,
              (unsigned long long)(audio_state.ring_observations
                                       ? audio_state.ring_frame_sum / audio_state.ring_observations
                                       : 0),
@@ -3763,9 +3806,11 @@ static void *ps5_audio_output_worker(void *)
         if (!prebuffering && state->ring_count < AUDIO_GRAIN_FRAMES)
         {
             ++state->underruns;
+            state->prebuffer_policy.on_underrun(monotonic_us());
             prebuffering = true;
         }
-        const uint32_t required = prebuffering ? AUDIO_PREBUFFER_FRAMES : AUDIO_GRAIN_FRAMES;
+        const uint32_t required =
+            prebuffering ? state->prebuffer_policy.target_frames() : AUDIO_GRAIN_FRAMES;
         uint64_t wait_started_us = 0;
         while (!state->stop_output && state->ring_count < required)
         {
@@ -3795,17 +3840,23 @@ static void *ps5_audio_output_worker(void *)
 
         const uint64_t started = monotonic_us();
         const int result = sceAudioOutOutput(state->handle, output);
-        const uint64_t elapsed = monotonic_us() - started;
+        const uint64_t finished = monotonic_us();
+        const uint64_t elapsed = finished - started;
         pthread_mutex_lock(&state->ring_lock);
         state->output_total_us += elapsed;
         state->output_timing.add(elapsed);
         state->output_max_us = std::max(state->output_max_us, elapsed);
         ++state->output_calls;
+        if (!state->first_output_call_us)
+            state->first_output_call_us = started;
+        state->last_output_call_us = started;
         if (result < 0)
         {
             ++state->output_errors;
             state->stop_output = true;
         }
+        else
+            state->prebuffer_policy.on_output(finished);
         pthread_mutex_unlock(&state->ring_lock);
         if (result < 0)
             break;
@@ -3840,6 +3891,7 @@ static int ps5_audio_init(int audio_configuration, const POPUS_MULTISTREAM_CONFI
     (void)context;
     (void)flags;
     memset(&audio_state, 0, sizeof(audio_state));
+    audio_state.prebuffer_policy = moonlight::AudioPrebufferPolicy{};
     audio_state.handle = -1;
     audio_state.open_result = -1;
     audio_state.drain_result = -1;

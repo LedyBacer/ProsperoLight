@@ -49,8 +49,13 @@ hosts, run the impairment command **on the gateway**, then use your normal
 Test Lab coordinator; the wrapper must remain alive until the test completes.
 The wrapper validates **both** interfaces before applying either condition;
 captures per-direction configuration and `tc -s -j qdisc show` packet/byte/drop
-statistics **before cleanup**; records the test exit code; rolls back only its
-own qdiscs (including if the second installation fails) on completion/error/
+statistics **at installation and before cleanup**. The owned netem packet
+counter must **increase during the test in every shaped direction**; otherwise
+the verdict is `NETWORK_TRAFFIC_UNVERIFIED` (`INCONCLUSIVE`, wrapper exit 3)
+even if the wrapped test succeeded. A positive count proves egress activity,
+**not** that the PS5 stream traversed that interface. Inspect flow identity
+through a packet capture/routing check. The wrapper records the test exit code;
+rolls back only its own qdiscs (including if the second installation fails) on completion/error/
 Ctrl+C; and writes a per-direction cleanup receipt. An interrupted/failed run
 is not automatically a performance failure: inspect the cleanup evidence.
 For a hard kill or power loss, inspect `tc -j qdisc show dev IFACE`
@@ -87,6 +92,33 @@ check reserve caps, epoch resets, queue starvation and recovery; they **cannot**
 establish audible quality or physical display latency. `netem` is required for
 actual UDP traffic, and is only effective on a verified routed path.
 
+## Adaptive receiver changes and measurement limits
+
+- Fixed-refresh video now derives an optional **bounded** (at most 30 ms)
+  playout reserve from the rolling p98 of positive completed-frame arrival
+  variations over two seconds, requires repeated outliers, and releases the
+  reserve gradually. RTP frame gaps do not reset previously learned protection.
+  This adapts Nonary's statistical tail/slow-release principle, not its entire
+  VRR/FFmpeg buffering implementation. VRR and decoder/GPU timing remain
+  independently paced. `video_arrival_p98_us` is **not packet transit jitter**:
+  the host encoder and UDP reassembly can affect completed-frame times.
+- The audio output worker starts with 20 ms of PCM prebuffer, increases by
+  10 ms after closely repeated underruns (up to 50 ms), then releases one step
+  after 45 seconds of quiet and subsequent 30-second intervals. The bounded
+  ring remains 64 ms; no unbounded buffering and no callback blocking.
+- Native `performance-last.json` exports video FEC recovered/failed, out-of-
+  sequence packets, arrival p98/sample count/gaps, and audio target/peak/
+  adjustments. Test Lab's `passive_link_quality` combines these as *limited*
+  diagnostic evidence. It **does not** estimate available Mbps or automatically
+  renegotiate encoder bitrate. Nonary's active UDP capacity probe requires
+  explicit compatible host protocol support, a hardware validated traffic
+  budget, and matching test evidence before it can be brought over safely.
+- `av_startup_observation.offset_us` is the PS5 audio-output **call start**
+  relative to first video-presentation **observation**. It helps identify
+  gross startup regressions, but is **not measured lip sync**, since it lacks
+  a shared source media PTS and physical audio/display output timestamps.
+  Check synchronization with an external A/V flash/clap recording.
+
 ## Test plan for Codex
 
 1. On PS5 13.60 and (if available) legacy 3.x, do three interleaved **A/B**
@@ -102,12 +134,16 @@ actual UDP traffic, and is only effective on a verified routed path.
 4. For audio, compare `audio_pending_ms_high_water`, `audio_catchup_frames`,
    `audio_ring_overruns`, `audio_underruns`, `audio_underrun_wait_total_us`,
    `audio_underrun_wait_max_us`, `audio_startup_prebuffer_wait_us`,
-   `audio_ring_mean_frames`, `audio_output_errors`, RTP packet loss and
+   `audio_ring_mean_frames`, `audio_output_errors`,
+   `audio_prebuffer_target_frames`, `audio_prebuffer_peak_frames`,
+   `audio_prebuffer_increases`, `audio_prebuffer_decreases`, RTP packet loss and
    audible dropout duration. The wait counters measure time until enough PCM
    returns, **not exact HDMI silence**. Check A/V synchronization too.
 5. For video, compare unique displayed FPS, lost/decode-drop/frame-age counts,
    ready-to-submit p95, `video_network_jitter_peak_us`,
-   `video_network_jitter_bursts`, stale drops and time to recover from each
+   `video_network_jitter_bursts`, `video_arrival_p98_us`, sample/gap counts,
+   `rtp_video_fec_recovered`/`rtp_video_fec_failed`, reordering,
+   `passive_link_quality`, stale drops and time to recover from each
    burst. Distinguish network enqueue variation from decoder/GPU stalls; do
    not mistake the source's low-motion frame rate for client frame loss.
 6. Deliver immutable A/B paired reports, raw PS5 `performance-last.json`,

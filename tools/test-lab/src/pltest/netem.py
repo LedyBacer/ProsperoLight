@@ -59,6 +59,15 @@ def root_qdisc(rows):
     return next((q for q in rows if q.get('root') is True), None)
 
 
+def owned_packet_count(rows):
+    """Read netem's own packet counter, never a sibling/parent qdisc total."""
+    root = root_qdisc(rows)
+    if not root or root.get('kind') != 'netem' or root.get('handle') != HANDLE:
+        return None
+    value = root.get('packets')
+    return value if type(value) is int and value >= 0 else None
+
+
 def validate_interface(interface):
     if not re.fullmatch(r'[A-Za-z0-9_.-]{1,15}', interface) or interface in ('lo', 'all'):
         raise ValueError('invalid or unsafe network interface')
@@ -107,6 +116,7 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
                                        if direction['scenario'] != 'lan' else None)
         direction['applied'] = False
         direction['cleanup_verified'] = direction['scenario'] == 'lan'
+        direction['traffic_verdict'] = 'NOT_APPLICABLE' if direction['scenario'] == 'lan' else 'UNVERIFIED'
     record = {'schema': 'prosperolight-netem/1', 'scenario': scenario,
               'one_way_egress': SCENARIOS[scenario], 'interface': interface,
               'start_utc': utc_now(), 'baseline_qdisc': directions[0]['baseline_qdisc'],
@@ -133,6 +143,12 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
                 direction['applied_qdisc'] = active
                 if direction is directions[0]:
                     record['applied_qdisc'] = active
+                try:
+                    start_stats = qdiscs(dev, statistics=True)
+                    direction['qdisc_stats_at_start'] = start_stats
+                    direction['packets_at_start'] = owned_packet_count(start_stats)
+                except Exception as exc:
+                    direction['start_stats_error'] = str(exc)
             direction['applied'] = True
         record['applied'] = True
         write_evidence(evidence_path, record)
@@ -161,6 +177,14 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
             # ownership-verified rollback of a live network impairment.
             try:
                 direction['qdisc_stats_before_cleanup'] = qdiscs(dev, statistics=True)
+                end_packets = owned_packet_count(direction['qdisc_stats_before_cleanup'])
+                start_packets = direction.get('packets_at_start')
+                if start_packets is not None and end_packets is not None and end_packets > start_packets:
+                    direction['traffic_verdict'] = 'EGRESS_ACTIVITY_VERIFIED'
+                    direction['packet_delta'] = end_packets - start_packets
+                else:
+                    direction['traffic_reason'] = ('netem packet counter missing or did not increase '
+                                                   'during the test; routing is unverified')
             except Exception as exc:
                 direction['stats_error'] = str(exc)
             try:
@@ -175,6 +199,13 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
                 direction['cleanup_error'] = str(exc)
                 direction['cleanup_verified'] = False
         record['cleanup_verified'] = all(d['cleanup_verified'] for d in directions)
+        record['traffic_verdict'] = (
+            'NOT_APPLICABLE' if all(d['traffic_verdict'] == 'NOT_APPLICABLE' for d in directions)
+            else 'EGRESS_ACTIVITY_VERIFIED' if all(d['traffic_verdict'] in (
+                'EGRESS_ACTIVITY_VERIFIED', 'NOT_APPLICABLE') for d in directions)
+            else 'INCONCLUSIVE')
+        if record['traffic_verdict'] == 'INCONCLUSIVE':
+            record['reason_code'] = 'NETWORK_TRAFFIC_UNVERIFIED'
         if not record['cleanup_verified']:
             record['cleanup_error'] = 'one or more directions failed ownership-verified cleanup'
         record['end_utc'] = utc_now()
@@ -184,6 +215,8 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
             signal.signal(signal.SIGTERM, previous_term)
     if not record['cleanup_verified']:
         raise RuntimeError('NETWORK_QDISC_CLEANUP_UNVERIFIED; inspect interface manually')
+    if record['traffic_verdict'] == 'INCONCLUSIVE':
+        return 3
     return code
 
 

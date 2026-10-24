@@ -852,8 +852,12 @@ void *worker(void *)
     log_line("PyroWave scanout repeats total=%llu", (unsigned long long)repeated);
     {
         std::lock_guard<std::mutex> lock(s.mutex);
-        log_line("PyroWave network arrival jitter: bursts=%u peak_budget_us=%u",
-                 s.network_jitter.bursts(), s.network_jitter.peak_us());
+        log_line("PyroWave completed-frame arrival variation: budget_increases=%u "
+                 "peak_budget_us=%u p98_us=%u samples=%u missing_frames=%llu "
+                 "discontinuities=%u (not UDP packet jitter)",
+                 s.network_jitter.bursts(), s.network_jitter.peak_us(), s.network_jitter.p98_us(),
+                 s.network_jitter.samples(), (unsigned long long)s.network_jitter.missing_frames(),
+                 s.network_jitter.discontinuities());
     }
     return nullptr;
 }

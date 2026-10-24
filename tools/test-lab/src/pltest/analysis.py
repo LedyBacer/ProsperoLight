@@ -23,11 +23,23 @@ CLOCKS = {
 def network_audio_metrics(performance):
     """Optional measured counters; never infer RTT from a netem scenario name."""
     keys = ('video_network_jitter_peak_us', 'video_network_jitter_bursts',
+            'video_arrival_p98_us', 'video_arrival_samples',
+            'video_arrival_missing_frames', 'video_arrival_discontinuities',
+            'rtp_video_packets', 'rtp_video_fec_packets',
+            'rtp_video_fec_recovered', 'rtp_video_fec_failed',
+            'rtp_video_out_of_sequence', 'rtp_video_invalid',
+            'rtp_video_fec_invalid',
             'audio_pending_ms_high_water', 'audio_ring_frames_high_water',
             'audio_catchup_frames', 'audio_ring_overruns', 'audio_underruns',
             'audio_underrun_wait_total_us', 'audio_underrun_wait_max_us',
             'audio_startup_prebuffer_wait_us', 'audio_ring_mean_frames',
-            'audio_output_errors')
+            'audio_output_errors', 'audio_prebuffer_target_frames',
+            'audio_prebuffer_peak_frames', 'audio_prebuffer_increases',
+            'audio_prebuffer_decreases', 'audio_first_output_call_us',
+            'audio_last_output_call_us', 'audio_first_packet_call_us',
+            'video_first_present_observed_us', 'rtp_audio_packets',
+            'rtp_audio_fec_recovered', 'rtp_audio_fec_failed',
+            'rtp_audio_out_of_sequence')
     data = {key: performance[key] for key in keys
             if type(performance.get(key)) is int and performance[key] >= 0}
     if type(performance.get('network_rtt_valid')) is int and \
@@ -38,6 +50,61 @@ def network_audio_metrics(performance):
                 performance['network_rtt_variance_ms'] >= 0:
             data['network_rtt_variance_ms_observed'] = performance['network_rtt_variance_ms']
     return data
+
+
+def passive_link_quality(performance):
+    """Nonary-inspired passive tail/recovery assessment, never a bandwidth probe.
+
+    Whole-session FEC counters cannot locate a burst and completed-frame
+    arrival variation includes host encoding. This is diagnostic only: the
+    client must not reduce bitrate from these signals automatically.
+    """
+    result = {'classification': 'UNKNOWN', 'confidence': 'insufficient',
+              'bitrate_adaptation': 'disabled',
+              'semantics': 'passive observations; no UDP capacity probe, no packet-time p99, '
+                           'no direct estimate of available Mbps'}
+    valid = (performance.get('rtp_video_stats_valid') == 1 and
+             type(performance.get('rtp_video_packets')) is int and
+             performance['rtp_video_packets'] >= 100 and
+             type(performance.get('video_arrival_samples')) is int and
+             performance['video_arrival_samples'] >= 24 and
+             type(performance.get('video_arrival_p98_us')) is int)
+    if not valid:
+        return result
+    recovered = performance.get('rtp_video_fec_recovered')
+    failed = performance.get('rtp_video_fec_failed')
+    oos = performance.get('rtp_video_out_of_sequence')
+    if any(type(x) is not int or x < 0 for x in (recovered, failed, oos)):
+        return result
+    tail = performance['video_arrival_p98_us']
+    rtt_variance = (performance.get('network_rtt_variance_ms')
+                    if performance.get('network_rtt_valid') == 1 else None)
+    unstable = tail >= 12000 or (type(rtt_variance) is int and rtt_variance >= 20)
+    if failed:
+        label = 'FEC_RECOVERY_FAILURES_WITH_VARIATION' if unstable else 'FEC_RECOVERY_FAILURES'
+    elif unstable:
+        label = 'ELEVATED_DELIVERY_VARIATION'
+    elif recovered or oos:
+        label = 'RECOVERY_OR_REORDER_OBSERVED'
+    else:
+        label = 'NO_IMPAIRMENT_OBSERVED'
+    return dict(result, classification=label, confidence='limited',
+                observations={'completed_frame_arrival_p98_us': tail,
+                              'fec_recovered': recovered, 'fec_failed': failed,
+                              'out_of_sequence': oos,
+                              'rtt_variance_ms': rtt_variance})
+
+
+def av_startup_observation(performance):
+    """Relative local callback timing only, not decoded source A/V sync."""
+    audio = performance.get('audio_first_output_call_us')
+    video = performance.get('video_first_present_observed_us')
+    result = {'available': False, 'semantics': 'PS5 audio-output call start minus '
+              'video first-presentation observation; different physical output delays, '
+              'unknown source timestamp alignment; NOT lip-sync error'}
+    if (type(audio) is int and type(video) is int and audio > 0 and video > 0):
+        return dict(result, available=True, offset_us=audio-video)
+    return result
 
 
 def read_bounded(path):
@@ -153,6 +220,8 @@ def _analyze_run(profile, report, directory):
     try:
         performance = json.loads(read_bounded(artifact_dir / 'performance-last.json'))
         result['network_audio_metrics'] = network_audio_metrics(performance)
+        result['passive_link_quality'] = passive_link_quality(performance)
+        result['av_startup_observation'] = av_startup_observation(performance)
         from .session_evidence import native_effective_settings
         from .decoder_lifecycle import decoder_lifecycle
         lifecycle = decoder_lifecycle(performance)

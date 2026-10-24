@@ -25,8 +25,23 @@ class NetemTest(unittest.TestCase):
             self.assertLessEqual(value['loss_percent'], 2)
             self.assertIn('delay', netem.tc_args(name))
 
+    def test_lan_baseline_does_not_require_a_netem_counter(self):
+        class Child:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return None
+            def wait(self): return 0
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(netem.platform, 'system', return_value='Linux'), \
+                patch.object(netem.subprocess, 'Popen', return_value=Child()), \
+                patch.object(netem, 'execute') as execute:
+            evidence = Path(folder) / 'lan.json'
+            self.assertEqual(netem.run('test0', 'lan', ['pltest'], evidence), 0)
+            self.assertEqual(json.loads(evidence.read_text())['traffic_verdict'],
+                             'NOT_APPLICABLE')
+            execute.assert_not_called()
+
     def test_ownership_cleanup_and_evidence(self):
-        state = {'kind': 'fq_codel', 'handle': '0:'}
+        state = {'kind': 'fq_codel', 'handle': '0:', 'packets': 0}
         commands = []
 
         def execute(args, **kwargs):
@@ -45,7 +60,9 @@ class NetemTest(unittest.TestCase):
         class Child:
             def __enter__(self): return self
             def __exit__(self, *_args): return None
-            def wait(self): return 1
+            def wait(self):
+                state['packets'] = 123
+                return 1
 
         with tempfile.TemporaryDirectory() as folder, patch.object(netem.platform, 'system', return_value='Linux'), \
                 patch.object(netem, 'execute', side_effect=execute), \
@@ -57,6 +74,8 @@ class NetemTest(unittest.TestCase):
             self.assertTrue(record['applied'])
             self.assertTrue(record['cleanup_verified'])
             self.assertEqual(record['command_exit_code'], 1)
+            self.assertEqual(record['traffic_verdict'], 'EGRESS_ACTIVITY_VERIFIED')
+            self.assertEqual(record['directions'][0]['packet_delta'], 123)
             self.assertEqual(record['one_way_egress']['jitter_ms'], 15)
             self.assertEqual(sum(x[:3] == ['tc', 'qdisc', 'del'] for x in commands), 1)
 
@@ -113,6 +132,7 @@ class NetemTest(unittest.TestCase):
     def test_two_directions_with_independent_conditions_and_stats(self):
         states = {'toward-ps5': 'fq_codel', 'toward-host': 'fq_codel'}
         operations = []
+        traffic = [False]
 
         def execute(args, **_kwargs):
             operations.append(args)
@@ -123,7 +143,8 @@ class NetemTest(unittest.TestCase):
                 kind = states[dev]
                 return type('Result', (), {'stdout': json.dumps([{
                     'root': True, 'kind': kind, 'handle': '51:' if kind == 'netem' else '0:',
-                    'bytes': 12345 if '-s' in args else 0}])})()
+                    'bytes': 12345 if '-s' in args else 0,
+                    'packets': (100 if traffic[0] else 0) if '-s' in args else 0}])})()
             dev = args[args.index('dev') + 1]
             states[dev] = 'netem' if 'add' in args else 'fq_codel'
             return type('Result', (), {'stdout': ''})()
@@ -131,7 +152,9 @@ class NetemTest(unittest.TestCase):
         class Child:
             def __enter__(self): return self
             def __exit__(self, *_args): return None
-            def wait(self): return 0
+            def wait(self):
+                traffic[0] = True
+                return 0
 
         with tempfile.TemporaryDirectory() as folder, \
                 patch.object(netem.platform, 'system', return_value='Linux'), \
@@ -143,6 +166,7 @@ class NetemTest(unittest.TestCase):
                                        return_scenario='wifi-light'), 0)
             record = json.loads(evidence.read_text())
             self.assertTrue(record['cleanup_verified'])
+            self.assertEqual(record['traffic_verdict'], 'EGRESS_ACTIVITY_VERIFIED')
             self.assertEqual(len(record['directions']), 2)
             self.assertEqual([x['direction'] for x in record['directions']],
                              ['host_to_ps5', 'ps5_to_host'])
@@ -212,11 +236,43 @@ class NetemTest(unittest.TestCase):
                 patch.object(netem, 'execute', side_effect=execute), \
                 patch.object(netem.subprocess, 'Popen', return_value=Child()):
             evidence = Path(folder) / 'stats-fail.json'
-            self.assertEqual(netem.run('test0', 'wifi-light', ['pltest'], evidence), 0)
+            self.assertEqual(netem.run('test0', 'wifi-light', ['pltest'], evidence), 3)
             self.assertEqual(state[0], 'fq')
             record = json.loads(evidence.read_text())
             self.assertTrue(record['cleanup_verified'])
             self.assertIn('tc stats unavailable', record['directions'][0]['stats_error'])
+            self.assertEqual(record['reason_code'], 'NETWORK_TRAFFIC_UNVERIFIED')
+
+    def test_no_traffic_never_becomes_a_valid_network_experiment(self):
+        state = ['fq']
+
+        def execute(args, **_kwargs):
+            if args[0] == 'ip':
+                return type('Result', (), {'stdout': '[]'})()
+            if 'show' in args:
+                kind = state[0]
+                return type('Result', (), {'stdout': json.dumps([{
+                    'root': True, 'kind': kind,
+                    'handle': '51:' if kind == 'netem' else '0:', 'packets': 0}])})()
+            state[0] = 'netem' if 'add' in args else 'fq'
+            return type('Result', (), {'stdout': ''})()
+
+        class Child:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return None
+            def wait(self): return 0
+
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(netem.platform, 'system', return_value='Linux'), \
+                patch.object(netem, 'execute', side_effect=execute), \
+                patch.object(netem.subprocess, 'Popen', return_value=Child()):
+            evidence = Path(folder) / 'unrouted.json'
+            self.assertEqual(netem.run('test0', 'wan-50', ['pltest'], evidence), 3)
+            record = json.loads(evidence.read_text())
+            self.assertTrue(record['cleanup_verified'])
+            self.assertEqual(record['traffic_verdict'], 'INCONCLUSIVE')
+            self.assertEqual(record['reason_code'], 'NETWORK_TRAFFIC_UNVERIFIED')
+            self.assertEqual(state[0], 'fq')
 
     def test_no_partial_mutation_if_return_interface_unsafe(self):
         with patch.object(netem.platform, 'system', return_value='Linux'), \
