@@ -1205,27 +1205,26 @@ static void save_performance_summary(const native_renderer_state_t &state,
                              controller_summary.peak, controller_summary.arrivals,
                              controller_summary.removals, controller_summary.open_errors,
                              controller_summary.send_errors, controller_summary.scan_errors);
-    ok = ok &&
-         report_append(
-             report, sizeof(report), &length,
-             "\"audio_pending_ms_high_water\":%u,\"audio_ring_frames_high_water\":%u,"
-             "\"audio_catchup_packets\":%u,\"audio_catchup_frames\":%llu,"
-             "\"audio_decode_errors\":%u,\"audio_output_errors\":%u,"
-             "\"audio_ring_overruns\":%u,\"audio_underruns\":%u,"
-             "\"udp_packets\":%llu,\"udp_bytes\":%llu,\"udp_receive_errors\":%llu,"
-             "\"socket_poll_calls\":%llu,\"socket_heap_polls\":%llu,"
-             "\"rcvbuf_requests\":%llu,\"rcvbuf_failures\":%llu,"
-             "\"last_rcvbuf_requested\":%llu,\"last_rcvbuf_actual\":%llu,\"timings_us\":{\n",
-             audio_state.pending_ms_high_water, audio_state.ring_high_water,
-             audio_state.catchup_packets, (unsigned long long)audio_state.catchup_frames,
-             audio_state.decode_errors, audio_state.output_errors, audio_state.overruns,
-             audio_state.underruns,
-             (unsigned long long)network.packets, (unsigned long long)network.bytes,
-             (unsigned long long)network.receive_errors, (unsigned long long)network.poll_calls,
-             (unsigned long long)network.heap_polls, (unsigned long long)network.buffer_requests,
-             (unsigned long long)network.buffer_failures,
-             (unsigned long long)network.last_buffer_requested,
-             (unsigned long long)network.last_buffer_actual);
+    ok = ok && report_append(
+                   report, sizeof(report), &length,
+                   "\"audio_pending_ms_high_water\":%u,\"audio_ring_frames_high_water\":%u,"
+                   "\"audio_catchup_packets\":%u,\"audio_catchup_frames\":%llu,"
+                   "\"audio_decode_errors\":%u,\"audio_output_errors\":%u,"
+                   "\"audio_ring_overruns\":%u,\"audio_underruns\":%u,"
+                   "\"udp_packets\":%llu,\"udp_bytes\":%llu,\"udp_receive_errors\":%llu,"
+                   "\"socket_poll_calls\":%llu,\"socket_heap_polls\":%llu,"
+                   "\"rcvbuf_requests\":%llu,\"rcvbuf_failures\":%llu,"
+                   "\"last_rcvbuf_requested\":%llu,\"last_rcvbuf_actual\":%llu,\"timings_us\":{\n",
+                   audio_state.pending_ms_high_water, audio_state.ring_high_water,
+                   audio_state.catchup_packets, (unsigned long long)audio_state.catchup_frames,
+                   audio_state.decode_errors, audio_state.output_errors, audio_state.overruns,
+                   audio_state.underruns, (unsigned long long)network.packets,
+                   (unsigned long long)network.bytes, (unsigned long long)network.receive_errors,
+                   (unsigned long long)network.poll_calls, (unsigned long long)network.heap_polls,
+                   (unsigned long long)network.buffer_requests,
+                   (unsigned long long)network.buffer_failures,
+                   (unsigned long long)network.last_buffer_requested,
+                   (unsigned long long)network.last_buffer_actual);
     if (!ok)
         return;
     const struct
