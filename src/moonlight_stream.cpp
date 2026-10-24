@@ -1288,7 +1288,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
              "\"udp_packets\":%llu,\"udp_bytes\":%llu,\"udp_receive_errors\":%llu,"
              "\"socket_poll_calls\":%llu,\"socket_heap_polls\":%llu,"
              "\"rcvbuf_requests\":%llu,\"rcvbuf_failures\":%llu,"
-             "\"last_rcvbuf_requested\":%llu,\"last_rcvbuf_actual\":%llu,\"timings_us\":{\n",
+             "\"last_rcvbuf_requested\":%llu,\"last_rcvbuf_actual\":%llu,\n",
              audio_state.pending_ms_high_water, audio_state.ring_high_water,
              audio_state.catchup_packets, (unsigned long long)audio_state.catchup_frames,
              audio_state.decode_errors, audio_state.output_errors, audio_state.overruns,
@@ -1337,6 +1337,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
                        (unsigned long long)phase.samples, (unsigned long long)phase.reanchors,
                        (unsigned long long)phase.late, phase.samples ? phase.min_slack_us : 0,
                        phase.mad_us, phase.tail_us, phase.cushion_us, phase.hold_us, phase.skew_us);
+    ok = ok && report_append(report, sizeof(report), &length, "\"timings_us\":{\n");
     if (!ok)
         return;
     const struct

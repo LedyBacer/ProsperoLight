@@ -150,6 +150,8 @@ int main()
     save_performance_summary(state, input, &options, 0);
     assert(saved_report.find("\"native_overload\":{\"enabled\":false,\"queue_limit_us\":0,") !=
            std::string::npos);
+    assert(saved_report.find("\"audio_pcm_hard_cap_frames\":8640,") != std::string::npos);
+    assert(saved_report.find("\"video_phase_clock\":{\"enabled\":false,") != std::string::npos);
     assert(saved_report.find("\"requested_slices_per_frame\":8,") != std::string::npos);
     const std::string original = saved_report;
     // The same summary reaches klog in bounded parts that concatenate back.
