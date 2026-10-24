@@ -316,5 +316,8 @@
   "ends the stream and returns here": "स्ट्रीम छोड़ें",
   "left": "…",
   "the PC": "कंप्यूटर",
-  "this PC": "कंप्यूटर"
+  "this PC": "कंप्यूटर",
+  "Wake PC": "PC जगाएं",
+  "Wake packet sent": "वेक पैकेट भेजा गया",
+  "Wake packet was not sent": "वेक पैकेट नहीं भेजा गया"
 }

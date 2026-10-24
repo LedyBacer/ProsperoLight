@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Yayından çık",
   "left": "…",
   "the PC": "Bilgisayarlar",
-  "this PC": "Bilgisayarlar"
+  "this PC": "Bilgisayarlar",
+  "Wake PC": "PC'yi uyandır",
+  "Wake packet sent": "Uyandırma paketi gönderildi",
+  "Wake packet was not sent": "Uyandırma paketi gönderilmedi"
 }

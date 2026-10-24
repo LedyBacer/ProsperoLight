@@ -316,5 +316,8 @@
   "ends the stream and returns here": "завершает трансляцию и возвращает в меню",
   "left": "осталось",
   "the PC": "ПК",
-  "this PC": "этот ПК"
+  "this PC": "этот ПК",
+  "Wake PC": "Разбудить ПК",
+  "Wake packet sent": "Пакет пробуждения отправлен",
+  "Wake packet was not sent": "Пакет пробуждения не отправлен"
 }

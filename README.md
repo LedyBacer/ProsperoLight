@@ -32,6 +32,7 @@ Features and fixes in the `main` branch may not be available in the [latest publ
 - **Controllers and input:** up to four DualSense controllers, supported haptics/adaptive triggers, USB keyboard and mouse, plus on-screen keyboard and controller-driven mouse mode.
 - **Audio:** selectable stereo or 5.1-channel Opus playback.
 - **A console-first launcher:** automatic LAN discovery, multiple saved PCs, application artwork, persistent settings, and a UI available in 31 languages.
+- **Wake an offline PC:** after a saved Sunshine PC answers once while awake, its MAC is remembered; an offline PC with that MAC offers an explicit IPv4 **Wake PC** action. Packet emission and the PC coming online are reported separately.
 - **Updates and diagnostics:** in-app update support for compatible folder installations, performance overlay, and optional timing/log capture.
 
 
@@ -46,6 +47,12 @@ Features and fixes in the `main` branch may not be available in the [latest publ
 Press **Touchpad + L1** to end the stream and return to the launcher. Pairings and settings normally remain in `/data/prosperolight` when updating the app.
 
 **[Full user guide →](docs/USER_GUIDE.md)** — installation, pairing, updates, controllers, settings and saved data.
+
+## Wake a saved PC
+
+After a saved PC has answered Sunshine once while awake, ProsperoLight remembers its valid MAC. When that PC later appears offline, the primary PC button becomes **Wake PC**. Confirming it sends IPv4 Wake-on-LAN packets and then checks the PC every second for up to 30 seconds.
+
+A successful send means **wake packet emitted**, not **PC woke**. The PC must already support Wake-on-LAN in firmware/BIOS/UEFI and its NIC/OS, remain reachable on the same IPv4 broadcast domain, and accept Sunshine's base port or a standard WOL port. See [Wake a saved PC](docs/USER_GUIDE.md#wake-a-saved-pc) and [troubleshooting](docs/TROUBLESHOOTING.md#wake-pc-is-missing-or-the-pc-does-not-wake).
 
 ## Controls
 

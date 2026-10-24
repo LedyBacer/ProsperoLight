@@ -117,6 +117,16 @@ The script writes only to `.deps/native/` and never installs packages globally.
 - The launcher includes the failed TCP stage and numeric error in its refresh
   message. Preserve that text when reporting a failure.
 
+## Wake PC is missing or the PC does not wake
+
+- **Wake PC is missing:** The selected saved PC is not known offline, does not have a valid learned MAC, or is online. Refresh while the PC is awake and Sunshine's `/serverinfo` response includes a valid `<mac>`. A configuration migrated from version 8 starts without MACs; a deliberate port change also clears the saved MAC until refresh learns it again. Missing or malformed MAC data does not erase an already valid value.
+- **A send failed:** The notice **Wake packet was not sent** means no complete 102-byte datagram was emitted. Check the console/PC network path and try again. This is different from a successful send followed by no response.
+- **Packet sent but the PC stays offline:** **Wake packet sent** proves only packet emission. Confirm firmware/BIOS/UEFI wake-on-magic-packet support, NIC/OS wake settings, and a supported sleep state. Test the exact state you use; Windows Fast Startup can prevent wake from a hybrid "shutdown". Wired Ethernet is more reliable than Wi-Fi.
+- **Network scope:** WOL is IPv4-only and must normally stay on the same broadcast domain. VLANs, routed broadcasts, firewalls, and relay services are outside this implementation. The sender uses limited broadcast, the configured/resolved IPv4 address, active interface broadcasts, and deduplicated ports `9`, `47009`, base+`9`/`10`/`11`/`13`/`21`; it does not assume `/24` or configure routers.
+- **Checking returns to normal without saying wake failed:** That is intentional. ProsperoLight checks every second for at most 30 seconds, then resumes normal health polling; a late boot can still appear online later. Press **Try again** after checking ends if the PC remains offline.
+- **Online or repeated confirmation:** An online PC never offers Wake PC. Repeated confirm input while the button is disabled **Checking** is ignored, so only one request is queued.
+- **Evidence:** When reporting a hardware WOL test, record packet-emitted, machine-woke, and launcher-online separately. Do not publish complete MAC addresses, private IP addresses, pairing material, or credentials.
+
 ## A second controller does not reach the PC
 
 - The PS5 gives a controller to a signed-in user. Turn the controller on and

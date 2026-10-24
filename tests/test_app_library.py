@@ -31,8 +31,17 @@ int main() {
  assert(first.apps[64].id==65 && first.apps.back().id==512);
  assert(std::string(first.apps.back().name)=="Game 512");
  assert(first.current_app_id==500);
+ const unsigned char learned_mac[] = {0x02,0x11,0x22,0x33,0x44,0x55};
+ std::memcpy(first.mac,learned_mac,sizeof(learned_mac));
+ first.mac_valid=1;
  auto copy=first;
  assert(copy==first);
+ copy.mac[5]^=1;
+ assert(!(copy==first));
+ copy=first;
+ copy.mac_valid=0;
+ assert(!(copy==first));
+ copy=first;
  copy.apps[499].hdr_supported=1;
  assert(!(copy==first));
  assert(first.apps[499].hdr_supported==0);
@@ -61,6 +70,36 @@ int main() {
         source = (ROOT/'src/moonlight_backend.cpp').read_text()
         self.assertNotIn('MOONLIGHT_BACKEND_MAX_APPS', source)
         self.assertIn('snapshot->apps.push_back(output)', source)
+
+    def test_sunshine_mac_path_preserves_http_and_reaches_unpaired_snapshots(self):
+        client = (ROOT/'src/gamestream/client.c').read_text()
+        client_header = (ROOT/'src/gamestream/client.h').read_text()
+        backend = (ROOT/'src/moonlight_backend.cpp').read_text()
+        snapshot = (ROOT/'include/moonlight_backend.hpp').read_text()
+
+        self.assertIn('uint8_t mac[MOONLIGHT_WOL_MAC_BYTES];', client_header)
+        self.assertIn('bool mac_valid;', client_header)
+        load = client[client.index('static int load_server_info('):client.index('int gs_init(')]
+        self.assertIn('char *mac = NULL;', load)
+        self.assertIn('xml_search(response.body, response.length, "mac", &mac)', load)
+        self.assertIn('if (mac && moonlight_wol_parse_mac(mac, server->mac))', load)
+        self.assertIn('server->mac_valid = true;', load)
+        self.assertIn('free(mac);', load)
+        # load_server_info() is called on the same zero-initialized server first
+        # over HTTP and then HTTPS. Only a valid parse writes the MAC or flag.
+        init = client[client.index('int gs_init('):client.index('static int check_paired(')]
+        self.assertLess(init.index('load_server_info(server, false)'),
+                        init.index('load_server_info(server, true)'))
+
+        refresh = backend[backend.index('int moonlight_backend_refresh('):
+                          backend.index('static void *pairing_thread(')]
+        self.assertLess(refresh.index('memcpy(snapshot->mac, server.mac'),
+                        refresh.index('if (!server.paired)'))
+        self.assertLess(refresh.index('snapshot->mac_valid = server.mac_valid'),
+                        refresh.index('if (!server.paired)'))
+        self.assertIn('uint8_t mac[MOONLIGHT_WOL_MAC_BYTES];', snapshot)
+        self.assertIn('uint32_t mac_valid;', snapshot)
+        self.assertIn('std::memcmp(mac, other.mac, sizeof(mac)) == 0', snapshot)
 
 
 if __name__ == '__main__':

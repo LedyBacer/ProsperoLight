@@ -28,6 +28,23 @@ for name in names:
  f.save(out/(name+'.ttf'));raw[name]=(out/(name+'.ttf')).read_bytes();faces[name]=f;cmaps[name]=f.getBestCmap()
 font_objects={n:hb.Font(hb.Face(raw[n])) for n in names}
 shaped={};records=[];used={n:set() for n in names};characters=set(range(32,127));next_cp=0xF0000
+# Preserve private-use mappings across catalog additions. Existing glyph rows are
+# seeded first so new translations receive fresh code points after all retained
+# shaped sequences instead of shifting unrelated rendered catalogs.
+glyphs_path=root / "tools/i18n/glyphs.tsv"
+if glyphs_path.exists():
+ seeded=0
+ for line_no,line in enumerate(glyphs_path.read_text().splitlines(),1):
+  parts=line.split()
+  if len(parts)!=6:
+   raise ValueError(str(glyphs_path)+":"+str(line_no)+": expected six fields")
+  cp,face_index,gid,x_advance,x_offset,y_offset=map(int,parts)
+  if face_index<1 or face_index>len(names):
+   raise ValueError(str(glyphs_path)+":"+str(line_no)+": invalid face index")
+  name=names[face_index-1];key=(name,gid,x_advance,x_offset,y_offset)
+  if key in shaped:
+   raise ValueError(str(glyphs_path)+":"+str(line_no)+": duplicate shaped glyph")
+  shaped[key]=cp;records.append((cp,face_index,gid,x_advance,x_offset,y_offset));used[name].add(gid);next_cp=max(next_cp,cp+1);seeded+=1
 name_labels={}
 # Native language labels always need to remain legible, even on the English screen.
 language_array=(root/'include/i18n.hpp').read_text().split('languages[] = {',1)[1].split('};',1)[0]

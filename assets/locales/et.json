@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Lõpeta voog",
   "left": "…",
   "the PC": "Arvutid",
-  "this PC": "Arvutid"
+  "this PC": "Arvutid",
+  "Wake PC": "Ärata arvuti",
+  "Wake packet sent": "Äratamispakett saadetud",
+  "Wake packet was not sent": "Äratamispaketti ei saadetud"
 }

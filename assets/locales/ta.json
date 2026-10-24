@@ -316,5 +316,8 @@
   "ends the stream and returns here": "ஸ்ட்ரீமை விட்டு வெளியேறு",
   "left": "…",
   "the PC": "கணினிகள்",
-  "this PC": "கணினிகள்"
+  "this PC": "கணினிகள்",
+  "Wake PC": "எழுந்த பிசி",
+  "Wake packet sent": "வேக் பாக்கெட் அனுப்பப்பட்டது",
+  "Wake packet was not sent": "வேக் பாக்கெட் அனுப்பப்படவில்லை"
 }

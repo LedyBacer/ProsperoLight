@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Sair da transmissão",
   "left": "…",
   "the PC": "Computadores",
-  "this PC": "Computadores"
+  "this PC": "Computadores",
+  "Wake PC": "Acordar o PC",
+  "Wake packet sent": "Pacote de despertar enviado",
+  "Wake packet was not sent": "Pacote de despertar não enviado"
 }

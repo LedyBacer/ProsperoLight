@@ -55,6 +55,27 @@ For release readiness, add a longer 1080p60 gameplay soak, network interruption
 recovery, repeated launch/stop cycles, and a check that no decoded-video CPU
 copy or frame backlog appears in the metrics.
 
+## Wake-on-LAN hardware matrix
+
+Wake-on-LAN validation requires explicit authorization to deploy or contact the named PS5 and to put the named PC into each tested sleep or shutdown state. The original local-only implementation request is not deployment authorization. Acquire and release the shared PS5 `lock.txt` exactly as in the smoke test above; delete it immediately after the test, including on failure.
+
+Record sanitized firmware/loader context, Sunshine version, link type/topology, candidate content version, and `eboot.bin` SHA-256. Do not record private IPs, complete MAC addresses, pairing data, or credentials. The PC must remain on the same IPv4 broadcast domain as the PS5; routed or VLAN wake is not supported by this implementation.
+
+| Case | Required observation |
+| --- | --- |
+| Upgrade/load | Existing version 1-8 configuration loads; saved PCs and settings remain; version 8 migrates with MAC unknown. |
+| Learn and persist | With the PC awake, refresh until a valid MAC is learned; restart the app and confirm the PC is still wakeable. |
+| Supported sleep state | Wait until the launcher declares the PC offline, select **Wake PC**, and separately record packet emitted, machine physically woke, launcher returned online, and elapsed time. |
+| Default port | Repeat with Sunshine HTTP base `47989`; verify the derived port set rather than changing unrelated host configuration. |
+| Custom base port | Repeat with one custom HTTP base port and verify the derived port set. |
+| No MAC | An offline saved PC without a MAC shows **Try again** and emits no WOL. |
+| Repeated confirm | While **Checking**, repeated confirm input queues only one request. |
+| Online safety | An online PC never offers or sends WOL. |
+| Persistence | Restart after learning and confirm the learned MAC remains usable. |
+| Shutdown (optional) | Test only when the PC/NIC/OS already supports it and the operator explicitly authorizes that power state. |
+
+Do not alter BIOS/UEFI, NIC, firewall, router, VLAN, or console settings to force a pass. Do not treat a successful UDP send or fake host test as proof of physical wake. If hardware is unavailable or unauthorized, leave the implementation `HARDWARE_PENDING` and record untested power states honestly.
+
 ## Latest hardware evidence
 
 On 2026-08-28, `PPSA77003` content version `01.000.011` passed a clean PS5

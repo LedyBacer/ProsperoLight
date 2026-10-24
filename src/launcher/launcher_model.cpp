@@ -85,6 +85,7 @@ void Model::Shutdown()
     requests_.clear();
     sweeps_.clear();
     artwork_wanted_.clear();
+    ClearWakeState();
     if (save_pending_)
         Save();
 }
@@ -112,6 +113,8 @@ HostStatus Model::host_status(unsigned index) const
 
 Busy Model::busy() const
 {
+    if (wake_state_ == WakeState::sending)
+        return Busy::waking;
     JobKind kind = worker_active_ ? job_.kind : JobKind::none;
     if (kind != JobKind::discover && kind != JobKind::refresh && kind != JobKind::unpair &&
         kind != JobKind::stop)
@@ -200,6 +203,7 @@ void Model::ResetSelected()
     backend_valid_ = false;
     health_ = {};
     health_due_ms_ = 0;
+    ClearWakeState();
     selected_app_ = 0;
     artwork_wanted_.clear();
     artwork_asked_.clear();
@@ -386,8 +390,8 @@ bool Model::AddHost(const char *text, std::string *error)
         return false;
     }
     // Without a port, a PC already saved at this address keeps the port it has.
-    const int index =
-        moonlight_config_upsert_host(&config_, address, port, i18n::tr("Sunshine PC"), "", true);
+    const int index = moonlight_config_upsert_host(&config_, address, port, i18n::tr("Sunshine PC"),
+                                                   "", nullptr, true);
     if (index < 0)
     {
         *error = i18n::tr("The list is full. Remove a PC first.");
@@ -470,6 +474,38 @@ bool Model::ResolveStreamOptions(moonlight_stream_options_t &options, std::strin
     error.clear();
     return true;
 }
+
+bool Model::can_wake_selected() const
+{
+    if (session_only_ || pairing() || wake_state_ != WakeState::none)
+        return false;
+    const moonlight_config_host_t *host = selected_host();
+    if (!host || !backend_valid_ || backend_.online || !moonlight_wol_mac_is_valid(host->mac))
+        return false;
+    if (worker_active_ && job_.kind == JobKind::wake)
+        return false;
+    for (const Job &queued : requests_)
+        if (queued.kind == JobKind::wake)
+            return false;
+    return true;
+}
+
+void Model::WakeSelectedHost()
+{
+    if (!can_wake_selected())
+        return;
+    const moonlight_config_host_t *host = selected_host();
+    Job job;
+    job.kind = JobKind::wake;
+    Copy(job.host, sizeof(job.host), host->address);
+    job.port = moonlight_config_host_port(host);
+    std::memcpy(job.mac, host->mac, sizeof(job.mac));
+    requests_.push_back(job);
+    wake_state_ = WakeState::sending;
+    wake_check_deadline_ms_ = 0;
+    ++revision_;
+}
+
 bool Model::RequestStream()
 {
     auto reject = [&](const char *code, const char *title, const char *body)
@@ -556,8 +592,8 @@ void *Model::Worker(void *self)
 void Model::Run(const Job &job, JobResult *result)
 {
     const auto started = std::chrono::steady_clock::now();
-    // Named by number: 1 discover, 2 refresh, 3 health, 4 sweep, 5 unpair, 6 stop, 7 artwork, 8
-    // update.
+    // Named by number: 1 discover, 2 refresh, 3 health, 4 wake, 5 sweep, 6 unpair, 7 stop,
+    // 8 artwork, 9 update.
     struct Report
     {
         const Job &job;
@@ -591,6 +627,12 @@ void Model::Run(const Job &job, JobResult *result)
     case JobKind::health:
     case JobKind::sweep:
         result->result = moonlight_backend_refresh(job.host, job.port, &result->snapshot);
+        break;
+    case JobKind::wake:
+        // The sender makes one pass and never sleeps or polls; recovery is
+        // scheduled by the model after this result is applied.
+        result->result =
+            wake_sender_ && wake_sender_(job.mac, job.host, job.port, &result->wake) ? 0 : -1;
         break;
     case JobKind::unpair:
         std::printf("[PL] launcher: unpairing %s:%u\n", job.host, job.port);
@@ -807,6 +849,34 @@ void Model::Poll(std::uint64_t now_ms)
         Save();
 }
 
+bool Model::ApplyWake(const Job &job, const JobResult &result)
+{
+    if (!IsSelected(job.host, job.port) || wake_state_ != WakeState::sending)
+        return false;
+    const bool sent = result.result == 0 && result.wake.successful_datagrams > 0;
+    if (sent)
+    {
+        wake_state_ = WakeState::checking;
+        wake_check_deadline_ms_ = now_ms_ + 30000;
+        health_due_ms_ = now_ms_ + 1000;
+        Notify(NoticeKind::info, i18n::tr("Wake packet sent"),
+               i18n::tr("The PC may still take time to start."));
+    }
+    else
+    {
+        ClearWakeState();
+        Notify(NoticeKind::error, i18n::tr("Wake packet was not sent"),
+               i18n::tr("Check the PC and network settings, then try again."));
+    }
+    return true;
+}
+
+void Model::ClearWakeState()
+{
+    wake_state_ = WakeState::none;
+    wake_check_deadline_ms_ = 0;
+}
+
 void Model::PollPairing()
 {
     char pin[5] = {};
@@ -901,8 +971,10 @@ bool Model::Upsert(const char *host, std::uint16_t port, const moonlight_backend
             manual = config_.hosts[index].manual != 0;
     }
     const moonlight_config_t before = config_;
-    const int index =
-        moonlight_config_upsert_host(&config_, host, port, state.name, state.unique_id, manual);
+    const std::uint8_t *mac =
+        state.mac_valid && moonlight_wol_mac_is_valid(state.mac) ? state.mac : nullptr;
+    const int index = moonlight_config_upsert_host(&config_, host, port, state.name,
+                                                   state.unique_id, mac, manual);
     if (index < 0)
         return false;
     const bool was_selected = selected_port == port && std::strcmp(selected_address, host) == 0;
@@ -935,7 +1007,7 @@ void Model::ApplyDiscovery(const JobResult &result)
         const std::uint32_t count = config_.host_count;
         (void)moonlight_config_upsert_host(&config_, result.found[index].address,
                                            result.found[index].http_port, result.found[index].name,
-                                           "", false);
+                                           "", nullptr, false);
         if (config_.host_count > count)
             ++added;
     }
@@ -964,6 +1036,14 @@ bool Model::ApplySelected(const Job &job, const JobResult &result)
     bool changed = false;
     const bool success = result.result == 0 && result.snapshot.online;
     health_due_ms_ = now_ms_ + health_.Record(success);
+    const bool was_wake_checking = wake_state_ == WakeState::checking;
+    if (was_wake_checking)
+    {
+        if (success || now_ms_ >= wake_check_deadline_ms_)
+            ClearWakeState();
+        else
+            health_due_ms_ = now_ms_ + 1000;
+    }
     if (success || (job.kind != JobKind::health && result.snapshot.app_count))
     {
         backend_ = result.snapshot;
@@ -999,7 +1079,7 @@ bool Model::ApplySelected(const Job &job, const JobResult &result)
     if (success || !health_.Reconnecting())
         changed = Remember(job.host, job.port, backend_, backend_.online != 0) || changed;
     return changed || !was_valid || was_reconnecting != health_.Reconnecting() ||
-           !(before == backend_);
+           was_wake_checking != (wake_state_ == WakeState::checking) || !(before == backend_);
 }
 
 void Model::PublishCatalog(const char *host, std::uint16_t port,
@@ -1043,6 +1123,10 @@ void Model::Apply(const Job &job, JobResult &result)
         KeepPicture(job.app_id, std::move(result.picture));
         if (!result.image.rgba.empty())
             artwork_ready_.push_back(std::move(result.image));
+        return;
+    case JobKind::wake:
+        if (ApplyWake(job, result))
+            ++revision_;
         return;
     default:
         break;

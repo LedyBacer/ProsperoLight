@@ -67,10 +67,23 @@ second. Three consecutive failures are required before the launcher shows the
 PC as not answering; polling continues so a host that restarts during an RDP
 or Windows-session transition recovers without a manual search. The other
 saved PCs are asked once each so the list can show their state. Every request
-(search, refresh, health check, unpair, stop, box art) runs on one worker
+(search, refresh, health check, wake, unpair, stop, box art) runs on one worker
 thread, one at a time, because the compact NVHTTP transport has process-global
 timeout/error state; pairing waits for that thread to be idle. The screen keeps
 drawing while a PC is slow to answer.
+
+Wake-on-LAN follows the same model/worker boundary. A successful `/serverinfo`
+response may teach `moonlight_backend_snapshot_t` a valid six-byte MAC;
+`Model::Upsert()` persists it into configuration version 9 without letting
+missing or malformed data erase a known value. `Model::can_wake_selected()`
+requires a selected saved host that is known offline and has a valid stored
+MAC; `Model::WakeSelectedHost()` queues a `wake` job carrying its own address,
+HTTP base port, and MAC. The worker calls `moonlight_wol_send()`, which makes
+one non-blocking pass over a deduplicated IPv4 target/port plan and emits the
+102-byte magic packet. A complete send enters a separate packet-sent state and
+schedules one-second health checks for at most 30 seconds; the sender contains
+no sleep or retry loop and packet emission never claims that the PC woke. There
+is no automatic wake-before-connect path.
 
 The launcher and the stream never own the display together. `main.cpp` runs
 the launcher until the player starts a stream; the launcher then stops its

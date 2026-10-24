@@ -127,6 +127,7 @@ static int load_server_info(gs_server_t *server, bool https)
     char *codec_mode = NULL;
     char *hostname = NULL;
     char *unique_id = NULL;
+    char *mac = NULL;
     int result;
 
     uuid_v4(server->identity, uuid);
@@ -152,6 +153,7 @@ static int load_server_info(gs_server_t *server, bool https)
     (void)xml_search(response.body, response.length, "ServerCodecModeSupport", &codec_mode);
     (void)xml_search(response.body, response.length, "hostname", &hostname);
     (void)xml_search(response.body, response.length, "uniqueid", &unique_id);
+    (void)xml_search(response.body, response.length, "mac", &mac);
     server->host_capabilities = 0;
     {
         const char *tags[] = {"VirtualDisplayCapable", "VirtualDisplayDriverReady",
@@ -178,6 +180,8 @@ static int load_server_info(gs_server_t *server, bool https)
         snprintf(server->hostname, sizeof(server->hostname), "%s", hostname);
     if (unique_id)
         snprintf(server->unique_id, sizeof(server->unique_id), "%s", unique_id);
+    if (mac && moonlight_wol_parse_mac(mac, server->mac))
+        server->mac_valid = true;
     /* Older servers omit HttpsPort. Malformed values must not wrap to another port. */
     server->https_port = server->http_port > 5 ? server->http_port - 5 : 47984;
     uint16_t negotiated_https_port;
@@ -197,6 +201,7 @@ done:
     free(codec_mode);
     free(hostname);
     free(unique_id);
+    free(mac);
     http_response_free(&response);
     return result;
 }

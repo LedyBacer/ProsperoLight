@@ -9,6 +9,7 @@ ProsperoLight streams applications and the desktop from a compatible Sunshine ho
 - A PS5 with a **compatible homebrew environment and title loader already installed**. This project does not provide an exploit or loader.
 - A PC with [Sunshine](https://github.com/LizardByte/Sunshine) or a compatible GameStream host. **PyroWave** requires a host version that explicitly supports that codec; ordinary Sunshine works with H.264/HEVC.
 - A working local network. Ethernet is strongly recommended; Wi-Fi quality varies.
+- For Wake-on-LAN, a PC whose firmware/BIOS/UEFI, NIC driver and operating system support Wake on Magic Packet, on the same IPv4 broadcast domain as the PS5.
 - A DualSense controller for the launcher. Additional controllers and supported USB keyboard/mouse devices can be used during streaming.
 
 ## Install or update
@@ -45,6 +46,20 @@ Pairing identities are retained for up to eight saved PCs. If a PC is no longer 
 ### Sunshine on a non-default port
 
 Sunshine normally uses **47989** as its base port. Discovered hosts advertise their configured port. For a manual host, enter `192.168.1.50:48989` (replace the address and port with yours), or use **PCs → Change port**. An empty port entry restores the default. Each saved PC keeps its own host port.
+
+### Wake a saved PC
+
+ProsperoLight can wake one saved PC after it has learned a valid MAC from Sunshine while that PC is awake. Refresh the selected PC once it is online; the MAC is stored in configuration and survives restart. An older configuration that migrates to version 9 starts with no saved MAC, so each saved PC must answer successfully once while awake before it can be awakened later.
+
+When a saved PC is known offline and has a valid learned MAC, the primary PC button changes from **Try again** to **Wake PC**. Confirming it sends IPv4 Wake-on-LAN packets in the background and changes the button to disabled **Checking**. Without a learned MAC, **Try again** performs the normal refresh and no wake packet is sent. ProsperoLight never wakes a PC automatically before connecting and never offers wake while the PC is online.
+
+The sender uses the selected PC's configured IPv4 address or resolved IPv4 result when available, limited broadcast `255.255.255.255`, and active non-loopback IPv4 interface broadcast addresses. It sends the standard 102-byte magic packet to deduplicated ports: `9`, `47009`, Sunshine HTTP base + `9`, `10`, `11`, `13`, and `21`. Port `7` is not used, and no `/24` or other subnet size is assumed. Routed/VLAN broadcasts, IPv6, and router or relay configuration are outside this implementation.
+
+The PC must already support wake from the selected power state. Check firmware/BIOS/UEFI **Wake on Magic Packet** or equivalent, the NIC driver's wake setting, the operating system's wake policy, and the motherboard's standby/soft-off power. Wired Ethernet is the most reliable path; Wi-Fi wake support varies. Windows Fast Startup can make a "shutdown" behave like a hybrid state and may prevent wake from a full shutdown; test the exact sleep/shutdown state you intend to use. ProsperoLight does not change these settings.
+
+After a successful send, ProsperoLight checks the selected PC every second for up to 30 seconds, then returns to its normal health cadence. **Wake packet sent** only confirms that at least one complete 102-byte datagram left the console. It does not prove that the PC woke. The PC waking and the launcher returning online are separate observations; if it does not appear, the launcher stops checking rather than asserting that wake failed.
+
+A deliberate port change treats the endpoint as a different Sunshine instance and clears its saved identity and MAC until a refresh identifies it again. Missing or malformed `<mac>` data in a later response never erases a valid stored MAC. See [Troubleshooting](TROUBLESHOOTING.md#wake-pc-is-missing-or-the-pc-does-not-wake).
 
 ### Multiple controllers
 
@@ -112,7 +127,7 @@ With filesystem access, data is stored under `/data/prosperolight/`:
 
 | Location | Contents |
 | --- | --- |
-| `config/` | Saved hosts and preferences |
+| `config/` | Saved hosts, settings, and learned MACs |
 | `pairing/` | Host pairing certificate and private key |
 | `logs/debug-trace.txt` | Current diagnostic event trace; previous run in `debug-trace.prev.txt` |
 | `logs/performance-last.json` | Latest stream performance report |
@@ -120,6 +135,8 @@ With filesystem access, data is stored under `/data/prosperolight/`:
 | `cache/` | Regenerable UI shader cache |
 
 When elevated storage access is unavailable, the app uses its own title storage (`/download0`). The **About** screen and startup logs indicate the active storage location.
+
+The main configuration uses version 9. Versions 1-8 load without losing saved hosts, settings, manual flags, identities, or custom ports. A version-8 configuration migrates with each PC's learned MAC initially unknown; the upstream and PyroWave version-7 layouts remain supported. A learned MAC is six bytes, with all-zero meaning unknown. Valid Sunshine data replaces it, missing or malformed `<mac>` data never erases it, and a deliberate port change clears it until refresh identifies the endpoint again.
 
 > **Privacy:** diagnostic traces may contain local IP addresses, PC names and application titles. Review them before posting. Do not publish the pairing private key (`pairing/key.pem`) or raw saved-data archives.
 

@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Zakończ transmisję",
   "left": "…",
   "the PC": "Komputery",
-  "this PC": "Komputery"
+  "this PC": "Komputery",
+  "Wake PC": "Obudź komputer",
+  "Wake packet sent": "Pakiet wybudzania wysłany",
+  "Wake packet was not sent": "Pakiet wybudzania nie został wysłany"
 }

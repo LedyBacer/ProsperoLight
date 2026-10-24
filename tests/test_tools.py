@@ -1035,7 +1035,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("options.host_port = selection.host_port;", launcher)
         # Every request to a PC carries that PC's port, and an answer from
         # another endpoint than the selected one never becomes its state.
-        self.assertEqual(app.count("job.port = moonlight_config_host_port("), 4)
+        self.assertEqual(app.count("job.port = moonlight_config_host_port("), 5)
         self.assertEqual(app.count("next.port = moonlight_config_host_port("), 3)
         self.assertIn("moonlight_backend_refresh(job.host, job.port, &result->snapshot)", app)
         self.assertIn("if (!IsSelected(job.host, job.port))", app)
@@ -1055,6 +1055,53 @@ class ToolTests(unittest.TestCase):
         self.assertLess(set_port.index("moonlight_config_set_host_port("),
                         set_port.index("DropSelectedRequests();"))
         self.assertIn("QueueSelectedRefresh();", set_port)
+
+    def test_wol_primary_host_button_matrix(self):
+        view = (ROOT / "src/launcher/launcher_view.cpp").read_text(encoding="utf-8")
+        sync = view[view.index("void View::sync_host_panel()") : view.index("void View::sync_games()")]
+        self.assertCodeContains(
+            "const bool wake_active = model_.wake_state() != WakeState::none;", sync
+        )
+        self.assertCodeContains(
+            "const bool wakeable = !wake_active && status.known && !status.online && "
+            "model_.can_wake_selected();",
+            sync,
+        )
+        self.assertCodeContains(
+            'open_games_.label = wake_active ? "Checking" : '
+            'status.online && status.paired ? "Open games" : '
+            'status.online ? "Pair this PC" : '
+            'wakeable ? "Wake PC" : "Try again";',
+            sync,
+        )
+        self.assertCodeContains("open_games_.set_disabled(wake_active);", sync)
+
+        action = view[
+            view.index("void View::primary_host_action(") : view.index("void View::set_games_zone(")
+        ]
+        self.assertCodeContains(
+            "if (model_.wake_state() != WakeState::none) return;", action
+        )
+        self.assertCodeContains(
+            "else if (model_.can_wake_selected()) { model_.WakeSelectedHost(); }", action
+        )
+        self.assertCodeContains("else { model_.Refresh(false); }", action)
+
+        footer = view[
+            view.index("void View::draw_footer(") : view.index("void View::draw_host_icon(")
+        ]
+        self.assertCodeContains("const WakeState wake = model_.wake_state();", footer)
+        self.assertCodeContains(
+            'model_.wake_state() != WakeState::none ? "Checking"', footer
+        )
+        self.assertCodeContains(
+            'model_.can_wake_selected() ? "Wake PC"', footer
+        )
+        # The primary PC button is reused; the fixed host action row stays at three.
+        self.assertCodeContains(
+            'host_actions_.set_items({{"Change port"}, {"Unpair"}, {"PC settings"}});', view
+        )
+        self.assertEqual(view.count("host_action_rects_.size() == 5"), 1)
 
     def test_stream_forwards_a_pad_for_every_signed_in_user(self):
         stream = (ROOT / "src/moonlight_stream.cpp").read_text()

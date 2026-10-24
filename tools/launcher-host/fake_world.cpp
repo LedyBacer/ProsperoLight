@@ -32,6 +32,10 @@ std::vector<unsigned char> temporary_file;
 bool temporary_open = false;
 std::size_t read_offset = 0;
 int artwork_ready = 0;
+std::atomic<int> wake_send_count{0};
+std::atomic<int> wake_last_mac_valid_count{0};
+std::atomic<bool> wake_failure{false};
+std::atomic<int> refresh_call_count{0};
 
 Pc *find(const char *host, std::uint16_t port)
 {
@@ -57,6 +61,8 @@ int describe(const char *host, std::uint16_t port, moonlight_backend_snapshot_t 
     }
     snapshot->online = 1;
     snapshot->paired = pc->paired ? 1u : 0u;
+    snapshot->mac_valid = pc->mac_valid ? 1u : 0u;
+    std::memcpy(snapshot->mac, pc->mac, sizeof(snapshot->mac));
     snapshot->https_port = static_cast<std::uint16_t>(pc->port - 5);
     snapshot->current_app_id = pc->current_app;
     snapshot->hevc_supported = pc->hevc ? 1u : 0u;
@@ -108,6 +114,78 @@ void erase_saved_file()
     saved_file.clear();
 }
 
+int send_wake(const std::uint8_t mac[MOONLIGHT_WOL_MAC_BYTES], const char *, std::uint16_t,
+              moonlight_wol_send_result *out_result)
+{
+    ++wake_send_count;
+    wake_last_mac_valid_count = moonlight_wol_mac_is_valid(mac) ? 1 : 0;
+    if (out_result)
+    {
+        *out_result = {};
+        out_result->attempted_datagrams = 1;
+        if (wake_failure.load())
+        {
+            out_result->failed_datagrams = 1;
+            out_result->error = MOONLIGHT_WOL_SEND_ERROR_ALL_DATAGRAMS_FAILED;
+            return 0;
+        }
+        out_result->successful_datagrams = 1;
+        out_result->error = MOONLIGHT_WOL_SEND_ERROR_NONE;
+    }
+    return wake_failure.load() ? 0 : 1;
+}
+
+void reset_wake()
+{
+    wake_send_count = 0;
+    wake_last_mac_valid_count = 0;
+    wake_failure = false;
+}
+
+void set_wake_failure(bool fails)
+{
+    wake_failure = fails;
+}
+
+int wake_sends()
+{
+    return wake_send_count.load();
+}
+
+int wake_last_mac_valid()
+{
+    return wake_last_mac_valid_count.load();
+}
+
+int refresh_calls()
+{
+    return refresh_call_count.load();
+}
+
+void reset_refresh_calls()
+{
+    refresh_call_count = 0;
+}
+
+void set_pc_online(unsigned index, bool online)
+{
+    std::lock_guard<std::mutex> lock(guard);
+    if (index < pcs.size())
+        pcs[index].online = online;
+}
+
+void set_pc_mac(unsigned index, const std::uint8_t mac[MOONLIGHT_WOL_MAC_BYTES], bool valid)
+{
+    std::lock_guard<std::mutex> lock(guard);
+    if (index >= pcs.size())
+        return;
+    pcs[index].mac_valid = valid;
+    if (valid)
+        std::memcpy(pcs[index].mac, mac, MOONLIGHT_WOL_MAC_BYTES);
+    else
+        std::memset(pcs[index].mac, 0, MOONLIGHT_WOL_MAC_BYTES);
+}
+
 } // namespace fake
 
 using namespace fake;
@@ -118,6 +196,7 @@ extern "C"
 int moonlight_backend_refresh(const char *host, uint16_t http_port,
                               moonlight_backend_snapshot_t *snapshot)
 {
+    ++refresh_call_count;
     usleep(2000);
     std::lock_guard<std::mutex> lock(guard);
     return describe(host, http_port, snapshot);

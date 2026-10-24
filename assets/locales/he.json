@@ -316,5 +316,8 @@
   "ends the stream and returns here": "יציאה מהשידור",
   "left": "…",
   "the PC": "מחשבים",
-  "this PC": "מחשבים"
+  "this PC": "מחשבים",
+  "Wake PC": "העיר מחשב",
+  "Wake packet sent": "חבילת ההערה נשלחה",
+  "Wake packet was not sent": "חבילת ההערה לא נשלחה"
 }

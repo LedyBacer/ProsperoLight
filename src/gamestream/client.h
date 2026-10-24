@@ -10,9 +10,10 @@
 
 #include <Limelight.h>
 
+#include "../../include/moonlight_wol.hpp"
 #include "certgen.h"
-#include "mini_xml.h"
 #include "host_launch_options.h"
+#include "mini_xml.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -33,6 +34,8 @@ extern "C"
         int server_codec_mode_support;
         bool is_nvidia_software;
         unsigned host_capabilities;
+        uint8_t mac[MOONLIGHT_WOL_MAC_BYTES];
+        bool mac_valid;
         char hostname[64];
         char unique_id[48];
         char app_version[32];

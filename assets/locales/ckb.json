@@ -316,5 +316,8 @@
   "ends the stream and returns here": "دەرچوون لە ڕەوت",
   "left": "…",
   "the PC": "کۆمپیوتەرەکان",
-  "this PC": "کۆمپیوتەرەکان"
+  "this PC": "کۆمپیوتەرەکان",
+  "Wake PC": "PC بە ئاگا بهێنەوە",
+  "Wake packet sent": "پاکێتی بەئاگادارکردن نێررا",
+  "Wake packet was not sent": "پاکێتی بەئاگادارکردن نێرنەکرا"
 }

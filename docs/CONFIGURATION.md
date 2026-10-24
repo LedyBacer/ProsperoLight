@@ -135,11 +135,18 @@ the application. Do not commit credentials; `.env` is ignored by Git.
 ## Persistent configuration
 
 Files live under `/data/prosperolight` after filesystem elevation, with
-`/download0` as the sandbox fallback. Configuration version 8 migrates both
-the upstream and PyroWave version 7 layouts, preserving saved hosts and ports. Write a
-temporary file and rename it into place to avoid partial writes. Provide an
-application-level export/import mechanism for important data because retention
-after title deletion or cache-management actions is not guaranteed.
+`/download0` as the sandbox fallback. The main configuration uses version 9 and
+loads versions 1-8 without losing saved hosts, settings, manual flags,
+identities, or custom ports. Version 8 migrates with each PC's learned MAC
+initially unknown; the upstream and PyroWave version 7 layouts remain
+supported. A MAC is stored as six bytes, with all-zero meaning unknown. A valid
+Sunshine response replaces it; missing or malformed `<mac>` data never erases a
+known value. A stable Sunshine identity moving address keeps the MAC, while a
+deliberate port change clears both identity and MAC until a refresh identifies
+the endpoint again. Write a temporary file and rename it into place to avoid
+partial writes. Provide an application-level export/import mechanism for
+important data because retention after title deletion or cache-management
+actions is not guaranteed.
 
 Native SaveData initialization is not part of this baseline; see
 [Platform findings](PLATFORM_NOTES.md).

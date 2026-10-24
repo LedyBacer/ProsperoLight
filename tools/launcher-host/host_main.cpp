@@ -151,6 +151,7 @@ struct Step
     const char *capture = nullptr;
     std::uint32_t hold = 0;
     void (*before)() = nullptr; // changes the pretend network before the step
+    void (*check)(launcher::Model &, launcher::View &) = nullptr; // after the input frame
 };
 
 int failures = 0;
@@ -161,6 +162,25 @@ void expect(bool ok, const char *what)
     {
         ++failures;
         std::fprintf(stderr, "FAILED: %s\n", what);
+    }
+}
+
+template <typename Done>
+void pump_until(launcher::Model &model, std::uint64_t now_ms, Done done, int limit = 4000)
+{
+    for (int i = 0; i < limit; ++i)
+    {
+        model.Poll(now_ms);
+        usleep(1000);
+        if (!done())
+            continue;
+        // Let a worker that just became observable finish and apply at this clock.
+        for (int settle = 0; settle < 20; ++settle)
+        {
+            model.Poll(now_ms);
+            usleep(1000);
+        }
+        return;
     }
 }
 
@@ -249,6 +269,307 @@ int main(int argc, char **argv)
     living.online = false;
     living.discoverable = false;
     fake::world() = {gaming, office, living};
+    const std::vector<fake::Pc> initial_world = fake::world();
+
+    // ---- Step 05: model persistence, worker wake jobs, and recovery timing ----
+    {
+        const std::uint8_t test_mac[MOONLIGHT_WOL_MAC_BYTES] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+        const auto save_one_host = [&](bool mac_valid, std::uint16_t port)
+        {
+            fake::erase_saved_file();
+            moonlight_config_t config{};
+            moonlight_config_defaults(&config);
+            config.host_count = 1;
+            config.selected_host = 0;
+            std::snprintf(config.hosts[0].address, sizeof(config.hosts[0].address), "%s",
+                          "192.168.4.20");
+            std::snprintf(config.hosts[0].name, sizeof(config.hosts[0].name), "%s", "Gaming-PC");
+            config.hosts[0].http_port = port;
+            config.hosts[0].manual = 1;
+            if (mac_valid)
+                std::memcpy(config.hosts[0].mac, test_mac, sizeof(test_mac));
+            expect(moonlight_config_save(&config), "a wake-test config saves");
+        };
+        const auto save_two_hosts = [&]()
+        {
+            fake::erase_saved_file();
+            moonlight_config_t config{};
+            moonlight_config_defaults(&config);
+            config.host_count = 2;
+            config.selected_host = 0;
+            std::snprintf(config.hosts[0].address, sizeof(config.hosts[0].address), "%s",
+                          "192.168.4.20");
+            std::snprintf(config.hosts[0].name, sizeof(config.hosts[0].name), "%s", "Gaming-PC");
+            config.hosts[0].http_port = 47989;
+            config.hosts[0].manual = 1;
+            std::memcpy(config.hosts[0].mac, test_mac, sizeof(test_mac));
+            std::snprintf(config.hosts[1].address, sizeof(config.hosts[1].address), "%s",
+                          "192.168.4.31");
+            std::snprintf(config.hosts[1].name, sizeof(config.hosts[1].name), "%s", "Office-PC");
+            config.hosts[1].http_port = 47989;
+            config.hosts[1].manual = 1;
+            std::memcpy(config.hosts[1].mac, test_mac, sizeof(test_mac));
+            expect(moonlight_config_save(&config), "a two-host wake-test config saves");
+        };
+        const auto wake_pc = [&](bool online, bool mac_valid)
+        {
+            fake::Pc pc;
+            pc.address = "192.168.4.20";
+            pc.name = "Gaming-PC";
+            pc.online = online;
+            pc.paired = true;
+            pc.discoverable = false;
+            pc.mac_valid = mac_valid;
+            if (mac_valid)
+                std::memcpy(pc.mac, test_mac, sizeof(test_mac));
+            return pc;
+        };
+        const auto start_model = [&](launcher::Model &model, std::uint64_t &now_ms)
+        {
+            fake::reset_wake();
+            fake::reset_refresh_calls();
+            model.set_wake_sender(fake::send_wake);
+            model.Initialize(now_ms);
+            pump_until(model, now_ms, [&] { return model.backend_valid(); });
+            expect(model.backend_valid(), "the wake-test PC answered");
+        };
+        const auto start_checking = [&](launcher::Model &model, std::uint64_t &now_ms)
+        {
+            save_one_host(true, 47989);
+            fake::world() = {wake_pc(false, true)};
+            start_model(model, now_ms);
+            expect(model.can_wake_selected(), "an offline PC with a MAC can be woken");
+            fake::reset_refresh_calls();
+            model.WakeSelectedHost();
+            pump_until(model, now_ms,
+                       [&] { return model.wake_state() == launcher::WakeState::checking; });
+            expect(model.wake_state() == launcher::WakeState::checking,
+                   "a complete wake send enters checking");
+        };
+        const auto notice_has = [&](launcher::Model &model, const char *title)
+        {
+            for (const launcher::Notice &notice : model.TakeNotices())
+                if (notice.title == title)
+                    return true;
+            return false;
+        };
+
+        // A valid online snapshot teaches the MAC; missing or invalid data does not erase it.
+        {
+            save_one_host(false, 47989);
+            fake::world() = {wake_pc(true, true)};
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_model(model, now_ms);
+            moonlight_config_t saved{};
+            expect(moonlight_config_load(&saved) && saved.host_count == 1 &&
+                       std::memcmp(saved.hosts[0].mac, test_mac, sizeof(test_mac)) == 0,
+                   "a valid snapshot MAC persists");
+            fake::world()[0].mac_valid = false;
+            fake::reset_refresh_calls();
+            model.Refresh(false);
+            pump_until(model, now_ms, [&] { return fake::refresh_calls() > 0; });
+            expect(moonlight_config_load(&saved) &&
+                       std::memcmp(saved.hosts[0].mac, test_mac, sizeof(test_mac)) == 0,
+                   "a missing MAC preserves the saved value");
+            fake::world()[0].mac_valid = true;
+            std::memset(fake::world()[0].mac, 0, sizeof(fake::world()[0].mac));
+            fake::reset_refresh_calls();
+            model.Refresh(false);
+            pump_until(model, now_ms, [&] { return fake::refresh_calls() > 0; });
+            expect(moonlight_config_load(&saved) &&
+                       std::memcmp(saved.hosts[0].mac, test_mac, sizeof(test_mac)) == 0,
+                   "an invalid MAC preserves the saved value");
+            model.Shutdown();
+        }
+
+        // One queued send, copied MAC, packet-sent state distinct from recovery,
+        // and the first one-second health check.
+        {
+            save_one_host(true, 47989);
+            fake::world() = {wake_pc(false, true)};
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_model(model, now_ms);
+            expect(model.can_wake_selected(), "a known offline PC with a MAC is wakeable");
+            const unsigned before = model.revision();
+            model.WakeSelectedHost();
+            expect(model.wake_state() == launcher::WakeState::sending,
+                   "a wake request enters sending");
+            expect(model.busy() == launcher::Busy::waking, "sending is visible as waking");
+            expect(model.revision() > before, "the wake request changes visible state");
+            model.WakeSelectedHost();
+            pump_until(model, now_ms,
+                       [&] { return model.wake_state() == launcher::WakeState::checking; });
+            expect(fake::wake_sends() == 1, "repeated confirm queues only one send");
+            expect(fake::wake_last_mac_valid() == 1, "the queued job carries the valid MAC");
+            expect(model.wake_state() == launcher::WakeState::checking,
+                   "a complete send enters checking");
+            expect(model.backend().online == 0, "packet sent does not claim the PC woke");
+            expect(!model.can_wake_selected(), "checking rejects another wake");
+            expect(notice_has(model, "Wake packet sent"), "packet-sent notice is represented");
+            fake::reset_refresh_calls();
+            model.Poll(now_ms + 999);
+            usleep(3000);
+            expect(fake::refresh_calls() == 0, "the first recovery check waits one second");
+            model.Poll(now_ms + 1000);
+            pump_until(model, now_ms + 1000, [&] { return fake::refresh_calls() > 0; });
+            expect(model.wake_state() == launcher::WakeState::checking,
+                   "an offline recovery check keeps checking");
+            fake::world()[0].online = true;
+            fake::reset_refresh_calls();
+            model.Poll(now_ms + 2000);
+            pump_until(model, now_ms + 2000,
+                       [&] { return model.wake_state() == launcher::WakeState::none; });
+            expect(model.wake_state() == launcher::WakeState::none,
+                   "the first online result clears checking");
+            expect(model.backend().online != 0, "recovery is observed separately from send");
+            expect(!model.can_wake_selected(), "an online PC is not wakeable");
+            expect(model.revision() > before, "recovery changes visible state");
+            model.Shutdown();
+        }
+
+        // Send failure clears immediately and is reported accurately.
+        {
+            save_one_host(true, 47989);
+            fake::world() = {wake_pc(false, true)};
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_model(model, now_ms);
+            fake::set_wake_failure(true);
+            model.WakeSelectedHost();
+            pump_until(model, now_ms,
+                       [&] {
+                           return fake::wake_sends() > 0 &&
+                                  model.wake_state() == launcher::WakeState::none;
+                       });
+            expect(model.wake_state() == launcher::WakeState::none,
+                   "send failure clears the wake window");
+            expect(model.can_wake_selected(), "send failure permits another attempt");
+            expect(notice_has(model, "Wake packet was not sent"),
+                   "send failure notice is represented");
+            model.Shutdown();
+            fake::set_wake_failure(false);
+        }
+
+        // Online and no-MAC hosts never send.
+        {
+            save_one_host(true, 47989);
+            fake::world() = {wake_pc(true, true)};
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_model(model, now_ms);
+            expect(!model.can_wake_selected(), "an online PC is never wakeable");
+            model.WakeSelectedHost();
+            usleep(3000);
+            expect(fake::wake_sends() == 0, "an online PC never sends a wake packet");
+            model.Shutdown();
+        }
+        {
+            save_one_host(false, 47989);
+            fake::world() = {wake_pc(false, false)};
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_model(model, now_ms);
+            expect(!model.can_wake_selected(), "an offline PC without a MAC is not wakeable");
+            model.WakeSelectedHost();
+            usleep(3000);
+            expect(fake::wake_sends() == 0, "a no-MAC PC never sends a wake packet");
+            model.Shutdown();
+        }
+
+        // The window is one-second checks for thirty seconds, then normal cadence.
+        {
+            save_one_host(true, 47989);
+            fake::world() = {wake_pc(false, true)};
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_model(model, now_ms);
+            fake::reset_refresh_calls();
+            model.WakeSelectedHost();
+            pump_until(model, now_ms,
+                       [&] { return model.wake_state() == launcher::WakeState::checking; });
+            expect(model.wake_state() == launcher::WakeState::checking,
+                   "the deadline test enters checking");
+            for (int i = 1; i <= 30; ++i)
+            {
+                const std::uint64_t at = now_ms + static_cast<std::uint64_t>(i) * 1000;
+                model.Poll(at);
+                pump_until(model, at,
+                           [&]
+                           {
+                               return fake::refresh_calls() >= i &&
+                                      (i < 30 || model.wake_state() == launcher::WakeState::none);
+                           });
+            }
+            expect(fake::refresh_calls() == 30, "checking runs once per second for thirty checks");
+            expect(model.wake_state() == launcher::WakeState::none,
+                   "the deadline clears checking without declaring wake failed");
+            fake::reset_refresh_calls();
+            model.Poll(now_ms + 34000);
+            usleep(3000);
+            expect(fake::refresh_calls() == 0, "normal health cadence resumes after the deadline");
+            model.Poll(now_ms + 35000);
+            pump_until(model, now_ms + 35000, [&] { return fake::refresh_calls() > 0; });
+            expect(fake::refresh_calls() > 0, "normal health resumes after the deadline");
+            model.Shutdown();
+        }
+
+        // Selection, port, removal, reset, and shutdown each clear the window.
+        {
+            save_two_hosts();
+            fake::world() = {wake_pc(false, true), wake_pc(false, true)};
+            fake::world()[1].address = "192.168.4.31";
+            fake::world()[1].name = "Office-PC";
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_model(model, now_ms);
+            model.WakeSelectedHost();
+            pump_until(model, now_ms,
+                       [&] { return model.wake_state() == launcher::WakeState::checking; });
+            expect(model.wake_state() == launcher::WakeState::checking,
+                   "selection-cancel test enters checking");
+            model.SelectHost(1);
+            expect(model.wake_state() == launcher::WakeState::none,
+                   "selection change clears checking");
+            model.Shutdown();
+        }
+        {
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_checking(model, now_ms);
+            std::string error;
+            expect(model.SetPort("48989", &error), "the wake-test port change succeeds");
+            expect(model.wake_state() == launcher::WakeState::none, "port change clears checking");
+            model.Shutdown();
+        }
+        {
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_checking(model, now_ms);
+            model.RemoveHost();
+            expect(model.wake_state() == launcher::WakeState::none, "host removal clears checking");
+            model.Shutdown();
+        }
+        {
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_checking(model, now_ms);
+            model.Initialize(now_ms);
+            expect(model.wake_state() == launcher::WakeState::none, "model reset clears checking");
+            model.Shutdown();
+        }
+        {
+            std::uint64_t now_ms = 1000;
+            launcher::Model model;
+            start_checking(model, now_ms);
+            model.Shutdown();
+            expect(model.wake_state() == launcher::WakeState::none,
+                   "model shutdown clears checking");
+        }
+
+        fake::world() = initial_world;
+    }
 
     const std::uint32_t confirm = hui::action_bit(Action::confirm);
     const std::uint32_t back = hui::action_bit(Action::back);
@@ -298,6 +619,7 @@ int main(int argc, char **argv)
     {
         launcher::Model model;
         model.set_artwork_decoder(make_poster);
+        model.set_wake_sender(fake::send_wake);
         if (offer_update)
             model.set_update_check(
                 [](launcher::UpdateOffer *offer)
@@ -496,6 +818,8 @@ int main(int argc, char **argv)
             input.nav = step.nav;
             if (!started)
                 step_frame(input);
+            if (step.check)
+                step.check(model, view);
         }
         if (started)
         {
@@ -563,6 +887,193 @@ int main(int argc, char **argv)
         model.Shutdown();
         return started;
     };
+
+    // ---- Step 06: PC-screen Wake PC matrix and deterministic fake scenarios ----
+    {
+        const std::uint8_t test_mac[MOONLIGHT_WOL_MAC_BYTES] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+        const auto save_wake_host = [&](bool mac_valid)
+        {
+            fake::erase_saved_file();
+            moonlight_config_t config{};
+            moonlight_config_defaults(&config);
+            config.host_count = 1;
+            config.selected_host = 0;
+            std::snprintf(config.hosts[0].address, sizeof(config.hosts[0].address), "%s",
+                          "192.168.4.20");
+            std::snprintf(config.hosts[0].name, sizeof(config.hosts[0].name), "%s", "Gaming-PC");
+            config.hosts[0].http_port = 47989;
+            config.hosts[0].manual = 1;
+            if (mac_valid)
+                std::memcpy(config.hosts[0].mac, test_mac, sizeof(test_mac));
+            expect(moonlight_config_save(&config), "a Step 06 wake-test config saves");
+        };
+        const auto prepare_wake_world = [&](bool online, bool mac_valid)
+        {
+            fake::Pc pc;
+            pc.address = "192.168.4.20";
+            pc.name = "Gaming-PC";
+            pc.paired = true;
+            pc.discoverable = false;
+            fake::world() = {pc};
+            fake::set_pc_online(0, online);
+            fake::set_pc_mac(0, test_mac, mac_valid);
+            fake::reset_wake();
+            fake::reset_refresh_calls();
+            fake::set_wake_failure(false);
+        };
+
+        // Offline and previously learned: Wake PC sends once, repeated confirm is
+        // ignored, and the first health poll observes the offline-to-online recovery.
+        save_wake_host(true);
+        prepare_wake_world(false, true);
+        session(
+            "step06-wakeable",
+            {
+                {20, back, Direction::none, nullptr, 0, nullptr, nullptr},
+                {90, 0, Direction::none, "wakeable", 0, nullptr,
+                 [](launcher::Model &model, launcher::View &view)
+                 {
+                     expect(model.can_wake_selected(),
+                            "an offline PC with a saved MAC is wakeable");
+                     expect(view.screen() == 0, "the wakeable PC is shown on the PCs screen");
+                 }},
+                {20, confirm, Direction::none, nullptr, 0,
+                 [] { fake::reset_refresh_calls(); }, nullptr},
+                {30, 0, Direction::none, "checking", 0, nullptr,
+                 [](launcher::Model &model, launcher::View &)
+                 {
+                     expect(fake::wake_sends() == 1,
+                            "one confirm emits exactly one wake packet");
+                     expect(fake::wake_last_mac_valid() == 1,
+                            "the fake sender receives the saved MAC");
+                     expect(model.wake_state() == launcher::WakeState::checking,
+                            "a complete send enters Checking");
+                     expect(!model.can_wake_selected(),
+                            "Checking refuses another wake request");
+                 }},
+                {20, confirm, Direction::none, nullptr, 0, nullptr,
+                 [](launcher::Model &model, launcher::View &)
+                 {
+                     expect(fake::wake_sends() == 1,
+                            "a repeated confirm while Checking emits no second packet");
+                     expect(model.wake_state() == launcher::WakeState::checking,
+                            "Checking remains distinct from online recovery");
+                 }},
+                {30, 0, Direction::none, nullptr, 0, nullptr,
+                 [](launcher::Model &model, launcher::View &)
+                 {
+                     expect(fake::wake_sends() == 1,
+                            "idle Checking frames do not resend the wake packet");
+                     expect(model.wake_state() == launcher::WakeState::checking,
+                            "the PC stays in Checking while offline");
+                 }},
+                {90, 0, Direction::none, "recovered-online", 0,
+                 [] { fake::set_pc_online(0, true); },
+                 [](launcher::Model &model, launcher::View &)
+                 {
+                     expect(model.wake_state() == launcher::WakeState::none,
+                            "the first online health result clears Checking");
+                     expect(model.backend().online != 0,
+                            "online recovery is observed separately from packet send");
+                     expect(!model.can_wake_selected(),
+                            "an online PC no longer offers Wake PC");
+                     expect(fake::refresh_calls() > 0,
+                            "health polling observed the offline-to-online transition");
+                 }},
+            },
+            "");
+        expect(fake::wake_sends() == 1, "the wakeable scenario emits exactly one packet");
+
+        // Offline without a MAC: Try again refreshes and never sends WOL.
+        save_wake_host(false);
+        prepare_wake_world(false, false);
+        session(
+            "step06-no-mac",
+            {
+                {20, back, Direction::none, nullptr, 0, nullptr, nullptr},
+                {90, 0, Direction::none, "no-mac", 0, nullptr,
+                 [](launcher::Model &model, launcher::View &)
+                 {
+                     expect(!model.can_wake_selected(),
+                            "an offline PC without a saved MAC is not wakeable");
+                 }},
+                {20, confirm, Direction::none, nullptr, 0,
+                 [] { fake::reset_refresh_calls(); }, nullptr},
+                {60, 0, Direction::none, nullptr, 0, nullptr,
+                 [](launcher::Model &model, launcher::View &)
+                 {
+                     expect(fake::wake_sends() == 0,
+                            "a no-MAC PC never emits a wake packet");
+                     expect(fake::refresh_calls() > 0,
+                            "a no-MAC PC uses the existing Try again refresh");
+                     expect(!model.can_wake_selected(),
+                            "the no-MAC PC stays non-wakeable after refresh");
+                 }},
+            },
+            "");
+        expect(fake::wake_sends() == 0, "the no-MAC scenario emits no wake packet");
+
+        // Online and paired: the primary button opens Games and never sends WOL.
+        save_wake_host(true);
+        prepare_wake_world(true, true);
+        session(
+            "step06-online",
+            {
+                {20, back, Direction::none, nullptr, 0, nullptr, nullptr},
+                {90, 0, Direction::none, "online-paired", 0, nullptr,
+                 [](launcher::Model &model, launcher::View &)
+                 {
+                     expect(model.backend().online != 0,
+                            "the online scenario answers as online");
+                     expect(!model.can_wake_selected(),
+                            "an online PC never offers Wake PC");
+                 }},
+                {20, confirm, Direction::none, nullptr, 0, nullptr,
+                 [](launcher::Model &, launcher::View &view)
+                 {
+                     expect(fake::wake_sends() == 0,
+                            "an online PC never emits a wake packet");
+                     expect(view.screen() == 1,
+                            "the online paired primary action opens Games");
+                 }},
+            },
+            "");
+        expect(fake::wake_sends() == 0, "the online scenario emits no wake packet");
+
+        // Send failure: one attempt, immediate clear, retry remains available,
+        // and the accurate failure toast is captured.
+        save_wake_host(true);
+        prepare_wake_world(false, true);
+        fake::set_wake_failure(true);
+        session(
+            "step06-send-failure",
+            {
+                {20, back, Direction::none, nullptr, 0, nullptr, nullptr},
+                {90, 0, Direction::none, "send-failure-ready", 0, nullptr,
+                 [](launcher::Model &model, launcher::View &)
+                 {
+                     expect(model.can_wake_selected(),
+                            "the failure scenario starts wakeable");
+                 }},
+                {20, confirm, Direction::none, nullptr, 0, nullptr, nullptr},
+                {60, 0, Direction::none, "send-failure", 0, nullptr,
+                 [](launcher::Model &model, launcher::View &)
+                 {
+                     expect(fake::wake_sends() == 1,
+                            "a failed send attempts exactly one wake packet");
+                     expect(model.wake_state() == launcher::WakeState::none,
+                            "send failure clears the wake window immediately");
+                     expect(model.can_wake_selected(),
+                            "send failure permits another wake attempt");
+                 }},
+            },
+            "");
+        expect(fake::wake_sends() == 1, "the failure scenario emits exactly one packet");
+        fake::set_wake_failure(false);
+
+        fake::erase_saved_file();
+        fake::world() = initial_world;
+    }
 
     if (std::getenv("PROSPEROLIGHT_LAYOUT_CHECK"))
     {
@@ -660,7 +1171,8 @@ int main(int argc, char **argv)
     {
         moonlight_config_t saved;
         (void)moonlight_config_load(&saved);
-        (void)moonlight_config_upsert_host(&saved, "192.168.4.44", 0, "Living-Room", "", true);
+        (void)moonlight_config_upsert_host(&saved, "192.168.4.44", 0, "Living-Room", "", nullptr,
+                                           true);
         saved.selected_host = 0;
         saved.stream_resolution = MOONLIGHT_STREAM_RESOLUTION_2160P;
         saved.stream_fps = MOONLIGHT_STREAM_FPS_120;

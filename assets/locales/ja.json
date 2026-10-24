@@ -316,5 +316,8 @@
   "ends the stream and returns here": "配信を終了",
   "left": "…",
   "the PC": "コンピューター",
-  "this PC": "コンピューター"
+  "this PC": "コンピューター",
+  "Wake PC": "PCを起動",
+  "Wake packet sent": "ウェイクパケットを送信しました",
+  "Wake packet was not sent": "ウェイクパケットを送信できませんでした"
 }

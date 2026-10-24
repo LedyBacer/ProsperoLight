@@ -12,6 +12,7 @@
 #include "moonlight_config.hpp"
 #include "moonlight_discovery.hpp"
 #include "moonlight_health.hpp"
+#include "moonlight_wol.hpp"
 #include "moonlight_physical_input.hpp"
 #include "moonlight_performance.hpp"
 #include "moonlight_pipeline.hpp"
@@ -302,14 +303,76 @@ std::size_t kernel_read_offset;
 // Saving fails unless a test captures the file here.
 std::vector<std::uint8_t> *kernel_write_capture;
 
-// Configuration versions 1-6 stored a PC without its port.
+// Frozen historical PC records use literal dimensions so the fixtures cannot
+// grow when the live public host type changes.
 struct LegacyHost
 {
-    char address[MOONLIGHT_CONFIG_ADDRESS_SIZE];
-    char name[MOONLIGHT_CONFIG_NAME_SIZE];
-    char unique_id[MOONLIGHT_CONFIG_UNIQUE_ID_SIZE];
+    char address[64];
+    char name[64];
+    char unique_id[48];
     std::uint32_t manual;
 };
+
+struct LegacyHostWithPort
+{
+    char address[64];
+    char name[64];
+    char unique_id[48];
+    std::uint32_t manual;
+    std::uint32_t http_port;
+};
+
+static_assert(sizeof(LegacyHost) == 180);
+static_assert(sizeof(LegacyHostWithPort) == 184);
+
+struct Version8Config
+{
+    std::uint32_t fields[13];
+    LegacyHostWithPort hosts[8];
+};
+
+struct Version8File
+{
+    std::uint32_t magic, version, checksum, reserved;
+    Version8Config config;
+};
+
+struct Version9Host
+{
+    char address[64];
+    char name[64];
+    char unique_id[48];
+    std::uint32_t manual;
+    std::uint32_t http_port;
+    std::uint8_t mac[6];
+    std::uint8_t reserved[2];
+};
+
+struct Version9Config
+{
+    std::uint32_t fields[13];
+    Version9Host hosts[8];
+};
+
+struct Version9File
+{
+    std::uint32_t magic, version, checksum, reserved;
+    Version9Config config;
+};
+
+static_assert(sizeof(Version8Config) == 1524);
+static_assert(sizeof(Version8File) == 1540);
+static_assert(sizeof(Version9Host) == 192);
+static_assert(sizeof(Version9Config) == 1588);
+static_assert(sizeof(Version9File) == 1604);
+
+bool MacIsUnknown(const moonlight_config_host_t &host)
+{
+    for (std::uint8_t octet : host.mac)
+        if (octet)
+            return false;
+    return true;
+}
 
 std::uint32_t ConfigChecksum(const void *data, std::size_t size)
 {
@@ -620,7 +683,7 @@ TEST(Configuration, MigratesVersionFiveAndDefaultsTheNewStreamSettings)
         std::uint32_t stream_fps;
         std::uint32_t hdr_enabled;
         std::uint32_t audio_configuration;
-        LegacyHost hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+        LegacyHost hosts[8];
     };
     struct LegacyFile
     {
@@ -691,6 +754,87 @@ TEST(Configuration, MigratesVersionFiveAndDefaultsTheNewStreamSettings)
     kernel_read_data = nullptr;
     kernel_read_size = 0;
     EXPECT_EQ(config.hosts[0].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+    EXPECT_TRUE(MacIsUnknown(config.hosts[0]));
+}
+
+TEST(Configuration, MigratesVersionsOneAndTwoWithUnknownMac)
+{
+    struct Version1Config
+    {
+        std::uint32_t host_count;
+        std::uint32_t selected_host;
+        std::uint32_t bitrate_mbps;
+        std::uint32_t display_area;
+        LegacyHost hosts[8];
+    };
+    struct Version1File
+    {
+        std::uint32_t magic, version, checksum, reserved;
+        Version1Config config;
+    } version_1{};
+    struct Version2Config
+    {
+        std::uint32_t host_count;
+        std::uint32_t selected_host;
+        std::uint32_t bitrate_mbps;
+        std::uint32_t display_area;
+        std::uint32_t video_codec;
+        std::uint32_t stream_resolution;
+        LegacyHost hosts[8];
+    };
+    struct Version2File
+    {
+        std::uint32_t magic, version, checksum, reserved;
+        Version2Config config;
+    } version_2{};
+
+    static_assert(sizeof(Version1File) == 1472);
+    static_assert(sizeof(Version2File) == 1480);
+    version_1.magic = version_2.magic = UINT32_C(0x504c4346);
+    version_1.version = 1;
+    version_1.config.host_count = 1;
+    version_1.config.bitrate_mbps = 15;
+    version_1.config.display_area = MOONLIGHT_DISPLAY_AREA_TV_SAFE;
+    std::snprintf(version_1.config.hosts[0].address, sizeof(version_1.config.hosts[0].address),
+                  "192.168.1.1");
+    std::snprintf(version_1.config.hosts[0].name, sizeof(version_1.config.hosts[0].name),
+                  "Version One");
+    version_1.checksum = ConfigChecksum(&version_1.config, sizeof(version_1.config));
+
+    version_2.version = 2;
+    version_2.config.host_count = 1;
+    version_2.config.bitrate_mbps = 25;
+    version_2.config.display_area = MOONLIGHT_DISPLAY_AREA_FULL;
+    version_2.config.video_codec = MOONLIGHT_VIDEO_CODEC_HEVC;
+    version_2.config.stream_resolution = MOONLIGHT_STREAM_RESOLUTION_1440P;
+    std::snprintf(version_2.config.hosts[0].address, sizeof(version_2.config.hosts[0].address),
+                  "192.168.1.2");
+    std::snprintf(version_2.config.hosts[0].unique_id, sizeof(version_2.config.hosts[0].unique_id),
+                  "version-two-id");
+    version_2.config.hosts[0].manual = 1;
+    version_2.checksum = ConfigChecksum(&version_2.config, sizeof(version_2.config));
+
+    moonlight_config_t loaded{};
+    kernel_read_data = reinterpret_cast<const std::uint8_t *>(&version_1);
+    kernel_read_size = sizeof(version_1);
+    ASSERT_TRUE(moonlight_config_load(&loaded));
+    ASSERT_EQ(loaded.host_count, 1u);
+    EXPECT_STREQ(loaded.hosts[0].name, "Version One");
+    EXPECT_EQ(loaded.bitrate_mbps, 15u);
+    EXPECT_TRUE(MacIsUnknown(loaded.hosts[0]));
+
+    kernel_read_data = reinterpret_cast<const std::uint8_t *>(&version_2);
+    kernel_read_size = sizeof(version_2);
+    ASSERT_TRUE(moonlight_config_load(&loaded));
+    ASSERT_EQ(loaded.host_count, 1u);
+    EXPECT_STREQ(loaded.hosts[0].address, "192.168.1.2");
+    EXPECT_STREQ(loaded.hosts[0].unique_id, "version-two-id");
+    EXPECT_EQ(loaded.hosts[0].manual, 1u);
+    EXPECT_EQ(loaded.video_codec, MOONLIGHT_VIDEO_CODEC_HEVC);
+    EXPECT_EQ(loaded.stream_resolution, MOONLIGHT_STREAM_RESOLUTION_1440P);
+    EXPECT_TRUE(MacIsUnknown(loaded.hosts[0]));
+    kernel_read_data = nullptr;
+    kernel_read_size = 0;
 }
 
 TEST(Configuration, MigratesBothVersionSevenLayoutsWithoutLosingPyroWaveOrPorts)
@@ -698,12 +842,12 @@ TEST(Configuration, MigratesBothVersionSevenLayoutsWithoutLosingPyroWaveOrPorts)
     struct UpstreamConfig
     {
         std::uint32_t fields[12];
-        moonlight_config_host_t hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+        LegacyHostWithPort hosts[8];
     };
     struct PyroWaveConfig
     {
         std::uint32_t fields[13];
-        LegacyHost hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+        LegacyHost hosts[8];
     };
     struct UpstreamFile
     {
@@ -715,18 +859,29 @@ TEST(Configuration, MigratesBothVersionSevenLayoutsWithoutLosingPyroWaveOrPorts)
         std::uint32_t magic, version, checksum, reserved;
         PyroWaveConfig config;
     } pyrowave{};
-    moonlight_config_t defaults{};
-    moonlight_config_defaults(&defaults);
-    defaults.host_count = 1;
-    defaults.bitrate_mbps = 600;
-    defaults.stream_fps = 117;
-    defaults.video_codec = MOONLIGHT_VIDEO_CODEC_PYROWAVE;
-    defaults.hdr_enabled = 1;
-    defaults.chroma_sampling = MOONLIGHT_CHROMA_444;
+    static_assert(sizeof(PyroWaveConfig) == 1492);
+    static_assert(sizeof(PyroWaveFile) == 1508);
+    static_assert(sizeof(UpstreamConfig) == 1520);
+    static_assert(sizeof(UpstreamFile) == 1536);
+    const std::uint32_t frozen_settings[13] = {
+        1,
+        0,
+        600,
+        MOONLIGHT_DISPLAY_AREA_FULL,
+        MOONLIGHT_VIDEO_CODEC_PYROWAVE,
+        MOONLIGHT_STREAM_RESOLUTION_1080P,
+        117,
+        1,
+        MOONLIGHT_AUDIO_STEREO,
+        1,
+        MOONLIGHT_DECODER_PIPELINE_CLASSIC,
+        MOONLIGHT_DECODER_CORES_DEFAULT,
+        MOONLIGHT_CHROMA_444,
+    };
     upstream.magic = pyrowave.magic = UINT32_C(0x504c4346);
     upstream.version = pyrowave.version = 7;
-    memcpy(upstream.config.fields, &defaults, sizeof(upstream.config.fields));
-    memcpy(pyrowave.config.fields, &defaults, sizeof(pyrowave.config.fields));
+    memcpy(upstream.config.fields, frozen_settings, sizeof(upstream.config.fields));
+    memcpy(pyrowave.config.fields, frozen_settings, sizeof(pyrowave.config.fields));
     // Upstream's layout has a separate port and no chroma field.
     upstream.config.fields[4] = MOONLIGHT_VIDEO_CODEC_HEVC;
     snprintf(upstream.config.hosts[0].address, sizeof(upstream.config.hosts[0].address),
@@ -753,11 +908,68 @@ TEST(Configuration, MigratesBothVersionSevenLayoutsWithoutLosingPyroWaveOrPorts)
                   variant ? MOONLIGHT_VIDEO_CODEC_PYROWAVE : MOONLIGHT_VIDEO_CODEC_HEVC);
         EXPECT_EQ(loaded.chroma_sampling, variant ? MOONLIGHT_CHROMA_444 : MOONLIGHT_CHROMA_420);
         EXPECT_EQ(loaded.hdr_enabled, 1u);
+        EXPECT_TRUE(MacIsUnknown(loaded.hosts[0]));
     }
     ++pyrowave.checksum;
     kernel_read_data = reinterpret_cast<const std::uint8_t *>(&pyrowave);
     kernel_read_size = sizeof(pyrowave);
     moonlight_config_t loaded{};
+    EXPECT_FALSE(moonlight_config_load(&loaded));
+    kernel_read_data = nullptr;
+    kernel_read_size = 0;
+}
+
+TEST(Configuration, MigratesVersionEightWithoutChangingItsFrozenLayout)
+{
+    Version8File file{};
+    file.magic = UINT32_C(0x504c4346);
+    file.version = 8;
+    file.config.fields[0] = 1;
+    file.config.fields[1] = 0;
+    file.config.fields[2] = 75;
+    file.config.fields[3] = MOONLIGHT_DISPLAY_AREA_TV_SAFE;
+    file.config.fields[4] = MOONLIGHT_VIDEO_CODEC_HEVC;
+    file.config.fields[5] = MOONLIGHT_STREAM_RESOLUTION_1440P;
+    file.config.fields[6] = 90;
+    file.config.fields[7] = 1;
+    file.config.fields[8] = MOONLIGHT_AUDIO_51_SURROUND;
+    file.config.fields[9] = 0;
+    file.config.fields[10] = MOONLIGHT_DECODER_PIPELINE_CLASSIC;
+    file.config.fields[11] = MOONLIGHT_DECODER_CORES_DEFAULT;
+    file.config.fields[12] = MOONLIGHT_CHROMA_444;
+    std::snprintf(file.config.hosts[0].address, sizeof(file.config.hosts[0].address),
+                  "192.168.1.8");
+    std::snprintf(file.config.hosts[0].name, sizeof(file.config.hosts[0].name), "Version Eight");
+    std::snprintf(file.config.hosts[0].unique_id, sizeof(file.config.hosts[0].unique_id),
+                  "version-eight-id");
+    file.config.hosts[0].manual = 1;
+    file.config.hosts[0].http_port = 48989;
+    file.checksum = ConfigChecksum(&file.config, sizeof(file.config));
+    kernel_read_data = reinterpret_cast<const std::uint8_t *>(&file);
+    kernel_read_size = sizeof(file);
+
+    moonlight_config_t loaded{};
+    ASSERT_TRUE(moonlight_config_load(&loaded));
+    ASSERT_EQ(loaded.host_count, 1u);
+    EXPECT_EQ(loaded.bitrate_mbps, 75u);
+    EXPECT_EQ(loaded.display_area, MOONLIGHT_DISPLAY_AREA_TV_SAFE);
+    EXPECT_EQ(loaded.video_codec, MOONLIGHT_VIDEO_CODEC_HEVC);
+    EXPECT_EQ(loaded.stream_resolution, MOONLIGHT_STREAM_RESOLUTION_1440P);
+    EXPECT_EQ(loaded.stream_fps, 90u);
+    EXPECT_EQ(loaded.hdr_enabled, 1u);
+    EXPECT_EQ(loaded.audio_configuration, MOONLIGHT_AUDIO_51_SURROUND);
+    EXPECT_EQ(loaded.vsync_enabled, 0u);
+    EXPECT_EQ(loaded.chroma_sampling, MOONLIGHT_CHROMA_444);
+    EXPECT_STREQ(loaded.hosts[0].address, "192.168.1.8");
+    EXPECT_STREQ(loaded.hosts[0].name, "Version Eight");
+    EXPECT_STREQ(loaded.hosts[0].unique_id, "version-eight-id");
+    EXPECT_EQ(loaded.hosts[0].manual, 1u);
+    EXPECT_EQ(loaded.hosts[0].http_port, 48989u);
+    EXPECT_TRUE(MacIsUnknown(loaded.hosts[0]));
+
+    ++file.checksum;
+    kernel_read_data = reinterpret_cast<const std::uint8_t *>(&file);
+    kernel_read_size = sizeof(file);
     EXPECT_FALSE(moonlight_config_load(&loaded));
     kernel_read_data = nullptr;
     kernel_read_size = 0;
@@ -779,7 +991,7 @@ TEST(Configuration, MigratesVersionSixAndGivesSavedPcsTheDefaultPort)
         std::uint32_t vsync_enabled;
         std::uint32_t decoder_pipeline;
         std::uint32_t decoder_cores;
-        LegacyHost hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+        LegacyHost hosts[8];
     };
     struct LegacyFile
     {
@@ -836,20 +1048,26 @@ TEST(Configuration, MigratesVersionSixAndGivesSavedPcsTheDefaultPort)
     EXPECT_STREQ(config.hosts[0].name, "Gaming-PC");
     EXPECT_EQ(config.hosts[0].manual, 0U);
     EXPECT_EQ(config.hosts[0].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+    EXPECT_TRUE(MacIsUnknown(config.hosts[0]));
     EXPECT_STREQ(config.hosts[1].address, "192.168.4.21");
     EXPECT_STREQ(config.hosts[1].name, "Office-PC");
     EXPECT_STREQ(config.hosts[1].unique_id, "office-id");
     EXPECT_EQ(config.hosts[1].manual, 1U);
     EXPECT_EQ(config.hosts[1].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+    EXPECT_TRUE(MacIsUnknown(config.hosts[1]));
 }
 
-TEST(Configuration, SavesAndReloadsThePortOfEveryPc)
+TEST(Configuration, SavesAndReloadsVersionNineMacAndPorts)
 {
+    const std::uint8_t saved_mac[MOONLIGHT_WOL_MAC_BYTES] = {0x02, 0x10, 0x20, 0x30, 0x40, 0x50};
     moonlight_config_t saved{};
     moonlight_config_defaults(&saved);
     saved.bitrate_mbps = 60;
-    ASSERT_EQ(moonlight_config_upsert_host(&saved, "192.168.1.10", 0, "Default", "one", false), 0);
-    ASSERT_EQ(moonlight_config_upsert_host(&saved, "192.168.1.10", 48989, "Second", "two", true),
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&saved, "192.168.1.10", 0, "Default", "one", nullptr, false),
+        0);
+    ASSERT_EQ(moonlight_config_upsert_host(&saved, "192.168.1.10", 48989, "Second", "two",
+                                           saved_mac, true),
               1);
     saved.selected_host = 1;
 
@@ -858,7 +1076,14 @@ TEST(Configuration, SavesAndReloadsThePortOfEveryPc)
     const bool stored = moonlight_config_save(&saved);
     kernel_write_capture = nullptr;
     ASSERT_TRUE(stored);
-    ASSERT_FALSE(written.empty());
+    ASSERT_EQ(written.size(), sizeof(Version9File));
+    Version9File disk{};
+    std::memcpy(&disk, written.data(), sizeof(disk));
+    EXPECT_EQ(disk.magic, UINT32_C(0x504c4346));
+    EXPECT_EQ(disk.version, 9u);
+    EXPECT_EQ(disk.checksum, ConfigChecksum(&disk.config, sizeof(disk.config)));
+    EXPECT_EQ(disk.config.hosts[1].reserved[0], 0u);
+    EXPECT_EQ(disk.config.hosts[1].reserved[1], 0u);
 
     kernel_read_data = written.data();
     kernel_read_size = written.size();
@@ -876,6 +1101,16 @@ TEST(Configuration, SavesAndReloadsThePortOfEveryPc)
     EXPECT_STREQ(config.hosts[1].name, "Second");
     EXPECT_EQ(config.hosts[1].http_port, 48989U);
     EXPECT_EQ(config.hosts[1].manual, 1U);
+    EXPECT_EQ(std::memcmp(config.hosts[1].mac, saved_mac, sizeof(saved_mac)), 0);
+    EXPECT_EQ(config.hosts[1].reserved[0], 0u);
+    EXPECT_EQ(config.hosts[1].reserved[1], 0u);
+
+    ++disk.checksum;
+    kernel_read_data = reinterpret_cast<const std::uint8_t *>(&disk);
+    kernel_read_size = sizeof(disk);
+    EXPECT_FALSE(moonlight_config_load(&config));
+    kernel_read_data = nullptr;
+    kernel_read_size = 0;
 }
 
 TEST(Configuration, MigratesVersionFourAndDefaultsToStereo)
@@ -890,7 +1125,7 @@ TEST(Configuration, MigratesVersionFourAndDefaultsToStereo)
         std::uint32_t stream_resolution;
         std::uint32_t stream_fps;
         std::uint32_t hdr_enabled;
-        LegacyHost hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+        LegacyHost hosts[8];
     };
     struct LegacyFile
     {
@@ -932,6 +1167,7 @@ TEST(Configuration, MigratesVersionFourAndDefaultsToStereo)
     EXPECT_EQ(config.stream_resolution, MOONLIGHT_STREAM_RESOLUTION_2160P);
     EXPECT_EQ(config.stream_fps, MOONLIGHT_STREAM_FPS_120);
     EXPECT_EQ(config.audio_configuration, MOONLIGHT_AUDIO_STEREO);
+    EXPECT_TRUE(MacIsUnknown(config.hosts[0]));
 }
 
 TEST(Configuration, MigratesVersionThreeAndKeepsTheSavedHost)
@@ -945,7 +1181,7 @@ TEST(Configuration, MigratesVersionThreeAndKeepsTheSavedHost)
         std::uint32_t video_codec;
         std::uint32_t stream_resolution;
         std::uint32_t hdr_enabled;
-        LegacyHost hosts[MOONLIGHT_CONFIG_MAX_HOSTS];
+        LegacyHost hosts[8];
     };
     struct LegacyFile
     {
@@ -993,22 +1229,106 @@ TEST(Configuration, MigratesVersionThreeAndKeepsTheSavedHost)
     EXPECT_EQ(config.bitrate_mbps, 100U);
     EXPECT_EQ(config.hdr_enabled, 1U);
     EXPECT_EQ(config.audio_configuration, MOONLIGHT_AUDIO_STEREO);
+    EXPECT_TRUE(MacIsUnknown(config.hosts[0]));
 }
 
 TEST(Configuration, UpsertUpdatesAHostByStableIdentity)
 {
+    const std::uint8_t mac[MOONLIGHT_WOL_MAC_BYTES] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
     moonlight_config_t config{};
     moonlight_config_defaults(&config);
 
     EXPECT_EQ(
-        moonlight_config_upsert_host(&config, "192.168.1.10", 0, "Gaming PC", "host-1", false), 0);
-    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", 0, "", "host-1", true), 0);
+        moonlight_config_upsert_host(&config, "192.168.1.10", 0, "Gaming PC", "host-1", mac, false),
+        0);
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", 0, "", "host-1", nullptr, true),
+              0);
     ASSERT_EQ(config.host_count, 1U);
     EXPECT_STREQ(config.hosts[0].address, "192.168.1.20");
     EXPECT_STREQ(config.hosts[0].name, "Gaming PC");
     EXPECT_STREQ(config.hosts[0].unique_id, "host-1");
     EXPECT_EQ(config.hosts[0].manual, 1U);
     EXPECT_EQ(config.hosts[0].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
+    EXPECT_EQ(std::memcmp(config.hosts[0].mac, mac, sizeof(mac)), 0);
+}
+
+TEST(Configuration, MacUpdatesReplaceWhileMissingOrInvalidDataPreserves)
+{
+    const std::uint8_t first[MOONLIGHT_WOL_MAC_BYTES] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const std::uint8_t replacement[MOONLIGHT_WOL_MAC_BYTES] = {0x0a, 0xaa, 0xbb, 0xcc, 0xdd, 0xee};
+    const std::uint8_t all_zero[MOONLIGHT_WOL_MAC_BYTES] = {};
+    const std::uint8_t multicast[MOONLIGHT_WOL_MAC_BYTES] = {0x01, 0x11, 0x22, 0x33, 0x44, 0x55};
+    moonlight_config_t config{};
+    moonlight_config_defaults(&config);
+
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "PC", "stable", first, false),
+        0);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.11", 47989, "PC", "stable", nullptr,
+                                           false),
+              0);
+    EXPECT_EQ(std::memcmp(config.hosts[0].mac, first, sizeof(first)), 0);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.11", 47989, "PC", "stable", all_zero,
+                                           false),
+              0);
+    EXPECT_EQ(std::memcmp(config.hosts[0].mac, first, sizeof(first)), 0);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.11", 47989, "PC", "stable",
+                                           multicast, false),
+              0);
+    EXPECT_EQ(std::memcmp(config.hosts[0].mac, first, sizeof(first)), 0);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.11", 47989, "PC", "stable",
+                                           replacement, false),
+              0);
+    EXPECT_EQ(std::memcmp(config.hosts[0].mac, replacement, sizeof(replacement)), 0);
+}
+
+TEST(Configuration, DuplicateMergeKeepsFreshMacOrInheritsAValidOldOne)
+{
+    const std::uint8_t old_mac[MOONLIGHT_WOL_MAC_BYTES] = {0x02, 0x10, 0x20, 0x30, 0x40, 0x50};
+    const std::uint8_t fresh_mac[MOONLIGHT_WOL_MAC_BYTES] = {0x0a, 0x11, 0x21, 0x31, 0x41, 0x51};
+    for (bool fresh : {false, true})
+    {
+        moonlight_config_t config{};
+        moonlight_config_defaults(&config);
+        ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Survivor", "stable",
+                                               nullptr, false),
+                  0);
+        ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", 47989, "Duplicate", "",
+                                               old_mac, true),
+                  1);
+        config.selected_host = 1;
+        ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", 47989, "Survivor", "stable",
+                                               fresh ? fresh_mac : nullptr, false),
+                  0);
+        ASSERT_EQ(config.host_count, 1u);
+        EXPECT_EQ(config.selected_host, 0u);
+        EXPECT_EQ(
+            std::memcmp(config.hosts[0].mac, fresh ? fresh_mac : old_mac, MOONLIGHT_WOL_MAC_BYTES),
+            0);
+    }
+}
+
+TEST(Configuration, ChangedIdentityAtSameEndpointCannotKeepAStaleMac)
+{
+    const std::uint8_t stale[MOONLIGHT_WOL_MAC_BYTES] = {0x02, 0x10, 0x20, 0x30, 0x40, 0x50};
+    const std::uint8_t replacement[MOONLIGHT_WOL_MAC_BYTES] = {0x0a, 0x11, 0x21, 0x31, 0x41, 0x51};
+    moonlight_config_t config{};
+    moonlight_config_defaults(&config);
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Old", "old-id", stale, false),
+        0);
+
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "New", "new-id", nullptr,
+                                           false),
+              0);
+    EXPECT_STREQ(config.hosts[0].unique_id, "new-id");
+    EXPECT_TRUE(MacIsUnknown(config.hosts[0]));
+
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Newest", "newest-id",
+                                           replacement, false),
+              0);
+    EXPECT_STREQ(config.hosts[0].unique_id, "newest-id");
+    EXPECT_EQ(std::memcmp(config.hosts[0].mac, replacement, sizeof(replacement)), 0);
 }
 
 TEST(Configuration, OneAddressCanHoldSunshineOnSeveralPorts)
@@ -1016,11 +1336,15 @@ TEST(Configuration, OneAddressCanHoldSunshineOnSeveralPorts)
     moonlight_config_t config{};
     moonlight_config_defaults(&config);
 
-    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Desk", "one", false),
-              0);
-    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "TV", "two", true), 1);
+    EXPECT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Desk", "one", nullptr, false),
+        0);
+    EXPECT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "TV", "two", nullptr, true),
+        1);
     // A refresh of either endpoint updates that entry only.
-    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "TV room", "two", false),
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "TV room", "two",
+                                           nullptr, false),
               1);
     ASSERT_EQ(config.host_count, 2U);
     EXPECT_STREQ(config.hosts[0].name, "Desk");
@@ -1034,15 +1358,18 @@ TEST(Configuration, AnUnknownPortKeepsTheSavedOne)
 {
     moonlight_config_t config{};
     moonlight_config_defaults(&config);
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "Desk", "", true), 0);
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "Desk", "", nullptr, true), 0);
 
     // Discovery without a port record must not add a second, unreachable entry.
-    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 0, "DESK-PC", "", false), 0);
+    EXPECT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 0, "DESK-PC", "", nullptr, false), 0);
     ASSERT_EQ(config.host_count, 1U);
     EXPECT_EQ(config.hosts[0].http_port, 48989U);
     EXPECT_STREQ(config.hosts[0].name, "DESK-PC");
     // A PC seen for the first time without a port gets Sunshine's default.
-    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.30", 0, "Other", "", false), 1);
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.30", 0, "Other", "", nullptr, false),
+              1);
     EXPECT_EQ(config.hosts[1].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
 }
 
@@ -1050,14 +1377,18 @@ TEST(Configuration, APcIsFollowedToItsNewPort)
 {
     moonlight_config_t config{};
     moonlight_config_defaults(&config);
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Desk", "one", false),
-              0);
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Desk", "one", nullptr, false),
+        0);
     // Discovery sees the changed port first, without an identity...
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "Desk", "", false), 1);
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "Desk", "", nullptr, false),
+        1);
     config.selected_host = 1;
     // ...and the refresh of that endpoint recognises the same Sunshine.
-    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "Desk", "one", false),
-              0);
+    EXPECT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "Desk", "one", nullptr, false),
+        0);
     ASSERT_EQ(config.host_count, 1U);
     EXPECT_EQ(config.selected_host, 0U);
     EXPECT_EQ(config.hosts[0].http_port, 48989U);
@@ -1066,10 +1397,13 @@ TEST(Configuration, APcIsFollowedToItsNewPort)
 
 TEST(Configuration, ChangingAPortEditsThatPcOnly)
 {
+    const std::uint8_t mac[MOONLIGHT_WOL_MAC_BYTES] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
     moonlight_config_t config{};
     moonlight_config_defaults(&config);
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 0, "Desk", "one", false), 0);
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", 0, "Other", "two", true), 1);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 0, "Desk", "one", mac, false),
+              0);
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.20", 0, "Other", "two", nullptr, true), 1);
     config.selected_host = 1;
 
     EXPECT_EQ(moonlight_config_set_host_port(&config, 0, 48989), 0);
@@ -1077,12 +1411,14 @@ TEST(Configuration, ChangingAPortEditsThatPcOnly)
     EXPECT_EQ(config.hosts[0].http_port, 48989U);
     // The identity belonged to the old port: the next refresh fills it in again.
     EXPECT_EQ(config.hosts[0].unique_id[0], '\0');
+    EXPECT_TRUE(MacIsUnknown(config.hosts[0]));
     EXPECT_STREQ(config.hosts[0].name, "Desk");
     EXPECT_EQ(config.hosts[1].http_port, MOONLIGHT_CONFIG_DEFAULT_HTTP_PORT);
     EXPECT_STREQ(config.hosts[1].unique_id, "two");
     EXPECT_EQ(config.selected_host, 1U);
     // Setting the same port again is not a change.
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "", "one", false), 0);
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "", "one", nullptr, false), 0);
     EXPECT_EQ(moonlight_config_set_host_port(&config, 0, 48989), 0);
     EXPECT_STREQ(config.hosts[0].unique_id, "one");
 
@@ -1093,10 +1429,16 @@ TEST(Configuration, ChangingAPortEditsThatPcOnly)
 
 TEST(Configuration, ChangingAPortOntoASavedEndpointMergesThePcs)
 {
+    const std::uint8_t first_mac[MOONLIGHT_WOL_MAC_BYTES] = {0x02, 0x10, 0x20, 0x30, 0x40, 0x50};
+    const std::uint8_t other_mac[MOONLIGHT_WOL_MAC_BYTES] = {0x0a, 0x11, 0x21, 0x31, 0x41, 0x51};
     moonlight_config_t config{};
     moonlight_config_defaults(&config);
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Old", "", false), 0);
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "New", "", true), 1);
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 47989, "Old", "", first_mac, false),
+        0);
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 48989, "New", "", other_mac, true),
+        1);
     config.selected_host = 0;
 
     EXPECT_EQ(moonlight_config_set_host_port(&config, 0, 48989), 0);
@@ -1105,6 +1447,7 @@ TEST(Configuration, ChangingAPortOntoASavedEndpointMergesThePcs)
     EXPECT_STREQ(config.hosts[0].name, "Old");
     EXPECT_EQ(config.hosts[0].http_port, 48989U);
     EXPECT_EQ(config.hosts[0].manual, 1U);
+    EXPECT_TRUE(MacIsUnknown(config.hosts[0]));
 }
 
 TEST(Configuration, HostPortFallsBackToTheDefault)
@@ -1160,11 +1503,12 @@ TEST(Configuration, DiscoveryPreservesAnExplicitCustomPort)
 {
     moonlight_config_t config{};
     moonlight_config_defaults(&config);
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 48000, "PC", "host-1", true),
-              0);
     ASSERT_EQ(
-        moonlight_config_upsert_host(&config, "192.168.1.10", 0, "PC discovered", "host-1", false),
+        moonlight_config_upsert_host(&config, "192.168.1.10", 48000, "PC", "host-1", nullptr, true),
         0);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 0, "PC discovered", "host-1",
+                                           nullptr, false),
+              0);
     EXPECT_EQ(config.host_count, 1u);
     EXPECT_STREQ(config.hosts[0].address, "192.168.1.10");
     EXPECT_EQ(config.hosts[0].http_port, 48000u);
@@ -1180,11 +1524,12 @@ TEST(Configuration, UpsertRejectsAHostBeyondCapacity)
     {
         char address[MOONLIGHT_CONFIG_ADDRESS_SIZE]{};
         std::snprintf(address, sizeof(address), "192.168.1.%u", index + 1);
-        ASSERT_EQ(moonlight_config_upsert_host(&config, address, 0, "PC", "", false),
+        ASSERT_EQ(moonlight_config_upsert_host(&config, address, 0, "PC", "", nullptr, false),
                   static_cast<int>(index));
     }
 
-    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.99", 0, "Extra", "", false), -1);
+    EXPECT_EQ(moonlight_config_upsert_host(&config, "192.168.1.99", 0, "Extra", "", nullptr, false),
+              -1);
     EXPECT_EQ(config.host_count, MOONLIGHT_CONFIG_MAX_HOSTS);
 }
 
@@ -1192,8 +1537,11 @@ TEST(Configuration, RemovingSelectedHostCompactsAndKeepsTheOtherPC)
 {
     moonlight_config_t config{};
     moonlight_config_defaults(&config);
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.10", 0, "Old PC", "old", false), 0);
-    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", 0, "Other PC", "other", true),
+    ASSERT_EQ(
+        moonlight_config_upsert_host(&config, "192.168.1.10", 0, "Old PC", "old", nullptr, false),
+        0);
+    ASSERT_EQ(moonlight_config_upsert_host(&config, "192.168.1.20", 0, "Other PC", "other", nullptr,
+                                           true),
               1);
     config.selected_host = 0;
 
@@ -1545,4 +1893,605 @@ TEST(ConnectingScreen, HdrPlateUsesTenBitPqLevels)
     EXPECT_EQ(surface[kPlateLuma], 512);
     plate.compose(surface.data(), 0.0f, 0.0f);
     EXPECT_EQ(surface[0], 64);
+}
+
+TEST(WakeOnLan, ParsesLowercaseColonMac)
+{
+    std::uint8_t parsed[MOONLIGHT_WOL_MAC_BYTES] = {};
+    ASSERT_EQ(moonlight_wol_parse_mac("02:ab:cd:ef:12:34", parsed), 1);
+    const std::uint8_t expected[] = {0x02, 0xab, 0xcd, 0xef, 0x12, 0x34};
+    for (std::size_t index = 0; index < MOONLIGHT_WOL_MAC_BYTES; ++index)
+        EXPECT_EQ(parsed[index], expected[index]) << index;
+}
+
+TEST(WakeOnLan, ParsesUppercaseHyphenMac)
+{
+    std::uint8_t parsed[MOONLIGHT_WOL_MAC_BYTES] = {};
+    ASSERT_EQ(moonlight_wol_parse_mac("02-AB-CD-EF-12-34", parsed), 1);
+    const std::uint8_t expected[] = {0x02, 0xab, 0xcd, 0xef, 0x12, 0x34};
+    for (std::size_t index = 0; index < MOONLIGHT_WOL_MAC_BYTES; ++index)
+        EXPECT_EQ(parsed[index], expected[index]) << index;
+}
+
+TEST(WakeOnLan, ParsesUppercaseColonMac)
+{
+    std::uint8_t parsed[MOONLIGHT_WOL_MAC_BYTES] = {};
+    ASSERT_EQ(moonlight_wol_parse_mac("02:AB:CD:EF:12:34", parsed), 1);
+    const std::uint8_t expected[] = {0x02, 0xab, 0xcd, 0xef, 0x12, 0x34};
+    for (std::size_t index = 0; index < MOONLIGHT_WOL_MAC_BYTES; ++index)
+        EXPECT_EQ(parsed[index], expected[index]) << index;
+}
+
+TEST(WakeOnLan, RejectsWrongOctetCounts)
+{
+    std::uint8_t parsed[MOONLIGHT_WOL_MAC_BYTES] = {0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa};
+    EXPECT_EQ(moonlight_wol_parse_mac("02:11:22:33:44", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("02:11:22:33:44:55:66", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac(nullptr, parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("02:11:22:33:44:55", nullptr), 0);
+    for (std::size_t index = 0; index < MOONLIGHT_WOL_MAC_BYTES; ++index)
+        EXPECT_EQ(parsed[index], 0xaa) << index;
+}
+
+TEST(WakeOnLan, RejectsMixedSeparators)
+{
+    std::uint8_t parsed[MOONLIGHT_WOL_MAC_BYTES] = {};
+    EXPECT_EQ(moonlight_wol_parse_mac("02:11-22:33:44:55", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("02-11:22-33:44:55", parsed), 0);
+}
+
+TEST(WakeOnLan, RejectsBadSeparators)
+{
+    std::uint8_t parsed[MOONLIGHT_WOL_MAC_BYTES] = {};
+    EXPECT_EQ(moonlight_wol_parse_mac("02/11/22/33/44/55", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("02 11 22 33 44 55", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("02,11,22,33,44,55", parsed), 0);
+}
+
+TEST(WakeOnLan, RejectsBadHex)
+{
+    std::uint8_t parsed[MOONLIGHT_WOL_MAC_BYTES] = {};
+    EXPECT_EQ(moonlight_wol_parse_mac("02:11:22:33:44:GG", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("02:11:22:33:44:5", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("02:11:22:33:44:5G", parsed), 0);
+}
+
+TEST(WakeOnLan, RejectsLeadingAndTrailingJunk)
+{
+    std::uint8_t parsed[MOONLIGHT_WOL_MAC_BYTES] = {};
+    EXPECT_EQ(moonlight_wol_parse_mac("x02:11:22:33:44:55", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("02:11:22:33:44:55x", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("02:11:22:33:44:55 ", parsed), 0);
+}
+
+TEST(WakeOnLan, RejectsAllZeroBroadcastAndMulticast)
+{
+    std::uint8_t parsed[MOONLIGHT_WOL_MAC_BYTES] = {};
+    EXPECT_EQ(moonlight_wol_parse_mac("00:00:00:00:00:00", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("ff:ff:ff:ff:ff:ff", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("01:00:00:00:00:01", parsed), 0);
+    EXPECT_EQ(moonlight_wol_parse_mac("03:00:00:00:00:01", parsed), 0);
+}
+
+TEST(WakeOnLan, AcceptsLocallyAdministeredUnicast)
+{
+    std::uint8_t parsed[MOONLIGHT_WOL_MAC_BYTES] = {};
+    ASSERT_EQ(moonlight_wol_parse_mac("02:00:00:00:00:01", parsed), 1);
+    EXPECT_EQ(moonlight_wol_mac_is_valid(parsed), 1);
+    EXPECT_EQ(parsed[0], 0x02);
+    EXPECT_EQ(parsed[5], 0x01);
+}
+
+TEST(WakeOnLan, BinaryValidityRejectsMalformedValues)
+{
+    const std::uint8_t locally_administered[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const std::uint8_t global_unicast[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const std::uint8_t all_zero[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    const std::uint8_t broadcast[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    const std::uint8_t multicast[] = {0x01, 0x11, 0x22, 0x33, 0x44, 0x55};
+    EXPECT_EQ(moonlight_wol_mac_is_valid(locally_administered), 1);
+    EXPECT_EQ(moonlight_wol_mac_is_valid(global_unicast), 1);
+    EXPECT_EQ(moonlight_wol_mac_is_valid(all_zero), 0);
+    EXPECT_EQ(moonlight_wol_mac_is_valid(broadcast), 0);
+    EXPECT_EQ(moonlight_wol_mac_is_valid(multicast), 0);
+    EXPECT_EQ(moonlight_wol_mac_is_valid(nullptr), 0);
+}
+
+TEST(WakeOnLan, BuildsExact102BytePacket)
+{
+    const std::uint8_t mac[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    std::uint8_t packet[MOONLIGHT_WOL_PACKET_BYTES] = {};
+    ASSERT_EQ(MOONLIGHT_WOL_PACKET_BYTES, 102U);
+    ASSERT_EQ(moonlight_wol_build_packet(mac, packet), 1);
+    for (std::size_t index = 0; index < MOONLIGHT_WOL_MAC_BYTES; ++index)
+        EXPECT_EQ(packet[index], 0xff) << index;
+    for (std::size_t repetition = 0; repetition < 16U; ++repetition)
+    {
+        for (std::size_t index = 0; index < MOONLIGHT_WOL_MAC_BYTES; ++index)
+            EXPECT_EQ(
+                packet[MOONLIGHT_WOL_MAC_BYTES + repetition * MOONLIGHT_WOL_MAC_BYTES + index],
+                mac[index])
+                << repetition << index;
+    }
+}
+
+TEST(WakeOnLan, RejectsInvalidMacForPacket)
+{
+    const std::uint8_t invalid[] = {0x01, 0x11, 0x22, 0x33, 0x44, 0x55};
+    std::uint8_t packet[MOONLIGHT_WOL_PACKET_BYTES];
+    for (std::size_t index = 0; index < MOONLIGHT_WOL_PACKET_BYTES; ++index)
+        packet[index] = 0xaa;
+    EXPECT_EQ(moonlight_wol_build_packet(invalid, packet), 0);
+    for (std::size_t index = 0; index < MOONLIGHT_WOL_PACKET_BYTES; ++index)
+        EXPECT_EQ(packet[index], 0xaa) << index;
+    EXPECT_EQ(moonlight_wol_build_packet(nullptr, packet), 0);
+    EXPECT_EQ(moonlight_wol_build_packet(invalid, nullptr), 0);
+}
+
+TEST(WakeOnLan, DerivesDefaultPorts)
+{
+    std::uint16_t ports[MOONLIGHT_WOL_MAX_PORTS] = {};
+    const std::uint16_t expected[] = {9U, 47009U, 47998U, 47999U, 48000U, 48002U, 48010U};
+    const std::size_t count =
+        moonlight_wol_derive_ports(MOONLIGHT_WOL_DEFAULT_HTTP_PORT, ports, MOONLIGHT_WOL_MAX_PORTS);
+    ASSERT_EQ(count, 7U);
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        EXPECT_EQ(ports[index], expected[index]) << index;
+        EXPECT_NE(ports[index], 7U);
+    }
+}
+
+TEST(WakeOnLan, DerivesCustomPorts)
+{
+    std::uint16_t ports[MOONLIGHT_WOL_MAX_PORTS] = {};
+    const std::uint16_t expected[] = {9U, 47009U, 48009U, 48010U, 48011U, 48013U, 48021U};
+    const std::size_t count = moonlight_wol_derive_ports(48000U, ports, MOONLIGHT_WOL_MAX_PORTS);
+    ASSERT_EQ(count, 7U);
+    for (std::size_t index = 0; index < count; ++index)
+        EXPECT_EQ(ports[index], expected[index]) << index;
+}
+
+TEST(WakeOnLan, DeduplicatesPortCollisions)
+{
+    std::uint16_t ports[MOONLIGHT_WOL_MAX_PORTS] = {};
+    const std::uint16_t expected[] = {9U, 47009U, 10U, 11U, 13U, 21U};
+    const std::size_t count = moonlight_wol_derive_ports(0U, ports, MOONLIGHT_WOL_MAX_PORTS);
+    ASSERT_EQ(count, 6U);
+    for (std::size_t index = 0; index < count; ++index)
+        EXPECT_EQ(ports[index], expected[index]) << index;
+
+    const std::uint16_t duplicate_static[] = {9U, 47009U, 47010U, 47011U, 47013U, 47021U};
+    const std::size_t duplicate_count =
+        moonlight_wol_derive_ports(47000U, ports, MOONLIGHT_WOL_MAX_PORTS);
+    ASSERT_EQ(duplicate_count, 6U);
+    for (std::size_t index = 0; index < duplicate_count; ++index)
+        EXPECT_EQ(ports[index], duplicate_static[index]) << index;
+}
+
+TEST(WakeOnLan, SkipsOverflowingPorts)
+{
+    std::uint16_t ports[MOONLIGHT_WOL_MAX_PORTS] = {};
+    const std::uint16_t overflow_expected[] = {9U, 47009U};
+    const std::size_t overflow_count =
+        moonlight_wol_derive_ports(65535U, ports, MOONLIGHT_WOL_MAX_PORTS);
+    ASSERT_EQ(overflow_count, 2U);
+    EXPECT_EQ(ports[0], overflow_expected[0]);
+    EXPECT_EQ(ports[1], overflow_expected[1]);
+
+    const std::uint16_t boundary_expected[] = {9U, 47009U, 65523U, 65524U, 65525U, 65527U, 65535U};
+    const std::size_t boundary_count =
+        moonlight_wol_derive_ports(65514U, ports, MOONLIGHT_WOL_MAX_PORTS);
+    ASSERT_EQ(boundary_count, 7U);
+    for (std::size_t index = 0; index < boundary_count; ++index)
+        EXPECT_EQ(ports[index], boundary_expected[index]) << index;
+
+    const std::size_t skipped_count =
+        moonlight_wol_derive_ports(65515U, ports, MOONLIGHT_WOL_MAX_PORTS);
+    ASSERT_EQ(skipped_count, 6U);
+    EXPECT_EQ(ports[5], 65528U);
+}
+
+TEST(WakeOnLan, BoundsPortOutputByCapacity)
+{
+    std::uint16_t ports[MOONLIGHT_WOL_MAX_PORTS];
+    for (std::size_t index = 0; index < MOONLIGHT_WOL_MAX_PORTS; ++index)
+        ports[index] = 0xaaaa;
+    const std::size_t count =
+        moonlight_wol_derive_ports(MOONLIGHT_WOL_DEFAULT_HTTP_PORT, ports, 3U);
+    ASSERT_EQ(count, 7U);
+    EXPECT_EQ(ports[0], 9U);
+    EXPECT_EQ(ports[1], 47009U);
+    EXPECT_EQ(ports[2], 47998U);
+    for (std::size_t index = 3; index < MOONLIGHT_WOL_MAX_PORTS; ++index)
+        EXPECT_EQ(ports[index], 0xaaaa) << index;
+    EXPECT_EQ(moonlight_wol_derive_ports(MOONLIGHT_WOL_DEFAULT_HTTP_PORT, nullptr,
+                                         MOONLIGHT_WOL_MAX_PORTS),
+              7U);
+}
+
+TEST(WakeOnLan, PlansLimitedBroadcastFallbackWithoutInputs)
+{
+    moonlight_wol_target_plan plan{};
+    ASSERT_EQ(moonlight_wol_plan_targets(nullptr, 0U, nullptr, 0U, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                         &plan),
+              1);
+    ASSERT_EQ(plan.address_count, 1U);
+    EXPECT_EQ(plan.addresses[0], 0xFFFFFFFFU);
+    const std::uint16_t expected_ports[] = {9U, 47009U, 47998U, 47999U, 48000U, 48002U, 48010U};
+    ASSERT_EQ(plan.port_count, 7U);
+    for (std::size_t index = 0; index < plan.port_count; ++index)
+        EXPECT_EQ(plan.ports[index], expected_ports[index]) << index;
+}
+
+TEST(WakeOnLan, DeduplicatesPlanAddressesAndPorts)
+{
+    const std::uint32_t required[] = {0xC000020AU, 0xC000020AU, 0xC6336414U};
+    const std::uint32_t interfaces[] = {0xCB00711EU, 0xC000020AU, 0xCB00711EU};
+    moonlight_wol_target_plan plan{};
+    ASSERT_EQ(moonlight_wol_plan_targets(required, 3U, interfaces, 3U, 48000U, &plan), 1);
+    ASSERT_EQ(plan.address_count, 4U);
+    EXPECT_EQ(plan.addresses[0], 0xFFFFFFFFU);
+    EXPECT_EQ(plan.addresses[1], 0xC000020AU);
+    EXPECT_EQ(plan.addresses[2], 0xC6336414U);
+    EXPECT_EQ(plan.addresses[3], 0xCB00711EU);
+    const std::uint16_t expected_ports[] = {9U, 47009U, 48009U, 48010U, 48011U, 48013U, 48021U};
+    ASSERT_EQ(plan.port_count, 7U);
+    for (std::size_t index = 0; index < plan.port_count; ++index)
+        EXPECT_EQ(plan.ports[index], expected_ports[index]) << index;
+}
+
+TEST(WakeOnLan, RejectsInvalidTargetPlanInputs)
+{
+    moonlight_wol_target_plan plan{};
+    EXPECT_EQ(moonlight_wol_plan_targets(nullptr, 1U, nullptr, 0U, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                         &plan),
+              0);
+    EXPECT_EQ(moonlight_wol_plan_targets(nullptr, 0U, nullptr, 1U, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                         &plan),
+              0);
+    EXPECT_EQ(moonlight_wol_plan_targets(nullptr, 0U, nullptr, 0U, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                         nullptr),
+              0);
+}
+
+namespace wol_test
+{
+struct SentDatagram
+{
+    std::uint32_t address = 0;
+    std::uint16_t port = 0;
+    std::uint8_t packet[MOONLIGHT_WOL_PACKET_BYTES] = {};
+};
+
+struct FakeTransport
+{
+    std::uint32_t resolved[MOONLIGHT_WOL_MAX_ADDRESSES] = {};
+    std::size_t resolved_count = 0;
+    bool resolve_success = true;
+    bool resolver_called = false;
+    std::string requested_host;
+
+    std::uint32_t interfaces[MOONLIGHT_WOL_MAX_ADDRESSES] = {};
+    std::size_t interface_count = 0;
+    bool enumerate_success = true;
+    bool enumerate_called = false;
+
+    int socket_value = 7;
+    bool socket_success = true;
+    bool open_called = false;
+
+    bool broadcast_success = true;
+    int broadcast_calls = 0;
+
+    std::size_t fail_from = static_cast<std::size_t>(-1);
+    std::size_t short_from = static_cast<std::size_t>(-1);
+    std::vector<SentDatagram> sent;
+
+    bool close_success = true;
+    int close_calls = 0;
+};
+
+static int resolve_ipv4(void *context, const char *host, std::uint32_t *out_addresses,
+                        std::size_t capacity, std::size_t *out_count)
+{
+    auto *fake = static_cast<FakeTransport *>(context);
+    fake->resolver_called = true;
+    fake->requested_host = host == nullptr ? "" : host;
+    if (!fake->resolve_success)
+        return 0;
+    const std::size_t copied = fake->resolved_count < capacity ? fake->resolved_count : capacity;
+    for (std::size_t index = 0; index < copied; ++index)
+        out_addresses[index] = fake->resolved[index];
+    *out_count = copied;
+    return 1;
+}
+
+static int enumerate_interface_broadcasts(void *context, std::uint32_t *out_addresses,
+                                          std::size_t capacity, std::size_t *out_count)
+{
+    auto *fake = static_cast<FakeTransport *>(context);
+    fake->enumerate_called = true;
+    if (!fake->enumerate_success)
+        return 0;
+    const std::size_t copied = fake->interface_count < capacity ? fake->interface_count : capacity;
+    for (std::size_t index = 0; index < copied; ++index)
+        out_addresses[index] = fake->interfaces[index];
+    *out_count = copied;
+    return 1;
+}
+
+static int open_udp_socket(void *context)
+{
+    auto *fake = static_cast<FakeTransport *>(context);
+    fake->open_called = true;
+    return fake->socket_success ? fake->socket_value : -1;
+}
+
+static int enable_broadcast(void *context, int socket_id)
+{
+    (void)socket_id;
+    auto *fake = static_cast<FakeTransport *>(context);
+    ++fake->broadcast_calls;
+    return fake->broadcast_success ? 0 : -1;
+}
+
+static int send_datagram(void *context, int socket_id, std::uint32_t address, std::uint16_t port,
+                         const std::uint8_t *packet, std::size_t packet_bytes)
+{
+    (void)socket_id;
+    auto *fake = static_cast<FakeTransport *>(context);
+    const std::size_t index = fake->sent.size();
+    if (index >= fake->fail_from)
+        return -1;
+    if (index >= fake->short_from)
+        return MOONLIGHT_WOL_PACKET_BYTES - 1;
+    if (packet == nullptr || packet_bytes != MOONLIGHT_WOL_PACKET_BYTES)
+        return -1;
+    SentDatagram sent;
+    sent.address = address;
+    sent.port = port;
+    std::memcpy(sent.packet, packet, packet_bytes);
+    fake->sent.push_back(sent);
+    return static_cast<int>(packet_bytes);
+}
+
+static int close_udp_socket(void *context, int socket_id)
+{
+    (void)socket_id;
+    auto *fake = static_cast<FakeTransport *>(context);
+    ++fake->close_calls;
+    return fake->close_success ? 0 : -1;
+}
+
+static moonlight_wol_send_operations operations()
+{
+    return {resolve_ipv4,    enumerate_interface_broadcasts,
+            open_udp_socket, enable_broadcast,
+            send_datagram,   close_udp_socket};
+}
+} // namespace wol_test
+
+TEST(WakeOnLan, SendsLiteralTargetWithBroadcastAndExactPacket)
+{
+    wol_test::FakeTransport fake;
+    fake.interfaces[0] = 0xCB00711EU;
+    fake.interfaces[1] = 0xCB00711EU;
+    fake.interface_count = 2U;
+    const std::uint8_t mac[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    std::uint8_t expected_packet[MOONLIGHT_WOL_PACKET_BYTES] = {};
+    ASSERT_EQ(moonlight_wol_build_packet(mac, expected_packet), 1);
+
+    const auto ops = wol_test::operations();
+    moonlight_wol_send_result result{};
+    ASSERT_EQ(moonlight_wol_send_with_operations(mac, "192.0.2.10", MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                                 &ops, &fake, &result),
+              1);
+    EXPECT_FALSE(fake.resolver_called);
+    EXPECT_TRUE(fake.enumerate_called);
+    EXPECT_EQ(fake.broadcast_calls, 1);
+    EXPECT_EQ(fake.close_calls, 1);
+    ASSERT_EQ(result.attempted_datagrams, 21U);
+    EXPECT_EQ(result.successful_datagrams, 21U);
+    EXPECT_EQ(result.failed_datagrams, 0U);
+    EXPECT_EQ(result.dns_failed, 0);
+    EXPECT_EQ(result.interface_enumeration_failed, 0);
+    EXPECT_EQ(result.socket_failed, 0);
+    EXPECT_EQ(result.broadcast_option_failed, 0);
+    EXPECT_EQ(result.close_failed, 0);
+    EXPECT_EQ(result.error, MOONLIGHT_WOL_SEND_ERROR_NONE);
+    ASSERT_EQ(fake.sent.size(), 21U);
+
+    const std::uint32_t expected_addresses[] = {0xFFFFFFFFU, 0xC000020AU, 0xCB00711EU};
+    const std::uint16_t expected_ports[] = {9U, 47009U, 47998U, 47999U, 48000U, 48002U, 48010U};
+    for (std::size_t address_index = 0; address_index < 3U; ++address_index)
+    {
+        for (std::size_t port_index = 0; port_index < 7U; ++port_index)
+        {
+            const std::size_t index = address_index * 7U + port_index;
+            EXPECT_EQ(fake.sent[index].address, expected_addresses[address_index]);
+            EXPECT_EQ(fake.sent[index].port, expected_ports[port_index]);
+            EXPECT_EQ(
+                std::memcmp(fake.sent[index].packet, expected_packet, MOONLIGHT_WOL_PACKET_BYTES),
+                0);
+        }
+    }
+}
+
+TEST(WakeOnLan, SendsHostnameTargetViaResolver)
+{
+    wol_test::FakeTransport fake;
+    fake.resolved[0] = 0xC6336414U;
+    fake.resolved_count = 1U;
+    const std::uint8_t mac[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const auto ops = wol_test::operations();
+    moonlight_wol_send_result result{};
+    ASSERT_EQ(moonlight_wol_send_with_operations(
+                  mac, "media.example", MOONLIGHT_WOL_DEFAULT_HTTP_PORT, &ops, &fake, &result),
+              1);
+    EXPECT_TRUE(fake.resolver_called);
+    EXPECT_EQ(fake.requested_host, "media.example");
+    EXPECT_EQ(result.attempted_datagrams, 14U);
+    EXPECT_EQ(result.successful_datagrams, 14U);
+    EXPECT_EQ(result.error, MOONLIGHT_WOL_SEND_ERROR_NONE);
+    EXPECT_EQ(fake.close_calls, 1);
+}
+
+TEST(WakeOnLan, DnsFailureStillSendsLimitedBroadcast)
+{
+    wol_test::FakeTransport fake;
+    fake.resolve_success = false;
+    const std::uint8_t mac[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const auto ops = wol_test::operations();
+    moonlight_wol_send_result result{};
+    ASSERT_EQ(moonlight_wol_send_with_operations(mac, "unresolvable.example",
+                                                 MOONLIGHT_WOL_DEFAULT_HTTP_PORT, &ops, &fake,
+                                                 &result),
+              1);
+    EXPECT_EQ(result.attempted_datagrams, 7U);
+    EXPECT_EQ(result.successful_datagrams, 7U);
+    EXPECT_EQ(result.dns_failed, 1);
+    EXPECT_EQ(result.error, MOONLIGHT_WOL_SEND_ERROR_PARTIAL);
+    EXPECT_EQ(fake.close_calls, 1);
+    ASSERT_EQ(fake.sent.size(), 7U);
+    const std::uint16_t expected_ports[] = {9U, 47009U, 47998U, 47999U, 48000U, 48002U, 48010U};
+    for (std::size_t index = 0; index < fake.sent.size(); ++index)
+    {
+        EXPECT_EQ(fake.sent[index].address, 0xFFFFFFFFU);
+        EXPECT_EQ(fake.sent[index].port, expected_ports[index]);
+    }
+}
+
+TEST(WakeOnLan, SenderSocketFailureClosesNothing)
+{
+    wol_test::FakeTransport fake;
+    fake.socket_success = false;
+    const std::uint8_t mac[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const auto ops = wol_test::operations();
+    moonlight_wol_send_result result{};
+    EXPECT_EQ(moonlight_wol_send_with_operations(mac, nullptr, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                                 &ops, &fake, &result),
+              0);
+    EXPECT_TRUE(fake.open_called);
+    EXPECT_EQ(fake.close_calls, 0);
+    EXPECT_TRUE(fake.sent.empty());
+    EXPECT_EQ(result.attempted_datagrams, 0U);
+    EXPECT_EQ(result.socket_failed, 1);
+    EXPECT_EQ(result.error, MOONLIGHT_WOL_SEND_ERROR_SOCKET);
+}
+
+TEST(WakeOnLan, SenderBroadcastOptionFailureClosesSocket)
+{
+    wol_test::FakeTransport fake;
+    fake.broadcast_success = false;
+    const std::uint8_t mac[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const auto ops = wol_test::operations();
+    moonlight_wol_send_result result{};
+    EXPECT_EQ(moonlight_wol_send_with_operations(mac, nullptr, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                                 &ops, &fake, &result),
+              0);
+    EXPECT_EQ(fake.close_calls, 1);
+    EXPECT_TRUE(fake.sent.empty());
+    EXPECT_EQ(result.attempted_datagrams, 0U);
+    EXPECT_EQ(result.broadcast_option_failed, 1);
+    EXPECT_EQ(result.error, MOONLIGHT_WOL_SEND_ERROR_BROADCAST_OPTION);
+}
+
+TEST(WakeOnLan, SenderPartialSuccessKeepsDiagnostics)
+{
+    wol_test::FakeTransport fake;
+    fake.fail_from = 5U;
+    const std::uint8_t mac[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const auto ops = wol_test::operations();
+    moonlight_wol_send_result result{};
+    EXPECT_EQ(moonlight_wol_send_with_operations(mac, nullptr, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                                 &ops, &fake, &result),
+              1);
+    EXPECT_EQ(result.attempted_datagrams, 7U);
+    EXPECT_EQ(result.successful_datagrams, 5U);
+    EXPECT_EQ(result.failed_datagrams, 2U);
+    EXPECT_EQ(result.error, MOONLIGHT_WOL_SEND_ERROR_PARTIAL);
+    EXPECT_EQ(fake.close_calls, 1);
+}
+
+TEST(WakeOnLan, SenderAllSendFailureIsFailure)
+{
+    wol_test::FakeTransport fake;
+    fake.fail_from = 0U;
+    const std::uint8_t mac[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const auto ops = wol_test::operations();
+    moonlight_wol_send_result result{};
+    EXPECT_EQ(moonlight_wol_send_with_operations(mac, nullptr, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                                 &ops, &fake, &result),
+              0);
+    EXPECT_EQ(result.attempted_datagrams, 7U);
+    EXPECT_EQ(result.successful_datagrams, 0U);
+    EXPECT_EQ(result.failed_datagrams, 7U);
+    EXPECT_EQ(result.error, MOONLIGHT_WOL_SEND_ERROR_ALL_DATAGRAMS_FAILED);
+    EXPECT_EQ(fake.close_calls, 1);
+}
+
+TEST(WakeOnLan, SenderShortSendIsNotSuccess)
+{
+    wol_test::FakeTransport fake;
+    fake.short_from = 0U;
+    const std::uint8_t mac[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const auto ops = wol_test::operations();
+    moonlight_wol_send_result result{};
+    EXPECT_EQ(moonlight_wol_send_with_operations(mac, nullptr, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                                 &ops, &fake, &result),
+              0);
+    EXPECT_EQ(result.attempted_datagrams, 7U);
+    EXPECT_EQ(result.successful_datagrams, 0U);
+    EXPECT_EQ(result.failed_datagrams, 7U);
+    EXPECT_EQ(result.error, MOONLIGHT_WOL_SEND_ERROR_ALL_DATAGRAMS_FAILED);
+    EXPECT_EQ(fake.close_calls, 1);
+}
+
+TEST(WakeOnLan, SenderRejectsInvalidMacBeforeSocket)
+{
+    wol_test::FakeTransport fake;
+    const std::uint8_t invalid[] = {0x01, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const auto ops = wol_test::operations();
+    moonlight_wol_send_result result{};
+    EXPECT_EQ(moonlight_wol_send_with_operations(invalid, nullptr, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                                 &ops, &fake, &result),
+              0);
+    EXPECT_FALSE(fake.open_called);
+    EXPECT_EQ(fake.close_calls, 0);
+    EXPECT_EQ(result.attempted_datagrams, 0U);
+    EXPECT_EQ(result.error, MOONLIGHT_WOL_SEND_ERROR_INVALID_MAC);
+}
+
+TEST(WakeOnLan, SenderCloseFailureIsPartialDiagnostic)
+{
+    wol_test::FakeTransport fake;
+    fake.close_success = false;
+    const std::uint8_t mac[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const auto ops = wol_test::operations();
+    moonlight_wol_send_result result{};
+    EXPECT_EQ(moonlight_wol_send_with_operations(mac, nullptr, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                                 &ops, &fake, &result),
+              1);
+    EXPECT_EQ(result.successful_datagrams, 7U);
+    EXPECT_EQ(result.close_failed, 1);
+    EXPECT_EQ(result.error, MOONLIGHT_WOL_SEND_ERROR_PARTIAL);
+    EXPECT_EQ(fake.close_calls, 1);
+}
+
+TEST(WakeOnLan, SenderInterfaceFailureKeepsBroadcast)
+{
+    wol_test::FakeTransport fake;
+    fake.enumerate_success = false;
+    const std::uint8_t mac[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const auto ops = wol_test::operations();
+    moonlight_wol_send_result result{};
+    EXPECT_EQ(moonlight_wol_send_with_operations(mac, nullptr, MOONLIGHT_WOL_DEFAULT_HTTP_PORT,
+                                                 &ops, &fake, &result),
+              1);
+    EXPECT_EQ(result.attempted_datagrams, 7U);
+    EXPECT_EQ(result.successful_datagrams, 7U);
+    EXPECT_EQ(result.interface_enumeration_failed, 1);
+    EXPECT_EQ(result.error, MOONLIGHT_WOL_SEND_ERROR_PARTIAL);
 }

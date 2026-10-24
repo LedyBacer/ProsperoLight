@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Вийти з трансляції",
   "left": "…",
   "the PC": "Комп’ютери",
-  "this PC": "Комп’ютери"
+  "this PC": "Комп’ютери",
+  "Wake PC": "Розбудити ПК",
+  "Wake packet sent": "Пакет пробудження надіслано",
+  "Wake packet was not sent": "Пакет пробудження не надіслано"
 }

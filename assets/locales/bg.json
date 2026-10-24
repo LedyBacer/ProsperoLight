@@ -316,5 +316,8 @@
   "ends the stream and returns here": "Напускане на потока",
   "left": "…",
   "the PC": "Компютри",
-  "this PC": "Компютри"
+  "this PC": "Компютри",
+  "Wake PC": "Събуждане на компютъра",
+  "Wake packet sent": "Пакетът за събуждане е изпратен",
+  "Wake packet was not sent": "Пакетът за събуждане не е изпратен"
 }
