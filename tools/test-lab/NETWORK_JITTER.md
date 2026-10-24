@@ -113,11 +113,44 @@ actual UDP traffic, and is only effective on a verified routed path.
   renegotiate encoder bitrate. Nonary's active UDP capacity probe requires
   explicit compatible host protocol support, a hardware validated traffic
   budget, and matching test evidence before it can be brought over safely.
+- A separate **opt-in pre-stream probe** now implements the authenticated
+  Nonary/Vibeshine `pyrowave-udp-probe` wire contract at one explicitly chosen
+  bitrate. It runs only when explicitly requested on an idle host, caps the
+  trial at 100 Mbps for two seconds, pins the paired HTTPS server certificate,
+  authenticates the client certificate and UDP token/source/port, and verifies
+  the host's independent sent count and duration. It uses 100 ms burst-loss
+  windows, sequence-aware loss and arrival p99/drift. The Python receiver's
+  timestamps are **user-space**, so the probe is a *diagnostic rate trial*,
+  not the precise kernel-timestamp bandwidth calibration in Nonary. Normal
+  Moonlight connections never send this probe: 404/405/501 from Sunshine or
+  another host is `UNSUPPORTED`, not a streaming failure. No bitrate setting
+  is changed from its result.
 - `av_startup_observation.offset_us` is the PS5 audio-output **call start**
   relative to first video-presentation **observation**. It helps identify
   gross startup regressions, but is **not measured lip sync**, since it lacks
   a shared source media PTS and physical audio/display output timestamps.
   Check synchronization with an external A/V flash/clap recording.
+
+Optional rate trial **before starting the stream**, using an already-paired
+client identity configured on the Linux Test Lab coordinator (do not upload,
+copy into git or share private keys):
+
+```sh
+PYTHONPATH=tools/test-lab/src python3 -m pltest.active_link_probe \
+  --host https://192.0.2.15:47984 \
+  --host-cert /secure/paired-host.pem \
+  --client-cert /secure/paired-client.pem --client-key /secure/paired-client.key \
+  --kbps 20000 --packet-size 1200 \
+  --evidence build/link-probe-20mbps.json \
+  --allow-active-traffic-on-idle-host
+```
+
+The `pltest link-probe ...` alias also works. The host HTTPS endpoint must
+implement the optional extension and accept that client identity; the
+coordinator must be able to receive its UDP traffic through the firewall.
+Check no RTSP session is active first. Exit 0 means this one chosen rate passed
+the limited qualification; 1 means it did not, 3 means unsupported/inconclusive.
+Never interpret a failed high-rate trial as a game-stream decoder problem.
 
 ## Test plan for Codex
 

@@ -18,6 +18,9 @@ def main():
     if args and args[0] == 'netem':
         from .netem import main as netem_main
         return netem_main(args[1:])
+    if args and args[0] == 'link-probe':
+        from .active_link_probe import main as probe_main
+        return probe_main(args[1:])
     if args in (['--help'], ['-h']) or (args and (args[0] in {'coordinator', 'status', 'report', 'artifacts', 'compare', 'matrix', 'paired', 'prepare-variant', 'build-variant', 'benchmark-plan', 'sweep', 'export'}
                  or (args[0] in {'run', 'doctor', 'stop'} and '--ps5' not in args))):
         from .coordinator.cli import main as coordinator_cli
