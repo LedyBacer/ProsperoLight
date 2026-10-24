@@ -158,6 +158,13 @@ Never interpret a failed high-rate trial as a game-stream decoder problem.
 
 ## Test plan for Codex
 
+Keep `NATIVE_MAX_QUEUE_MS=0` and omit
+`capture.native_queue_limit_ms` throughout the WAN/Wi-Fi matrix. The native
+overload experiment from PR #67 is a separate test with known heavy decoder
+load; combining its opt-in IDR resynchronization with network impairment would
+confound the attribution of video gaps. The combined build retains both
+policies, with native-overload recovery disabled by default.
+
 1. On PS5 13.60 and (if available) legacy 3.x, do three interleaved **A/B**
    repetitions per condition: PR #70 base commit `a180a56` (A), current branch
    head (B). Confirm the same host encoder and display settings; record build

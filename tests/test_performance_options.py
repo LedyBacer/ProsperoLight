@@ -34,6 +34,7 @@ class PerformanceOptions(unittest.TestCase):
             "DECODER_PIPELINE_DEPTH": (3, 4),
             "DECODER_CPU_PRIORITY": (720, 256),
             "INPUT_POLL_US": (1000, 0),
+            "PROSPEROLIGHT_NATIVE_MAX_QUEUE_MS": (80, 1),
         }
         for name, values in cases.items():
             for index, value in enumerate(values):

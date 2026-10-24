@@ -107,6 +107,18 @@ def av_startup_observation(performance):
     return result
 
 
+def native_overload_metrics(performance):
+    """Keep opt-in native queue resets separate from delivery impairment."""
+    source = performance.get('native_overload')
+    if not isinstance(source, dict) or type(source.get('enabled')) is not bool:
+        return {'available': False}
+    keys = ('queue_limit_us', 'resyncs', 'stops', 'attempts', 'peak_queue_age_us',
+            'last_action_age_us')
+    values = {key: source[key] for key in keys
+              if type(source.get(key)) is int and source[key] >= 0}
+    return {'available': True, 'enabled': source['enabled'], **values}
+
+
 def read_bounded(path):
     path = Path(path)
     if path.is_symlink() or path.stat().st_size > MAX_BYTES:
@@ -222,6 +234,12 @@ def _analyze_run(profile, report, directory):
         result['network_audio_metrics'] = network_audio_metrics(performance)
         result['passive_link_quality'] = passive_link_quality(performance)
         result['av_startup_observation'] = av_startup_observation(performance)
+        result['native_overload'] = native_overload_metrics(performance)
+        if (profile.get('suite') == 'network-jitter' and
+                result['native_overload'].get('enabled')):
+            # Network-only A/B cannot attribute this additional IDR/reset
+            # policy to delivery jitter, even when the stream looks smoother.
+            issues.append('NETWORK_TEST_NATIVE_OVERLOAD_CONFOUNDED')
         from .session_evidence import native_effective_settings
         from .decoder_lifecycle import decoder_lifecycle
         lifecycle = decoder_lifecycle(performance)

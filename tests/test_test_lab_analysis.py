@@ -10,7 +10,7 @@ import uuid
 
 from pltest.analysis import (analyze_run, parse_trace, analyze_pyrowave,
                              network_audio_metrics, passive_link_quality,
-                             av_startup_observation)
+                             av_startup_observation, native_overload_metrics)
 from pltest.comparison import compare_pairs
 from pltest.suites import apply_suite
 from pltest.report import archive_analysis
@@ -78,6 +78,18 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(record['available'])
         self.assertEqual(record['offset_us'], -12000)
         self.assertIn('NOT lip-sync error', record['semantics'])
+
+    def test_native_overload_is_a_separate_explicit_experiment(self):
+        self.assertEqual(native_overload_metrics({}), {'available': False})
+        report = {'native_overload': {'enabled': False, 'queue_limit_us': 0,
+                                      'resyncs': 0, 'peak_queue_age_us': 0}}
+        self.assertFalse(native_overload_metrics(report)['enabled'])
+        report['native_overload'].update(enabled=True, queue_limit_us=80000,
+                                          resyncs=2, stops=1)
+        result = native_overload_metrics(report)
+        self.assertTrue(result['enabled'])
+        self.assertEqual(result['resyncs'], 2)
+        self.assertEqual(result['queue_limit_us'], 80000)
 
     def test_authenticated_counter_rates_keep_clock_bounds_and_capture_unknown(self):
         from pltest.session_evidence import host_transport_rates

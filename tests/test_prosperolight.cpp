@@ -6,16 +6,16 @@
 
 #include "connecting_plate.hpp"
 #include "lan_http_report.hpp"
-#include "native_agc_output.hpp"
-#include "moonlight_stream_input.hpp"
-#include "moonlight_stream_keyboard.hpp"
 #include "moonlight_config.hpp"
 #include "moonlight_discovery.hpp"
 #include "moonlight_health.hpp"
-#include "moonlight_physical_input.hpp"
 #include "moonlight_performance.hpp"
+#include "moonlight_physical_input.hpp"
 #include "moonlight_pipeline.hpp"
+#include "moonlight_stream_input.hpp"
+#include "moonlight_stream_keyboard.hpp"
 #include "moonlight_tuning.hpp"
+#include "native_agc_output.hpp"
 
 #include <gtest/gtest.h>
 
@@ -100,6 +100,57 @@ TEST(Pipeline, DrainStartsOnlyWhenNothingIsQueued)
     EXPECT_FALSE(should_drain(true, 3, 0, 0)); // Nothing held.
     EXPECT_FALSE(should_drain(true, 1, 1, 0)); // Depth one never holds a picture.
     EXPECT_FALSE(should_drain(false, 3, 1, 0));
+}
+
+#include "video_overload.hpp"
+
+TEST(Pipeline, NativeOverloadHasABoundedRecoveryBudget)
+{
+    using namespace moonlight::video;
+    OverloadGuard guard;
+    EXPECT_EQ(guard.observe(1, 200000, true, 14, 0, true), OverloadAction::Continue);
+    EXPECT_EQ(guard.observe(2, 90000, true, 3, 80000, false), OverloadAction::Continue);
+    EXPECT_EQ(guard.observe(3, 90000, false, 3, 80000, true), OverloadAction::Continue);
+    EXPECT_EQ(guard.observe(4, 79000, true, 3, 80000, true), OverloadAction::Continue);
+    EXPECT_EQ(guard.observe(5, 80000, true, 3, 80000, true), OverloadAction::Resync);
+    EXPECT_EQ(guard.observe(6, 1, true, 12, 80000, true), OverloadAction::Continue);
+    EXPECT_EQ(guard.observe(7, 16000, true, 12, 80000, true), OverloadAction::Resync);
+    EXPECT_EQ(guard.observe(8, 80000, true, 3, 80000, true), OverloadAction::Stop);
+    EXPECT_EQ(guard.resyncs, 2u);
+    EXPECT_EQ(guard.stops, 1u);
+}
+
+TEST(Pipeline, NativeOverloadSeparatesFreshNetworkBurstsFromSustainedPressure)
+{
+    using namespace moonlight::video;
+    OverloadGuard guard;
+    // Freshly reassembled WAN frames are not grounds for discarding a valid
+    // reference chain; no pressure budget is consumed merely by queue depth.
+    EXPECT_EQ(guard.observe(1000000, 100, true, 14, 80000, true), OverloadAction::Continue);
+    EXPECT_EQ(guard.observe(1001000, 8000, true, 13, 80000, true), OverloadAction::Continue);
+    EXPECT_EQ(guard.attempts, 0u);
+    // Remaining near-full and aging beyond a small grace is actionable.
+    EXPECT_EQ(guard.observe(1020000, 20000, true, 13, 80000, true), OverloadAction::Resync);
+    EXPECT_EQ(guard.resyncs, 1u);
+    // The production/default gate remains a strict no-op even at the limit.
+    EXPECT_EQ(guard.observe(1021000, 200000, true, 14, 0, true), OverloadAction::Continue);
+}
+
+TEST(Pipeline, NativeOverloadRearmsOnlyAfterObservedHealthyDelivery)
+{
+    using namespace moonlight::video;
+    OverloadGuard guard;
+    EXPECT_EQ(guard.observe(100, 80000, true, 3, 80000, true), OverloadAction::Resync);
+    // An idle gap, a backwards clock or unknown timestamps cannot rearm it.
+    guard.observe(40000000, 0, true, 0, 80000, true);
+    EXPECT_EQ(guard.attempts, 1u);
+    guard.observe(2, 0, true, 0, 80000, true);
+    guard.observe(40000001, 0, false, 0, 80000, true);
+    EXPECT_EQ(guard.attempts, 1u);
+    for (uint64_t now = 41000000; now <= 72000000; now += 500000)
+        EXPECT_EQ(guard.observe(now, 1000, true, 0, 80000, true), OverloadAction::Continue);
+    EXPECT_EQ(guard.attempts, 0u);
+    EXPECT_EQ(guard.observe(72000001, 80000, true, 3, 80000, true), OverloadAction::Resync);
 }
 
 TEST(Pipeline, CatchUpNeedsASustainedBacklog)
