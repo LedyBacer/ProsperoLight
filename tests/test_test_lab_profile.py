@@ -38,6 +38,14 @@ int main() {
         assert(!parse_profile(queue,"run-1",profile,error));
     }
     assert(parse_profile(base,"run-1",profile,error) && !profile.native_queue_limit_ms);
+    std::string phase=base; phase.insert(1,"\"capture\":{\"experimental_phase_clock\":true},");
+    assert(parse_profile(phase,"run-1",profile,error) && profile.experimental_phase_clock);
+    auto phase_wrong=phase; phase_wrong.replace(phase_wrong.find("\"pacing\":\"paced\""),
+        strlen("\"pacing\":\"paced\""), "\"pacing\":\"vrr\"");
+    assert(!parse_profile(phase_wrong,"run-1",profile,error));
+    phase_wrong=phase; phase_wrong.replace(phase_wrong.find("\"codec\":\"hevc\""),
+        strlen("\"codec\":\"hevc\""), "\"codec\":\"pyrowave\"");
+    assert(!parse_profile(phase_wrong,"run-1",profile,error));
     std::string probe=base; probe.insert(1,"\"capture\":{\"decoder_capacity_probe\":true},");
     assert(parse_profile(probe,"run-1",profile,error) && profile.decoder_capacity_probe);
     auto early=probe;early.insert(early.find("decoder_capacity_probe")-1,"\"decoder_capacity_probe_first\":true,");

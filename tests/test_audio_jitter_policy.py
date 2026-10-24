@@ -21,29 +21,31 @@ int main() {
     assert(policy.target_frames() == 960);  // isolated failure
     policy.on_underrun(1500000);
     assert(policy.target_frames() == 1440);
-    policy.on_underrun(2000000);
-    policy.on_underrun(2500000);
-    policy.on_underrun(3000000);
-    assert(policy.target_frames() == 2400); // no unbounded latency
-    policy.on_underrun(3500000);
-    assert(policy.target_frames() == 2400);
-    assert(policy.peak_frames() == 2400 && policy.increases() == 3);
+    for (unsigned i = 0; i < 8; ++i)
+        policy.on_underrun(2000000 + i * 500000);
+    assert(policy.target_frames() == 3840); // bounded at 80 ms
+    assert(policy.peak_frames() == 3840 && policy.increases() == 6);
     policy.on_output(46000000);
-    assert(policy.target_frames() == 2400); // 45 s quiet not reached
-    policy.on_output(48500000);
-    assert(policy.target_frames() == 1920);
-    policy.on_output(49000000);
-    assert(policy.target_frames() == 1920);
-    policy.on_output(78500000);
-    assert(policy.target_frames() == 1440);
-    policy.on_output(108500000);
-    assert(policy.target_frames() == 960);
+    assert(policy.target_frames() == 3840); // 45 s quiet not reached
+    policy.on_output(51000000);
+    assert(policy.target_frames() == 3360);
+    policy.on_output(52000000);
+    assert(policy.target_frames() == 3360);
+    policy.on_underrun(53000000); // failed 5 s shrink probe restores proven depth
+    assert(policy.target_frames() == 3840);
+    assert(policy.failed_shrinks() == 1);
+    policy.on_output(100000000); // backoff; do not immediately probe again
+    assert(policy.target_frames() == 3840);
+    policy.on_output(114000000);
+    assert(policy.target_frames() == 3360);
+    policy.on_output(144000000);
+    assert(policy.target_frames() == 2880);
     assert(policy.decreases() == 3);
-    policy.on_underrun(120000000);
-    assert(policy.target_frames() == 960); // old failure doesn't count
-    policy.on_underrun(121000000);
-    assert(policy.target_frames() == 1440);
-    assert(policy.underrun_events() == 8);
+    policy.on_underrun(175000000);
+    assert(policy.target_frames() == 2880); // old failure doesn't count
+    policy.on_underrun(176000000);
+    assert(policy.target_frames() == 3360);
+    assert(policy.underrun_events() == 13);
 }
 '''
         with tempfile.TemporaryDirectory() as folder:

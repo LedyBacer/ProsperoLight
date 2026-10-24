@@ -36,6 +36,10 @@ def network_audio_metrics(performance):
             'audio_output_errors', 'audio_prebuffer_target_frames',
             'audio_prebuffer_peak_frames', 'audio_prebuffer_increases',
             'audio_prebuffer_decreases', 'audio_first_output_call_us',
+            'audio_pcm_hard_cap_frames', 'audio_first_pcm_output_us',
+            'audio_silence_grains', 'audio_short_grains', 'audio_crossfades',
+            'audio_drift_shed_frames', 'audio_ring_ewma_frames',
+            'audio_near_miss_events', 'audio_failed_shrink_probes',
             'audio_last_output_call_us', 'audio_first_packet_call_us',
             'video_first_present_observed_us', 'rtp_audio_packets',
             'rtp_audio_fec_recovered', 'rtp_audio_fec_failed',
@@ -97,11 +101,16 @@ def passive_link_quality(performance):
 
 def av_startup_observation(performance):
     """Relative local callback timing only, not decoded source A/V sync."""
-    audio = performance.get('audio_first_output_call_us')
+    # A zero-filled hardware grain does not mean the source's first PCM played.
+    audio = performance.get('audio_first_pcm_output_us')
+    clock_point = 'first_real_pcm_output' if type(audio) is int and audio > 0 else 'first_audioout_call'
+    if clock_point == 'first_audioout_call':
+        audio = performance.get('audio_first_output_call_us')
     video = performance.get('video_first_present_observed_us')
-    result = {'available': False, 'semantics': 'PS5 audio-output call start minus '
+    result = {'available': False, 'semantics': 'PS5 first PCM AudioOut call (legacy: first output call) minus '
               'video first-presentation observation; different physical output delays, '
-              'unknown source timestamp alignment; NOT lip-sync error'}
+              'unknown source timestamp alignment; NOT lip-sync error',
+              'audio_clock_point': clock_point}
     if (type(audio) is int and type(video) is int and audio > 0 and video > 0):
         return dict(result, available=True, offset_us=audio-video)
     return result
@@ -117,6 +126,65 @@ def native_overload_metrics(performance):
     values = {key: source[key] for key in keys
               if type(source.get(key)) is int and source[key] >= 0}
     return {'available': True, 'enabled': source['enabled'], **values}
+
+
+def phase_clock_metrics(performance):
+    """Experimental network/source phase clock; not an A/V clock or scanout."""
+    source = performance.get('video_phase_clock')
+    if not isinstance(source, dict) or type(source.get('enabled')) is not bool:
+        return {'available': False}
+    keys = ('samples', 'reanchors', 'late', 'mad_us', 'tail_us',
+            'cushion_us', 'hold_us')
+    values = {key: source[key] for key in keys
+              if type(source.get(key)) is int and source[key] >= 0}
+    for key in ('skew_us', 'min_slack_us'):
+        if type(source.get(key)) is int:
+            values[key] = source[key]
+    return {'available': True, 'enabled': source['enabled'],
+            'semantics': 'source-PTS to network-enqueue phase only; not HDMI or audio sync',
+            **values}
+
+
+def cadence_lane_metrics(rows, source_fps):
+    """Adjacent frame interval *variation* within each independent clock domain.
+
+    We never subtract clocks across callback/network/PS5 epochs, and never
+    label an interval error input latency or glass-to-glass latency.
+    """
+    if type(source_fps) is not int or source_fps <= 0:
+        return {'available': False}
+    nominal = 1000000.0 / source_fps
+    lanes = {'source_pts': 'pts_us', 'network_enqueue': 'enqueue_us',
+             'decoder_ready': 'ready_us', 'present_submit': 'submit_us'}
+    samples = {key: [] for key in lanes}
+    previous = None
+    for row in rows:
+        if row.get('outcome') != 1:
+            previous = None
+            continue
+        if previous and row.get('frame') == previous.get('frame', -2) + 1:
+            source_delta = row.get('pts_us', 0) - previous.get('pts_us', 0)
+            if nominal * 0.5 <= source_delta <= nominal * 1.5:
+                for key, field in lanes.items():
+                    current_stamp, previous_stamp = row.get(field, 0), previous.get(field, 0)
+                    if current_stamp > 0 and previous_stamp > 0 and current_stamp >= previous_stamp:
+                        samples[key].append(abs((current_stamp - previous_stamp) - nominal))
+        previous = row
+    metrics = {}
+    for key, values in samples.items():
+        if values:
+            ordered = sorted(values)
+            metrics[key] = {
+                'samples': len(values),
+                'mean_abs_interval_error_us': round(sum(values) / len(values)),
+                'p95_abs_interval_error_us': round(ordered[math.ceil(len(ordered) * .95) - 1]),
+                'max_abs_interval_error_us': round(ordered[-1]),
+            }
+        else:
+            metrics[key] = {'samples': 0}
+    return {'available': any(samples.values()), 'nominal_interval_us': round(nominal),
+            'semantics': 'within-clock adjacent frame interval error, not cross-clock latency',
+            'lanes': metrics}
 
 
 def read_bounded(path):
@@ -235,6 +303,11 @@ def _analyze_run(profile, report, directory):
         result['passive_link_quality'] = passive_link_quality(performance)
         result['av_startup_observation'] = av_startup_observation(performance)
         result['native_overload'] = native_overload_metrics(performance)
+        result['video_phase_clock'] = phase_clock_metrics(performance)
+        if profile.get('capture', {}).get('experimental_phase_clock') and not (
+                result['video_phase_clock'].get('available') and
+                result['video_phase_clock'].get('enabled')):
+            issues.append('EXPERIMENTAL_PHASE_CLOCK_NOT_ACTIVE')
         if (profile.get('suite') == 'network-jitter' and
                 result['native_overload'].get('enabled')):
             # Network-only A/B cannot attribute this additional IDR/reset
@@ -286,6 +359,7 @@ def _analyze_run(profile, report, directory):
             issues.append('EFFECTIVE_FIELD_MISMATCH:output_pacing')
         data = read_bounded(artifact_dir / name)
         rows, omitted = parse_trace(data)
+        result['cadence_lanes'] = cadence_lane_metrics(rows, profile['client']['fps'])
         if omitted: issues.append('TRACE_TRUNCATED')
         if not performance.get('performance_detail'): issues.append('DETAILED_TIMING_DISABLED')
         faults = performance.get('decode_errors', 0) + performance.get('drain_faults', 0)

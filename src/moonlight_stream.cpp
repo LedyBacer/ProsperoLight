@@ -34,7 +34,9 @@
 #include "stream_profile.hpp"
 #include "frame_cadence.hpp"
 #include "frame_pacing.hpp"
+#include "frame_phase_clock.hpp"
 #include "audio_jitter_policy.hpp"
+#include "audio_pcm_policy.hpp"
 #include "presentation_preferences.hpp"
 #include "app_storage.hpp"
 #include "host_quit_preferences.hpp"
@@ -89,7 +91,8 @@
 #define AUDIO_STEREO_CHANNELS 2u
 #define AUDIO_51_CHANNELS 6u
 #define AUDIO_MAX_CHANNELS 8u
-#define AUDIO_RING_FRAMES (AUDIO_GRAIN_FRAMES * 6u)
+#define AUDIO_RING_FRAMES 8640u // 180 ms hard cap; adaptive target remains <= 80 ms.
+#define AUDIO_CROSSFADE_FRAMES 96u // 2 ms at 48 kHz.
 static_assert(moonlight::AudioPrebufferPolicy::kMinimumFrames == AUDIO_PREBUFFER_FRAMES &&
                   moonlight::AudioPrebufferPolicy::kMaximumFrames < AUDIO_RING_FRAMES,
               "audio recovery must fit the bounded PCM ring");
@@ -497,8 +500,14 @@ typedef struct ps5_audio_state
     uint32_t underruns;
     uint64_t startup_prebuffer_wait_us, underrun_wait_total_us, underrun_wait_max_us;
     uint64_t first_output_call_us, last_output_call_us;
+    uint64_t first_pcm_output_us, last_pcm_enqueue_us;
+    uint32_t silence_grains, short_grains, crossfades;
+    uint64_t drift_shed_frames;
     uint64_t ring_frame_sum, ring_observations;
     moonlight::AudioPrebufferPolicy prebuffer_policy;
+    moonlight::AudioRingDriftPolicy drift_policy;
+    int16_t last_output_sample[AUDIO_MAX_CHANNELS];
+    bool crossfade_pending;
     pthread_mutex_t ring_lock;
     pthread_cond_t ring_wake;
     pthread_t output_thread;
@@ -722,6 +731,8 @@ typedef struct native_renderer_state
     moonlight::ArrivalRate arrival;
     moonlight::VideoArrivalJitter network_jitter;
     std::atomic<uint32_t> network_jitter_budget_us{0};
+    moonlight::CadencePhaseClock phase_clock;
+    bool phase_clock_enabled{};
     moonlight::RateWindow decoded_rate;
     moonlight::WindowedTiming decode_window, queue_window;
     moonlight::CatchUpGuard catchup;
@@ -1302,6 +1313,32 @@ static void save_performance_summary(const native_renderer_state_t &state,
              (unsigned long long)network.buffer_failures,
              (unsigned long long)network.last_buffer_requested,
              (unsigned long long)network.last_buffer_actual);
+    ok = ok &&
+         report_append(report, sizeof(report), &length,
+                       "\"audio_pcm_hard_cap_frames\":%u,\"audio_first_pcm_output_us\":%llu,"
+                       "\"audio_silence_grains\":%u,\"audio_short_grains\":%u,"
+                       "\"audio_crossfades\":%u,\"audio_drift_shed_frames\":%llu,"
+                       "\"audio_ring_ewma_frames\":%u,\"audio_near_miss_events\":%u,"
+                       "\"audio_failed_shrink_probes\":%u,\n",
+                       AUDIO_RING_FRAMES, (unsigned long long)audio_state.first_pcm_output_us,
+                       audio_state.silence_grains, audio_state.short_grains,
+                       audio_state.crossfades, (unsigned long long)audio_state.drift_shed_frames,
+                       audio_state.drift_policy.mean_frames(),
+                       audio_state.prebuffer_policy.near_miss_events(),
+                       audio_state.prebuffer_policy.failed_shrinks());
+    const auto &phase = state.phase_clock.stats;
+    ok = ok && report_append(
+                   report, sizeof(report), &length,
+                   "\"video_phase_clock\":{\"enabled\":%s,\"samples\":%llu,"
+                   "\"reanchors\":%llu,\"late\":%llu,\"min_slack_us\":%d,"
+                   "\"mad_us\":%u,\"tail_us\":%u,\"cushion_us\":%u,"
+                   "\"hold_us\":%u,\"skew_us\":%d},\n",
+                   state.phase_clock_enabled ? "true" : "false",
+                   (unsigned long long)phase.samples,
+                   (unsigned long long)phase.reanchors,
+                   (unsigned long long)phase.late,
+                   phase.samples ? phase.min_slack_us : 0, phase.mad_us, phase.tail_us,
+                   phase.cushion_us, phase.hold_us, phase.skew_us);
     if (!ok)
         return;
     const struct
@@ -3261,9 +3298,20 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
     const bool successor_queued = state->mailbox.full;
     pthread_mutex_unlock(&state->lock);
     const uint64_t queue_age_us = started > item.ready_us ? started - item.ready_us : 0;
-    stream_pacer.set_network_jitter_budget_us(
-        state->network_jitter_budget_us.load(std::memory_order_relaxed));
-    const uint64_t deadline =
+    const uint32_t network_budget =
+        state->network_jitter_budget_us.load(std::memory_order_relaxed);
+    stream_pacer.set_network_jitter_budget_us(network_budget);
+    // Developer-only A/B: the phase estimator samples the NETWORK timestamp
+    // and source PTS, not decode/GPU readiness. It cannot add a second reserve
+    // on top of FramePacing or affect VRR's separate source timeline.
+    const uint32_t phase_hold =
+        state->phase_clock_enabled && fixed && !native_agc_vrr_active()
+            ? state->phase_clock.observe(static_cast<uint32_t>(item.frame), item.pts_us,
+                                         item.enqueue_us,
+                                         UINT32_C(1000000) / std::max(1u, state->stream_fps),
+                                         network_budget)
+            : 0;
+    uint64_t deadline =
         native_agc_vrr_active()
             ? vrr.picture_target(started, successor_queued, queue_age_us)
             : stream_pacer.target(
@@ -3271,6 +3319,8 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
                   fixed ? state->last_present_us : 0, fixed ? 0 : refresh,
                   std::max<uint64_t>(250, state->present_call_timing.percentile(99) +
                                               stream_pacer.wake_lead_us()));
+    if (phase_hold)
+        deadline = std::max(deadline, started + phase_hold);
     decisions.record(item.frame, item.pts_us, started, deadline, "target");
     uint64_t now = started;
     while (now < deadline)
@@ -3795,9 +3845,12 @@ static void moonlight_renderer_cleanup(void)
 
 static void audio_ring_drop(ps5_audio_state_t *state, uint32_t frames)
 {
+    if (!frames)
+        return;
     state->ring_head = (state->ring_head + frames) % AUDIO_RING_FRAMES;
     state->ring_count -= frames;
     state->dropped_frames += frames;
+    state->crossfade_pending = true;
 }
 
 static void audio_ring_push(ps5_audio_state_t *state, const int16_t *pcm, uint32_t frames)
@@ -3815,6 +3868,7 @@ static void audio_ring_push(ps5_audio_state_t *state, const int16_t *pcm, uint32
         state->ring_count = 0;
         frames = AUDIO_RING_FRAMES;
         ++state->overruns;
+        state->crossfade_pending = true;
     }
     else if (state->ring_count + frames > AUDIO_RING_FRAMES)
     {
@@ -3853,50 +3907,97 @@ static void audio_ring_pop(ps5_audio_state_t *state, int16_t *pcm, uint32_t fram
     ++state->ring_observations;
 }
 
-// sceAudioOutOutput() can block for an entire hardware grain. It must never
-// block moonlight-common-c's Opus callback (and, indirectly, its packet queue).
-// The ring is bounded; a late burst evicts old PCM instead of growing latency.
+// AudioOut's independent hardware clock must keep moving even when the network
+// runs dry. Never block this worker waiting for a full ring after startup: output
+// one silent/partially concealed grain, re-prime, then fade the resumed PCM in.
+// The Opus callback never calls a blocking AudioOut API or runs any pacing.
 static void *ps5_audio_output_worker(void *)
 {
     auto *state = &audio_state;
     bool prebuffering = true;
+    uint64_t recovery_started_us = monotonic_us();
     int16_t output[AUDIO_GRAIN_FRAMES * AUDIO_MAX_CHANNELS];
     for (;;)
     {
         pthread_mutex_lock(&state->ring_lock);
-        if (!prebuffering && state->ring_count < AUDIO_GRAIN_FRAMES)
-        {
-            ++state->underruns;
-            state->prebuffer_policy.on_underrun(monotonic_us());
-            prebuffering = true;
-        }
-        const uint32_t required =
-            prebuffering ? state->prebuffer_policy.target_frames() : AUDIO_GRAIN_FRAMES;
-        uint64_t wait_started_us = 0;
-        while (!state->stop_output && state->ring_count < required)
-        {
-            if (!wait_started_us)
-                wait_started_us = monotonic_us();
-            pthread_cond_wait(&state->ring_wake, &state->ring_lock);
-        }
-        if (wait_started_us && !state->stop_output)
-        {
-            const uint64_t wait_us = monotonic_us() - wait_started_us;
-            if (!state->output_calls)
-                state->startup_prebuffer_wait_us += wait_us;
-            else
-            {
-                state->underrun_wait_total_us += wait_us;
-                state->underrun_wait_max_us = std::max(state->underrun_wait_max_us, wait_us);
-            }
-        }
         if (state->stop_output)
         {
             pthread_mutex_unlock(&state->ring_lock);
             break;
         }
-        audio_ring_pop(state, output, AUDIO_GRAIN_FRAMES);
-        prebuffering = false;
+        const uint64_t now_us = monotonic_us();
+        if (!prebuffering)
+        {
+            const uint32_t shed = state->drift_policy.observe(
+                now_us, state->ring_count, state->prebuffer_policy.target_frames());
+            if (shed && state->ring_count >= shed + AUDIO_GRAIN_FRAMES)
+            {
+                audio_ring_drop(state, shed);
+                state->drift_shed_frames += shed;
+            }
+        }
+        const auto decision = moonlight::audio_grain_decision(
+            state->ring_count, AUDIO_GRAIN_FRAMES, state->prebuffer_policy.target_frames(),
+            static_cast<uint32_t>(std::max(1, state->samples_per_frame)), prebuffering);
+        if (decision.underrun)
+        {
+            ++state->underruns;
+            state->prebuffer_policy.on_underrun(now_us);
+        }
+        else if (decision.near_miss && state->last_pcm_enqueue_us &&
+                 now_us >= state->last_pcm_enqueue_us &&
+                 now_us - state->last_pcm_enqueue_us >
+                     uint64_t(std::max<unsigned>(AUDIO_GRAIN_FRAMES,
+                                                 std::max(1, state->samples_per_frame) * 2)) *
+                         UINT64_C(1000000) / 48000)
+            state->prebuffer_policy.on_near_miss(now_us);
+        else if (decision.take)
+            state->prebuffer_policy.on_healthy_grain();
+        if (decision.priming && !prebuffering)
+            recovery_started_us = now_us;
+        prebuffering = decision.priming;
+        memset(output, 0, sizeof(output));
+        if (decision.take)
+        {
+            audio_ring_pop(state, output, decision.take);
+            if (decision.silence)
+            {
+                moonlight::audio_fade_to_silence(output, decision.take,
+                                                 state->output_channels, AUDIO_CROSSFADE_FRAMES);
+                ++state->short_grains;
+            }
+            if (state->crossfade_pending)
+            {
+                moonlight::audio_crossfade_from_sample(
+                    output, decision.take, state->output_channels, state->last_output_sample,
+                    AUDIO_CROSSFADE_FRAMES);
+                ++state->crossfades;
+                state->crossfade_pending = false;
+            }
+        }
+        else
+            ++state->silence_grains;
+        if (decision.silence)
+            state->crossfade_pending = true;
+        for (int channel = 0; channel < state->output_channels; ++channel)
+            state->last_output_sample[channel] =
+                output[(AUDIO_GRAIN_FRAMES - 1) * state->output_channels + channel];
+        if (decision.take && !state->first_pcm_output_us)
+            state->first_pcm_output_us = now_us;
+        if (decision.take && recovery_started_us)
+        {
+            const uint64_t wait_us = now_us - recovery_started_us;
+            if (state->first_pcm_output_us == now_us)
+                state->startup_prebuffer_wait_us = wait_us;
+            else
+            {
+                state->underrun_wait_total_us += wait_us;
+                state->underrun_wait_max_us = std::max(state->underrun_wait_max_us, wait_us);
+            }
+            recovery_started_us = 0;
+        }
+        if (decision.priming && !recovery_started_us)
+            recovery_started_us = now_us;
         pthread_mutex_unlock(&state->ring_lock);
 
         const uint64_t started = monotonic_us();
@@ -3916,7 +4017,7 @@ static void *ps5_audio_output_worker(void *)
             ++state->output_errors;
             state->stop_output = true;
         }
-        else
+        else if (decision.take && !decision.underrun)
             state->prebuffer_policy.on_output(finished);
         pthread_mutex_unlock(&state->ring_lock);
         if (result < 0)
@@ -4158,6 +4259,7 @@ static void ps5_audio_sample(char *sample_data, int sample_length)
     }
     pthread_mutex_lock(&audio_state.ring_lock);
     audio_ring_push(&audio_state, audio_state.decoded, (uint32_t)decoded);
+    audio_state.last_pcm_enqueue_us = now;
     if (audio_state.ring_count > audio_state.ring_high_water)
         audio_state.ring_high_water = audio_state.ring_count;
     pthread_cond_signal(&audio_state.ring_wake);
@@ -5563,6 +5665,9 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         prosperolight::test_lab::active_profile().native_queue_limit_ms)
         renderer.overload_limit_us =
             *prosperolight::test_lab::active_profile().native_queue_limit_ms * UINT64_C(1000);
+    if (prosperolight::test_lab::active())
+        renderer.phase_clock_enabled =
+            prosperolight::test_lab::active_profile().experimental_phase_clock;
 #endif
     renderer.stream_policy.allow_reconfiguration = MOONLIGHT_EXPERIMENTAL_DECODER_CONTROLS != 0;
     renderer.lifecycle.wait(0);

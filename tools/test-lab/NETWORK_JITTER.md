@@ -84,7 +84,9 @@ an external RTT measurement and label its measurement source explicitly.
 
 ```sh
 python3 -m unittest tests.test_test_lab_netem tests.test_network_jitter_replay \
-  tests.test_frame_pacing_policy tests.test_ps5_pacing_replay -v
+  tests.test_frame_pacing_policy tests.test_ps5_pacing_replay \
+  tests.test_audio_pcm_policy tests.test_audio_jitter_policy \
+  tests.test_frame_phase_clock tests.test_test_lab_analysis -v
 ```
 
 The deterministic host-only tests use synthetic arrival/decode timelines to
@@ -102,10 +104,18 @@ actual UDP traffic, and is only effective on a verified routed path.
   VRR/FFmpeg buffering implementation. VRR and decoder/GPU timing remain
   independently paced. `video_arrival_p98_us` is **not packet transit jitter**:
   the host encoder and UDP reassembly can affect completed-frame times.
-- The audio output worker starts with 20 ms of PCM prebuffer, increases by
-  10 ms after closely repeated underruns (up to 50 ms), then releases one step
-  after 45 seconds of quiet and subsequent 30-second intervals. The bounded
-  ring remains 64 ms; no unbounded buffering and no callback blocking.
+- The audio output worker **always** feeds 512-frame AudioOut grains on its
+  own hardware clock, including silence during startup/recovery or a short
+  zero-padded/faded grain on an underrun. It does not block the hardware
+  clock while waiting for a full ring. A 2 ms per-channel S16 fade smooths
+  discontinuities after trimming/resume. Silence is still audible loss, not
+  packet recovery. It starts with 20 ms of PCM prebuffer and escalates in
+  10 ms steps after repeated underruns *or* qualified imminent underruns, up
+  to **80 ms**. Successful quiet intervals permit shrink probes; a dropout
+  within five seconds rolls the probe back and exponentially delays another.
+  The 180 ms ring is a **hard ceiling**, not the target or added latency.
+  A slow EWMA only sheds a 5 ms packet of sustained excess after two seconds
+  above target + 15 ms; short packet clumps are preserved as jitter cover.
 - Native `performance-last.json` exports video FEC recovered/failed, out-of-
   sequence packets, arrival p98/sample count/gaps, and audio target/peak/
   adjustments. Test Lab's `passive_link_quality` combines these as *limited*
@@ -129,11 +139,32 @@ actual UDP traffic, and is only effective on a verified routed path.
   the actual PS5 path*. Do not use its result to set PS5 bitrate unless the
   shared route has been independently verified. A future native PS5 receiver
   needs a separate hardware-validated implementation.
-- `av_startup_observation.offset_us` is the PS5 audio-output **call start**
+- `av_startup_observation.offset_us` prefers the PS5 first **real PCM**
+  AudioOut call start (falling back to the first output call on older builds)
   relative to first video-presentation **observation**. It helps identify
   gross startup regressions, but is **not measured lip sync**, since it lacks
   a shared source media PTS and physical audio/display output timestamps.
   Check synchronization with an external A/V flash/clap recording.
+- `cadence_lanes` reports independent p95 interval deviations for source PTS,
+  network enqueue, decoder-ready, and presentation-submit. These are
+  **separate clock domains**. Do not subtract absolute timestamps between
+  them. A large network-enqueue p95 with stable source PTS suggests delivery
+  jitter; decoder-ready/presentation variation can be local PS5 work.
+- `video_phase_clock` is an **experimental**, native fixed-Paced-only
+  cadence-phase model. It derives a bounded hold from source PTS and network
+  enqueue, at most one frame and never more than the existing network budget.
+  The frame deadline is the *maximum* of this hold and the existing pacer
+  deadline: never add the same jitter reserve twice. VRR, Unpaced, PyroWave
+  and normal sessions are unchanged. This is an A/B candidate, **not** a
+  production default and **not** an A/V lip-sync controller.
+
+To compare the optional phase model, duplicate a native H.264 or HEVC
+`client.pacing="paced"` profile and add `"experimental_phase_clock": true`
+inside its `capture` object. Run the unmodified profile immediately before
+and after each experimental run, keeping netem/host/output unchanged. `false`
+or omitted is the control. If the report shows
+`EXPERIMENTAL_PHASE_CLOCK_NOT_ACTIVE`, discard the comparison. Keep the same
+binary in both legs so any difference is caused by the profile toggle.
 
 Optional rate trial **before starting the stream**, using an already-paired
 client identity configured on the Linux Test Lab coordinator (do not upload,
@@ -167,7 +198,8 @@ policies, with native-overload recovery disabled by default.
 
 1. On PS5 13.60 and (if available) legacy 3.x, do three interleaved **A/B**
    repetitions per condition: PR #70 base commit `a180a56` (A), current branch
-   head (B). Confirm the same host encoder and display settings; record build
+   head (B). For phase experiments, also compare B with/without the toggle.
+   Confirm the same host encoder and display settings; record build
    SHA, applied netem JSON, packet counters, host FPS and actual RTT.
 2. Start with `lan`, then `wifi-light`, `wifi-congested`, `wan-50`, `wan-100`,
    `wan-burst`. Stop after an unrecoverable decoder/audio failure, and save
@@ -180,15 +212,21 @@ policies, with native-overload recovery disabled by default.
    `audio_underrun_wait_max_us`, `audio_startup_prebuffer_wait_us`,
    `audio_ring_mean_frames`, `audio_output_errors`,
    `audio_prebuffer_target_frames`, `audio_prebuffer_peak_frames`,
-   `audio_prebuffer_increases`, `audio_prebuffer_decreases`, RTP packet loss and
-   audible dropout duration. The wait counters measure time until enough PCM
-   returns, **not exact HDMI silence**. Check A/V synchronization too.
+   `audio_prebuffer_increases`, `audio_prebuffer_decreases`,
+   `audio_near_miss_events`, `audio_failed_shrink_probes`, `audio_silence_grains`,
+   `audio_short_grains`, `audio_crossfades`, `audio_drift_shed_frames`,
+   `audio_ring_ewma_frames`, RTP packet loss and audible dropout duration.
+   Fixed AudioOut grains mean prebuffer/underrun wait is not hardware idle time;
+   **silence and short-grain counters are now the better continuity signals**.
+   The wait counters measure until real PCM is usable, **not exact HDMI silence**.
+   Check A/V synchronization with external audio/video capture too.
 5. For video, compare unique displayed FPS, lost/decode-drop/frame-age counts,
    ready-to-submit p95, `video_network_jitter_peak_us`,
    `video_network_jitter_bursts`, `video_arrival_p98_us`, sample/gap counts,
    `rtp_video_fec_recovered`/`rtp_video_fec_failed`, reordering,
    `passive_link_quality`, stale drops and time to recover from each
-   burst. Distinguish network enqueue variation from decoder/GPU stalls; do
+   burst. Compare `cadence_lanes` and optional `video_phase_clock` telemetry.
+   Distinguish network enqueue variation from decoder/GPU stalls; do
    not mistake the source's low-motion frame rate for client frame loss.
 6. Deliver immutable A/B paired reports, raw PS5 `performance-last.json`,
    host logs, network receipts, exact network topology and a brief subjective

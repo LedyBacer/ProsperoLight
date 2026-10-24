@@ -10,7 +10,8 @@ import uuid
 
 from pltest.analysis import (analyze_run, parse_trace, analyze_pyrowave,
                              network_audio_metrics, passive_link_quality,
-                             av_startup_observation, native_overload_metrics)
+                             av_startup_observation, native_overload_metrics,
+                             phase_clock_metrics, cadence_lane_metrics)
 from pltest.comparison import compare_pairs
 from pltest.suites import apply_suite
 from pltest.report import archive_analysis
@@ -43,11 +44,15 @@ class AnalysisTests(unittest.TestCase):
         report = {'network_rtt_valid': 0, 'network_rtt_ms': 0,
                   'network_rtt_variance_ms': 0, 'audio_underruns': 2,
                   'audio_underrun_wait_total_us': 35000,
+                  'audio_silence_grains': 12, 'audio_crossfades': 3,
+                  'audio_failed_shrink_probes': 1,
                   'video_network_jitter_peak_us': 25000}
         metrics = network_audio_metrics(report)
         self.assertNotIn('network_rtt_ms_observed', metrics)
         self.assertNotIn('network_rtt_variance_ms_observed', metrics)
         self.assertEqual(metrics['audio_underrun_wait_total_us'], 35000)
+        self.assertEqual(metrics['audio_crossfades'], 3)
+        self.assertEqual(metrics['audio_failed_shrink_probes'], 1)
         report['network_rtt_valid'] = 1
         report['network_rtt_ms'] = 51
         self.assertEqual(network_audio_metrics(report)['network_rtt_ms_observed'], 51)
@@ -77,7 +82,13 @@ class AnalysisTests(unittest.TestCase):
                                          'video_first_present_observed_us': 1012000})
         self.assertTrue(record['available'])
         self.assertEqual(record['offset_us'], -12000)
+        self.assertEqual(record['audio_clock_point'], 'first_audioout_call')
         self.assertIn('NOT lip-sync error', record['semantics'])
+        record = av_startup_observation({'audio_first_output_call_us': 1000000,
+                                         'audio_first_pcm_output_us': 1009000,
+                                         'video_first_present_observed_us': 1012000})
+        self.assertEqual(record['offset_us'], -3000)
+        self.assertEqual(record['audio_clock_point'], 'first_real_pcm_output')
 
     def test_native_overload_is_a_separate_explicit_experiment(self):
         self.assertEqual(native_overload_metrics({}), {'available': False})
@@ -90,6 +101,32 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(result['enabled'])
         self.assertEqual(result['resyncs'], 2)
         self.assertEqual(result['queue_limit_us'], 80000)
+
+    def test_phase_clock_metrics_preserve_clock_domain_and_enabled_state(self):
+        self.assertFalse(phase_clock_metrics({})['available'])
+        report = {'video_phase_clock': {'enabled': True, 'samples': 80,
+                                        'reanchors': 3, 'hold_us': 2500,
+                                        'min_slack_us': -1000, 'skew_us': -15}}
+        metrics = phase_clock_metrics(report)
+        self.assertTrue(metrics['enabled'])
+        self.assertEqual(metrics['samples'], 80)
+        self.assertEqual(metrics['min_slack_us'], -1000)
+        self.assertIn('not HDMI', metrics['semantics'])
+
+    def test_cadence_lanes_do_not_subtract_different_clock_origins(self):
+        rows = [dict(frame=i, outcome=1, pts_us=1000000 + i * 16667,
+                     enqueue_us=99000000 + i * 16667 + (2000 if i == 2 else 0),
+                     ready_us=5000000 + i * 16667 + (3000 if i == 2 else 0),
+                     submit_us=7000000 + i * 16667 + (4000 if i == 2 else 0))
+                for i in range(4)]
+        observed = cadence_lane_metrics(rows, 60)
+        self.assertTrue(observed['available'])
+        self.assertEqual(observed['lanes']['source_pts']['p95_abs_interval_error_us'], 0)
+        self.assertEqual(observed['lanes']['network_enqueue']['p95_abs_interval_error_us'], 2000)
+        self.assertEqual(observed['lanes']['present_submit']['p95_abs_interval_error_us'], 4000)
+        rows[2]['frame'] = 200  # Discontinuity must not bridge the cadence calculation.
+        observed = cadence_lane_metrics(rows, 60)
+        self.assertEqual(observed['lanes']['network_enqueue']['samples'], 1)
 
     def test_authenticated_counter_rates_keep_clock_bounds_and_capture_unknown(self):
         from pltest.session_evidence import host_transport_rates
