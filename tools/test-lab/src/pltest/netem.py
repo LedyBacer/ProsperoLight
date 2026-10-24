@@ -50,8 +50,9 @@ def execute(args, *, check=True):
     return subprocess.run(args, text=True, capture_output=True, check=check)
 
 
-def qdiscs(interface):
-    return json.loads(execute(['tc', '-j', 'qdisc', 'show', 'dev', interface]).stdout)
+def qdiscs(interface, *, statistics=False):
+    command = ['tc', '-s', '-j'] if statistics else ['tc', '-j']
+    return json.loads(execute([*command, 'qdisc', 'show', 'dev', interface]).stdout)
 
 
 def root_qdisc(rows):
@@ -83,17 +84,35 @@ def write_evidence(path, record):
     path.write_text(json.dumps(record, indent=2, sort_keys=True) + '\n', encoding='utf-8')
 
 
-def run(interface, scenario, command, evidence_path=None):
+def run(interface, scenario, command, evidence_path=None, *, return_interface=None,
+        return_scenario=None):
     if platform.system() != 'Linux':
         raise RuntimeError('tc netem requires a Linux gateway/host with CAP_NET_ADMIN')
     if not command:
         raise ValueError('a test command after -- is required')
-    original = validate_interface(interface) if scenario != 'lan' else None
+    if (return_interface is None) != (return_scenario is None):
+        raise ValueError('return interface and scenario must be provided together')
+    if return_interface == interface:
+        raise ValueError('forward and return egress must be separate interfaces')
+    directions = [{'direction': 'host_to_ps5', 'interface': interface, 'scenario': scenario,
+                   'one_way_egress': SCENARIOS[scenario]}]
+    if return_interface is not None:
+        directions.append({'direction': 'ps5_to_host', 'interface': return_interface,
+                           'scenario': return_scenario,
+                           'one_way_egress': SCENARIOS[return_scenario]})
+    # Refuse unsafe/foreign configurations in *either* direction before adding
+    # any qdisc. No partial modification if validation of the second fails.
+    for direction in directions:
+        direction['baseline_qdisc'] = (validate_interface(direction['interface'])
+                                       if direction['scenario'] != 'lan' else None)
+        direction['applied'] = False
+        direction['cleanup_verified'] = direction['scenario'] == 'lan'
     record = {'schema': 'prosperolight-netem/1', 'scenario': scenario,
               'one_way_egress': SCENARIOS[scenario], 'interface': interface,
-              'start_utc': utc_now(), 'baseline_qdisc': original,
-              'command': command, 'applied': False, 'cleanup_verified': scenario == 'lan'}
-    installed = False
+              'start_utc': utc_now(), 'baseline_qdisc': directions[0]['baseline_qdisc'],
+              'directions': directions, 'command': command, 'applied': False,
+              'cleanup_verified': False}
+    installed = []
     code = 3
     previous_term = signal.getsignal(signal.SIGTERM)
 
@@ -102,14 +121,19 @@ def run(interface, scenario, command, evidence_path=None):
 
     try:
         signal.signal(signal.SIGTERM, interrupt)
-        if scenario != 'lan':
-            execute(['tc', 'qdisc', 'add', 'dev', interface, 'root', 'handle', HANDLE, 'netem',
-                     *tc_args(scenario)])
-            installed = True
-            active = root_qdisc(qdiscs(interface))
-            if not active or active.get('kind') != 'netem' or active.get('handle') != HANDLE:
-                raise RuntimeError('netem installation could not be verified')
-            record['applied_qdisc'] = active
+        for direction in directions:
+            if direction['scenario'] != 'lan':
+                dev = direction['interface']
+                execute(['tc', 'qdisc', 'add', 'dev', dev, 'root', 'handle', HANDLE, 'netem',
+                         *tc_args(direction['scenario'])])
+                installed.append(direction)
+                active = root_qdisc(qdiscs(dev))
+                if not active or active.get('kind') != 'netem' or active.get('handle') != HANDLE:
+                    raise RuntimeError(f'netem installation could not be verified on {dev}')
+                direction['applied_qdisc'] = active
+                if direction is directions[0]:
+                    record['applied_qdisc'] = active
+            direction['applied'] = True
         record['applied'] = True
         write_evidence(evidence_path, record)
         with subprocess.Popen(command) as child:
@@ -128,18 +152,31 @@ def run(interface, scenario, command, evidence_path=None):
     finally:
         # Once rollback starts, a second TERM must not interrupt qdisc removal.
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        if installed:
+        for direction in directions:
+            if direction not in installed:
+                direction['cleanup_verified'] = True
+        for direction in reversed(installed):
+            dev = direction['interface']
+            # Evidence collection is best effort; it must never prevent the
+            # ownership-verified rollback of a live network impairment.
             try:
-                active = root_qdisc(qdiscs(interface))
+                direction['qdisc_stats_before_cleanup'] = qdiscs(dev, statistics=True)
+            except Exception as exc:
+                direction['stats_error'] = str(exc)
+            try:
+                active = root_qdisc(qdiscs(dev))
                 if active and active.get('kind') == 'netem' and active.get('handle') == HANDLE:
-                    execute(['tc', 'qdisc', 'del', 'dev', interface, 'root'])
+                    execute(['tc', 'qdisc', 'del', 'dev', dev, 'root'])
                 else:
                     raise RuntimeError('qdisc ownership changed; refusing to delete it')
-                record['cleanup_verified'] = root_qdisc(qdiscs(interface)) is None or (
-                    root_qdisc(qdiscs(interface)).get('kind') != 'netem')
+                restored = root_qdisc(qdiscs(dev))
+                direction['cleanup_verified'] = restored is None or restored.get('kind') != 'netem'
             except Exception as exc:
-                record['cleanup_error'] = str(exc)
-                record['cleanup_verified'] = False
+                direction['cleanup_error'] = str(exc)
+                direction['cleanup_verified'] = False
+        record['cleanup_verified'] = all(d['cleanup_verified'] for d in directions)
+        if not record['cleanup_verified']:
+            record['cleanup_error'] = 'one or more directions failed ownership-verified cleanup'
         record['end_utc'] = utc_now()
         try:
             write_evidence(evidence_path, record)
@@ -154,12 +191,16 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Bounded Linux netem run for Test Lab')
     parser.add_argument('--interface', required=True, help='Dedicated egress toward the PS5')
     parser.add_argument('--scenario', choices=SCENARIOS, required=True)
+    parser.add_argument('--return-interface', help='Dedicated return egress toward the host')
+    parser.add_argument('--return-scenario', choices=SCENARIOS,
+                        help='Independent PS5-to-host impairment scenario')
     parser.add_argument('--evidence', type=Path, required=True)
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     command = args.command[1:] if args.command[:1] == ['--'] else args.command
     try:
-        return run(args.interface, args.scenario, command, args.evidence)
+        return run(args.interface, args.scenario, command, args.evidence,
+                   return_interface=args.return_interface, return_scenario=args.return_scenario)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, KeyboardInterrupt) as exc:
         print(json.dumps({'verdict': 'INCONCLUSIVE', 'reason_code': 'NETWORK_IMPAIRMENT_FAILED',
                           'reason': str(exc)}), file=sys.stderr)

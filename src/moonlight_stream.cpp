@@ -490,6 +490,8 @@ typedef struct ps5_audio_state
     uint32_t pending_ms_high_water, ring_high_water, catchup_packets;
     uint64_t catchup_frames;
     uint32_t underruns;
+    uint64_t startup_prebuffer_wait_us, underrun_wait_total_us, underrun_wait_max_us;
+    uint64_t ring_frame_sum, ring_observations;
     pthread_mutex_t ring_lock;
     pthread_cond_t ring_wake;
     pthread_t output_thread;
@@ -711,6 +713,8 @@ typedef struct native_renderer_state
     uint32_t submission_count;
     moonlight::DropAttribution drops;
     moonlight::ArrivalRate arrival;
+    moonlight::VideoArrivalJitter network_jitter;
+    std::atomic<uint32_t> network_jitter_budget_us{0};
     moonlight::RateWindow decoded_rate;
     moonlight::WindowedTiming decode_window, queue_window;
     moonlight::CatchUpGuard catchup;
@@ -994,14 +998,19 @@ static void save_performance_summary(const native_renderer_state_t &state,
              "\"network_frame_gaps\":%llu,\"decoder_frame_gaps\":%llu,\"queue_overflows\":%u,"
              "\"decoder_refreshes\":%u,\"decode_errors\":%u,\"last_decode_error\":%d,"
              "\"catchup_refreshes\":%u,\"unrecoverable_frames\":%u,"
-             "\"pending_video_high_water\":%u,\n",
+             "\"pending_video_high_water\":%u,\"video_network_jitter_peak_us\":%u,"
+             "\"video_network_jitter_bursts\":%u,"
+             "\"network_rtt_valid\":%u,\"network_rtt_ms\":%u,"
+             "\"network_rtt_variance_ms\":%u,\n",
              state.access_units, state.decoded, state.presented.load(), state.not_displayed.load(),
              (unsigned long long)state.drops.network, (unsigned long long)state.drops.decoder,
              std::atomic_load_explicit(&video_queue_overflows, std::memory_order_relaxed),
              state.decoder_refreshes, state.decode_errors, (int)state.last_decode_error,
              state.catchup_refreshes,
              std::atomic_load_explicit(&video_unrecoverable_frames, std::memory_order_relaxed),
-             state.pending_video_high_water);
+             state.pending_video_high_water, state.network_jitter.peak_us(),
+             state.network_jitter.bursts(), state.rtt_valid ? 1u : 0u,
+             state.rtt_valid ? state.rtt_ms : 0u, state.rtt_valid ? state.rtt_variance_ms : 0u);
     ok = ok &&
          report_append(
              report, sizeof(report), &length,
@@ -1205,26 +1214,36 @@ static void save_performance_summary(const native_renderer_state_t &state,
                              controller_summary.peak, controller_summary.arrivals,
                              controller_summary.removals, controller_summary.open_errors,
                              controller_summary.send_errors, controller_summary.scan_errors);
-    ok = ok && report_append(
-                   report, sizeof(report), &length,
-                   "\"audio_pending_ms_high_water\":%u,\"audio_ring_frames_high_water\":%u,"
-                   "\"audio_catchup_packets\":%u,\"audio_catchup_frames\":%llu,"
-                   "\"audio_decode_errors\":%u,\"audio_output_errors\":%u,"
-                   "\"audio_ring_overruns\":%u,\"audio_underruns\":%u,"
-                   "\"udp_packets\":%llu,\"udp_bytes\":%llu,\"udp_receive_errors\":%llu,"
-                   "\"socket_poll_calls\":%llu,\"socket_heap_polls\":%llu,"
-                   "\"rcvbuf_requests\":%llu,\"rcvbuf_failures\":%llu,"
-                   "\"last_rcvbuf_requested\":%llu,\"last_rcvbuf_actual\":%llu,\"timings_us\":{\n",
-                   audio_state.pending_ms_high_water, audio_state.ring_high_water,
-                   audio_state.catchup_packets, (unsigned long long)audio_state.catchup_frames,
-                   audio_state.decode_errors, audio_state.output_errors, audio_state.overruns,
-                   audio_state.underruns, (unsigned long long)network.packets,
-                   (unsigned long long)network.bytes, (unsigned long long)network.receive_errors,
-                   (unsigned long long)network.poll_calls, (unsigned long long)network.heap_polls,
-                   (unsigned long long)network.buffer_requests,
-                   (unsigned long long)network.buffer_failures,
-                   (unsigned long long)network.last_buffer_requested,
-                   (unsigned long long)network.last_buffer_actual);
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"audio_pending_ms_high_water\":%u,\"audio_ring_frames_high_water\":%u,"
+             "\"audio_catchup_packets\":%u,\"audio_catchup_frames\":%llu,"
+             "\"audio_decode_errors\":%u,\"audio_output_errors\":%u,"
+             "\"audio_ring_overruns\":%u,\"audio_underruns\":%u,"
+             "\"audio_startup_prebuffer_wait_us\":%llu,"
+             "\"audio_underrun_wait_total_us\":%llu,"
+             "\"audio_underrun_wait_max_us\":%llu,"
+             "\"audio_ring_mean_frames\":%llu,"
+             "\"udp_packets\":%llu,\"udp_bytes\":%llu,\"udp_receive_errors\":%llu,"
+             "\"socket_poll_calls\":%llu,\"socket_heap_polls\":%llu,"
+             "\"rcvbuf_requests\":%llu,\"rcvbuf_failures\":%llu,"
+             "\"last_rcvbuf_requested\":%llu,\"last_rcvbuf_actual\":%llu,\"timings_us\":{\n",
+             audio_state.pending_ms_high_water, audio_state.ring_high_water,
+             audio_state.catchup_packets, (unsigned long long)audio_state.catchup_frames,
+             audio_state.decode_errors, audio_state.output_errors, audio_state.overruns,
+             audio_state.underruns, (unsigned long long)audio_state.startup_prebuffer_wait_us,
+             (unsigned long long)audio_state.underrun_wait_total_us,
+             (unsigned long long)audio_state.underrun_wait_max_us,
+             (unsigned long long)(audio_state.ring_observations
+                                      ? audio_state.ring_frame_sum / audio_state.ring_observations
+                                      : 0),
+             (unsigned long long)network.packets, (unsigned long long)network.bytes,
+             (unsigned long long)network.receive_errors, (unsigned long long)network.poll_calls,
+             (unsigned long long)network.heap_polls, (unsigned long long)network.buffer_requests,
+             (unsigned long long)network.buffer_failures,
+             (unsigned long long)network.last_buffer_requested,
+             (unsigned long long)network.last_buffer_actual);
     if (!ok)
         return;
     const struct
@@ -2690,6 +2709,10 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
         decode_unit->frameNumber,
         std::atomic_load_explicit(&video_recovery_epoch, std::memory_order_relaxed));
     const bool rate_updated = state->arrival.update(network_enqueue_us, decode_unit->frameNumber);
+    state->network_jitter.observe(static_cast<uint32_t>(decode_unit->frameNumber),
+                                  decode_unit->rtpTimestamp, network_enqueue_us);
+    state->network_jitter_budget_us.store(state->network_jitter.budget_us(),
+                                          std::memory_order_relaxed);
     if (!state->access_units || rate_updated)
         state->rtt_valid = LiGetEstimatedRttInfo(&state->rtt_ms, &state->rtt_variance_ms);
     if (decode_unit->frameHostProcessingLatency)
@@ -3134,6 +3157,8 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
     const bool successor_queued = state->mailbox.full;
     pthread_mutex_unlock(&state->lock);
     const uint64_t queue_age_us = started > item.ready_us ? started - item.ready_us : 0;
+    stream_pacer.set_network_jitter_budget_us(
+        state->network_jitter_budget_us.load(std::memory_order_relaxed));
     const uint64_t deadline =
         native_agc_vrr_active()
             ? vrr.picture_target(started, successor_queued, queue_age_us)
@@ -3704,6 +3729,8 @@ static void audio_ring_push(ps5_audio_state_t *state, const int16_t *pcm, uint32
         state->ring_tail = (state->ring_tail + 1u) % AUDIO_RING_FRAMES;
     }
     state->ring_count += frames;
+    state->ring_frame_sum += state->ring_count;
+    ++state->ring_observations;
 }
 
 static void audio_ring_pop(ps5_audio_state_t *state, int16_t *pcm, uint32_t frames)
@@ -3718,6 +3745,8 @@ static void audio_ring_pop(ps5_audio_state_t *state, int16_t *pcm, uint32_t fram
         state->ring_head = (state->ring_head + 1u) % AUDIO_RING_FRAMES;
     }
     state->ring_count -= frames;
+    state->ring_frame_sum += state->ring_count;
+    ++state->ring_observations;
 }
 
 // sceAudioOutOutput() can block for an entire hardware grain. It must never
@@ -3731,15 +3760,29 @@ static void *ps5_audio_output_worker(void *)
     for (;;)
     {
         pthread_mutex_lock(&state->ring_lock);
+        if (!prebuffering && state->ring_count < AUDIO_GRAIN_FRAMES)
+        {
+            ++state->underruns;
+            prebuffering = true;
+        }
         const uint32_t required = prebuffering ? AUDIO_PREBUFFER_FRAMES : AUDIO_GRAIN_FRAMES;
+        uint64_t wait_started_us = 0;
         while (!state->stop_output && state->ring_count < required)
         {
-            if (!prebuffering)
-            {
-                ++state->underruns;
-                prebuffering = true;
-            }
+            if (!wait_started_us)
+                wait_started_us = monotonic_us();
             pthread_cond_wait(&state->ring_wake, &state->ring_lock);
+        }
+        if (wait_started_us && !state->stop_output)
+        {
+            const uint64_t wait_us = monotonic_us() - wait_started_us;
+            if (!state->output_calls)
+                state->startup_prebuffer_wait_us += wait_us;
+            else
+            {
+                state->underrun_wait_total_us += wait_us;
+                state->underrun_wait_max_us = std::max(state->underrun_wait_max_us, wait_us);
+            }
         }
         if (state->stop_output)
         {

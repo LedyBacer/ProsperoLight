@@ -16,9 +16,12 @@ network interface. Verify direction with a packet capture or interface counters.
 
 `netem` works on outbound packets: a 25 ms setting in one direction adds about
 25 ms to path RTT, **not** 50 ms unless both directions are separately shaped.
-Use a Linux gateway for return-path testing; avoid shaping the test coordinator
-control connection. Packet-loss/jitter patterns are probabilistic, so identical
-parameters do not produce bit-for-bit identical losses. Record actual conditions.
+For two directions, the two named egress interfaces must actually be distinct
+interfaces carrying PC→PS5 and PS5→PC respectively (e.g. two routed gateway
+links/veth interfaces); do not try two root qdiscs on the same physical device.
+Avoid shaping the test coordinator control connection. Packet-loss/jitter
+patterns are probabilistic; identical parameters do not produce identical
+losses. Record measured PS5 RTT separately from the configured delays.
 
 Commands (Linux with `tc` and `ip`; root/CAP_NET_ADMIN required):
 
@@ -30,12 +33,27 @@ PYTHONPATH=tools/test-lab/src python3 -m pltest.netem \
     --suite network-jitter --profile tools/test-lab/profiles/network/h264-1080p60.json
 ```
 
+Two-way experiment, with independently selected return-path conditions:
+
+```sh
+PYTHONPATH=tools/test-lab/src python3 -m pltest.netem \
+  --interface ps5-egress --scenario wan-50 \
+  --return-interface host-egress --return-scenario wifi-light \
+  --evidence build/netem-bidirectional.json -- \
+  python3 tools/test-lab/pltest_cli.py run \
+    --suite network-jitter --profile tools/test-lab/profiles/network/h264-1080p60.json
+```
+
 Alternative: `pltest netem ...` if the package is installed. For non-Linux
 hosts, run the impairment command **on the gateway**, then use your normal
 Test Lab coordinator; the wrapper must remain alive until the test completes.
-The wrapper collects the `tc -j qdisc` state, captures the test exit code,
-deletes only its own qdisc on completion/error/Ctrl+C and writes the cleanup
-receipt. For a hard kill or power loss, inspect `tc -j qdisc show dev IFACE`
+The wrapper validates **both** interfaces before applying either condition;
+captures per-direction configuration and `tc -s -j qdisc show` packet/byte/drop
+statistics **before cleanup**; records the test exit code; rolls back only its
+own qdiscs (including if the second installation fails) on completion/error/
+Ctrl+C; and writes a per-direction cleanup receipt. An interrupted/failed run
+is not automatically a performance failure: inspect the cleanup evidence.
+For a hard kill or power loss, inspect `tc -j qdisc show dev IFACE`
 and explicitly remove handle `51:` after verifying ownership. Never blindly
 delete a foreign qdisc. `lan` runs a baseline without applying `tc`.
 
@@ -51,7 +69,23 @@ delete a foreign qdisc. `lan` runs a baseline without applying `tc`.
 | `wan-burst` | 40 ms | 30 ms | 2%, 25% correlation | 1% |
 
 Note: `wan-50/100` are scenario names, **not measured RTT guarantees**.
-Profiles and output receipts must label the actual egress direction.
+Profiles and receipts must label the actual egress direction. The native
+PS5 performance summary now reports `network_rtt_valid`, `network_rtt_ms`,
+`network_rtt_variance_ms`; only call this observed RTT when `valid=1`.
+PyroWave does not yet export that summary: use its HUD/network statistics or
+an external RTT measurement and label its measurement source explicitly.
+
+## Repeatable pre-hardware checks
+
+```sh
+python3 -m unittest tests.test_test_lab_netem tests.test_network_jitter_replay \
+  tests.test_frame_pacing_policy tests.test_ps5_pacing_replay -v
+```
+
+The deterministic host-only tests use synthetic arrival/decode timelines to
+check reserve caps, epoch resets, queue starvation and recovery; they **cannot**
+establish audible quality or physical display latency. `netem` is required for
+actual UDP traffic, and is only effective on a verified routed path.
 
 ## Test plan for Codex
 
@@ -66,11 +100,15 @@ Profiles and output receipts must label the actual egress direction.
    initial matrix passes, additionally test 4K120 HEVC and PyroWave with VRR.
    Run both fixed Paced and Paced+VRR. Keep Unpaced as a LAN control.
 4. For audio, compare `audio_pending_ms_high_water`, `audio_catchup_frames`,
-   `audio_ring_overruns`, `audio_underruns`, `audio_output_errors`, RTP packet
-   loss and audible dropout duration. A low queue-overflow count alone is not
-   success; check late audio and A/V synchronization too.
+   `audio_ring_overruns`, `audio_underruns`, `audio_underrun_wait_total_us`,
+   `audio_underrun_wait_max_us`, `audio_startup_prebuffer_wait_us`,
+   `audio_ring_mean_frames`, `audio_output_errors`, RTP packet loss and
+   audible dropout duration. The wait counters measure time until enough PCM
+   returns, **not exact HDMI silence**. Check A/V synchronization too.
 5. For video, compare unique displayed FPS, lost/decode-drop/frame-age counts,
-   ready-to-submit p95, stale drops and time to recover from each burst. Do
+   ready-to-submit p95, `video_network_jitter_peak_us`,
+   `video_network_jitter_bursts`, stale drops and time to recover from each
+   burst. Distinguish network enqueue variation from decoder/GPU stalls; do
    not mistake the source's low-motion frame rate for client frame loss.
 6. Deliver immutable A/B paired reports, raw PS5 `performance-last.json`,
    host logs, network receipts, exact network topology and a brief subjective

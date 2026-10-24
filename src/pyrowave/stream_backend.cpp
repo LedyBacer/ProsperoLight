@@ -61,6 +61,9 @@ struct Session
     std::unique_ptr<PyroWaveVideoBackend> backend;
     std::atomic<uint64_t> incoming{0}, decoded{0}, shown{0}, stale{0}, partial{0}, rejected{0},
         losses{0}, bytes{0};
+    // Written by network callback under mutex; consumed by presentation worker.
+    moonlight::VideoArrivalJitter network_jitter;
+    std::atomic<uint32_t> network_jitter_budget_us{0};
     size_t high_water{};
 };
 std::unique_ptr<Session> session;
@@ -280,6 +283,8 @@ void wait_prepared_frame(void *context)
     // VRR has ONE admission clock for fresh pictures and repeats. Applying
     // the fixed/source pacer as well can postpone a prepared picture after a
     // repeat and create an additional 30-50 ms transition gap.
+    wait.pacer->set_network_jitter_budget_us(
+        s.network_jitter_budget_us.load(std::memory_order_relaxed));
     const uint64_t pacing_deadline =
         ps5_vrr_output_active()
             ? (wait.repeat ? wait.minimum_deadline
@@ -845,6 +850,11 @@ void *worker(void *)
             error_callback(-1);
     }
     log_line("PyroWave scanout repeats total=%llu", (unsigned long long)repeated);
+    {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        log_line("PyroWave network arrival jitter: bursts=%u peak_budget_us=%u",
+                 s.network_jitter.bursts(), s.network_jitter.peak_us());
+    }
     return nullptr;
 }
 int setup(int format, int width, int height, int fps, void *, int flags)
@@ -963,6 +973,10 @@ int submit(PDECODE_UNIT unit)
         std::lock_guard<std::mutex> lock(session->mutex);
         if (!session->running)
             return DR_OK;
+        session->network_jitter.observe(static_cast<uint32_t>(frame.number), frame.rtp_timestamp,
+                                        frame.enqueue_us ? frame.enqueue_us : frame.queued_us);
+        session->network_jitter_budget_us.store(session->network_jitter.budget_us(),
+                                                std::memory_order_relaxed);
         if (session->queue.size() == 2)
         {
             session->decisions.record(session->queue.front().number,

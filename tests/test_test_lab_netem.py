@@ -33,7 +33,8 @@ class NetemTest(unittest.TestCase):
             commands.append(args)
             if args[:4] == ['ip', '-j', 'route', 'show']:
                 return type('Result', (), {'stdout': '[{"dev":"wan0"}]'})()
-            if args[:4] == ['tc', '-j', 'qdisc', 'show']:
+            if args[:4] == ['tc', '-j', 'qdisc', 'show'] or args[:5] == [
+                    'tc', '-s', '-j', 'qdisc', 'show']:
                 return type('Result', (), {'stdout': json.dumps([dict(state, root=True)])})()
             if args[:3] == ['tc', 'qdisc', 'add']:
                 state.update(kind='netem', handle='51:')
@@ -79,7 +80,7 @@ class NetemTest(unittest.TestCase):
             operations.append(args)
             if args[0] == 'ip':
                 value = '[]'
-            elif args[1:3] == ['-j', 'qdisc']:
+            elif args[1:3] == ['-j', 'qdisc'] or args[1:4] == ['-s', '-j', 'qdisc']:
                 value = json.dumps([{'root': True, 'kind': kind[0],
                                      'handle': '51:' if kind[0] == 'netem' else '0:'}])
             else:
@@ -108,6 +109,128 @@ class NetemTest(unittest.TestCase):
             self.assertTrue(json.loads(evidence.read_text())['cleanup_verified'])
             self.assertEqual(kind[0], 'fq_codel')
             self.assertEqual(sum('del' in x for x in operations), 1)
+
+    def test_two_directions_with_independent_conditions_and_stats(self):
+        states = {'toward-ps5': 'fq_codel', 'toward-host': 'fq_codel'}
+        operations = []
+
+        def execute(args, **_kwargs):
+            operations.append(args)
+            if args[0] == 'ip':
+                return type('Result', (), {'stdout': '[{"dev":"wan0"}]'})()
+            if 'show' in args:
+                dev = args[-1]
+                kind = states[dev]
+                return type('Result', (), {'stdout': json.dumps([{
+                    'root': True, 'kind': kind, 'handle': '51:' if kind == 'netem' else '0:',
+                    'bytes': 12345 if '-s' in args else 0}])})()
+            dev = args[args.index('dev') + 1]
+            states[dev] = 'netem' if 'add' in args else 'fq_codel'
+            return type('Result', (), {'stdout': ''})()
+
+        class Child:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return None
+            def wait(self): return 0
+
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(netem.platform, 'system', return_value='Linux'), \
+                patch.object(netem, 'execute', side_effect=execute), \
+                patch.object(netem.subprocess, 'Popen', return_value=Child()):
+            evidence = Path(folder) / 'paired.json'
+            self.assertEqual(netem.run('toward-ps5', 'wan-50', ['pltest'], evidence,
+                                       return_interface='toward-host',
+                                       return_scenario='wifi-light'), 0)
+            record = json.loads(evidence.read_text())
+            self.assertTrue(record['cleanup_verified'])
+            self.assertEqual(len(record['directions']), 2)
+            self.assertEqual([x['direction'] for x in record['directions']],
+                             ['host_to_ps5', 'ps5_to_host'])
+            self.assertEqual(record['directions'][0]['qdisc_stats_before_cleanup'][0]['bytes'],
+                             12345)
+            self.assertEqual(record['directions'][1]['scenario'], 'wifi-light')
+            self.assertEqual([x[4] for x in operations if x[:3] == ['tc', 'qdisc', 'del']],
+                             ['toward-host', 'toward-ps5'])
+            self.assertEqual(states, {'toward-ps5': 'fq_codel', 'toward-host': 'fq_codel'})
+
+    def test_second_direction_install_failure_rolls_back_first(self):
+        states = {'ps5-egress': 'fq', 'host-egress': 'fq'}
+        operations = []
+
+        def execute(args, **_kwargs):
+            operations.append(args)
+            if args[0] == 'ip':
+                value = '[]'
+            elif 'show' in args:
+                dev = args[-1]
+                value = json.dumps([{'root': True, 'kind': states[dev],
+                                     'handle': '51:' if states[dev] == 'netem' else '0:'}])
+            else:
+                dev = args[args.index('dev') + 1]
+                if dev == 'host-egress' and 'add' in args:
+                    raise subprocess.CalledProcessError(2, args)
+                states[dev] = 'netem' if 'add' in args else 'fq'
+                value = ''
+            return type('Result', (), {'stdout': value})()
+
+        import subprocess
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(netem.platform, 'system', return_value='Linux'), \
+                patch.object(netem, 'execute', side_effect=execute):
+            evidence = Path(folder) / 'rollback.json'
+            with self.assertRaises(subprocess.CalledProcessError):
+                netem.run('ps5-egress', 'wan-100', ['pltest'], evidence,
+                          return_interface='host-egress', return_scenario='wan-burst')
+            record = json.loads(evidence.read_text())
+            self.assertFalse(record['applied'])
+            self.assertTrue(record['cleanup_verified'])
+            self.assertEqual(states, {'ps5-egress': 'fq', 'host-egress': 'fq'})
+            self.assertEqual(sum('del' in x for x in operations), 1)
+
+    def test_stats_capture_failure_does_not_leave_netem_installed(self):
+        state = ['fq']
+
+        def execute(args, **_kwargs):
+            if args[0] == 'ip':
+                return type('Result', (), {'stdout': '[]'})()
+            if '-s' in args:
+                raise OSError('tc stats unavailable')
+            if 'show' in args:
+                return type('Result', (), {'stdout': json.dumps([{
+                    'root': True, 'kind': state[0],
+                    'handle': '51:' if state[0] == 'netem' else '0:'}])})()
+            state[0] = 'netem' if 'add' in args else 'fq'
+            return type('Result', (), {'stdout': ''})()
+
+        class Child:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return None
+            def wait(self): return 0
+
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(netem.platform, 'system', return_value='Linux'), \
+                patch.object(netem, 'execute', side_effect=execute), \
+                patch.object(netem.subprocess, 'Popen', return_value=Child()):
+            evidence = Path(folder) / 'stats-fail.json'
+            self.assertEqual(netem.run('test0', 'wifi-light', ['pltest'], evidence), 0)
+            self.assertEqual(state[0], 'fq')
+            record = json.loads(evidence.read_text())
+            self.assertTrue(record['cleanup_verified'])
+            self.assertIn('tc stats unavailable', record['directions'][0]['stats_error'])
+
+    def test_no_partial_mutation_if_return_interface_unsafe(self):
+        with patch.object(netem.platform, 'system', return_value='Linux'), \
+                patch.object(netem, 'execute') as execute:
+            execute.side_effect = [type('Result', (), {'stdout': '[]'})(),
+                                   type('Result', (), {'stdout': '[{"root":true,"kind":"fq"}]'})(),
+                                   type('Result', (), {'stdout': '[{"dev":"host0"}]'})()]
+            with self.assertRaisesRegex(ValueError, 'default-route'):
+                netem.run('ps5-egress', 'wan-50', ['pltest'],
+                          return_interface='host0', return_scenario='wan-100')
+            self.assertFalse(any('add' in x for x in execute.call_args_list[0][0]))
+            with self.assertRaisesRegex(ValueError, 'separate'):
+                netem.run('ps5-egress', 'wan-50', ['pltest'],
+                          return_interface='ps5-egress', return_scenario='wan-50')
 
 
 if __name__ == '__main__':

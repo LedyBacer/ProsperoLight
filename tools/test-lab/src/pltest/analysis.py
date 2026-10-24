@@ -20,6 +20,26 @@ CLOCKS = {
 }
 
 
+def network_audio_metrics(performance):
+    """Optional measured counters; never infer RTT from a netem scenario name."""
+    keys = ('video_network_jitter_peak_us', 'video_network_jitter_bursts',
+            'audio_pending_ms_high_water', 'audio_ring_frames_high_water',
+            'audio_catchup_frames', 'audio_ring_overruns', 'audio_underruns',
+            'audio_underrun_wait_total_us', 'audio_underrun_wait_max_us',
+            'audio_startup_prebuffer_wait_us', 'audio_ring_mean_frames',
+            'audio_output_errors')
+    data = {key: performance[key] for key in keys
+            if type(performance.get(key)) is int and performance[key] >= 0}
+    if type(performance.get('network_rtt_valid')) is int and \
+            performance['network_rtt_valid'] == 1 and \
+            type(performance.get('network_rtt_ms')) is int and performance['network_rtt_ms'] >= 0:
+        data['network_rtt_ms_observed'] = performance['network_rtt_ms']
+        if type(performance.get('network_rtt_variance_ms')) is int and \
+                performance['network_rtt_variance_ms'] >= 0:
+            data['network_rtt_variance_ms_observed'] = performance['network_rtt_variance_ms']
+    return data
+
+
 def read_bounded(path):
     path = Path(path)
     if path.is_symlink() or path.stat().st_size > MAX_BYTES:
@@ -132,6 +152,7 @@ def _analyze_run(profile, report, directory):
         return result
     try:
         performance = json.loads(read_bounded(artifact_dir / 'performance-last.json'))
+        result['network_audio_metrics'] = network_audio_metrics(performance)
         from .session_evidence import native_effective_settings
         from .decoder_lifecycle import decoder_lifecycle
         lifecycle = decoder_lifecycle(performance)

@@ -71,21 +71,80 @@ int main() {
         assert(target>=previous+2000000 && target<=previous+2010000);
         assert(p.stats.resets);
     }
-    // Several genuine bursts, close together, earn a bounded extra reserve.
-    // Isolated LAN spikes retain the legacy 10 ms ceiling above.
+    // Slow decode/GPU preparation on an otherwise stable LAN must NOT
+    // authorize a 30 ms playout reserve (ready time is not network evidence).
+    moonlight::VideoArrivalJitter stable_network;
+    moonlight::FramePacing slow_decoder;
+    slow_decoder.reset(60);
+    for(int frame=1;frame<=180;++frame) {
+        const auto source=uint64_t(frame)*1000000/60;
+        const auto arrival=1000000+source;
+        stable_network.observe(frame,frame*1500,arrival);
+        slow_decoder.set_network_jitter_budget_us(stable_network.budget_us());
+        const auto ready=arrival+(frame%7==0?25000:1000);
+        const auto target=slow_decoder.target(frame,source,ready);
+        slow_decoder.submitted(target,target,target-ready);
+        assert(slow_decoder.stats.reserve_us<=10000);
+    }
+    assert(stable_network.budget_us()==0 && stable_network.bursts()==0);
+    // Repeated *arrival* bursts, close together, earn bounded extra reserve.
+    // Arrival is monotonic, even when a delayed burst is followed by catchup.
+    moonlight::VideoArrivalJitter impaired_network;
     moonlight::FramePacing unstable;
     unstable.reset(60);
     uint64_t peak_reserve=0;
     for(int frame=1; frame<=160; ++frame) {
         const uint64_t pts=uint64_t(frame)*1000000/60;
         const uint64_t jitter=frame%7==0?25000:0;
-        const uint64_t ready=1000000+pts+jitter;
+        static uint64_t last_arrival=0;
+        const uint64_t arrival=std::max(1000000+pts+jitter,last_arrival+1);
+        last_arrival=arrival;
+        impaired_network.observe(frame,frame*1500,arrival);
+        unstable.set_network_jitter_budget_us(impaired_network.budget_us());
+        const uint64_t ready=arrival+1000;
         const auto target=unstable.target(frame,pts,ready);
         assert(target>=ready && target<=ready+30000);
         unstable.submitted(target,target,target-ready);
         peak_reserve=std::max(peak_reserve,unstable.stats.reserve_us);
     }
     assert(peak_reserve>10000 && peak_reserve<=30000);
+    assert(impaired_network.peak_us()>10000 && impaired_network.bursts()>0);
+    // Matching 60-on-60 fixed refresh normally submits immediately, but a
+    // confirmed WAN burst is allowed a bounded reserve on that path too.
+    moonlight::FramePacing fixed_wan;
+    fixed_wan.reset(60);
+    moonlight::VideoArrivalJitter fixed_arrivals;
+    uint64_t fixed_last=0, fixed_arrival=0;
+    bool fixed_extended=false;
+    for(int frame=1;frame<=150;++frame) {
+        const uint64_t source=uint64_t(frame)*1000000/60;
+        const uint64_t spike=frame%7==0?25000:0;
+        fixed_arrival=std::max(1000000+source+spike,fixed_arrival+1);
+        fixed_arrivals.observe(frame,frame*1500,fixed_arrival);
+        fixed_wan.set_network_jitter_budget_us(fixed_arrivals.budget_us());
+        const uint64_t ready=fixed_arrival+1000;
+        const auto target=fixed_wan.target(frame,source,ready,6000,fixed_last);
+        assert(target>=ready && target<=ready+50000);
+        if(fixed_arrivals.budget_us() && target>ready+1000)
+            fixed_extended=true;
+        fixed_wan.submitted(target,target,target-ready);
+        fixed_last=target;
+    }
+    assert(fixed_extended);
+    // The enlarged budget expires when the last burst has passed. RTP
+    // discontinuity must drop it immediately, including rollover-safe deltas.
+    uint64_t last_good=1000000+160*16667+30000;
+    for(int frame=161;frame<=460;++frame) {
+        last_good+=16667;
+        impaired_network.observe(frame,frame*1500,last_good);
+    }
+    assert(impaired_network.budget_us()==0);
+    impaired_network.observe(999,1500,9000000);
+    assert(impaired_network.budget_us()==0);
+    moonlight::VideoArrivalJitter rollover;
+    rollover.observe(1,0xfffffff0u,1000000);
+    rollover.observe(2,1484u,1016666);
+    assert(rollover.bursts()==0 && rollover.budget_us()==0);
     // Capture jitter alternates long and short PTS deltas for twenty minutes.
     // The source is still 60 FPS; cadence must not drift into a 40 FPS cap.
     moonlight::FramePacing jittered;

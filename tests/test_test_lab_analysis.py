@@ -8,7 +8,7 @@ import tempfile
 import unittest
 import uuid
 
-from pltest.analysis import analyze_run, parse_trace, analyze_pyrowave
+from pltest.analysis import analyze_run, parse_trace, analyze_pyrowave, network_audio_metrics
 from pltest.comparison import compare_pairs
 from pltest.suites import apply_suite
 from pltest.report import archive_analysis
@@ -37,6 +37,19 @@ def run_fixture(fps=60, age=3000, ready=1500, variant='a'):
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_network_audio_metrics_only_reports_observed_rtt(self):
+        report = {'network_rtt_valid': 0, 'network_rtt_ms': 0,
+                  'network_rtt_variance_ms': 0, 'audio_underruns': 2,
+                  'audio_underrun_wait_total_us': 35000,
+                  'video_network_jitter_peak_us': 25000}
+        metrics = network_audio_metrics(report)
+        self.assertNotIn('network_rtt_ms_observed', metrics)
+        self.assertNotIn('network_rtt_variance_ms_observed', metrics)
+        self.assertEqual(metrics['audio_underrun_wait_total_us'], 35000)
+        report['network_rtt_valid'] = 1
+        report['network_rtt_ms'] = 51
+        self.assertEqual(network_audio_metrics(report)['network_rtt_ms_observed'], 51)
+
     def test_authenticated_counter_rates_keep_clock_bounds_and_capture_unknown(self):
         from pltest.session_evidence import host_transport_rates
         samples=[{'source':'Vibepollo /api/rtsp/sessions','verified':True,

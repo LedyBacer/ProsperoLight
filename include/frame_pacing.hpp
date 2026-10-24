@@ -46,6 +46,88 @@ class SourceTimestamp
     bool initialized_{};
 };
 
+// Measures *network/reassembly arrival* variation against the sender's RTP
+// clock. In particular, a slow decoder or Vulkan fence cannot contribute to
+// this estimate. Treat discontinuities and idle source frames as new epochs.
+// Only repeated late arrivals permit the fixed-refresh pacer to use >10 ms.
+class VideoArrivalJitter
+{
+  public:
+    void observe(uint32_t frame, uint32_t rtp, uint64_t enqueue_us)
+    {
+        if (!rtp || !enqueue_us)
+        {
+            reset();
+            return;
+        }
+        if (valid_)
+        {
+            const uint32_t ticks = rtp - last_rtp_;
+            const uint64_t source_delta = uint64_t(ticks) * 1000000 / 90000;
+            if (frame != last_frame_ + 1 || !ticks || source_delta > 100000 ||
+                enqueue_us < last_enqueue_us_ || enqueue_us - last_enqueue_us_ > 250000)
+            {
+                reset();
+            }
+            else
+            {
+                if (window_)
+                    --window_;
+                else
+                    strikes_ = 0;
+                if (hold_ && !--hold_)
+                    budget_us_ = 0;
+                const uint64_t arrival_delta = enqueue_us - last_enqueue_us_;
+                const uint64_t excess =
+                    arrival_delta > source_delta ? arrival_delta - source_delta : 0;
+                if (excess > 10000 && excess < 100000)
+                {
+                    window_ = 48;
+                    if (++strikes_ >= 3)
+                    {
+                        budget_us_ = static_cast<uint32_t>(std::min<uint64_t>(
+                            30000, std::max<uint64_t>(budget_us_, excess + 500)));
+                        peak_us_ = std::max(peak_us_, budget_us_);
+                        ++bursts_;
+                        strikes_ = 0;
+                        hold_ = 240;
+                    }
+                }
+            }
+        }
+        last_frame_ = frame;
+        last_rtp_ = rtp;
+        last_enqueue_us_ = enqueue_us;
+        valid_ = true;
+    }
+
+    uint32_t budget_us() const
+    {
+        return budget_us_;
+    }
+    uint32_t peak_us() const
+    {
+        return peak_us_;
+    }
+    uint32_t bursts() const
+    {
+        return bursts_;
+    }
+
+    void reset()
+    {
+        valid_ = false;
+        budget_us_ = 0;
+        strikes_ = window_ = hold_ = 0;
+    }
+
+  private:
+    uint32_t last_frame_{}, last_rtp_{}, budget_us_{}, peak_us_{}, bursts_{};
+    uint32_t strikes_{}, window_{}, hold_{};
+    uint64_t last_enqueue_us_{};
+    bool valid_{};
+};
+
 // A target is a submission deadline. GPU completion and physical display
 // completion remain distinct measurements owned by the presentation backend.
 class FramePacing
@@ -56,6 +138,11 @@ class FramePacing
         uint64_t misses{}, resets{}, submissions{}, reserve_us{}, period_us{};
         uint64_t wait_total_us{}, late_max_us{}, spacing_error_max_us{};
     } stats;
+
+    void set_network_jitter_budget_us(uint32_t budget)
+    {
+        network_budget_us_ = std::min<uint32_t>(budget, 30000);
+    }
 
     void reset(unsigned fps)
     {
@@ -186,27 +273,12 @@ class FramePacing
         if (stats.submissions < 3)
             slot_ = ready_us;
         const uint64_t demand = ready_us > slot_ ? ready_us - slot_ : 0;
-        // A single late frame can be host scheduling noise. Only repeated
-        // lateness in a short window earns an extra source-frame reserve.
-        // Stable LAN remains at the original <=10 ms ceiling. The reserve is
-        // capped even on WAN to avoid slowly accumulating input latency.
-        if (burst_window_)
-            --burst_window_;
-        else
-            burst_count_ = 0;
-        if (extended_hold_)
-            --extended_hold_;
-        if (demand > 10000 && demand < 100000)
-        {
-            burst_window_ = 40;
-            if (++burst_count_ >= 3)
-            {
-                extended_hold_ = 240;
-                burst_count_ = 0;
-            }
-        }
-        const uint64_t cap = extended_hold_ ? std::min<uint64_t>(30000, period_ * 2)
-                                            : std::min<uint64_t>(10000, period_);
+        // Decoder/GPU stalls can increase readiness demand, but only measured
+        // RTP-to-network-enqueue jitter can authorize a larger waiting cap.
+        const uint64_t cap = network_budget_us_
+                                 ? std::min<uint64_t>(std::max<uint32_t>(10000, network_budget_us_),
+                                                      std::min<uint64_t>(30000, period_ * 2))
+                                 : std::min<uint64_t>(10000, period_);
         if (demand > reserve_)
         {
             reserve_ = std::min(cap, demand + 250);
@@ -243,8 +315,11 @@ class FramePacing
         if (fixed_refresh_x100 && flip_anchor_us && display_matches)
         {
             // VSync latches at the next vblank. Waiting until just before it
-            // misses that vblank and the output stays at half rate.
-            deadline = ready_us;
+            // misses that vblank and the output stays at half rate. Retain
+            // immediate presentation on LAN; only measured arrival bursts
+            // authorize the modest source-clock playout reserve on WAN.
+            if (!network_budget_us_)
+                deadline = ready_us;
             if (submitted_)
                 deadline = std::max(deadline, submitted_ + minimum);
         }
@@ -301,7 +376,7 @@ class FramePacing
     uint64_t period_ = 16666, nominal_period_ = 16666, slot_{}, submitted_{}, last_source_{},
              cadence_source_{};
     uint64_t reserve_ = 1500, candidate_{}, wake_lead_ = 100, fixed_fraction_{};
-    unsigned candidate_count_{}, clean_{}, burst_count_{}, burst_window_{}, extended_hold_{};
+    unsigned candidate_count_{}, clean_{}, network_budget_us_{};
     int32_t last_frame_{}, cadence_frame_{};
     bool initialized_{}, resume_pending_{};
 };
