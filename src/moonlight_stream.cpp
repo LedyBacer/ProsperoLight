@@ -1053,6 +1053,28 @@ static void save_performance_summary(const native_renderer_state_t &state,
              video_rtp ? video_rtp->packetCountOOS : 0u,
              video_rtp ? video_rtp->packetCountInvalid : 0u,
              video_rtp ? video_rtp->packetCountFecInvalid : 0u);
+#ifdef LI_VIDEO_REORDER_STATS_VERSION
+    LI_VIDEO_REORDER_STATS reorder_stats{};
+    const bool reorder_stats_valid = LiGetVideoReorderStats(&reorder_stats);
+    ok = ok &&
+         report_append(
+             report, sizeof(report), &length,
+             "\"video_reorder\":{\"available\":%s,\"version\":1,"
+             "\"late_packets_accepted\":%llu,\"late_packets_rejected\":%llu,"
+             "\"reorder_wait_total_us\":%llu,\"reorder_wait_max_us\":%llu,"
+             "\"reorder_timeouts\":%llu,\"fec_recovered_after_reorder\":%llu,"
+             "\"rescued_frames\":%llu,\"held_packets\":%llu,\"capacity_flushes\":%llu},\\n",
+             reorder_stats_valid ? "true" : "false",
+             (unsigned long long)reorder_stats.late_packets_accepted,
+             (unsigned long long)reorder_stats.late_packets_rejected,
+             (unsigned long long)reorder_stats.reorder_wait_total_us,
+             (unsigned long long)reorder_stats.reorder_wait_max_us,
+             (unsigned long long)reorder_stats.reorder_timeouts,
+             (unsigned long long)reorder_stats.fec_recovered_after_reorder,
+             (unsigned long long)reorder_stats.rescued_frames,
+             (unsigned long long)reorder_stats.held_packets,
+             (unsigned long long)reorder_stats.capacity_flushes);
+#endif
     ok = ok &&
          report_append(
              report, sizeof(report), &length,
