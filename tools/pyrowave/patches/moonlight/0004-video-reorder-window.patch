@@ -1,0 +1,536 @@
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -34,6 +34,108 @@
+ // and subsequent packet/frame bursts that follow.
+ #define RTP_RECV_PACKETS_BUFFERED 2048
+ 
++/* Defer next-frame/block packets briefly while the active FEC block can still
++ * complete. This is intentionally before RtpvAddPacket(): its multi-FEC state,
++ * recovered-shard ownership, and decoder recovery rules remain unchanged.
++ * All allocations and traversal happen on the single video receive thread. */
++#define VIDEO_REORDER_WAIT_US UINT64_C(40000)
++#define VIDEO_REORDER_MAX_PACKETS 2048u
++#define VIDEO_REORDER_MAX_BYTES (4u * 1024u * 1024u)
++typedef struct _VIDEO_REORDER_HELD {
++    struct _VIDEO_REORDER_HELD* next;
++    char* memory;
++    int length;
++    uint32_t frame;
++    uint8_t block;
++    uint64_t receivedUs;
++} VIDEO_REORDER_HELD;
++static VIDEO_REORDER_HELD* reorderHead;
++static unsigned reorderCount;
++static size_t reorderBytes;
++static int reorderEntryOffset;
++
++static void reorderDispatch(char* memory, int length) {
++    int status = RtpvAddPacket(&rtpQueue, (PRTP_PACKET)memory, length,
++                              (PRTPV_QUEUE_ENTRY)(memory + reorderEntryOffset));
++    if (status != RTPF_RET_QUEUED) free(memory);
++}
++
++static bool reorderIsFuture(uint32_t frame, uint8_t block) {
++    return isBefore32(rtpQueue.currentFrameNumber, frame) ||
++           (frame == rtpQueue.currentFrameNumber &&
++            block > rtpQueue.multiFecCurrentBlockNumber);
++}
++
++static bool reorderHasActiveBlock(void) {
++    return rtpQueue.pendingFecBlockList.count != 0 ||
++           rtpQueue.completedFecBlockList.count != 0;
++}
++
++static void reorderRelease(bool force) {
++    uint64_t now = PltGetMicroseconds();
++    while (reorderHead != NULL) {
++        VIDEO_REORDER_HELD* entry = reorderHead;
++        bool stale = isBefore32(entry->frame, rtpQueue.currentFrameNumber) ||
++                     (entry->frame == rtpQueue.currentFrameNumber &&
++                      entry->block < rtpQueue.multiFecCurrentBlockNumber);
++        bool expected = !reorderIsFuture(entry->frame, entry->block);
++        bool waiting = reorderHasActiveBlock() &&
++                       now - entry->receivedUs < VIDEO_REORDER_WAIT_US &&
++                       (rtpQueue.bufferFirstRecvTimeUs == 0 ||
++                        now - rtpQueue.bufferFirstRecvTimeUs < VIDEO_REORDER_WAIT_US);
++        if (!stale && !expected && !force && waiting) break;
++
++        reorderHead = entry->next;
++        reorderCount--;
++        reorderBytes -= (size_t)entry->length;
++        if (stale) free(entry->memory);
++        else reorderDispatch(entry->memory, entry->length);
++        free(entry);
++        now = PltGetMicroseconds();
++    }
++}
++
++static bool reorderHold(char* memory, int length, uint32_t frame, uint8_t block) {
++    VIDEO_REORDER_HELD* entry;
++    VIDEO_REORDER_HELD** link;
++    if (reorderCount >= VIDEO_REORDER_MAX_PACKETS ||
++        reorderBytes + (size_t)length > VIDEO_REORDER_MAX_BYTES)
++        return false;
++    entry = (VIDEO_REORDER_HELD*)malloc(sizeof(*entry));
++    if (entry == NULL) return false;
++    entry->memory = memory;
++    entry->length = length;
++    entry->frame = frame;
++    entry->block = block;
++    entry->receivedUs = PltGetMicroseconds();
++    entry->next = NULL;
++    /* Release older frames and earlier multi-FEC blocks before newer ones.
++     * Within the same block preserve arrival order; RtpvAddPacket handles OOS. */
++    link = &reorderHead;
++    while (*link != NULL &&
++           (isBefore32((*link)->frame, frame) ||
++            ((*link)->frame == frame && (*link)->block <= block)))
++        link = &(*link)->next;
++    entry->next = *link;
++    *link = entry;
++    reorderCount++;
++    reorderBytes += (size_t)length;
++    return true;
++}
++
++static void reorderCleanup(void) {
++    VIDEO_REORDER_HELD* entry = reorderHead;
++    while (entry != NULL) {
++        VIDEO_REORDER_HELD* next = entry->next;
++        free(entry->memory);
++        free(entry);
++        entry = next;
++    }
++    reorderHead = NULL;
++    reorderCount = 0;
++    reorderBytes = 0;
++}
++
+ // Initialize the video stream
+ void initializeVideoStream(void) {
+     initializeVideoDepacketizer(StreamConfig.packetSize);
+@@ -87,7 +189,6 @@
+     int bufferSize, receiveSize, decryptedSize, minSize;
+     char* buffer;
+     char* encryptedBuffer;
+-    int queueStatus;
+     bool useSelect;
+     int waitingForVideoMs;
+     bool encrypted;
+@@ -98,6 +199,10 @@
+     receiveSize = decryptedSize + ((EncryptionFeaturesEnabled & SS_ENC_VIDEO) ? sizeof(ENC_VIDEO_HEADER) : 0);
+     bufferSize = decryptedSize + sizeof(RTPV_QUEUE_ENTRY);
+     buffer = NULL;
++    reorderEntryOffset = decryptedSize;
++    reorderHead = NULL;
++    reorderCount = 0;
++    reorderBytes = 0;
+ 
+     if (setNonFatalRecvTimeoutMs(rtpSocket, UDP_RECV_POLL_TIMEOUT_MS) < 0) {
+         // SO_RCVTIMEO failed, so use select() to wait
+@@ -155,7 +260,8 @@
+                 }
+             }
+ 
+-            // Receive timed out; try again
++            // Release expired future blocks even when no further UDP arrives.
++            reorderRelease(false);
+             continue;
+         }
+ 
+@@ -227,11 +333,148 @@
+         packet->timestamp = BE32(packet->timestamp);
+         packet->ssrc = BE32(packet->ssrc);
+ 
+-        queueStatus = RtpvAddPacket(&rtpQueue, packet, err, (PRTPV_QUEUE_ENTRY)&buffer[decryptedSize]);
+-
+-        if (queueStatus == RTPF_RET_QUEUED) {
+-            // The queue owns the buffer
+-            buffer = NULL;
++        int headerSize = sizeof(*packet) + ((packet->header & FLAG_EXTENSION) ? 4 : 0);
++        if (err >= headerSize + (int)sizeof(NV_VIDEO_PACKET)) {
++            PNV_VIDEO_PACKET nv = (PNV_VIDEO_PACKET)(buffer + headerSize);
++            uint32_t frame = LE32(nv->frameIndex);
++            uint8_t block = rtpQueue.multiFecCapable ?
++                (uint8_t)((nv->multiFecBlocks >> 4) & 3) : 0;
++            if (reorderIsFuture(frame, block) && reorderHasActiveBlock()) {
++                if (reorderHold(buffer, err, frame, block)) {
++                    buffer = NULL;
++                    reorderRelease(false);
++                    continue;
++                }
++                // Allocation or capacity limit: flush in frame/block order.
++                reorderRelease(true);
++            }
++        }
++        reorderDispatch(buffer, err);
++        buffer = NULL;
++        reorderRelease(false);
++    }
++
++    reorderCleanup();
++    if (buffer != NULL) {
++        free(buffer);
++    }
++
++    if (encryptedBuffer != NULL) {
++        free(encryptedBuffer);
++    }
++}
++
++void notifyKeyFrameReceived(void) {
++    // Remember that we got a full frame successfully
++    receivedFullFrame = true;
++}
++
++// Decoder thread proc
++static void VideoDecoderThreadProc(void* context) {
++    while (!PltIsThreadInterrupted(&decoderThread)) {
++        VIDEO_FRAME_HANDLE frameHandle;
++        PDECODE_UNIT decodeUnit;
++
++        if (!LiWaitForNextVideoFrame(&frameHandle, &decodeUnit)) {
++            return;
++        }
++
++        LiCompleteVideoFrame(frameHandle, VideoCallbacks.submitDecodeUnit(decodeUnit));
++    }
++}
++
++// Read the first frame of the video stream
++int readFirstFrame(void) {
++    // All that matters is that we close this socket.
++    // This starts the flow of video on Gen 3 servers.
++
++    closeSocket(firstFrameSocket);
++    firstFrameSocket = INVALID_SOCKET;
++
++    return 0;
++}
++
++// Terminate the video stream
++void stopVideoStream(void) {
++    if (!receivedDataFromPeer) {
++        Limelog("No video traffic was ever received from the host!\n");
++    }
++
++    VideoCallbacks.stop();
++
++    // Wake up client code that may be waiting on the decode unit queue
++    stopVideoDepacketizer();
++
++    PltInterruptThread(&udpPingThread);
++    PltInterruptThread(&receiveThread);
++    if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
++        PltInterruptThread(&decoderThread);
++    }
++
++    if (firstFrameSocket != INVALID_SOCKET) {
++        shutdownTcpSocket(firstFrameSocket);
++    }
++
++    PltJoinThread(&udpPingThread);
++    PltJoinThread(&receiveThread);
++    if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
++        PltJoinThread(&decoderThread);
++    }
++
++    if (firstFrameSocket != INVALID_SOCKET) {
++        closeSocket(firstFrameSocket);
++        firstFrameSocket = INVALID_SOCKET;
++    }
++    if (rtpSocket != INVALID_SOCKET) {
++        closeSocket(rtpSocket);
++        rtpSocket = INVALID_SOCKET;
++    }
++
++    VideoCallbacks.cleanup();
++}
++
++// Start the video stream
++int startVideoStream(void* rendererContext, int drFlags) {
++    int err;
++
++    firstFrameSocket = INVALID_SOCKET;
++
++    // This must be called before the decoder thread starts submitting
++    // decode units
++    LC_ASSERT(NegotiatedVideoFormat != 0);
++    err = VideoCallbacks.setup(NegotiatedVideoFormat, StreamConfig.width,
++        StreamConfig.height, StreamConfig.fps, rendererContext, drFlags);
++    if (err != 0) {
++        return err;
++    }
++
++    rtpSocket = bindUdpSocket(RemoteAddr.ss_family, &LocalAddr, AddrLen,
++                              RTP_RECV_PACKETS_BUFFERED * (StreamConfig.packetSize + MAX_RTP_HEADER_SIZE),
++                              SOCK_QOS_TYPE_VIDEO);
++    if (rtpSocket == INVALID_SOCKET) {
++        VideoCallbacks.cleanup();
++        return LastSocketError();
++    }
++
++    VideoCallbacks.start();
++
++    err = PltCreateThread("VideoRecv", VideoReceiveThreadProc, NULL, &receiveThread);
++    if (err != 0) {
++        VideoCallbacks.stop();
++        closeSocket(rtpSocket);
++        VideoCallbacks.cleanup();
++        return err;
++    }
++
++    if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
++        err = PltCreateThread("VideoDec", VideoDecoderThreadProc, NULL, &decoderThread);
++        if (err != 0) {
++            VideoCallbacks.stop();
++            PltInterruptThread(&receiveThread);
++            PltJoinThread(&receiveThread);
++            closeSocket(rtpSocket);
++            VideoCallbacks.cleanup();
++            return err;
+         }
+     }
+ 
+@@ -235,41 +478,58 @@
+         }
+     }
+ 
+-    if (buffer != NULL) {
+-        free(buffer);
+-    }
+-
+-    if (encryptedBuffer != NULL) {
+-        free(encryptedBuffer);
+-    }
+-}
+-
+-void notifyKeyFrameReceived(void) {
+-    // Remember that we got a full frame successfully
+-    receivedFullFrame = true;
+-}
+-
+-// Decoder thread proc
+-static void VideoDecoderThreadProc(void* context) {
+-    while (!PltIsThreadInterrupted(&decoderThread)) {
+-        VIDEO_FRAME_HANDLE frameHandle;
+-        PDECODE_UNIT decodeUnit;
+-
+-        if (!LiWaitForNextVideoFrame(&frameHandle, &decodeUnit)) {
+-            return;
+-        }
+-
+-        LiCompleteVideoFrame(frameHandle, VideoCallbacks.submitDecodeUnit(decodeUnit));
+-    }
+-}
+-
+-// Read the first frame of the video stream
+-int readFirstFrame(void) {
+-    // All that matters is that we close this socket.
+-    // This starts the flow of video on Gen 3 servers.
+-
+-    closeSocket(firstFrameSocket);
+-    firstFrameSocket = INVALID_SOCKET;
++    if (AppVersionQuad[0] == 3) {
++        // Connect this socket to open port 47998 for our ping thread
++        firstFrameSocket = connectTcpSocket(&RemoteAddr, AddrLen,
++                                            FIRST_FRAME_PORT, FIRST_FRAME_TIMEOUT_SEC);
++        if (firstFrameSocket == INVALID_SOCKET) {
++            VideoCallbacks.stop();
++            stopVideoDepacketizer();
++            PltInterruptThread(&receiveThread);
++            if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
++                PltInterruptThread(&decoderThread);
++            }
++            PltJoinThread(&receiveThread);
++            if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
++                PltJoinThread(&decoderThread);
++            }
++            closeSocket(rtpSocket);
++            VideoCallbacks.cleanup();
++            return LastSocketError();
++        }
++    }
++
++    // Start pinging before reading the first frame so GFE knows where
++    // to send UDP data
++    err = PltCreateThread("VideoPing", VideoPingThreadProc, NULL, &udpPingThread);
++    if (err != 0) {
++        VideoCallbacks.stop();
++        stopVideoDepacketizer();
++        PltInterruptThread(&receiveThread);
++        if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
++            PltInterruptThread(&decoderThread);
++        }
++        PltJoinThread(&receiveThread);
++        if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
++            PltJoinThread(&decoderThread);
++        }
++        closeSocket(rtpSocket);
++        if (firstFrameSocket != INVALID_SOCKET) {
++            closeSocket(firstFrameSocket);
++            firstFrameSocket = INVALID_SOCKET;
++        }
++        VideoCallbacks.cleanup();
++        return err;
++    }
++
++    if (AppVersionQuad[0] == 3) {
++        // Read the first frame to start the flow of video
++        err = readFirstFrame();
++        if (err != 0) {
++            stopVideoStream();
++            return err;
++        }
++    }
+ 
+     return 0;
+ }
+@@ -274,146 +534,6 @@
+     return 0;
+ }
+ 
+-// Terminate the video stream
+-void stopVideoStream(void) {
+-    if (!receivedDataFromPeer) {
+-        Limelog("No video traffic was ever received from the host!\n");
+-    }
+-
+-    VideoCallbacks.stop();
+-
+-    // Wake up client code that may be waiting on the decode unit queue
+-    stopVideoDepacketizer();
+-
+-    PltInterruptThread(&udpPingThread);
+-    PltInterruptThread(&receiveThread);
+-    if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
+-        PltInterruptThread(&decoderThread);
+-    }
+-
+-    if (firstFrameSocket != INVALID_SOCKET) {
+-        shutdownTcpSocket(firstFrameSocket);
+-    }
+-
+-    PltJoinThread(&udpPingThread);
+-    PltJoinThread(&receiveThread);
+-    if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
+-        PltJoinThread(&decoderThread);
+-    }
+-
+-    if (firstFrameSocket != INVALID_SOCKET) {
+-        closeSocket(firstFrameSocket);
+-        firstFrameSocket = INVALID_SOCKET;
+-    }
+-    if (rtpSocket != INVALID_SOCKET) {
+-        closeSocket(rtpSocket);
+-        rtpSocket = INVALID_SOCKET;
+-    }
+-
+-    VideoCallbacks.cleanup();
+-}
+-
+-// Start the video stream
+-int startVideoStream(void* rendererContext, int drFlags) {
+-    int err;
+-
+-    firstFrameSocket = INVALID_SOCKET;
+-
+-    // This must be called before the decoder thread starts submitting
+-    // decode units
+-    LC_ASSERT(NegotiatedVideoFormat != 0);
+-    err = VideoCallbacks.setup(NegotiatedVideoFormat, StreamConfig.width,
+-        StreamConfig.height, StreamConfig.fps, rendererContext, drFlags);
+-    if (err != 0) {
+-        return err;
+-    }
+-
+-    rtpSocket = bindUdpSocket(RemoteAddr.ss_family, &LocalAddr, AddrLen,
+-                              RTP_RECV_PACKETS_BUFFERED * (StreamConfig.packetSize + MAX_RTP_HEADER_SIZE),
+-                              SOCK_QOS_TYPE_VIDEO);
+-    if (rtpSocket == INVALID_SOCKET) {
+-        VideoCallbacks.cleanup();
+-        return LastSocketError();
+-    }
+-
+-    VideoCallbacks.start();
+-
+-    err = PltCreateThread("VideoRecv", VideoReceiveThreadProc, NULL, &receiveThread);
+-    if (err != 0) {
+-        VideoCallbacks.stop();
+-        closeSocket(rtpSocket);
+-        VideoCallbacks.cleanup();
+-        return err;
+-    }
+-
+-    if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
+-        err = PltCreateThread("VideoDec", VideoDecoderThreadProc, NULL, &decoderThread);
+-        if (err != 0) {
+-            VideoCallbacks.stop();
+-            PltInterruptThread(&receiveThread);
+-            PltJoinThread(&receiveThread);
+-            closeSocket(rtpSocket);
+-            VideoCallbacks.cleanup();
+-            return err;
+-        }
+-    }
+-
+-    if (AppVersionQuad[0] == 3) {
+-        // Connect this socket to open port 47998 for our ping thread
+-        firstFrameSocket = connectTcpSocket(&RemoteAddr, AddrLen,
+-                                            FIRST_FRAME_PORT, FIRST_FRAME_TIMEOUT_SEC);
+-        if (firstFrameSocket == INVALID_SOCKET) {
+-            VideoCallbacks.stop();
+-            stopVideoDepacketizer();
+-            PltInterruptThread(&receiveThread);
+-            if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
+-                PltInterruptThread(&decoderThread);
+-            }
+-            PltJoinThread(&receiveThread);
+-            if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
+-                PltJoinThread(&decoderThread);
+-            }
+-            closeSocket(rtpSocket);
+-            VideoCallbacks.cleanup();
+-            return LastSocketError();
+-        }
+-    }
+-
+-    // Start pinging before reading the first frame so GFE knows where
+-    // to send UDP data
+-    err = PltCreateThread("VideoPing", VideoPingThreadProc, NULL, &udpPingThread);
+-    if (err != 0) {
+-        VideoCallbacks.stop();
+-        stopVideoDepacketizer();
+-        PltInterruptThread(&receiveThread);
+-        if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
+-            PltInterruptThread(&decoderThread);
+-        }
+-        PltJoinThread(&receiveThread);
+-        if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
+-            PltJoinThread(&decoderThread);
+-        }
+-        closeSocket(rtpSocket);
+-        if (firstFrameSocket != INVALID_SOCKET) {
+-            closeSocket(firstFrameSocket);
+-            firstFrameSocket = INVALID_SOCKET;
+-        }
+-        VideoCallbacks.cleanup();
+-        return err;
+-    }
+-
+-    if (AppVersionQuad[0] == 3) {
+-        // Read the first frame to start the flow of video
+-        err = readFirstFrame();
+-        if (err != 0) {
+-            stopVideoStream();
+-            return err;
+-        }
+-    }
+-
+-    return 0;
+-}
+-
+ const RTP_VIDEO_STATS* LiGetRTPVideoStats(void) {
+     return &rtpQueue.stats;
+ }
