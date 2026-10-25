@@ -43,6 +43,8 @@ extern "C"
         stats->rescued_frames = 1;
         stats->held_packets = 5;
         stats->capacity_flushes = 0;
+        stats->late_data_rejected = 1;
+        stats->late_parity_rejected = 2;
         return true;
     }
 #endif
@@ -168,6 +170,9 @@ int main()
     assert(saved_report.find("\"native_overload\":{\"enabled\":false,\"queue_limit_us\":0,") !=
            std::string::npos);
     assert(saved_report.find("\"audio_pcm_hard_cap_frames\":8640,") != std::string::npos);
+    assert(saved_report.find(
+               "\"audio_startup_silence_grains\":0,\"audio_active_silence_grains\":0,") !=
+           std::string::npos);
     assert(saved_report.find("\"video_phase_clock\":{\"enabled\":false,") != std::string::npos);
     assert(saved_report.find("\"video_pacing_burst\":{\"version\":1,\"catchups\":0,") !=
            std::string::npos);
@@ -175,12 +180,14 @@ int main()
            std::string::npos);
     assert(saved_report.find("\"video_present_feedback\":{\"version\":1,\"submitted\":0,") !=
            std::string::npos);
-    assert(saved_report.find("\"video_source_due_shadow\":{\"version\":1,\"active\":false,") !=
+    assert(saved_report.find("\"video_source_due_shadow\":{\"version\":2,\"active\":false,") !=
            std::string::npos);
+    assert(saved_report.find("\"post_callback_delay_max_us\":0},") != std::string::npos);
 #ifdef LI_VIDEO_REORDER_STATS_VERSION
-    assert(saved_report.find("\"video_reorder\":{\"available\":true,\"version\":1,") !=
+    assert(saved_report.find("\"video_reorder\":{\"available\":true,\"version\":2,") !=
            std::string::npos);
-    assert(saved_report.find("\"late_packets_accepted\":3,\"late_packets_rejected\":1,") !=
+    assert(saved_report.find("\"late_packets_accepted\":3,\"late_packets_rejected\":1,"
+                             "\"late_data_rejected\":1,\"late_parity_rejected\":2,") !=
            std::string::npos);
     assert(saved_report.find("\"rescued_frames\":1,\"held_packets\":5,\"capacity_flushes\":0}") !=
            std::string::npos);
