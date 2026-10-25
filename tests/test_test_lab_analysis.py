@@ -116,13 +116,16 @@ class AnalysisTests(unittest.TestCase):
     def test_cadence_lanes_do_not_subtract_different_clock_origins(self):
         rows = [dict(frame=i, outcome=1, pts_us=1000000 + i * 16667,
                      enqueue_us=99000000 + i * 16667 + (2000 if i == 2 else 0),
-                     ready_us=5000000 + i * 16667 + (3000 if i == 2 else 0),
+                     callback_us=5000000 + i * 16667,
+                     ready_us=1500 + (3000 if i == 2 else 0),
                      submit_us=7000000 + i * 16667 + (4000 if i == 2 else 0))
                 for i in range(4)]
         observed = cadence_lane_metrics(rows, 60)
         self.assertTrue(observed['available'])
         self.assertEqual(observed['lanes']['source_pts']['p95_abs_interval_error_us'], 0)
         self.assertEqual(observed['lanes']['network_enqueue']['p95_abs_interval_error_us'], 2000)
+        self.assertEqual(observed['lanes']['decoder_ready']['p95_abs_interval_error_us'], 3000)
+        self.assertEqual(observed['lanes']['decoder_ready']['samples'], 3)
         self.assertEqual(observed['lanes']['present_submit']['p95_abs_interval_error_us'], 4000)
         rows[2]['frame'] = 200  # Discontinuity must not bridge the cadence calculation.
         observed = cadence_lane_metrics(rows, 60)
