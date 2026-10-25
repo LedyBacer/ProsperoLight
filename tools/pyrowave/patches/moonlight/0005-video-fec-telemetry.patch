@@ -17,17 +17,18 @@ diff --git a/src/RtpVideoQueue.c b/src/RtpVideoQueue.c
      ret = -1;                                         \
      Limelog("FEC recovery returned corrupt packet %d" \
              " (frame %d)", rtpPacket->sequenceNumber, \
-@@ -359,7 +361,8 @@
-     // If this fails, something is probably wrong with our FEC state.
-     LC_ASSERT(ret == 0);
+@@ -476,6 +478,10 @@
+     }
  
+ cleanup:
++    // Count a recovery only after all reconstructed shards pass validation.
 +    if (ret == 0 && queue->bufferDataPackets != queue->receivedDataPackets) {
 +        queue->stats.packetCountFecRecovered += queue->bufferDataPackets - queue->receivedDataPackets;
--    if (queue->bufferDataPackets != queue->receivedDataPackets) {
- #ifdef FEC_VERBOSE
-         Limelog("Recovered %d video data shards from frame %d\n",
-                 queue->bufferDataPackets - queue->receivedDataPackets,
-@@ -785,6 +788,7 @@
++    }
+     reed_solomon_release(rs);
+ 
+     if (packets != NULL)
+@@ -785,6 +791,7 @@
      }
  
      if (length < dataOffset + (int)sizeof(NV_VIDEO_PACKET)) {
@@ -35,7 +36,7 @@ diff --git a/src/RtpVideoQueue.c b/src/RtpVideoQueue.c
          // Reject packets that are too small to fit a NV_VIDEO_PACKET header
          return RTPF_RET_REJECTED;
      }
-@@ -848,6 +852,7 @@
+@@ -848,6 +855,7 @@
                  }
              }
              else if (queue->multiFecLastBlockNumber != 0) {
@@ -43,7 +44,7 @@ diff --git a/src/RtpVideoQueue.c b/src/RtpVideoQueue.c
                  Limelog("Unrecoverable frame %d (block %d of %d): %d+%d=%d received < %d needed\n",
                          queue->currentFrameNumber, queue->multiFecCurrentBlockNumber+1,
                          queue->multiFecLastBlockNumber+1,
-@@ -876,6 +881,7 @@
+@@ -876,6 +884,7 @@
                  }
              }
              else {
@@ -51,7 +52,7 @@ diff --git a/src/RtpVideoQueue.c b/src/RtpVideoQueue.c
                  Limelog("Unrecoverable frame %d: %d+%d=%d received < %d needed\n",
                          queue->currentFrameNumber, queue->receivedDataPackets,
                          queue->receivedParityPackets,
-@@ -891,6 +897,7 @@
+@@ -891,6 +900,7 @@
              // Report the final status of the FEC queue before dropping this frame
              reportFinalFrameFecStatus(queue);
  
