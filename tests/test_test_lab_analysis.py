@@ -57,6 +57,23 @@ class AnalysisTests(unittest.TestCase):
         report['network_rtt_ms'] = 51
         self.assertEqual(network_audio_metrics(report)['network_rtt_ms_observed'], 51)
 
+    def test_reorder_window_counters_are_optional_and_versioned(self):
+        payload = {'video_reorder': {'available': True, 'version': 1,
+                   'late_packets_accepted': 5, 'late_packets_rejected': 1,
+                   'reorder_wait_total_us': 25000, 'reorder_wait_max_us': 13000,
+                   'reorder_timeouts': 1, 'fec_recovered_after_reorder': 3,
+                   'rescued_frames': 2, 'held_packets': 7,
+                   'capacity_flushes': 0}}
+        observed = network_audio_metrics(payload)
+        self.assertEqual(observed['video_reorder_rescued_frames'], 2)
+        self.assertEqual(observed['video_reorder_fec_recovered_after_reorder'], 3)
+        self.assertEqual(observed['video_reorder_reorder_timeouts'], 1)
+        payload['video_reorder']['available'] = False
+        self.assertNotIn('video_reorder_rescued_frames', network_audio_metrics(payload))
+        payload['video_reorder']['available'] = True
+        payload['video_reorder']['version'] = 2
+        self.assertNotIn('video_reorder_rescued_frames', network_audio_metrics(payload))
+
     def test_passive_nonary_style_evidence_never_guesses_available_bandwidth(self):
         report = {'rtp_video_stats_valid': 1, 'rtp_video_packets': 1000,
                   'video_arrival_samples': 100, 'video_arrival_p98_us': 16000,
