@@ -416,10 +416,14 @@ class FramePacing
     // source-period floor. A lone frame, LAN, VRR and non-divisor rates retain
     // the existing policy. The caller may repeat this after a successor
     // arrives during a bounded wait.
-    uint64_t catch_up_deadline(uint64_t ready_us, uint64_t deadline_us,
-                               uint32_t fixed_refresh_x100)
+    uint64_t catch_up_deadline(uint64_t ready_us, uint64_t now_us,
+                               uint64_t deadline_us, uint32_t fixed_refresh_x100)
     {
-        if (!network_budget_us_ || !submitted_ || !fixed_refresh_x100 || !nominal_period_)
+        // If the original target has already passed, nothing remains to
+        // accelerate. Never manufacture a past deadline or count elapsed
+        // time as saved waiting.
+        if (now_us >= deadline_us || !network_budget_us_ || !submitted_ ||
+            !fixed_refresh_x100 || !nominal_period_)
             return deadline_us;
         const uint64_t display_period = UINT64_C(100000000) / fixed_refresh_x100;
         if (!display_period)
@@ -432,7 +436,7 @@ class FramePacing
         if (error > nominal_period_ / 100)
             return deadline_us;
         const uint64_t minimum = matched * 98 / 100;
-        const uint64_t candidate = std::max(ready_us, submitted_ + minimum);
+        const uint64_t candidate = std::max({ready_us, now_us, submitted_ + minimum});
         if (candidate >= deadline_us)
             return deadline_us;
         ++stats.backlog_catchups;
