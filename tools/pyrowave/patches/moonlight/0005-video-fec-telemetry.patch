@@ -1,0 +1,61 @@
+diff --git a/src/RtpVideoQueue.c b/src/RtpVideoQueue.c
+--- a/src/RtpVideoQueue.c
++++ b/src/RtpVideoQueue.c
+@@ -161,6 +161,7 @@
+     // FEC recovery packets are synthesized by us, so don't use them to determine OOS data
+     if (!isFecRecovery) {
+         if (outOfSequence) {
++            queue->stats.packetCountOOS++;
+             // This packet was received after a higher sequence number packet, so note that we
+             // received an out of order packet to disable our speculative RFI recovery logic.
+             queue->lastOosFramePresentationTimestamp = newEntry->presentationTimeUs;
+@@ -183,6 +184,7 @@
+ }
+ 
+ #define PACKET_RECOVERY_FAILURE()                     \
++    queue->stats.packetCountFecInvalid++;             \
+     ret = -1;                                         \
+     Limelog("FEC recovery returned corrupt packet %d" \
+             " (frame %d)", rtpPacket->sequenceNumber, \
+@@ -335,7 +337,8 @@
+     // If this fails, something is probably wrong with our FEC state.
+     LC_ASSERT(ret == 0);
+ 
++    if (ret == 0 && queue->bufferDataPackets != queue->receivedDataPackets) {
++        queue->stats.packetCountFecRecovered += queue->bufferDataPackets - queue->receivedDataPackets;
+-    if (queue->bufferDataPackets != queue->receivedDataPackets) {
+ #ifdef FEC_VERBOSE
+         Limelog("Recovered %d video data shards from frame %d\n",
+                 queue->bufferDataPackets - queue->receivedDataPackets,
+@@ -556,6 +559,7 @@
+     }
+ 
+     if (length < dataOffset + (int)sizeof(NV_VIDEO_PACKET)) {
++        queue->stats.packetCountInvalid++;
+         // Reject packets that are too small to fit a NV_VIDEO_PACKET header
+         return RTPF_RET_REJECTED;
+     }
+@@ -598,6 +602,7 @@
+             reportFinalFrameFecStatus(queue);
+ 
+             if (queue->multiFecLastBlockNumber != 0) {
++                queue->stats.packetCountFecFailed++;
+                 Limelog("Unrecoverable frame %d (block %d of %d): %d+%d=%d received < %d needed\n",
+                         queue->currentFrameNumber, queue->multiFecCurrentBlockNumber+1,
+                         queue->multiFecLastBlockNumber+1,
+@@ -628,6 +633,7 @@
+                 }
+             }
+             else {
++                queue->stats.packetCountFecFailed++;
+                 Limelog("Unrecoverable frame %d: %d+%d=%d received < %d needed\n",
+                         queue->currentFrameNumber, queue->receivedDataPackets,
+                         queue->receivedParityPackets,
+@@ -643,6 +649,7 @@
+             // Report the final status of the FEC queue before dropping this frame
+             reportFinalFrameFecStatus(queue);
+ 
++            queue->stats.packetCountFecFailed++;
+             Limelog("Unrecoverable frame %d: lost FEC blocks %d to %d\n",
+                     nvPacket->frameIndex,
+                     expectedFecBlockNumber + 1,
