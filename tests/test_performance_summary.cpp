@@ -170,9 +170,12 @@ int main()
     assert(saved_report.find("\"audio_pcm_hard_cap_frames\":8640,") != std::string::npos);
     assert(saved_report.find("\"video_phase_clock\":{\"enabled\":false,") != std::string::npos);
 #ifdef LI_VIDEO_REORDER_STATS_VERSION
-    assert(saved_report.find("\"video_reorder\":{\"available\":true,\"version\":1,") != std::string::npos);
-    assert(saved_report.find("\"late_packets_accepted\":3,\"late_packets_rejected\":1,") != std::string::npos);
-    assert(saved_report.find("\"rescued_frames\":1,\"held_packets\":5,\"capacity_flushes\":0}") != std::string::npos);
+    assert(saved_report.find("\"video_reorder\":{\"available\":true,\"version\":1,") !=
+           std::string::npos);
+    assert(saved_report.find("\"late_packets_accepted\":3,\"late_packets_rejected\":1,") !=
+           std::string::npos);
+    assert(saved_report.find("\"rescued_frames\":1,\"held_packets\":5,\"capacity_flushes\":0}") !=
+           std::string::npos);
 #endif
     assert(saved_report.find("\"requested_slices_per_frame\":8,") != std::string::npos);
     const std::string original = saved_report;
