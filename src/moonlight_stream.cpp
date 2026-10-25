@@ -978,6 +978,8 @@ report_append(char *report, size_t capacity, size_t *length, const char *format,
 }
 
 static prosperolight::dualsense::Statistics controller_summary{};
+// Shared by the presenter; sampled for the final report after workers join.
+static moonlight::FramePacing stream_pacer;
 
 static void save_performance_summary(const native_renderer_state_t &state,
                                      const moonlight::TimingHistogram &input_intervals,
@@ -3305,7 +3307,6 @@ static void *video_decode_thread(void *context)
     return nullptr;
 }
 
-static moonlight::FramePacing stream_pacer;
 static unsigned stream_presentation_mode = 0;
 static unsigned stream_vrr_profile = 1;
 
