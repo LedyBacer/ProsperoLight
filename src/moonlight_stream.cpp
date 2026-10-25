@@ -3861,6 +3861,8 @@ static void *video_present_thread(void *context)
         ++failures;
         ++state->present_errors;
         ++state->not_displayed;
+        if (current.trace)
+            current.trace->outcome = 3;
         decisions.record(current.frame, current.pts_us, monotonic_us(), 0, "drop-present-error");
         pthread_mutex_lock(&state->lock);
         state->frames.release(current.slot);
