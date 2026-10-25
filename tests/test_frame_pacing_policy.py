@@ -80,23 +80,92 @@ int main() {
     burst_pacer.submitted(1000000,1000000,0);
     auto burst_target=burst_pacer.target(2,33333,1016666,6000,1000000);
     const auto original_burst_target=burst_target+20000;
-    const auto caught_up=burst_pacer.catch_up_deadline(1016666,original_burst_target,6000);
+    const auto caught_up=burst_pacer.catch_up_deadline(1016666,1016666,original_burst_target,6000);
     assert(caught_up>=1016666 && caught_up>=1000000+16666*98/100);
     assert(caught_up<original_burst_target);
     assert(burst_pacer.stats.backlog_catchups==1);
     assert(burst_pacer.stats.backlog_saved_us==original_burst_target-caught_up);
     // A second observation of the same successor must not double-account.
-    assert(burst_pacer.catch_up_deadline(1016666,caught_up,6000)==caught_up);
+    assert(burst_pacer.catch_up_deadline(1016666,1016666,caught_up,6000)==caught_up);
     assert(burst_pacer.stats.backlog_catchups==1);
     // When the source cadence is not a divisor of the fixed display grid
     // (90 FPS on 60 Hz), its fractional presentation policy must be retained.
-    assert(burst_pacer.catch_up_deadline(1016666,original_burst_target,9000)==original_burst_target);
+    assert(burst_pacer.catch_up_deadline(1016666,1016666,original_burst_target,9000)==original_burst_target);
     burst_pacer.set_network_jitter_budget_us(0);
-    assert(burst_pacer.catch_up_deadline(1016666,original_burst_target,6000)==original_burst_target);
+    assert(burst_pacer.catch_up_deadline(1016666,1016666,original_burst_target,6000)==original_burst_target);
     moonlight::FramePacing initial;
     initial.reset(60);
     initial.set_network_jitter_budget_us(30000);
-    assert(initial.catch_up_deadline(1016666,original_burst_target,6000)==original_burst_target);
+    assert(initial.catch_up_deadline(1016666,1016666,original_burst_target,6000)==original_burst_target);
+    // A scheduler that wakes after the floor has passed must not invent
+    // saved waiting or report that the stream missed a target in the past.
+    const uint64_t resumed_now=1019500;
+    const uint64_t still_future=original_burst_target+1000;
+    burst_pacer.set_network_jitter_budget_us(30000);
+    const auto previous_catchups=burst_pacer.stats.backlog_catchups;
+    const auto previous_saved=burst_pacer.stats.backlog_saved_us;
+    assert(burst_pacer.catch_up_deadline(1016666,resumed_now,still_future,6000)
+           ==resumed_now);
+    assert(burst_pacer.stats.backlog_saved_us==previous_saved+still_future-resumed_now);
+    assert(burst_pacer.stats.backlog_catchups==previous_catchups+1);
+    const auto after_catchups=burst_pacer.stats.backlog_catchups;
+    const auto after_saved=burst_pacer.stats.backlog_saved_us;
+    assert(burst_pacer.catch_up_deadline(1016666,still_future+1000,still_future,6000)
+           ==still_future);
+    assert(burst_pacer.stats.backlog_catchups==after_catchups);
+    assert(burst_pacer.stats.backlog_saved_us==after_saved);
+
+    // Deterministic scheduler replay. Packet bursts become ready pictures,
+    // an early successor arrives during the old playout reserve, and each
+    // synthetic wake advances monotonically. 59.94 and 119.88 Hz represent
+    // the real nominal PS5 output modes (in hundredths of a hertz).
+    for(unsigned refresh : {5994u,11988u}) {
+        for(bool impaired : {false,true}) {
+            moonlight::FramePacing replay;
+            replay.reset(60);
+            uint64_t last_submit=0,previous_arrival=0;
+            uint64_t accelerated=0;
+            const uint64_t refresh_period=UINT64_C(100000000)/refresh;
+            const uint64_t matched=refresh==11988?2*refresh_period:refresh_period;
+            const uint64_t floor=matched*98/100;
+            for(int frame=1;frame<=180;++frame) {
+                const uint64_t pts=uint64_t(frame)*1000000/60;
+                const uint64_t jitter=impaired && frame%11==0?22000:0;
+                const uint64_t arrival=std::max(UINT64_C(1000000)+pts+jitter,previous_arrival+1);
+                previous_arrival=arrival;
+                replay.set_network_jitter_budget_us(impaired && frame>24?25000:0);
+                const uint64_t base=replay.target(frame,pts,arrival,refresh,last_submit);
+                const uint64_t old_deadline=impaired && frame>24
+                    ?std::max(base,arrival+12000):base;
+                const uint64_t successor_at=arrival+4000;
+                uint64_t deadline=old_deadline;
+                // Model the present-thread's existing 1ms polling.
+                for(uint64_t now=arrival;now<deadline;now+=1000) {
+                    if(now>=successor_at) {
+                        const uint64_t changed=replay.catch_up_deadline(
+                            arrival,now,deadline,refresh);
+                        assert(changed>=now && changed>=arrival);
+                        if(changed<deadline) ++accelerated;
+                        deadline=changed;
+                    }
+                }
+                const uint64_t submit=std::max(arrival,deadline);
+                if(last_submit)
+                    assert(submit>=last_submit+floor);
+                replay.submitted(deadline,submit,submit-arrival);
+                last_submit=submit;
+            }
+            if(impaired) {
+                assert(accelerated>0);
+                assert(replay.stats.backlog_catchups==accelerated);
+                assert(replay.stats.backlog_saved_us>0);
+            } else {
+                assert(accelerated==0);
+                assert(replay.stats.backlog_catchups==0);
+                assert(replay.stats.backlog_saved_us==0);
+            }
+        }
+    }
     // Slow decode/GPU preparation on an otherwise stable LAN must NOT
     // authorize a 30 ms playout reserve (ready time is not network evidence).
     moonlight::VideoArrivalJitter stable_network;
