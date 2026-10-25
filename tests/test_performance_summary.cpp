@@ -175,6 +175,8 @@ int main()
            std::string::npos);
     assert(saved_report.find("\"video_present_feedback\":{\"version\":1,\"submitted\":0,") !=
            std::string::npos);
+    assert(saved_report.find("\"video_source_due_shadow\":{\"version\":1,\"active\":false,") !=
+           std::string::npos);
 #ifdef LI_VIDEO_REORDER_STATS_VERSION
     assert(saved_report.find("\"video_reorder\":{\"available\":true,\"version\":1,") !=
            std::string::npos);
