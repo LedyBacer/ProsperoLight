@@ -1,5 +1,5 @@
 /*
- * ProsperoLight - bounded playout accounting and VideoOut feedback.
+ * ps5-native-app-boilerplate / ProsperoLight - bounded playout accounting and VideoOut feedback.
  * Copyright (C) 2026 LedyBacer and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
