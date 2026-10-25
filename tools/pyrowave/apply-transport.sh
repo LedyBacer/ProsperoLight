@@ -95,13 +95,13 @@ fi
 # Keep a throttled recovery request pending until the next receive/poll tick,
 # cancelling once a valid IDR/recovery anchor arrives. This is additive to 0008.
 patch="$root/tools/pyrowave/patches/moonlight/0009-deferred-idr-recovery.patch"
-if git -C "$common" apply --check "$patch" 2>/dev/null; then
-    git -C "$common" apply "$patch"
+if git -C "$common" apply --unidiff-zero --check "$patch" 2>/dev/null; then
+    git -C "$common" apply --unidiff-zero "$patch"
 elif grep -Fq 'void PlVideoRecoveryPoll(void)' "$common/src/VideoDepacketizer.c" &&
      grep -Fq 'PlVideoRecoveryPoll();' "$common/src/VideoStream.c"; then
     : # Already applied; later instrumentation may change reverse context.
 else
-    git -C "$common" apply --check --verbose "$patch" >&2 || true
+    git -C "$common" apply --unidiff-zero --check --verbose "$patch" >&2 || true
     echo "Deferred IDR recovery patch does not match pinned Moonlight source" >&2
     exit 1
 fi
