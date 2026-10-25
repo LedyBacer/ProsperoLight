@@ -3364,11 +3364,13 @@ static void *video_decode_thread(void *context)
 static unsigned stream_presentation_mode = 0;
 static unsigned stream_vrr_profile = 1;
 
+// clang-format off
 static bool wait_presentation_deadline(native_renderer_state_t *state,
                                        const stream_ready_frame_t &item,
                                        moonlight::VrrRepeatPolicy &vrr,
                                        PacingDecisionTrace &decisions,
                                        uint64_t *planned_us, uint64_t *paced_wait_us)
+// clang-format on
 {
     *planned_us = 0;
     *paced_wait_us = 0;
@@ -3391,12 +3393,14 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
     // Reassembly already consumed a part of this frame's jitter tolerance.
     // Shadow-evaluate the bounded shared budget now; enable only in an
     // explicit A/B build until PS5 replay validates the trade-off.
+    // clang-format off
     const auto playout = state->playout_budget.observe(
         network_budget, item.receive_us, item.enqueue_us, state->stream_fps);
     // Shadow comparison only. The host RTP clock is relative and gets mapped
     // to local monotonic time without replacing the tested FramePacing path.
     (void)state->source_due.observe(
         item.pts_us, item.ready_us, UINT32_C(1000000) / std::max(1u, state->stream_fps));
+    // clang-format on
 #if PROSPEROLIGHT_UNIFIED_PLAYOUT_EXPERIMENT
     stream_pacer.set_network_jitter_budget_us(playout.remaining_us);
 #else
@@ -3772,6 +3776,7 @@ static void *video_present_thread(void *context)
         decisions.record(current.frame, current.pts_us, monotonic_us(), current.ready_us, "ready");
         // Only discard an old ready image if a decoded replacement exists.
         // GPU/decoder service is not counted as replaceable queue residence.
+        // clang-format off
         while (stream_presentation_mode && state->mailbox.full &&
                moonlight::deadline_mailbox_replacement(
                    monotonic_us(),
@@ -3782,6 +3787,7 @@ static void *video_present_thread(void *context)
                    current.pts_us, state->mailbox.item.pts_us,
                    state->mailbox.item.ready_us))
         {
+            // clang-format on
             decisions.record(current.frame, current.pts_us, monotonic_us(), 0, "drop-age");
             state->frames.release(current.slot);
             if (current.trace)
@@ -3822,9 +3828,11 @@ static void *video_present_thread(void *context)
             (void)lan_http_report_text(receipt);
         }
         uint64_t planned_us = 0, paced_wait_us = 0;
+        // clang-format off
         if (!wait_presentation_deadline(state, current, vrr_repeats, decisions,
                                         &planned_us, &paced_wait_us))
         {
+            // clang-format on
             pthread_mutex_lock(&state->lock);
             state->frames.release(current.slot);
             pthread_mutex_unlock(&state->lock);
