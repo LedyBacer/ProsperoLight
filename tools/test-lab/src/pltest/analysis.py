@@ -46,6 +46,18 @@ def network_audio_metrics(performance):
             'rtp_audio_out_of_sequence')
     data = {key: performance[key] for key in keys
             if type(performance.get(key)) is int and performance[key] >= 0}
+    # Optional native RTP reorder counters. A missing versioned object is
+    # unavailable evidence, never a zero-loss claim.
+    reorder = performance.get('video_reorder')
+    reorder_fields = ('late_packets_accepted', 'late_packets_rejected',
+                      'reorder_wait_total_us', 'reorder_wait_max_us',
+                      'reorder_timeouts', 'fec_recovered_after_reorder',
+                      'rescued_frames', 'held_packets', 'capacity_flushes')
+    if isinstance(reorder, dict) and reorder.get('available') is True and reorder.get('version') == 1:
+        for key in reorder_fields:
+            value = reorder.get(key)
+            if type(value) is int and value >= 0:
+                data['video_reorder_' + key] = value
     if type(performance.get('network_rtt_valid')) is int and \
             performance['network_rtt_valid'] == 1 and \
             type(performance.get('network_rtt_ms')) is int and performance['network_rtt_ms'] >= 0:
