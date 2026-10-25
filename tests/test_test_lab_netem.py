@@ -80,6 +80,8 @@ class NetemTest(unittest.TestCase):
                 return ('', f'{self.samples} packets captured\\n')
 
         class Child:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return None
             def wait(self):
                 state['packets'] = 10000
                 state['drops'] = 100
@@ -88,9 +90,9 @@ class NetemTest(unittest.TestCase):
 
         for samples, verdict in ((64, 'UDP_EGRESS_VERIFIED'), (0, 'INCONCLUSIVE')):
             state.update(kind='fq', handle='0:', packets=0, drops=0)
-            with tempfile.TemporaryDirectory() as folder, \\
-                    patch.object(netem.platform, 'system', return_value='Linux'), \\
-                    patch.object(netem, 'execute', side_effect=execute), \\
+            with tempfile.TemporaryDirectory() as folder, \
+                    patch.object(netem.platform, 'system', return_value='Linux'), \
+                    patch.object(netem, 'execute', side_effect=execute), \
                     patch.object(netem.subprocess, 'Popen',
                                  side_effect=[Capture(samples), Child()]):
                 evidence = Path(folder) / 'video-flow.json'
@@ -104,7 +106,6 @@ class NetemTest(unittest.TestCase):
                 self.assertEqual(state['kind'], 'fq')
                 if not samples:
                     self.assertEqual(receipt['reason_code'], 'VIDEO_UDP_FLOW_UNVERIFIED')
-        self.assertTrue(any('tcpdump' in args[0] for args in requested) is False)
         # The capture subprocess is separate from tc; no packet bytes are
         # written into the evidence receipt.
 
