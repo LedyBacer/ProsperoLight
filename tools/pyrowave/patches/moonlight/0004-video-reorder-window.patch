@@ -140,7 +140,7 @@ diff --git a/src/VideoStream.c b/src/VideoStream.c
              continue;
          }
  
-@@ -266,14 +372,29 @@
+@@ -266,14 +372,32 @@
          packet->timestamp = BE32(packet->timestamp);
          packet->ssrc = BE32(packet->ssrc);
  
@@ -166,8 +166,11 @@ diff --git a/src/VideoStream.c b/src/VideoStream.c
 -            // The queue owns the buffer
 -            buffer = NULL;
          }
-+        reorderDispatch(buffer, err);
-+        buffer = NULL;
++        // Preserve the original zero-copy and rejected-buffer reuse fast path.
++        if (RtpvAddPacket(&rtpQueue, packet, err,
++                          (PRTPV_QUEUE_ENTRY)&buffer[decryptedSize]) == RTPF_RET_QUEUED) {
++            buffer = NULL;
++        }
 +        reorderRelease(false);
      }
  
