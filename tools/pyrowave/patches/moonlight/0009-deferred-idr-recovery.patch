@@ -1,7 +1,7 @@
 diff --git a/src/VideoDepacketizer.c b/src/VideoDepacketizer.c
 --- a/src/VideoDepacketizer.c
 +++ b/src/VideoDepacketizer.c
-@@ -38,21 +38,43 @@
+@@ -38,21 +38,25 @@
 -// Coalesce only redundant keyframe requests; keep the existing RFI/IDR
 -// state machine and decoder lifecycle entirely unchanged. An absent IDR can
 -// be requested again after this short interval if stream loss continues.
@@ -49,7 +49,10 @@ diff --git a/src/VideoDepacketizer.c b/src/VideoDepacketizer.c
 +    }
 +}
 +
-+
++@@ -92,3 +92,19 @@
+ static bool waitingForNextSuccessfulFrame;
+ static bool waitingForIdrFrame;
+ static bool waitingForRefInvalFrame;
 +// Called on the sole video receive thread, including idle recv timeouts.
 +// A request inside the cooldown is not lost: dispatch it once that window
 +// expires, but cancel it if the depacketizer already accepted recovery.
@@ -66,29 +69,4 @@ diff --git a/src/VideoDepacketizer.c b/src/VideoDepacketizer.c
 +    if (!last || now < last || now - last >= IDR_REQUEST_COOLDOWN_US)
 +        requestIdrCoalesced();
 +}
-@@ -118,1 +118,2 @@
--    atomic_store_explicit(&lastIdrRequestUs, 0, memory_order_relaxed);
-+    atomic_store_explicit(&lastIdrRequestUs, 0, memory_order_relaxed);
-+    atomic_store_explicit(&deferredIdrRequest, false, memory_order_relaxed);
-diff --git a/src/VideoStream.c b/src/VideoStream.c
---- a/src/VideoStream.c
-+++ b/src/VideoStream.c
-@@ -1,1 +1,2 @@
- #include "Limelight-internal.h"
-+extern void PlVideoRecoveryPoll(void);
-@@ -300,2 +300,3 @@
--            reorderRelease(false);
--            continue;
-+            reorderRelease(false);
-+            PlVideoRecoveryPoll();
-+            continue;
-@@ -520,4 +520,5 @@
--        reorderRelease(false);
--    }
--
--    reorderCleanup();
-+        reorderRelease(false);
-+        PlVideoRecoveryPoll();
-+    }
-+
-+    reorderCleanup();
+
