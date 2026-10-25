@@ -23,11 +23,17 @@ Avoid shaping the test coordinator control connection. Packet-loss/jitter
 patterns are probabilistic; identical parameters do not produce identical
 losses. Record measured PS5 RTT separately from the configured delays.
 
-Commands (Linux with `tc` and `ip`; root/CAP_NET_ADMIN required):
+Commands (Linux with `tc`, `ip`, and `tcpdump`; netem needs
+CAP_NET_ADMIN and tcpdump needs capture privileges). For PR #70 hardware
+comparisons, set `PS5_IP` to the actual console address and
+`VIDEO_UDP_PORT` to the **negotiated host→PS5 video UDP destination port**
+(do not assume it is always 47998). An explicitly verified test is required
+before claiming that the impairment affected the game stream:
 
 ```sh
 PYTHONPATH=tools/test-lab/src python3 -m pltest.netem \
   --interface ps5-egress --scenario wifi-congested \
+  --verify-video-udp "${PS5_IP}:${VIDEO_UDP_PORT}" \
   --evidence build/netem-wifi-congested.json -- \
   python3 tools/test-lab/pltest_cli.py run \
     --suite network-jitter --profile tools/test-lab/profiles/network/h264-1080p60.json
@@ -54,7 +60,25 @@ counter must **increase during the test in every shaped direction**; otherwise
 the verdict is `NETWORK_TRAFFIC_UNVERIFIED` (`INCONCLUSIVE`, wrapper exit 3)
 even if the wrapped test succeeded. A positive count proves egress activity,
 **not** that the PS5 stream traversed that interface. Inspect flow identity
-through a packet capture/routing check. The wrapper records the test exit code;
+through a packet capture/routing check. For a confirmed video-path run, `--verify-video-udp PS5_IP:PORT`
+checks the route to the console from the **same network namespace** and samples
+up to 64 matching host→PS5 UDP datagrams on the shaped egress using tcpdump
+(with a minimum of eight matches). No packet contents or captures are retained.
+The evidence includes `video_flow_verdict=UDP_EGRESS_VERIFIED`, or
+`VIDEO_UDP_FLOW_UNVERIFIED` / exit 3 if insufficient. Without that option,
+`video_flow_verdict=NOT_REQUESTED`; rising qdisc packet counters alone never
+prove the stream was shaped.
+
+The wrapper now also checks configured loss against the `tc -s -j` netem
+`drops` counter. Once the sample predicts 30 or more drops, observing fewer
+than 10% of that expectation makes the scenario **INCONCLUSIVE** with
+`NETWORK_LOSS_UNVERIFIED` (exit 3). Smaller samples are explicitly marked
+`INSUFFICIENT_SAMPLE`, not falsely reported as 0% loss. These intentionally
+loose thresholds detect gross misrouting/misaccounting, not small random
+differences. A 1% configured-loss run with one qdisc drop out of ~100,000 packets
+must never be treated as proof of real 1% wire loss.
+
+The wrapper records the test exit code;
 rolls back only its own qdiscs (including if the second installation fails) on completion/error/
 Ctrl+C; and writes a per-direction cleanup receipt. An interrupted/failed run
 is not automatically a performance failure: inspect the cleanup evidence.
