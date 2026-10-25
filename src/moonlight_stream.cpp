@@ -514,6 +514,7 @@ typedef struct ps5_audio_state
     moonlight::AudioRingDriftPolicy drift_policy;
     int16_t last_output_sample[AUDIO_MAX_CHANNELS];
     bool crossfade_pending;
+    bool backlog_gap_pending;
     pthread_mutex_t ring_lock;
     pthread_cond_t ring_wake;
     pthread_t output_thread;
@@ -4448,11 +4449,33 @@ static void ps5_audio_sample(char *sample_data, int sample_length)
     {
         // Keep the already-buffered near-term PCM. Draining it from the callback
         // caused long audible gaps; only discard this late decoded packet.
+        // The next retained PCM must blend at its enqueue boundary, after the
+        // existing ring contents have played, not at the next AudioOut grain.
+        pthread_mutex_lock(&audio_state.ring_lock);
+        audio_state.backlog_gap_pending = true;
+        pthread_mutex_unlock(&audio_state.ring_lock);
         ++audio_state.catchup_packets;
         audio_state.catchup_frames += static_cast<uint32_t>(decoded);
         return;
     }
     pthread_mutex_lock(&audio_state.ring_lock);
+    if (audio_state.backlog_gap_pending)
+    {
+        int16_t preceding[AUDIO_MAX_CHANNELS]{};
+        if (audio_state.ring_count)
+        {
+            const uint32_t last = (audio_state.ring_tail + AUDIO_RING_FRAMES - 1) % AUDIO_RING_FRAMES;
+            memcpy(preceding, &audio_state.ring[last * audio_state.output_channels],
+                   audio_state.channels * sizeof(int16_t));
+        }
+        else
+            memcpy(preceding, audio_state.last_output_sample,
+                   audio_state.channels * sizeof(int16_t));
+        if (moonlight::audio_rejoin_after_skip(audio_state.backlog_gap_pending,
+                                                audio_state.decoded, static_cast<uint32_t>(decoded),
+                                                audio_state.channels, preceding, AUDIO_CROSSFADE_FRAMES))
+            ++audio_state.crossfades;
+    }
     audio_ring_push(&audio_state, audio_state.decoded, (uint32_t)decoded);
     audio_state.last_pcm_enqueue_us = now;
     if (audio_state.ring_count > audio_state.ring_high_water)

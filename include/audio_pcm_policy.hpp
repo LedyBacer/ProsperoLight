@@ -58,6 +58,20 @@ inline void audio_crossfade_from_sample(int16_t *grain, uint32_t frames, uint32_
         }
 }
 
+// The Opus callback may skip stale PCM while the AudioOut ring still has
+// earlier samples buffered. Blend the *next enqueued* packet at that exact
+// discontinuity, not the next hardware grain (which may be tens of ms earlier).
+inline bool audio_rejoin_after_skip(bool &pending, int16_t *pcm, uint32_t frames,
+                                    uint32_t channels, const int16_t *preceding,
+                                    uint32_t fade_frames)
+{
+    if (!pending || !pcm || !frames || !channels || !preceding)
+        return false;
+    audio_crossfade_from_sample(pcm, frames, channels, preceding, fade_frames);
+    pending = false;
+    return true;
+}
+
 // A short read should not cut straight from a non-zero sample to zero. Fade
 // the last decoded samples away before the zero-padded tail starts.
 inline void audio_fade_to_silence(int16_t *grain, uint32_t valid_frames, uint32_t channels,

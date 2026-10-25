@@ -298,7 +298,14 @@ void wait_prepared_frame(void *context)
                   wait.readiness
                       ? std::clamp<uint64_t>(wait.readiness->percentile_us() / 4, 250, 2000)
                       : 1000);
-    const uint64_t deadline = std::max(pacing_deadline, wait.minimum_deadline);
+    uint64_t deadline = std::max(pacing_deadline, wait.minimum_deadline);
+    // A prepared fixed-VSync picture should not consume its entire WAN
+    // reserve once a genuine newer picture is already queued. Mirror native
+    // H.264/HEVC's successor catch-up without changing VRR/repeat/fractional
+    // cadence or the two-frame mailbox capacity.
+    const bool backlog_catchup = !wait.repeat && wait.frame && selected_vsync &&
+                                 !fractional_fixed && !ps5_vrr_output_active() &&
+                                 s.network_jitter_budget_us.load(std::memory_order_relaxed) != 0;
     if (!wait.repeat && wait.frame && wait.readiness)
     {
         // Convert the PS5 CLOCK_MONOTONIC target to LiGetMicroseconds time
@@ -315,6 +322,25 @@ void wait_prepared_frame(void *context)
     while (s.running)
     {
         const uint64_t current = now_us();
+        if (backlog_catchup && !s.queue.empty())
+        {
+            const uint64_t shortened = std::max(
+                wait.minimum_deadline,
+                wait.pacer->catch_up_deadline(wait.ready_us, current, deadline, wait.refresh));
+            if (shortened < deadline)
+            {
+                deadline = shortened;
+                s.decisions.record(wait.frame->number, wait.frame->presentation_us, current,
+                                   deadline, "catchup");
+                const uint64_t sampled_mono = now_us();
+                const uint64_t sampled_li = LiGetMicroseconds();
+                receive_deadline.publish(wait.frame->rtp_timestamp, deadline, sampled_mono,
+                                         sampled_li, wait.readiness
+                                                         ? wait.readiness->percentile_us()
+                                                         : 1000,
+                                         true);
+            }
+        }
         if (current >= deadline)
             break;
         const uint64_t remaining = deadline - current;

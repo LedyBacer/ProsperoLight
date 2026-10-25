@@ -44,6 +44,19 @@ int main() {
     assert(silence[0] < 0 && silence[1] > 0); // seamless fade on full silence
     assert(silence[6] < 0 && silence[7] > 0);
 
+    // A stale Opus packet is discarded while older audio remains buffered.
+    // Rejoining must smooth the first *new* PCM samples at the ring tail,
+    // not the next hardware grain drawn from old buffered samples.
+    bool gap = true;
+    int16_t next[16] = {30000,-30000,30000,-30000,30000,-30000,30000,-30000,
+                        30000,-30000,30000,-30000,30000,-30000,30000,-30000};
+    assert(audio_rejoin_after_skip(gap,next,8,2,last,4));
+    assert(!gap);
+    assert(next[0] < 30000 && next[0] > -30000);
+    assert(next[1] > -30000 && next[1] < 30000);
+    assert(next[8] == 30000 && next[9] == -30000);
+    assert(!audio_rejoin_after_skip(gap,next,8,2,last,4));
+
     AudioPrebufferPolicy pre;
     pre.on_near_miss(1000000);
     pre.on_healthy_grain();
