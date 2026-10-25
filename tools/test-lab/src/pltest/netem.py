@@ -8,6 +8,7 @@ existing custom qdisc, and cleanup verifies ownership before deleting one.
 """
 import argparse
 import datetime as dt
+import ipaddress
 import json
 import os
 import platform
@@ -68,6 +69,75 @@ def owned_packet_count(rows):
     return value if type(value) is int and value >= 0 else None
 
 
+
+def owned_drop_count(rows):
+    """Read netem's drop counter instead of guessing from packet totals."""
+    root = root_qdisc(rows)
+    if not root or root.get('kind') != 'netem' or root.get('handle') != HANDLE:
+        return None
+    value = root.get('drops')
+    if value is None:
+        value = (root.get('stats2') or {}).get('queue', {}).get('drops')
+    return value if type(value) is int and value >= 0 else None
+
+
+def loss_counter_verdict(direction, end_stats):
+    """Reject gross loss mismatches, not normal statistical variation.
+
+    Very small samples do not establish an empirical loss rate. With at
+    least 30 expected drops, fewer than a tenth as many merits investigation.
+    """
+    loss = (SCENARIOS[direction['scenario']] or {}).get('loss_percent', 0)
+    if not loss:
+        return 'NOT_APPLICABLE'
+    sent = direction.get('packet_delta', 0)
+    if sent <= 0:
+        return 'INSUFFICIENT_TRAFFIC'
+    before = direction.get('drops_at_start')
+    after = owned_drop_count(end_stats)
+    expected_floor = sent * loss / 100
+    if before is None or after is None or after < before:
+        direction['loss_reason'] = 'qdisc drop counter unavailable'
+        return 'INCONCLUSIVE' if expected_floor >= 30 else 'INSUFFICIENT_SAMPLE'
+    dropped = after - before
+    direction['drop_delta'] = dropped
+    expected = (sent + dropped) * loss / 100
+    direction['expected_drops_at_configured_rate'] = round(expected, 2)
+    if expected < 30:
+        return 'INSUFFICIENT_SAMPLE'
+    if dropped < expected * 0.1:
+        direction['loss_reason'] = (
+            'netem drops implausibly below configured loss; verify traffic '
+            'direction, qdisc accounting and PS5 UDP capture')
+        return 'INCONCLUSIVE'
+    return 'PLAUSIBLE'
+
+
+def parse_video_udp_target(value):
+    """Require an explicit endpoint; the game-stream UDP port can vary."""
+    try:
+        host, port = value.rsplit(':', 1)
+        address = str(ipaddress.IPv4Address(host))
+        number = int(port)
+        if not 1 <= number <= 65535:
+            raise ValueError('port out of range')
+        return address, number
+    except (ValueError, AttributeError) as exc:
+        raise ValueError('expected --verify-video-udp IPv4:port') from exc
+
+
+def validate_video_udp_route(interface, ip):
+    """Verify this gateway namespace routes the PS5 IP to shaped egress."""
+    routes = json.loads(execute(['ip', '-j', 'route', 'get', ip]).stdout)
+    if not routes or routes[0].get('dev') != interface:
+        raise ValueError('PS5 UDP destination does not route through selected egress')
+    return routes[0].get('dev')
+
+
+def captured_udp_count(stderr):
+    match = re.search(r'(\d+) packets captured', stderr or '')
+    return int(match.group(1)) if match else None
+
 def validate_interface(interface):
     if not re.fullmatch(r'[A-Za-z0-9_.-]{1,15}', interface) or interface in ('lo', 'all'):
         raise ValueError('invalid or unsafe network interface')
@@ -94,7 +164,7 @@ def write_evidence(path, record):
 
 
 def run(interface, scenario, command, evidence_path=None, *, return_interface=None,
-        return_scenario=None):
+        return_scenario=None, verify_video_udp=None):
     if platform.system() != 'Linux':
         raise RuntimeError('tc netem requires a Linux gateway/host with CAP_NET_ADMIN')
     if not command:
@@ -109,6 +179,11 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
         directions.append({'direction': 'ps5_to_host', 'interface': return_interface,
                            'scenario': return_scenario,
                            'one_way_egress': SCENARIOS[return_scenario]})
+    video_target = parse_video_udp_target(verify_video_udp) if verify_video_udp else None
+    if video_target and scenario == 'lan':
+        raise ValueError('UDP flow verification requires an impaired scenario')
+    if video_target:
+        validate_video_udp_route(interface, video_target[0])
     # Refuse unsafe/foreign configurations in *either* direction before adding
     # any qdisc. No partial modification if validation of the second fails.
     for direction in directions:
@@ -121,8 +196,10 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
               'one_way_egress': SCENARIOS[scenario], 'interface': interface,
               'start_utc': utc_now(), 'baseline_qdisc': directions[0]['baseline_qdisc'],
               'directions': directions, 'command': command, 'applied': False,
-              'cleanup_verified': False}
+              'cleanup_verified': False,
+              'video_flow_verdict': 'UNVERIFIED' if video_target else 'NOT_REQUESTED'}
     installed = []
+    video_capture = None
     code = 3
     previous_term = signal.getsignal(signal.SIGTERM)
 
@@ -147,6 +224,7 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
                     start_stats = qdiscs(dev, statistics=True)
                     direction['qdisc_stats_at_start'] = start_stats
                     direction['packets_at_start'] = owned_packet_count(start_stats)
+                    direction['drops_at_start'] = owned_drop_count(start_stats)
                 except Exception as exc:
                     direction['start_stats_error'] = str(exc)
             direction['applied'] = True
@@ -228,12 +306,15 @@ def main(argv=None):
     parser.add_argument('--return-scenario', choices=SCENARIOS,
                         help='Independent PS5-to-host impairment scenario')
     parser.add_argument('--evidence', type=Path, required=True)
+    parser.add_argument('--verify-video-udp', metavar='PS5_IP:PORT',
+                        help='Require matching UDP flow on the shaped PS5 egress')
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     command = args.command[1:] if args.command[:1] == ['--'] else args.command
     try:
         return run(args.interface, args.scenario, command, args.evidence,
-                   return_interface=args.return_interface, return_scenario=args.return_scenario)
+                   return_interface=args.return_interface, return_scenario=args.return_scenario,
+                   verify_video_udp=args.verify_video_udp)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, KeyboardInterrupt) as exc:
         print(json.dumps({'verdict': 'INCONCLUSIVE', 'reason_code': 'NETWORK_IMPAIRMENT_FAILED',
                           'reason': str(exc)}), file=sys.stderr)
