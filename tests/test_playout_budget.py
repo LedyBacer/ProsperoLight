@@ -1,3 +1,5 @@
+# ps5-native-app-boilerplate / ProsperoLight - host policy verification
+# Copyright (C) 2026 LedyBacer and contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Host-side deterministic checks for playout reserve and VideoOut feedback."""
 import pathlib
