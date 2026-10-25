@@ -1378,6 +1378,39 @@ static void save_performance_summary(const native_renderer_state_t &state,
                        (unsigned long long)stream_pacer.stats.backlog_catchups,
                        (unsigned long long)stream_pacer.stats.backlog_saved_us);
     // clang-format on
+    // These are CPU boundary observations, never claimed HDMI scanout times.
+    // The shared playout-budget candidate is shadow-only by default.
+    // clang-format off
+    ok = ok &&
+         report_append(report, sizeof(report), &length,
+                       "\"video_playout_budget\":{\"version\":1,\"active\":%s,"
+                       "\"observed\":%llu,\"adjusted\":%llu,\"candidate_saved_us\":%llu,"
+                       "\"max_candidate_saved_us\":%u},\n",
+                       PROSPEROLIGHT_UNIFIED_PLAYOUT_EXPERIMENT ? "true" : "false",
+                       (unsigned long long)state.playout_budget.stats.observed,
+                       (unsigned long long)state.playout_budget.stats.adjusted,
+                       (unsigned long long)state.playout_budget.stats.saved_us,
+                       state.playout_budget.stats.max_saved_us);
+    ok = ok &&
+         report_append(report, sizeof(report), &length,
+                       "\"video_present_feedback\":{\"version\":1,\"submitted\":%llu,"
+                       "\"completed\":%llu,\"late_submissions\":%llu,"
+                       "\"submit_service_total_us\":%llu,\"submit_service_max_us\":%llu,"
+                       "\"scheduler_late_total_us\":%llu,\"scheduler_late_max_us\":%llu,"
+                       "\"flip_observation_interval_max_us\":%llu,"
+                       "\"flip_counter_advances\":%llu,\"repeated_flip_counters\":%llu,"
+                       "\"timestamp_kind\":\"cpu-observation-not-hdmi-scanout\"},\n",
+                       (unsigned long long)state.present_feedback.stats.submitted,
+                       (unsigned long long)state.present_feedback.stats.completed,
+                       (unsigned long long)state.present_feedback.stats.late_submissions,
+                       (unsigned long long)state.present_feedback.stats.submit_service_total_us,
+                       (unsigned long long)state.present_feedback.stats.submit_service_max_us,
+                       (unsigned long long)state.present_feedback.stats.scheduler_late_total_us,
+                       (unsigned long long)state.present_feedback.stats.scheduler_late_max_us,
+                       (unsigned long long)state.present_feedback.stats.observed_flip_interval_max_us,
+                       (unsigned long long)state.present_feedback.stats.flip_counter_advances,
+                       (unsigned long long)state.present_feedback.stats.repeated_flip_counters);
+    // clang-format on
     ok = ok && report_append(report, sizeof(report), &length, "\"timings_us\":{\n");
     if (!ok)
         return;
