@@ -153,7 +153,7 @@ diff --git a/src/VideoStream.c b/src/VideoStream.c
              uint8_t block = rtpQueue.multiFecCapable ?
                  (uint8_t)((nv->multiFecBlocks >> 4) & 3) : 0;
              if (reorderIsFuture(frame, block) && reorderHasActiveBlock()) {
-@@ -417,14 +490,28 @@
+@@ -417,14 +490,29 @@
                      continue;
                  }
                  // Allocation or capacity limit: flush in frame/block order.
@@ -167,12 +167,13 @@ diff --git a/src/VideoStream.c b/src/VideoStream.c
 +                             !(NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE);
 +        uint32_t frameBefore = rtpQueue.currentFrameNumber;
 +        uint32_t fecBefore = rtpQueue.stats.packetCountFecRecovered;
++        uint32_t failedBefore = rtpQueue.stats.packetCountFecFailed;
 +        int status = RtpvAddPacket(&rtpQueue, packet, err,
 +                                  (PRTPV_QUEUE_ENTRY)&buffer[decryptedSize]);
 +        if (wasReordering && status == RTPF_RET_QUEUED) {
 +            REORDER_INC(LATE_ACCEPTED);
 +            reorderRescueFrame = frameBefore;
-+            reorderRescueFecFailures = rtpQueue.stats.packetCountFecFailed;
++            reorderRescueFecFailures = failedBefore;
 +        }
 +        if (wasReordering && rtpQueue.stats.packetCountFecRecovered > fecBefore) {
 +            REORDER_ADD(FEC_RECOVERED, rtpQueue.stats.packetCountFecRecovered - fecBefore);
