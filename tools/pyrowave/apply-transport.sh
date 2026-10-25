@@ -54,3 +54,14 @@ else
     echo "Video FEC stats patch does not match pinned Moonlight source" >&2
     exit 1
 fi
+
+# Keep the 40ms FEC holding window accurate without polling busy on clean LAN.
+patch="$root/tools/pyrowave/patches/moonlight/0006-video-reorder-poll.patch"
+if git -C "$common" apply --check "$patch" 2>/dev/null; then
+    git -C "$common" apply "$patch"
+elif git -C "$common" apply --reverse --check "$patch" 2>/dev/null; then
+    : # already applied
+else
+    echo "Video reorder deadline patch does not match pinned Moonlight source" >&2
+    exit 1
+fi
