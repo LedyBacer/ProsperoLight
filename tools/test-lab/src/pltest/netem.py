@@ -229,6 +229,15 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
                     direction['start_stats_error'] = str(exc)
             direction['applied'] = True
         record['applied'] = True
+        if video_target:
+            target_ip, target_port = video_target
+            record['video_udp_target'] = f'{target_ip}:{target_port}'
+            # tcpdump stops after 64 matches and writes no packet headers or
+            # payloads to the evidence; this is route/flow qualification only.
+            video_capture = subprocess.Popen(
+                ['tcpdump', '-n', '-q', '-i', interface, '-c', '64', '-w', '/dev/null',
+                 f'udp and dst host {target_ip} and dst port {target_port}'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         write_evidence(evidence_path, record)
         with subprocess.Popen(command) as child:
             try:
@@ -246,6 +255,26 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
     finally:
         # Once rollback starts, a second TERM must not interrupt qdisc removal.
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        if video_capture is not None:
+            try:
+                if video_capture.poll() is None:
+                    video_capture.send_signal(signal.SIGINT)
+                _out, capture_stderr = video_capture.communicate(timeout=5)
+                captured = captured_udp_count(capture_stderr)
+                record['video_udp_samples'] = captured
+                if captured is not None and captured >= 8:
+                    record['video_flow_verdict'] = 'UDP_EGRESS_VERIFIED'
+                else:
+                    record['video_flow_verdict'] = 'INCONCLUSIVE'
+                    record['video_flow_reason'] = 'fewer than 8 matching UDP packets on shaped egress'
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                record['video_flow_verdict'] = 'INCONCLUSIVE'
+                record['video_flow_reason'] = str(exc)
+                try:
+                    video_capture.kill()
+                    video_capture.communicate(timeout=2)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
         for direction in directions:
             if direction not in installed:
                 direction['cleanup_verified'] = True
@@ -260,6 +289,10 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
                 if start_packets is not None and end_packets is not None and end_packets > start_packets:
                     direction['traffic_verdict'] = 'EGRESS_ACTIVITY_VERIFIED'
                     direction['packet_delta'] = end_packets - start_packets
+                    direction['loss_counter_verdict'] = loss_counter_verdict(
+                        direction, direction['qdisc_stats_before_cleanup'])
+                    if direction['loss_counter_verdict'] == 'INCONCLUSIVE':
+                        direction['traffic_verdict'] = 'INCONCLUSIVE'
                 else:
                     direction['traffic_reason'] = ('netem packet counter missing or did not increase '
                                                    'during the test; routing is unverified')
@@ -283,7 +316,12 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
                 'EGRESS_ACTIVITY_VERIFIED', 'NOT_APPLICABLE') for d in directions)
             else 'INCONCLUSIVE')
         if record['traffic_verdict'] == 'INCONCLUSIVE':
-            record['reason_code'] = 'NETWORK_TRAFFIC_UNVERIFIED'
+            record['reason_code'] = (
+                'NETWORK_LOSS_UNVERIFIED'
+                if any(d.get('loss_counter_verdict') == 'INCONCLUSIVE' for d in directions)
+                else 'NETWORK_TRAFFIC_UNVERIFIED')
+        if record['video_flow_verdict'] == 'INCONCLUSIVE':
+            record['reason_code'] = 'VIDEO_UDP_FLOW_UNVERIFIED'
         if not record['cleanup_verified']:
             record['cleanup_error'] = 'one or more directions failed ownership-verified cleanup'
         record['end_utc'] = utc_now()
@@ -293,7 +331,7 @@ def run(interface, scenario, command, evidence_path=None, *, return_interface=No
             signal.signal(signal.SIGTERM, previous_term)
     if not record['cleanup_verified']:
         raise RuntimeError('NETWORK_QDISC_CLEANUP_UNVERIFIED; inspect interface manually')
-    if record['traffic_verdict'] == 'INCONCLUSIVE':
+    if record['traffic_verdict'] == 'INCONCLUSIVE' or record['video_flow_verdict'] == 'INCONCLUSIVE':
         return 3
     return code
 
