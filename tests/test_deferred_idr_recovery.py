@@ -1,3 +1,5 @@
+# ps5-native-app-boilerplate / ProsperoLight - host policy verification
+# Copyright (C) 2026 LedyBacer and contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Compile and run the actual deferred-IDR helper extracted from patch 0009."""
 import pathlib
