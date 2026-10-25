@@ -1063,7 +1063,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
              "\"late_packets_accepted\":%llu,\"late_packets_rejected\":%llu,"
              "\"reorder_wait_total_us\":%llu,\"reorder_wait_max_us\":%llu,"
              "\"reorder_timeouts\":%llu,\"fec_recovered_after_reorder\":%llu,"
-             "\"rescued_frames\":%llu,\"held_packets\":%llu,\"capacity_flushes\":%llu},\\n",
+             "\"rescued_frames\":%llu,\"held_packets\":%llu,\"capacity_flushes\":%llu},\n",
              reorder_stats_valid ? "true" : "false",
              (unsigned long long)reorder_stats.late_packets_accepted,
              (unsigned long long)reorder_stats.late_packets_rejected,
