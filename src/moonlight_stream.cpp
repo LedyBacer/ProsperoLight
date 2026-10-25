@@ -1361,12 +1361,14 @@ static void save_performance_summary(const native_renderer_state_t &state,
                        phase.mad_us, phase.tail_us, phase.cushion_us, phase.hold_us, phase.skew_us);
     // A backlog catch-up never creates a new buffering layer. Report the
     // shortened deadline separately from transport/FEC waiting.
+    // clang-format off
     ok = ok &&
          report_append(report, sizeof(report), &length,
                        "\"video_pacing_burst\":{\"version\":1,\"catchups\":%llu,"
                        "\"wait_saved_us\":%llu,\"scope\":\"fixed-vsync-network-backlog\"},\n",
                        (unsigned long long)stream_pacer.stats.backlog_catchups,
                        (unsigned long long)stream_pacer.stats.backlog_saved_us);
+    // clang-format on
     ok = ok && report_append(report, sizeof(report), &length, "\"timings_us\":{\n");
     if (!ok)
         return;
@@ -3351,9 +3353,11 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
     // As in Moonlight's bounded queue policy, use a waiting successor as
     // evidence to remove redundant WAN reserve, never as permission to skip
     // a display interval. Explicit phase-clock experiments remain isolated.
-    const bool backlog_catchup =
-        fixed && !native_agc_vrr_active() && !state->phase_clock_enabled &&
-        state->last_present_us != 0 && network_budget != 0;
+    // clang-format off
+    const bool backlog_catchup = fixed && !native_agc_vrr_active() &&
+                                 !state->phase_clock_enabled && state->last_present_us != 0 &&
+                                 network_budget != 0;
+    // clang-format on
     if (backlog_catchup && successor_queued)
         deadline = stream_pacer.catch_up_deadline(item.ready_us, deadline, refresh);
     decisions.record(item.frame, item.pts_us, started, deadline, "target");
