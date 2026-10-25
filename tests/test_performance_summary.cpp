@@ -29,6 +29,23 @@ extern "C"
         return false;
     }
 #endif
+#ifdef LI_VIDEO_REORDER_STATS_VERSION
+    bool LiGetVideoReorderStats(LI_VIDEO_REORDER_STATS *stats)
+    {
+        if (!stats)
+            return false;
+        stats->late_packets_accepted = 3;
+        stats->late_packets_rejected = 1;
+        stats->reorder_wait_total_us = 20000;
+        stats->reorder_wait_max_us = 12000;
+        stats->reorder_timeouts = 1;
+        stats->fec_recovered_after_reorder = 2;
+        stats->rescued_frames = 1;
+        stats->held_packets = 5;
+        stats->capacity_flushes = 0;
+        return true;
+    }
+#endif
     int prosperolight_logs_enabled(void)
     {
         return diagnostic_logs;
@@ -152,6 +169,11 @@ int main()
            std::string::npos);
     assert(saved_report.find("\"audio_pcm_hard_cap_frames\":8640,") != std::string::npos);
     assert(saved_report.find("\"video_phase_clock\":{\"enabled\":false,") != std::string::npos);
+#ifdef LI_VIDEO_REORDER_STATS_VERSION
+    assert(saved_report.find("\"video_reorder\":{\"available\":true,\"version\":1,") != std::string::npos);
+    assert(saved_report.find("\"late_packets_accepted\":3,\"late_packets_rejected\":1,") != std::string::npos);
+    assert(saved_report.find("\"rescued_frames\":1,\"held_packets\":5,\"capacity_flushes\":0}") != std::string::npos);
+#endif
     assert(saved_report.find("\"requested_slices_per_frame\":8,") != std::string::npos);
     const std::string original = saved_report;
     // The same summary reaches klog in bounded parts that concatenate back.
