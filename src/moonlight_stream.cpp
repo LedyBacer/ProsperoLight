@@ -3340,15 +3340,39 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
                                               stream_pacer.wake_lead_us()));
     if (phase_hold)
         deadline = std::max(deadline, started + phase_hold);
+    // As in Moonlight's bounded queue policy, use a waiting successor as
+    // evidence to remove redundant WAN reserve, never as permission to skip
+    // a display interval. Explicit phase-clock experiments remain isolated.
+    const bool backlog_catchup =
+        fixed && !native_agc_vrr_active() && !state->phase_clock_enabled &&
+        state->last_present_us != 0 && network_budget != 0;
+    if (backlog_catchup && successor_queued)
+        deadline = stream_pacer.catch_up_deadline(item.ready_us, deadline, refresh);
     decisions.record(item.frame, item.pts_us, started, deadline, "target");
     uint64_t now = started;
     while (now < deadline)
     {
         pthread_mutex_lock(&state->lock);
         const bool stopping = state->stop_presenting;
+        const bool queued_successor = backlog_catchup && state->mailbox.full;
         pthread_mutex_unlock(&state->lock);
         if (stopping)
             return false;
+        if (queued_successor)
+        {
+            // A later decoded picture may arrive while this thread sleeps.
+            // Re-check at the existing bounded 1ms wake cadence, so the
+            // reserve cannot cause needless capacity drops mid-wait.
+            const uint64_t shortened =
+                stream_pacer.catch_up_deadline(item.ready_us, deadline, refresh);
+            if (shortened < deadline)
+            {
+                deadline = shortened;
+                decisions.record(item.frame, item.pts_us, now, deadline, "catchup");
+                if (now >= deadline)
+                    break;
+            }
+        }
         const uint64_t remaining = deadline - now;
         const uint64_t lead = stream_pacer.wake_lead_us();
         if (remaining > lead)
@@ -6303,7 +6327,8 @@ done:
         prosperolight::pyrowave::cleanup();
 #endif
     LOGI("Moonlight pacing result: mode=%u period_us=%llu reserve_us=%llu submissions=%llu "
-         "misses=%llu resets=%llu wait_total_us=%llu late_max_us=%llu spacing_error_max_us=%llu",
+         "misses=%llu resets=%llu wait_total_us=%llu late_max_us=%llu spacing_error_max_us=%llu "
+         "backlog_catchups=%llu backlog_saved_us=%llu",
          stream_presentation_mode, (unsigned long long)stream_pacer.stats.period_us,
          (unsigned long long)stream_pacer.stats.reserve_us,
          (unsigned long long)stream_pacer.stats.submissions,
@@ -6311,7 +6336,9 @@ done:
          (unsigned long long)stream_pacer.stats.resets,
          (unsigned long long)stream_pacer.stats.wait_total_us,
          (unsigned long long)stream_pacer.stats.late_max_us,
-         (unsigned long long)stream_pacer.stats.spacing_error_max_us);
+         (unsigned long long)stream_pacer.stats.spacing_error_max_us,
+         (unsigned long long)stream_pacer.stats.backlog_catchups,
+         (unsigned long long)stream_pacer.stats.backlog_saved_us);
     controller_summary = prosperolight::dualsense::GetStatistics();
     save_performance_summary(renderer, input_intervals, options, result);
     if (renderer.access_units)
