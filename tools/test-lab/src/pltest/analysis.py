@@ -48,6 +48,14 @@ def network_audio_metrics(performance):
             if type(performance.get(key)) is int and performance[key] >= 0}
     # Optional native RTP reorder counters. A missing versioned object is
     # unavailable evidence, never a zero-loss claim.
+    # These counters describe fixed-VSync presentation waiting, not RTP
+    # recovery or physical scanout latency. Absence is not a zero measurement.
+    burst = performance.get('video_pacing_burst')
+    if isinstance(burst, dict) and burst.get('version') == 1:
+        for key in ('catchups', 'wait_saved_us'):
+            value = burst.get(key)
+            if type(value) is int and value >= 0:
+                data['video_pacing_burst_' + key] = value
     reorder = performance.get('video_reorder')
     reorder_fields = ('late_packets_accepted', 'late_packets_rejected',
                       'reorder_wait_total_us', 'reorder_wait_max_us',
