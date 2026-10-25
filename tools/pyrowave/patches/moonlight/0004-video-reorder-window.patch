@@ -24,13 +24,12 @@ diff --git a/src/VideoStream.c b/src/VideoStream.c
 +static unsigned reorderCount;
 +static size_t reorderBytes;
 +static int reorderEntryOffset;
- 
 +static void reorderDispatch(char* memory, int length) {
 +    int status = RtpvAddPacket(&rtpQueue, (PRTP_PACKET)memory, length,
 +                              (PRTPV_QUEUE_ENTRY)(memory + reorderEntryOffset));
 +    if (status != RTPF_RET_QUEUED) free(memory);
 +}
-+
+ 
 +static bool reorderIsFuture(uint32_t frame, uint8_t block) {
 +    return isBefore32(rtpQueue.currentFrameNumber, frame) ||
 +           (frame == rtpQueue.currentFrameNumber &&
@@ -108,10 +107,11 @@ diff --git a/src/VideoStream.c b/src/VideoStream.c
 +}
 +
 +
- // Initialize the video stream
- void initializeVideoStream(void) {
-     initializeVideoDepacketizer(StreamConfig.packetSize);
-@@ -87,7 +189,6 @@
++
+ // PyroWave frames are intra-coded at hundreds of Mbps; a 1080p120 or 4K60 frame
+ // alone can approach 2048 packets. Keep several frames of headroom.
+ #define RTP_RECV_PACKETS_BUFFERED_PYROWAVE 8192
+@@ -91,7 +193,6 @@
      int bufferSize, receiveSize, decryptedSize, minSize;
      char* buffer;
      char* encryptedBuffer;
@@ -119,7 +119,7 @@ diff --git a/src/VideoStream.c b/src/VideoStream.c
      bool useSelect;
      int waitingForVideoMs;
      bool encrypted;
-@@ -98,6 +199,10 @@
+@@ -103,6 +204,10 @@
      receiveSize = decryptedSize + ((EncryptionFeaturesEnabled & SS_ENC_VIDEO) ? sizeof(ENC_VIDEO_HEADER) : 0);
      bufferSize = decryptedSize + sizeof(RTPV_QUEUE_ENTRY);
      buffer = NULL;
@@ -128,9 +128,9 @@ diff --git a/src/VideoStream.c b/src/VideoStream.c
 +    reorderCount = 0;
 +    reorderBytes = 0;
  
-     if (setNonFatalRecvTimeoutMs(rtpSocket, UDP_RECV_POLL_TIMEOUT_MS) < 0) {
-         // SO_RCVTIMEO failed, so use select() to wait
-@@ -155,7 +260,8 @@
+     usePartialFrameTimeout = (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) != 0 &&
+                             setSocketNonBlocking(rtpSocket, true) == 0;
+@@ -193,7 +298,8 @@
                  }
              }
  
@@ -140,12 +140,13 @@ diff --git a/src/VideoStream.c b/src/VideoStream.c
              continue;
          }
  
-@@ -227,14 +333,28 @@
+@@ -266,14 +372,29 @@
          packet->timestamp = BE32(packet->timestamp);
          packet->ssrc = BE32(packet->ssrc);
  
 +        int headerSize = sizeof(*packet) + ((packet->header & FLAG_EXTENSION) ? 4 : 0);
-+        if (err >= headerSize + (int)sizeof(NV_VIDEO_PACKET)) {
++        if (err >= headerSize + (int)sizeof(NV_VIDEO_PACKET) &&
++            !(NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE)) {
 +            PNV_VIDEO_PACKET nv = (PNV_VIDEO_PACKET)(buffer + headerSize);
 +            uint32_t frame = LE32(nv->frameIndex);
 +            uint8_t block = rtpQueue.multiFecCapable ?
