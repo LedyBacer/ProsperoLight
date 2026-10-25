@@ -71,28 +71,28 @@ int main() {
         assert(target>=previous+2000000 && target<=previous+2010000);
         assert(p.stats.resets);
     }
-    // Nonary/Punktfunk-inspired burst catch-up: a decoded successor that
+    // Nonary/Punktfunk-inspired burst_pacer catch-up: a decoded successor that
     // arrives during an existing WAN reserve can shorten that wait, but may
     // never evade the source-period floor for fixed VSync.
-    moonlight::FramePacing burst;
-    burst.reset(60);
-    burst.set_network_jitter_budget_us(30000);
-    burst.submitted(1000000,1000000,0);
-    auto burst_target=burst.target(2,33333,1016666,6000,1000000);
+    moonlight::FramePacing burst_pacer;
+    burst_pacer.reset(60);
+    burst_pacer.set_network_jitter_budget_us(30000);
+    burst_pacer.submitted(1000000,1000000,0);
+    auto burst_target=burst_pacer.target(2,33333,1016666,6000,1000000);
     const auto original_burst_target=burst_target+20000;
-    const auto caught_up=burst.catch_up_deadline(1016666,original_burst_target,6000);
+    const auto caught_up=burst_pacer.catch_up_deadline(1016666,original_burst_target,6000);
     assert(caught_up>=1016666 && caught_up>=1000000+16666*98/100);
     assert(caught_up<original_burst_target);
-    assert(burst.stats.backlog_catchups==1);
-    assert(burst.stats.backlog_saved_us==original_burst_target-caught_up);
+    assert(burst_pacer.stats.backlog_catchups==1);
+    assert(burst_pacer.stats.backlog_saved_us==original_burst_target-caught_up);
     // A second observation of the same successor must not double-account.
-    assert(burst.catch_up_deadline(1016666,caught_up,6000)==caught_up);
-    assert(burst.stats.backlog_catchups==1);
+    assert(burst_pacer.catch_up_deadline(1016666,caught_up,6000)==caught_up);
+    assert(burst_pacer.stats.backlog_catchups==1);
     // When the source cadence is not a divisor of the fixed display grid
     // (90 FPS on 60 Hz), its fractional presentation policy must be retained.
-    assert(burst.catch_up_deadline(1016666,original_burst_target,9000)==original_burst_target);
-    burst.set_network_jitter_budget_us(0);
-    assert(burst.catch_up_deadline(1016666,original_burst_target,6000)==original_burst_target);
+    assert(burst_pacer.catch_up_deadline(1016666,original_burst_target,9000)==original_burst_target);
+    burst_pacer.set_network_jitter_budget_us(0);
+    assert(burst_pacer.catch_up_deadline(1016666,original_burst_target,6000)==original_burst_target);
     moonlight::FramePacing initial;
     initial.reset(60);
     initial.set_network_jitter_budget_us(30000);
