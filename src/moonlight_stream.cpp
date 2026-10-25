@@ -3546,10 +3546,10 @@ static int submit_presentation(native_renderer_state_t *state, const stream_read
         return result;
     }
     if (item.trace)
-    {
         item.trace->submit_us = finished;
-        item.trace->outcome = 1;
-    }
+    // A successful VideoOut submit is not a completed flip. Leave the trace
+    // incomplete until native_agc_finish_frame() confirms that the picture
+    // was accepted for display.
     return 0;
 }
 
@@ -3562,6 +3562,10 @@ static int complete_presentation(native_renderer_state_t *state, const stream_re
     moonlight::record_performance_elapsed(state->completion_wait_timing, wait_started);
     if (result != 0)
     {
+        // The picture may have been submitted, but VideoOut did not confirm
+        // the flip. Do not label it as displayed in the diagnostic trace.
+        if (item.trace)
+            item.trace->outcome = 3;
         std::atomic_store_explicit(&state->present_result, result, std::memory_order_relaxed);
         return result;
     }
@@ -3569,7 +3573,10 @@ static int complete_presentation(native_renderer_state_t *state, const stream_re
     const uint32_t presented =
         std::atomic_load_explicit(&state->presented, std::memory_order_relaxed);
     if (item.trace)
+    {
         item.trace->completion_us = flipped_us;
+        item.trace->outcome = 1;
+    }
     if (presented != 0)
         state->flip_interval_timing.add(flipped_us - state->last_present_us);
     else
