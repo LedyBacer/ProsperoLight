@@ -148,3 +148,16 @@ else
     echo "Video reorder telemetry classification patch does not match pinned Moonlight source" >&2
     exit 1
 fi
+
+# Reject stale RTP sequence windows and impossible FEC geometry before
+# reserving limited reorder memory. The actual parser remains authoritative.
+patch="$root/tools/pyrowave/patches/moonlight/0013-reorder-staging-admission.patch"
+if git -C "$common" apply --check "$patch" 2>/dev/null; then
+    git -C "$common" apply "$patch"
+elif grep -Fq 'static bool reorderStagingEligible(' "$common/src/VideoStream.c" &&
+     grep -Fq 'reorderStagingEligible(packet->sequenceNumber' "$common/src/VideoStream.c"; then
+    : # Already applied.
+else
+    echo "Video reorder admission patch does not match pinned Moonlight source" >&2
+    exit 1
+fi

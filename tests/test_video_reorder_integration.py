@@ -62,6 +62,7 @@ static uint8_t dispatchBlocks[4096];
 static int dispatchCount;
 static uint64_t PltGetMicroseconds(void) { return testNow; }
 static bool isBefore32(uint32_t a, uint32_t b) { return (int32_t)(a - b) < 0; }
+static bool isBefore16(uint16_t a, uint16_t b) { return (int16_t)(a - b) < 0; }
 #define RTPF_RET_QUEUED 1
 static int RtpvAddPacket(FakeQueue* q, PRTP_PACKET p, int length, PRTPV_QUEUE_ENTRY entry) {
     (void)length; (void)entry;
@@ -95,6 +96,15 @@ static void reset(uint32_t frame) {
         atomic_store_explicit(&reorderCounters[i], 0, memory_order_relaxed);
 }
 int main(void) {
+    const uint32_t fec = (8u << 22) | (4u << 12) | (50u << 4);
+    assert(reorderStagingEligible(100, 50, true, fec, 0x40, true));
+    assert(!reorderStagingEligible(49, 50, true, fec, 0x40, true)); // stale RTP
+    assert(!reorderStagingEligible(100, 50, false, fec, 0x40, true)); // no extension
+    assert(!reorderStagingEligible(100, 50, true, 4u << 12, 0x40, true)); // no data
+    assert(!reorderStagingEligible(100, 50, true, (8u << 22) | (12u << 12) |
+                                   (50u << 4), 0x40, true)); // invalid FEC index
+    assert(!reorderStagingEligible(100, 50, true, fec, 0x20, true)); // block > last
+    assert(reorderStagingEligible(100, 50, true, fec, 0x20, false)); // legacy single-FEC
     reset(10);
     assert(reorderHold(packet(12, 0, 0), sizeof(FakePacket), 12, 0, false));
     assert(reorderHold(packet(11, 1, 0), sizeof(FakePacket), 11, 1, true));
