@@ -78,6 +78,22 @@ loose thresholds detect gross misrouting/misaccounting, not small random
 differences. A 1% configured-loss run with one qdisc drop out of ~100,000 packets
 must never be treated as proof of real 1% wire loss.
 
+Before a PS5 loss test, optionally qualify the Linux gateway's own `netem`
+behavior with an isolated synthetic UDP run (requires CAP_NET_ADMIN):
+
+```sh
+python3 tools/test-lab/netem_calibrate.py --scenario wifi-congested --count 12000
+```
+
+The calibrator creates a random owned network namespace, uses **only its
+loopback**, and removes that namespace afterward. It reports both received
+UDP sequence numbers and `tc -s -j` drop counts. No Windows route, PS5 socket,
+or host-facing NIC is changed. A `qualified=false` result blocks a physical
+loss claim; `qualified=true` establishes only the local qdisc configuration,
+not that the later video flow takes the shaped path. The latter still requires
+`--verify-video-udp` on the actual run. The calibrator is intentionally opt-in
+and not part of unprivileged CI.
+
 The wrapper records the test exit code;
 rolls back only its own qdiscs (including if the second installation fails) on completion/error/
 Ctrl+C; and writes a per-direction cleanup receipt. An interrupted/failed run
@@ -110,7 +126,10 @@ an external RTT measurement and label its measurement source explicitly.
 python3 -m unittest tests.test_test_lab_netem tests.test_network_jitter_replay \
   tests.test_frame_pacing_policy tests.test_ps5_pacing_replay \
   tests.test_audio_pcm_policy tests.test_audio_jitter_policy \
-  tests.test_frame_phase_clock tests.test_test_lab_analysis -v
+  tests.test_frame_phase_clock tests.test_test_lab_analysis \
+  tests.test_video_reorder_integration tests.test_deferred_idr_recovery \
+  tests.test_presentation_mailbox_replay tests.test_playout_budget \
+  tests.test_netem_calibration -v
 ```
 
 The deterministic host-only tests use synthetic arrival/decode timelines to
@@ -174,6 +193,20 @@ actual UDP traffic, and is only effective on a verified routed path.
   **separate clock domains**. Do not subtract absolute timestamps between
   them. A large network-enqueue p95 with stable source PTS suggests delivery
   jitter; decoder-ready/presentation variation can be local PS5 work.
+- `video_source_due_shadow` v2 is **observation only**. Its clock-offset model
+  learns at the video callback entry on the local monotonic clock; it must not
+  compare absolute Common-C `enqueueTimeUs` against native `ready_us`.
+  `post_callback_delay_max_us` is time from callback entry to decoder readiness,
+  not packet transit, physical scanout latency or an enabled presentation mode.
+- `video_reorder` v2 separately counts obsolete video data and FEC parity;
+  `late_data_rejected`/`late_parity_rejected` describe packets too late to
+  enter the current FEC block, **not** unrecoverable frame loss. The real
+  Common-C reorder helpers are exercised by a sanitized synthetic UDP/FEC
+  queue replay; full Reed–Solomon decoding and Wi-Fi hardware are not emulated.
+- `audio_startup_silence_grains` and `audio_active_silence_grains` distinguish
+  pre-first-PCM silence from playback gaps. `audio_first_underrun_us` and
+  `audio_last_underrun_us` are monotonic timestamps of policy underrun events,
+  not audible dropout durations. All are diagnostic counters only.
 - `video_phase_clock` is an **experimental**, native fixed-Paced-only
   cadence-phase model. It derives a bounded hold from source PTS and network
   enqueue, at most one frame and never more than the existing network budget.

@@ -506,6 +506,8 @@ typedef struct ps5_audio_state
     uint64_t first_output_call_us, last_output_call_us;
     uint64_t first_pcm_output_us, last_pcm_enqueue_us;
     uint32_t silence_grains, short_grains, crossfades;
+    uint32_t startup_silence_grains, active_silence_grains;
+    uint64_t first_underrun_us, last_underrun_us;
     uint64_t drift_shed_frames;
     uint64_t ring_frame_sum, ring_observations;
     moonlight::AudioPrebufferPolicy prebuffer_policy;
@@ -1068,14 +1070,17 @@ static void save_performance_summary(const native_renderer_state_t &state,
     const bool reorder_stats_valid = LiGetVideoReorderStats(&reorder_stats);
     // clang-format off
     ok = ok && report_append(report, sizeof(report), &length,
-                             "\"video_reorder\":{\"available\":%s,\"version\":1,"
+                             "\"video_reorder\":{\"available\":%s,\"version\":2,"
                              "\"late_packets_accepted\":%llu,\"late_packets_rejected\":%llu,"
+                             "\"late_data_rejected\":%llu,\"late_parity_rejected\":%llu,"
                              "\"reorder_wait_total_us\":%llu,\"reorder_wait_max_us\":%llu,"
                              "\"reorder_timeouts\":%llu,\"fec_recovered_after_reorder\":%llu,"
                              "\"rescued_frames\":%llu,\"held_packets\":%llu,\"capacity_flushes\":%llu},\n",
                              reorder_stats_valid ? "true" : "false",
                              (unsigned long long)reorder_stats.late_packets_accepted,
                              (unsigned long long)reorder_stats.late_packets_rejected,
+                             (unsigned long long)reorder_stats.late_data_rejected,
+                             (unsigned long long)reorder_stats.late_parity_rejected,
                              (unsigned long long)reorder_stats.reorder_wait_total_us,
                              (unsigned long long)reorder_stats.reorder_wait_max_us,
                              (unsigned long long)reorder_stats.reorder_timeouts,
@@ -1349,11 +1354,16 @@ static void save_performance_summary(const native_renderer_state_t &state,
          report_append(report, sizeof(report), &length,
                        "\"audio_pcm_hard_cap_frames\":%u,\"audio_first_pcm_output_us\":%llu,"
                        "\"audio_silence_grains\":%u,\"audio_short_grains\":%u,"
+                       "\"audio_startup_silence_grains\":%u,\"audio_active_silence_grains\":%u,"
+                       "\"audio_first_underrun_us\":%llu,\"audio_last_underrun_us\":%llu,"
                        "\"audio_crossfades\":%u,\"audio_drift_shed_frames\":%llu,"
                        "\"audio_ring_ewma_frames\":%u,\"audio_near_miss_events\":%u,"
                        "\"audio_failed_shrink_probes\":%u,\n",
                        AUDIO_RING_FRAMES, (unsigned long long)audio_state.first_pcm_output_us,
-                       audio_state.silence_grains, audio_state.short_grains, audio_state.crossfades,
+                       audio_state.silence_grains, audio_state.short_grains,
+                       audio_state.startup_silence_grains, audio_state.active_silence_grains,
+                       (unsigned long long)audio_state.first_underrun_us,
+                       (unsigned long long)audio_state.last_underrun_us, audio_state.crossfades,
                        (unsigned long long)audio_state.drift_shed_frames,
                        audio_state.drift_policy.mean_frames(),
                        audio_state.prebuffer_policy.near_miss_events(),
@@ -1415,13 +1425,14 @@ static void save_performance_summary(const native_renderer_state_t &state,
     // clang-format off
     ok = ok && report_append(
         report, sizeof(report), &length,
-        "\"video_source_due_shadow\":{\"version\":1,\"active\":false,"
+        "\"video_source_due_shadow\":{\"version\":2,\"active\":false,"
         "\"samples\":%llu,\"late\":%llu,\"reanchors\":%llu,"
-        "\"cushion_us\":%u,\"jitter_us\":%u},\n",
+        "\"cushion_us\":%u,\"jitter_us\":%u,\"post_callback_delay_max_us\":%u},\n",
         (unsigned long long)state.source_due.stats.samples,
         (unsigned long long)state.source_due.stats.late,
         (unsigned long long)state.source_due.stats.reanchors,
-        state.source_due.stats.cushion_us, state.source_due.stats.jitter_us);
+        state.source_due.stats.cushion_us, state.source_due.stats.jitter_us,
+        state.source_due.stats.post_callback_delay_max_us);
     // clang-format on
     ok = ok && report_append(report, sizeof(report), &length, "\"timings_us\":{\n");
     if (!ok)
@@ -3396,10 +3407,12 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
     // clang-format off
     const auto playout = state->playout_budget.observe(
         network_budget, item.receive_us, item.enqueue_us, state->stream_fps);
-    // Shadow comparison only. The host RTP clock is relative and gets mapped
-    // to local monotonic time without replacing the tested FramePacing path.
+    // Shadow comparison only: use callback ingress in the CLOCK_MONOTONIC
+    // domain (Common-C enqueue timestamps are process-relative), then score
+    // downstream decode readiness separately from ingress jitter.
     (void)state->source_due.observe(
-        item.pts_us, item.ready_us, UINT32_C(1000000) / std::max(1u, state->stream_fps));
+        item.pts_us, item.arrival_us, item.ready_us,
+        UINT32_C(1000000) / std::max(1u, state->stream_fps));
     // clang-format on
 #if PROSPEROLIGHT_UNIFIED_PLAYOUT_EXPERIMENT
     stream_pacer.set_network_jitter_budget_us(playout.remaining_us);
@@ -4102,6 +4115,9 @@ static void *ps5_audio_output_worker(void *)
         if (decision.underrun)
         {
             ++state->underruns;
+            if (!state->first_underrun_us)
+                state->first_underrun_us = now_us;
+            state->last_underrun_us = now_us;
             state->prebuffer_policy.on_underrun(now_us);
         }
         else if (decision.near_miss && state->last_pcm_enqueue_us &&
@@ -4138,6 +4154,10 @@ static void *ps5_audio_output_worker(void *)
         else
         {
             ++state->silence_grains;
+            if (state->first_pcm_output_us)
+                ++state->active_silence_grains;
+            else
+                ++state->startup_silence_grains;
             // A previously full grain may end at a non-zero sample before
             // the next packet drought. Ramp into zero rather than cutting
             // the hardware stream abruptly at the grain boundary.

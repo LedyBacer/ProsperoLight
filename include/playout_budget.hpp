@@ -64,14 +64,22 @@ class SourceDueClock
     struct Stats
     {
         uint64_t samples{}, late{}, reanchors{};
-        uint32_t cushion_us{}, jitter_us{};
+        uint32_t cushion_us{}, jitter_us{}, post_callback_delay_max_us{};
     } stats;
 
-    uint64_t observe(uint64_t pts_us, uint64_t ready_us, uint32_t source_period_us)
+    // Learn the source-to-receiver offset from the video callback's ingress
+    // timestamp, *not* Common-C's enqueueTimeUs: PltGetMicroseconds() is
+    // process-relative, while ready_us uses CLOCK_MONOTONIC. Decoder/GPU
+    // stalls are evaluated separately and never train the ingress estimate.
+    uint64_t observe(uint64_t pts_us, uint64_t ingress_us, uint64_t ready_us,
+                     uint32_t source_period_us)
     {
-        if (!pts_us || !ready_us || !source_period_us)
+        if (!pts_us || !ingress_us || !ready_us || !source_period_us || ready_us < ingress_us)
             return ready_us;
-        const int64_t raw = static_cast<int64_t>(ready_us) - static_cast<int64_t>(pts_us);
+        stats.post_callback_delay_max_us = std::max(
+            stats.post_callback_delay_max_us,
+            static_cast<uint32_t>(std::min<uint64_t>(ready_us - ingress_us, UINT32_MAX)));
+        const int64_t raw = static_cast<int64_t>(ingress_us) - static_cast<int64_t>(pts_us);
         if (!initialized_ || pts_us < previous_pts_us_ ||
             pts_us - previous_pts_us_ > UINT64_C(500000))
         {

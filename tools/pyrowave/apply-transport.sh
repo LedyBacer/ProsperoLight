@@ -109,3 +109,42 @@ else
     echo "Deferred IDR recovery patch does not match pinned Moonlight source" >&2
     exit 1
 fi
+
+# Keep sorted future-block staging O(1) in the common append case. Rare true
+# out-of-order inserts still use the original bounded ordered-list traversal.
+patch="$root/tools/pyrowave/patches/moonlight/0010-video-reorder-tail-fastpath.patch"
+if git -C "$common" apply --check "$patch" 2>/dev/null; then
+    git -C "$common" apply "$patch"
+elif grep -Fq 'static VIDEO_REORDER_HELD* reorderTail;' "$common/src/VideoStream.c" &&
+     grep -Fq 'reorderTail->next = entry;' "$common/src/VideoStream.c"; then
+    : # Already applied.
+else
+    echo "Video reorder tail fast path does not match pinned Moonlight source" >&2
+    exit 1
+fi
+
+# Synchronize the decoder-owner IDR-wait flag and make pending recovery
+# cancellation generation-safe across concurrent receive/decode callbacks.
+patch="$root/tools/pyrowave/patches/moonlight/0011-recovery-epoch-safety.patch"
+if git -C "$common" apply --check "$patch" 2>/dev/null; then
+    git -C "$common" apply "$patch"
+elif grep -Fq 'static _Atomic uint64_t deferredIdrEpoch;' "$common/src/VideoDepacketizer.c" &&
+     grep -Fq 'static _Atomic bool waitingForIdrFrame;' "$common/src/VideoDepacketizer.c"; then
+    : # Already applied.
+else
+    echo "Video recovery epoch patch does not match pinned Moonlight source" >&2
+    exit 1
+fi
+
+# Distinguish obsolete FEC parity from missing data in reorder diagnostics;
+# the packets and existing admission/recovery decisions remain untouched.
+patch="$root/tools/pyrowave/patches/moonlight/0012-video-reorder-classification.patch"
+if git -C "$common" apply --check "$patch" 2>/dev/null; then
+    git -C "$common" apply "$patch"
+elif grep -Fq 'LI_VIDEO_REORDER_STATS_VERSION 2' "$common/src/Limelight.h" &&
+     grep -Fq 'RV_LATE_PARITY' "$common/src/VideoStream.c"; then
+    : # Already applied.
+else
+    echo "Video reorder telemetry classification patch does not match pinned Moonlight source" >&2
+    exit 1
+fi
