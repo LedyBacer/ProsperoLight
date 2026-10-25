@@ -1,0 +1,94 @@
+diff --git a/src/VideoDepacketizer.c b/src/VideoDepacketizer.c
+--- a/src/VideoDepacketizer.c
++++ b/src/VideoDepacketizer.c
+@@ -38,21 +38,43 @@
+-// Coalesce only redundant keyframe requests; keep the existing RFI/IDR
+-// state machine and decoder lifecycle entirely unchanged. An absent IDR can
+-// be requested again after this short interval if stream loss continues.
+-#define IDR_REQUEST_COOLDOWN_US UINT64_C(100000)
+-static _Atomic uint64_t lastIdrRequestUs;
+-static void requestIdrCoalesced(void) {
+-    uint64_t now = PltGetMicroseconds();
+-    uint64_t previous = atomic_load_explicit(&lastIdrRequestUs, memory_order_relaxed);
+-    for (;;) {
+-        if (previous != 0 && now >= previous &&
+-            now - previous < IDR_REQUEST_COOLDOWN_US) {
+-            return;
+-        }
+-        if (atomic_compare_exchange_weak_explicit(&lastIdrRequestUs, &previous,
+-                                                  now, memory_order_relaxed,
+-                                                  memory_order_relaxed)) {
+-            LiRequestIdrFrame();
+-            return;
+-        }
+-    }
+-}
++// Coalesce only redundant keyframe requests; keep the existing RFI/IDR
++// state machine and decoder lifecycle entirely unchanged. An absent IDR can
++// be requested again after this short interval if stream loss continues.
++#define IDR_REQUEST_COOLDOWN_US UINT64_C(100000)
++static _Atomic uint64_t lastIdrRequestUs;
++static _Atomic bool deferredIdrRequest;
++static void requestIdrCoalesced(void) {
++    uint64_t now = PltGetMicroseconds();
++    uint64_t previous = atomic_load_explicit(&lastIdrRequestUs, memory_order_relaxed);
++    for (;;) {
++        if (previous != 0 && now >= previous &&
++            now - previous < IDR_REQUEST_COOLDOWN_US) {
++            atomic_store_explicit(&deferredIdrRequest, true, memory_order_relaxed);
++            return;
++        }
++        if (atomic_compare_exchange_weak_explicit(&lastIdrRequestUs, &previous,
++                                                  now, memory_order_relaxed,
++                                                  memory_order_relaxed)) {
++            // Clear only requests already pending before this send.
++            (void)atomic_exchange_explicit(&deferredIdrRequest, false, memory_order_relaxed);
++            LiRequestIdrFrame();
++            return;
++        }
++    }
++}
++
++
++// Called on the sole video receive thread, including idle recv timeouts.
++// A request inside the cooldown is not lost: dispatch it once that window
++// expires, but cancel it if the depacketizer already accepted recovery.
++// These frame-state flags are owned by the Moonlight receive/depacketizer path.
++void PlVideoRecoveryPoll(void) {
++    if (!atomic_load_explicit(&deferredIdrRequest, memory_order_relaxed))
++        return;
++    if (!waitingForIdrFrame && !waitingForNextSuccessfulFrame) {
++        atomic_store_explicit(&deferredIdrRequest, false, memory_order_relaxed);
++        return;
++    }
++    uint64_t last = atomic_load_explicit(&lastIdrRequestUs, memory_order_relaxed);
++    uint64_t now = PltGetMicroseconds();
++    if (!last || now < last || now - last >= IDR_REQUEST_COOLDOWN_US)
++        requestIdrCoalesced();
++}
+@@ -118,1 +118,2 @@
+-    atomic_store_explicit(&lastIdrRequestUs, 0, memory_order_relaxed);
++    atomic_store_explicit(&lastIdrRequestUs, 0, memory_order_relaxed);
++    atomic_store_explicit(&deferredIdrRequest, false, memory_order_relaxed);
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -1,1 +1,2 @@
+ #include "Limelight-internal.h"
++extern void PlVideoRecoveryPoll(void);
+@@ -300,2 +300,3 @@
+-            reorderRelease(false);
+-            continue;
++            reorderRelease(false);
++            PlVideoRecoveryPoll();
++            continue;
+@@ -520,4 +520,5 @@
+-        reorderRelease(false);
+-    }
+-
+-    reorderCleanup();
++        reorderRelease(false);
++        PlVideoRecoveryPoll();
++    }
++
++    reorderCleanup();
