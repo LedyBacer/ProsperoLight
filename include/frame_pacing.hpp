@@ -205,6 +205,7 @@ class FramePacing
     {
         uint64_t misses{}, resets{}, submissions{}, reserve_us{}, period_us{};
         uint64_t wait_total_us{}, late_max_us{}, spacing_error_max_us{};
+        uint64_t backlog_catchups{}, backlog_saved_us{};
     } stats;
 
     void set_network_jitter_budget_us(uint32_t budget)
@@ -406,6 +407,37 @@ class FramePacing
         stats.reserve_us = reserve_;
         stats.period_us = period_;
         return deadline;
+    }
+
+    // Catch up after a reorder/FEC burst has already produced a new ready
+    // picture. Keeping an extra network-derived playout reserve here causes
+    // the two-slot mailbox to evict good frames before they reach VideoOut.
+    // Remove *only* the redundant reserve; still respect the fixed display's
+    // source-period floor. A lone frame, LAN, VRR and non-divisor rates retain
+    // the existing policy. The caller may repeat this after a successor
+    // arrives during a bounded wait.
+    uint64_t catch_up_deadline(uint64_t ready_us, uint64_t deadline_us,
+                               uint32_t fixed_refresh_x100)
+    {
+        if (!network_budget_us_ || !submitted_ || !fixed_refresh_x100 || !nominal_period_)
+            return deadline_us;
+        const uint64_t display_period = UINT64_C(100000000) / fixed_refresh_x100;
+        if (!display_period)
+            return deadline_us;
+        const uint64_t divisor =
+            std::max<uint64_t>(1, (nominal_period_ + display_period / 2) / display_period);
+        const uint64_t matched = display_period * divisor;
+        const uint64_t error =
+            matched > nominal_period_ ? matched - nominal_period_ : nominal_period_ - matched;
+        if (error > nominal_period_ / 100)
+            return deadline_us;
+        const uint64_t minimum = matched * 98 / 100;
+        const uint64_t candidate = std::max(ready_us, submitted_ + minimum);
+        if (candidate >= deadline_us)
+            return deadline_us;
+        ++stats.backlog_catchups;
+        stats.backlog_saved_us += deadline_us - candidate;
+        return candidate;
     }
 
     void submitted(uint64_t planned_us, uint64_t actual_us, uint64_t wait_us)
