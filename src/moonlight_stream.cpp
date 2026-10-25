@@ -3724,11 +3724,14 @@ static void *video_present_thread(void *context)
         // Only discard an old ready image if a decoded replacement exists.
         // GPU/decoder service is not counted as replaceable queue residence.
         while (stream_presentation_mode && state->mailbox.full &&
-               monotonic_us() >
+               moonlight::deadline_mailbox_replacement(
+                   monotonic_us(),
                    current.ready_us + stream_pacer.admission_limit_us(
                                           0, native_agc_vrr_active() && vrr_repeats.grid_active()
                                                  ? vrr_repeats.interval()
-                                                 : 0))
+                                                 : 0),
+                   current.pts_us, state->mailbox.item.pts_us,
+                   state->mailbox.item.ready_us))
         {
             decisions.record(current.frame, current.pts_us, monotonic_us(), 0, "drop-age");
             state->frames.release(current.slot);
