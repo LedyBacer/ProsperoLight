@@ -50,7 +50,8 @@ static Result replay(unsigned source_fps, unsigned refresh_x100, bool burst, boo
     uint64_t now = base_us, last_submit = 0, last_flip = 0;
     size_t input = 0;
 
-    const auto admit = [&](const Picture &next) {
+    const auto admit = [&](const Picture &next)
+    {
         Picture displaced{};
         if (mailbox.publish(next, &displaced))
         {
@@ -68,17 +69,17 @@ static Result replay(unsigned source_fps, unsigned refresh_x100, bool burst, boo
         Picture current{};
         if (!mailbox.take(&current))
             continue;
+        const uint64_t admission_due = current.ready_us + pacer.admission_limit_us(0, 0);
         while (mailbox.full &&
-               moonlight::deadline_mailbox_replacement(
-                   now, current.ready_us + pacer.admission_limit_us(0, 0), current.pts_us,
-                   mailbox.item.pts_us, mailbox.item.ready_us))
+               moonlight::deadline_mailbox_replacement(now, admission_due, current.pts_us,
+                                                       mailbox.item.pts_us, mailbox.item.ready_us))
         {
             ++result.age_drops;
             assert(mailbox.take(&current));
         }
 
-        uint64_t deadline = pacer.target(current.frame, current.pts_us, now, refresh_x100,
-                                         last_flip);
+        uint64_t deadline =
+            pacer.target(current.frame, current.pts_us, now, refresh_x100, last_flip);
         if (burst && catchup && mailbox.full)
             deadline = pacer.catch_up_deadline(current.ready_us, now, deadline, refresh_x100);
         // Producer can publish a successor during the <=1 ms present-thread
@@ -88,8 +89,7 @@ static Result replay(unsigned source_fps, unsigned refresh_x100, bool burst, boo
             now = arrival[input].ready_us;
             admit(arrival[input++]);
             if (burst && catchup && mailbox.full)
-                deadline = pacer.catch_up_deadline(current.ready_us, now, deadline,
-                                                   refresh_x100);
+                deadline = pacer.catch_up_deadline(current.ready_us, now, deadline, refresh_x100);
         }
 
         now = std::max(now, deadline);
