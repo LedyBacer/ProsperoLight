@@ -25,6 +25,89 @@ class NetemTest(unittest.TestCase):
             self.assertLessEqual(value['loss_percent'], 2)
             self.assertIn('delay', netem.tc_args(name))
 
+    def test_configured_loss_must_match_large_netem_sample(self):
+        direction = {'scenario': 'wifi-congested', 'packet_delta': 101000,
+                     'drops_at_start': 0}
+        stats = [{'root': True, 'kind': 'netem', 'handle': '51:', 'drops': 1}]
+        self.assertEqual(netem.loss_counter_verdict(direction, stats), 'INCONCLUSIVE')
+        self.assertEqual(direction['drop_delta'], 1)
+        self.assertGreater(direction['expected_drops_at_configured_rate'], 1000)
+        stats[0]['drops'] = 900
+        self.assertEqual(netem.loss_counter_verdict(direction, stats), 'PLAUSIBLE')
+        direction['packet_delta'] = 50
+        self.assertEqual(netem.loss_counter_verdict(direction, stats), 'INSUFFICIENT_SAMPLE')
+        direction['packet_delta'] = 101000
+        stats[0].pop('drops')
+        self.assertEqual(netem.loss_counter_verdict(direction, stats), 'INCONCLUSIVE')
+
+    def test_video_udp_target_syntax_and_capture_statistics(self):
+        self.assertEqual(netem.parse_video_udp_target('192.0.2.25:47998'),
+                         ('192.0.2.25', 47998))
+        for invalid in ('example.com:47998', '192.0.2.25:0', '192.0.2.25:99999',
+                        '192.0.2.25', '192.0.2.300:47998'):
+            with self.assertRaises(ValueError):
+                netem.parse_video_udp_target(invalid)
+        self.assertEqual(netem.captured_udp_count('64 packets captured\\n'), 64)
+        self.assertIsNone(netem.captured_udp_count('tcpdump: permission denied'))
+        with patch.object(netem, 'execute') as execute:
+            execute.return_value.stdout = '[{"dev":"wrong-route"}]'
+            with self.assertRaisesRegex(ValueError, 'does not route'):
+                netem.validate_video_udp_route('test0', '192.0.2.25')
+
+    def test_udp_flow_must_match_shaped_egress_and_cleanup(self):
+        state = {'kind': 'fq', 'handle': '0:', 'packets': 0, 'drops': 0}
+        requested = []
+
+        def execute(args, **_kwargs):
+            requested.append(args)
+            if args[:4] == ['ip', '-j', 'route', 'get']:
+                return type('Result', (), {'stdout': '[{"dev":"test0"}]'})()
+            if args[:4] == ['ip', '-j', 'route', 'show']:
+                return type('Result', (), {'stdout': '[{"dev":"wan0"}]'})()
+            if 'show' in args:
+                return type('Result', (), {'stdout': json.dumps([dict(state, root=True)])})()
+            if args[:3] == ['tc', 'qdisc', 'add']:
+                state.update(kind='netem', handle='51:')
+            if args[:3] == ['tc', 'qdisc', 'del']:
+                state.update(kind='fq', handle='0:')
+            return type('Result', (), {'stdout': ''})()
+
+        class Capture:
+            def __init__(self, samples):
+                self.samples = samples
+            def poll(self): return 0
+            def communicate(self, **_kwargs):
+                return ('', f'{self.samples} packets captured\\n')
+
+        class Child:
+            def wait(self):
+                state['packets'] = 10000
+                state['drops'] = 100
+                return 0
+            def poll(self): return 0
+
+        for samples, verdict in ((64, 'UDP_EGRESS_VERIFIED'), (0, 'INCONCLUSIVE')):
+            state.update(kind='fq', handle='0:', packets=0, drops=0)
+            with tempfile.TemporaryDirectory() as folder, \\
+                    patch.object(netem.platform, 'system', return_value='Linux'), \\
+                    patch.object(netem, 'execute', side_effect=execute), \\
+                    patch.object(netem.subprocess, 'Popen',
+                                 side_effect=[Capture(samples), Child()]):
+                evidence = Path(folder) / 'video-flow.json'
+                result = netem.run('test0', 'wifi-congested', ['pltest'], evidence,
+                                   verify_video_udp='192.0.2.25:47998')
+                receipt = json.loads(evidence.read_text())
+                self.assertEqual(result, 0 if samples else 3)
+                self.assertEqual(receipt['video_flow_verdict'], verdict)
+                self.assertEqual(receipt['directions'][0]['loss_counter_verdict'], 'PLAUSIBLE')
+                self.assertTrue(receipt['cleanup_verified'])
+                self.assertEqual(state['kind'], 'fq')
+                if not samples:
+                    self.assertEqual(receipt['reason_code'], 'VIDEO_UDP_FLOW_UNVERIFIED')
+        self.assertTrue(any('tcpdump' in args[0] for args in requested) is False)
+        # The capture subprocess is separate from tc; no packet bytes are
+        # written into the evidence receipt.
+
     def test_lan_baseline_does_not_require_a_netem_counter(self):
         class Child:
             def __enter__(self): return self
