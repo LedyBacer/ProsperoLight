@@ -1359,6 +1359,14 @@ static void save_performance_summary(const native_renderer_state_t &state,
                        (unsigned long long)phase.samples, (unsigned long long)phase.reanchors,
                        (unsigned long long)phase.late, phase.samples ? phase.min_slack_us : 0,
                        phase.mad_us, phase.tail_us, phase.cushion_us, phase.hold_us, phase.skew_us);
+    // A backlog catch-up never creates a new buffering layer. Report the
+    // shortened deadline separately from transport/FEC waiting.
+    ok = ok &&
+         report_append(report, sizeof(report), &length,
+                       "\"video_pacing_burst\":{\"version\":1,\"catchups\":%llu,"
+                       "\"wait_saved_us\":%llu,\"scope\":\"fixed-vsync-network-backlog\"},\n",
+                       (unsigned long long)stream_pacer.stats.backlog_catchups,
+                       (unsigned long long)stream_pacer.stats.backlog_saved_us);
     ok = ok && report_append(report, sizeof(report), &length, "\"timings_us\":{\n");
     if (!ok)
         return;
