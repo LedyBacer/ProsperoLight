@@ -3322,8 +3322,11 @@ static unsigned stream_vrr_profile = 1;
 static bool wait_presentation_deadline(native_renderer_state_t *state,
                                        const stream_ready_frame_t &item,
                                        moonlight::VrrRepeatPolicy &vrr,
-                                       PacingDecisionTrace &decisions)
+                                       PacingDecisionTrace &decisions,
+                                       uint64_t *planned_us, uint64_t *paced_wait_us)
 {
+    *planned_us = 0;
+    *paced_wait_us = 0;
     if (!stream_presentation_mode)
         return true;
     uint32_t width = 0, height = 0, refresh = 0;
@@ -3416,7 +3419,12 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
     if (native_agc_vrr_active())
         vrr.waited(started, deadline, now);
     else
-        stream_pacer.submitted(deadline, now, now - started);
+    {
+        // Do not advance the pacing clock until VideoOut actually accepts
+        // this picture. Failed presentations must never train its phase.
+        *planned_us = deadline;
+        *paced_wait_us = now - started;
+    }
     return true;
 }
 
@@ -3631,7 +3639,9 @@ static void *video_present_thread(void *context)
                                                 current.ready_us, last_scanout_us,
                                                 native_agc_vrr_active(), unique_request_us);
             uint64_t count = 0, argument = 0;
-            if (native_agc_scanout_counter(&count, &argument) == 0)
+            const bool observed_flip_counter = native_agc_scanout_counter(&count, &argument) == 0;
+            state->present_feedback.observed_flip(last_scanout_us, count, observed_flip_counter);
+            if (observed_flip_counter)
             {
                 scanout_trace.observe(count, argument, last_scanout_us, false);
                 vrr_repeats.scanned(count, last_scanout_us);
@@ -3759,16 +3769,22 @@ static void *video_present_thread(void *context)
                      vrr_repeats.source_rate());
             (void)lan_http_report_text(receipt);
         }
-        if (!wait_presentation_deadline(state, current, vrr_repeats, decisions))
+        uint64_t planned_us = 0, paced_wait_us = 0;
+        if (!wait_presentation_deadline(state, current, vrr_repeats, decisions,
+                                        &planned_us, &paced_wait_us))
         {
             pthread_mutex_lock(&state->lock);
             state->frames.release(current.slot);
             pthread_mutex_unlock(&state->lock);
             return nullptr;
         }
+        const uint64_t submit_entered_us = monotonic_us();
         if (submit_presentation(state, current) == 0)
         {
             unique_request_us = monotonic_us();
+            if (planned_us)
+                stream_pacer.submitted(planned_us, submit_entered_us, paced_wait_us);
+            state->present_feedback.submitted(planned_us, submit_entered_us, unique_request_us);
             decisions.record(current.frame, current.pts_us, unique_request_us, 0, "submit");
             vrr_repeats.presented(unique_request_us);
             flip_pending = true;
