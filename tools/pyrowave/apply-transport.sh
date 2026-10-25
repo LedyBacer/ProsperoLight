@@ -101,6 +101,7 @@ elif grep -Fq 'void PlVideoRecoveryPoll(void)' "$common/src/VideoDepacketizer.c"
      grep -Fq 'PlVideoRecoveryPoll();' "$common/src/VideoStream.c"; then
     : # Already applied; later instrumentation may change reverse context.
 else
+    git -C "$common" apply --check --verbose "$patch" >&2 || true
     echo "Deferred IDR recovery patch does not match pinned Moonlight source" >&2
     exit 1
 fi
