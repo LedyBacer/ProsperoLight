@@ -31,3 +31,15 @@ elif grep -Fq 'LbqInitializeLinkedBlockingQueue(&packetQueue, 100)' "$common/src
 else
     git -C "$common" apply --check "$patch"
 fi
+
+# Bounded out-of-order staging in the Moonlight UDP receive thread. The
+# original FEC and multi-block recovery rules remain in RtpVideoQueue.c.
+patch="$root/tools/pyrowave/patches/moonlight/0004-video-reorder-window.patch"
+if git -C "$common" apply --check "$patch" 2>/dev/null; then
+    git -C "$common" apply "$patch"
+elif git -C "$common" apply --reverse --check "$patch" 2>/dev/null; then
+    : # already applied
+else
+    echo "Video reorder patch does not match pinned Moonlight source" >&2
+    exit 1
+fi
