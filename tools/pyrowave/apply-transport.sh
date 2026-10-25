@@ -63,8 +63,9 @@ fi
 patch="$root/tools/pyrowave/patches/moonlight/0006-video-reorder-poll.patch"
 if git -C "$common" apply --check "$patch" 2>/dev/null; then
     git -C "$common" apply "$patch"
-elif git -C "$common" apply --reverse --check "$patch" 2>/dev/null; then
-    : # already applied
+elif grep -Fq 'int timeoutMs = RTP_QUEUE_DELAY;' "$common/src/VideoStream.c" &&
+     grep -Fq 'pollSockets(&pfd, 1, timeoutMs)' "$common/src/VideoStream.c"; then
+    : # already applied; downstream changes alter reverse patch context
 else
     echo "Video reorder deadline patch does not match pinned Moonlight source" >&2
     exit 1
@@ -74,8 +75,10 @@ fi
 patch="$root/tools/pyrowave/patches/moonlight/0007-video-reorder-telemetry.patch"
 if git -C "$common" apply --check "$patch" 2>/dev/null; then
     git -C "$common" apply "$patch"
-elif git -C "$common" apply --reverse --check "$patch" 2>/dev/null; then
-    : # already applied
+elif grep -Fq 'LI_VIDEO_REORDER_STATS_VERSION' "$common/src/Limelight.h" &&
+     grep -Fq 'static void reorderObserveWait(' "$common/src/VideoStream.c" &&
+     grep -Fq 'REORDER_INC(HELD)' "$common/src/VideoStream.c"; then
+    : # already applied; downstream recovery patch modifies VideoStream.c
 else
     echo "Video reorder metrics patch does not match pinned Moonlight source" >&2
     exit 1
@@ -85,8 +88,9 @@ fi
 patch="$root/tools/pyrowave/patches/moonlight/0008-coalesce-idr-recovery.patch"
 if git -C "$common" apply --check "$patch" 2>/dev/null; then
     git -C "$common" apply "$patch"
-elif git -C "$common" apply --reverse --check "$patch" 2>/dev/null; then
-    : # already applied
+elif grep -Fq 'IDR_REQUEST_COOLDOWN_US' "$common/src/VideoDepacketizer.c" &&
+     grep -Fq 'requestIdrCoalesced();' "$common/src/VideoDepacketizer.c"; then
+    : # already applied; deferred-IDR follow-up modifies helper's source
 else
     echo "Video recovery coalescing patch does not match pinned Moonlight source" >&2
     exit 1
