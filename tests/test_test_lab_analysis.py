@@ -45,6 +45,8 @@ class AnalysisTests(unittest.TestCase):
                   'network_rtt_variance_ms': 0, 'audio_underruns': 2,
                   'audio_underrun_wait_total_us': 35000,
                   'audio_silence_grains': 12, 'audio_crossfades': 3,
+                  'audio_startup_silence_grains': 2, 'audio_active_silence_grains': 10,
+                  'audio_first_underrun_us': 123000, 'audio_last_underrun_us': 140000,
                   'audio_failed_shrink_probes': 1,
                   'video_network_jitter_peak_us': 25000}
         metrics = network_audio_metrics(report)
@@ -52,6 +54,8 @@ class AnalysisTests(unittest.TestCase):
         self.assertNotIn('network_rtt_variance_ms_observed', metrics)
         self.assertEqual(metrics['audio_underrun_wait_total_us'], 35000)
         self.assertEqual(metrics['audio_crossfades'], 3)
+        self.assertEqual(metrics['audio_active_silence_grains'], 10)
+        self.assertEqual(metrics['audio_first_underrun_us'], 123000)
         self.assertEqual(metrics['audio_failed_shrink_probes'], 1)
         report['network_rtt_valid'] = 1
         report['network_rtt_ms'] = 51
@@ -81,6 +85,13 @@ class AnalysisTests(unittest.TestCase):
         self.assertNotIn('video_reorder_rescued_frames', network_audio_metrics(payload))
         payload['video_reorder']['available'] = True
         payload['video_reorder']['version'] = 2
+        payload['video_reorder']['late_data_rejected'] = 3
+        payload['video_reorder']['late_parity_rejected'] = 2
+        upgraded = network_audio_metrics(payload)
+        self.assertEqual(upgraded['video_reorder_rescued_frames'], 2)
+        self.assertEqual(upgraded['video_reorder_late_data_rejected'], 3)
+        self.assertEqual(upgraded['video_reorder_late_parity_rejected'], 2)
+        payload['video_reorder']['version'] = 3
         self.assertNotIn('video_reorder_rescued_frames', network_audio_metrics(payload))
 
     def test_passive_nonary_style_evidence_never_guesses_available_bandwidth(self):

@@ -123,11 +123,13 @@ an external RTT measurement and label its measurement source explicitly.
 ## Repeatable pre-hardware checks
 
 ```sh
-python3 -m unittest tests.test_test_lab_netem tests.test_network_jitter_replay \
+PYTHONPATH=tools/test-lab/src:tests python3 -m unittest \
+  tests.test_test_lab_netem tests.test_network_jitter_replay \
   tests.test_frame_pacing_policy tests.test_ps5_pacing_replay \
   tests.test_audio_pcm_policy tests.test_audio_jitter_policy \
   tests.test_frame_phase_clock tests.test_test_lab_analysis \
-  tests.test_video_reorder_integration tests.test_deferred_idr_recovery \
+  tests.test_video_reorder_integration tests.test_video_fec_queue_replay \
+  tests.test_deferred_idr_recovery \
   tests.test_presentation_mailbox_replay tests.test_playout_budget \
   tests.test_netem_calibration -v
 ```
@@ -244,7 +246,25 @@ Check no RTSP session is active first. Exit 0 means this one chosen rate passed
 the limited qualification; 1 means it did not, 3 means unsupported/inconclusive.
 Never interpret a failed high-rate trial as a game-stream decoder problem.
 
-## Test plan for Codex
+## Initial hardware gate for PR #70
+
+Run **one LAN and one confirmed `wifi-congested` comparison** before expanding
+the matrix. Use matching baseline/candidate builds (same PS5 firmware, host
+settings and instrumenting flags within each pair), and record each exact
+source SHA. The ordinary PR Actions artifact is built with `TEST_LAB=0` and
+must **not** be passed to the automated Test Lab controller. The remote Test Lab
+builder deliberately builds `TEST_LAB=1 PERFORMANCE_DETAIL=1 LAN_TELEMETRY=0`;
+build both A and B that way. Do not infer equivalence from the build label.
+
+Start with native H.264 1080p60, fixed Paced, `NATIVE_MAX_QUEUE_MS=0`,
+`UNIFIED_PLAYOUT_EXPERIMENT=0` and phase-clock experiment disabled. Verify
+the actual UDP egress with `--verify-video-udp`, capture qdisc loss receipts,
+and compare frame age, presented FPS, true FEC recovery, reorder timeouts and
+audio underruns/silence grains. If Test Lab metrics lack `video_reorder_*` on
+a v2-enabled build, the measurement is incomplete and must not pass the gate.
+Keep Draft until the paired measurements are reviewed.
+
+## Extended qualification (only after the initial hardware gate)
 
 Keep `NATIVE_MAX_QUEUE_MS=0` and omit
 `capture.native_queue_limit_ms` throughout the WAN/Wi-Fi matrix. The native

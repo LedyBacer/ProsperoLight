@@ -41,6 +41,8 @@ def network_audio_metrics(performance):
             'audio_drift_shed_frames', 'audio_ring_ewma_frames',
             'audio_near_miss_events', 'audio_failed_shrink_probes',
             'audio_last_output_call_us', 'audio_first_packet_call_us',
+            'audio_startup_silence_grains', 'audio_active_silence_grains',
+            'audio_first_underrun_us', 'audio_last_underrun_us',
             'video_first_present_observed_us', 'rtp_audio_packets',
             'rtp_audio_fec_recovered', 'rtp_audio_fec_failed',
             'rtp_audio_out_of_sequence')
@@ -61,7 +63,10 @@ def network_audio_metrics(performance):
                       'reorder_wait_total_us', 'reorder_wait_max_us',
                       'reorder_timeouts', 'fec_recovered_after_reorder',
                       'rescued_frames', 'held_packets', 'capacity_flushes')
-    if isinstance(reorder, dict) and reorder.get('available') is True and reorder.get('version') == 1:
+    if (isinstance(reorder, dict) and reorder.get('available') is True and
+            type(reorder.get('version')) is int and reorder['version'] in (1, 2)):
+        if reorder['version'] == 2:
+            reorder_fields += ('late_data_rejected', 'late_parity_rejected')
         for key in reorder_fields:
             value = reorder.get(key)
             if type(value) is int and value >= 0:
