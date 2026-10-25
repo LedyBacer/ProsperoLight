@@ -156,6 +156,15 @@ def cadence_lane_metrics(rows, source_fps):
     nominal = 1000000.0 / source_fps
     lanes = {'source_pts': 'pts_us', 'network_enqueue': 'enqueue_us',
              'decoder_ready': 'ready_us', 'present_submit': 'submit_us'}
+
+    def clock_stamp(row, lane, field):
+        # Trace schema 2 stores ready_us as callback-to-ready DURATION.
+        # Only callback_us + ready_us yields a PS5-clock timestamp.
+        if lane == 'decoder_ready':
+            callback = row.get('callback_us', 0)
+            elapsed = row.get('ready_us', 0)
+            return callback + elapsed if callback > 0 and elapsed > 0 else 0
+        return row.get(field, 0)
     samples = {key: [] for key in lanes}
     previous = None
     for row in rows:
@@ -166,7 +175,8 @@ def cadence_lane_metrics(rows, source_fps):
             source_delta = row.get('pts_us', 0) - previous.get('pts_us', 0)
             if nominal * 0.5 <= source_delta <= nominal * 1.5:
                 for key, field in lanes.items():
-                    current_stamp, previous_stamp = row.get(field, 0), previous.get(field, 0)
+                    current_stamp = clock_stamp(row, key, field)
+                    previous_stamp = clock_stamp(previous, key, field)
                     if current_stamp > 0 and previous_stamp > 0 and current_stamp >= previous_stamp:
                         samples[key].append(abs((current_stamp - previous_stamp) - nominal))
         previous = row
