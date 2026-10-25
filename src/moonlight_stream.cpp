@@ -3360,7 +3360,7 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
                                  network_budget != 0;
     // clang-format on
     if (backlog_catchup && successor_queued)
-        deadline = stream_pacer.catch_up_deadline(item.ready_us, deadline, refresh);
+        deadline = stream_pacer.catch_up_deadline(item.ready_us, started, deadline, refresh);
     decisions.record(item.frame, item.pts_us, started, deadline, "target");
     uint64_t now = started;
     while (now < deadline)
@@ -3377,7 +3377,7 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
             // Re-check at the existing bounded 1ms wake cadence, so the
             // reserve cannot cause needless capacity drops mid-wait.
             const uint64_t shortened =
-                stream_pacer.catch_up_deadline(item.ready_us, deadline, refresh);
+                stream_pacer.catch_up_deadline(item.ready_us, now, deadline, refresh);
             if (shortened < deadline)
             {
                 deadline = shortened;
