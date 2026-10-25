@@ -169,6 +169,8 @@ int main()
            std::string::npos);
     assert(saved_report.find("\"audio_pcm_hard_cap_frames\":8640,") != std::string::npos);
     assert(saved_report.find("\"video_phase_clock\":{\"enabled\":false,") != std::string::npos);
+    assert(saved_report.find("\"video_pacing_burst\":{\"version\":1,\"catchups\":0,") !=
+           std::string::npos);
 #ifdef LI_VIDEO_REORDER_STATS_VERSION
     assert(saved_report.find("\"video_reorder\":{\"available\":true,\"version\":1,") !=
            std::string::npos);
