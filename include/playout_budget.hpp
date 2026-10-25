@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 
 namespace moonlight
 {
@@ -52,6 +53,64 @@ class VideoPlayoutBudget
         }
         return out;
     }
+};
+
+// Punktfunk-inspired source PTS mapper. Pure clock arithmetic only; use in
+// shadow mode until hardware traces establish the decoder/VideoOut phase.
+// Smooth the offset, never the source timestamps, and re-anchor on gaps.
+class SourceDueClock
+{
+  public:
+    struct Stats
+    {
+        uint64_t samples{}, late{}, reanchors{};
+        uint32_t cushion_us{}, jitter_us{};
+    } stats;
+
+    uint64_t observe(uint64_t pts_us, uint64_t ready_us, uint32_t source_period_us)
+    {
+        if (!pts_us || !ready_us || !source_period_us)
+            return ready_us;
+        const int64_t raw = static_cast<int64_t>(ready_us) - static_cast<int64_t>(pts_us);
+        if (!initialized_ || pts_us < previous_pts_us_ ||
+            pts_us - previous_pts_us_ > UINT64_C(500000))
+        {
+            offset_us_ = raw;
+            skew_us_ = 0;
+            mad_us_ = 0;
+            tail_us_ = 0;
+            ++stats.reanchors;
+            initialized_ = true;
+        }
+        else if (pts_us > previous_pts_us_)
+        {
+            offset_us_ += skew_us_;
+            const int64_t error = std::clamp(raw - offset_us_, INT64_C(-20000), INT64_C(20000));
+            offset_us_ += error / 32;
+            skew_us_ = std::clamp(skew_us_ + error / 1024, INT64_C(-1000), INT64_C(1000));
+            mad_us_ = std::max<int64_t>(0, mad_us_ + (std::abs(error) - mad_us_) / 32);
+            tail_us_ = error > tail_us_ ? error : tail_us_ - tail_us_ / 128;
+        }
+        else
+            return ready_us; // Duplicate RTP PTS is not a drift observation.
+
+        previous_pts_us_ = pts_us;
+        const int64_t cushion = std::clamp(
+            std::max(INT64_C(500), std::max(mad_us_ * 2, tail_us_)),
+            INT64_C(500), static_cast<int64_t>(source_period_us));
+        const int64_t due = static_cast<int64_t>(pts_us) + offset_us_ + cushion;
+        stats.cushion_us = static_cast<uint32_t>(cushion);
+        stats.jitter_us = static_cast<uint32_t>(mad_us_);
+        ++stats.samples;
+        if (due < static_cast<int64_t>(ready_us))
+            ++stats.late;
+        return due <= 0 ? 0 : static_cast<uint64_t>(due);
+    }
+
+  private:
+    uint64_t previous_pts_us_{};
+    int64_t offset_us_{}, skew_us_{}, mad_us_{}, tail_us_{};
+    bool initialized_{};
 };
 
 // A completed flip observation is NOT a physical HDMI scanout timestamp.
