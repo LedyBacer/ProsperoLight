@@ -1,3 +1,5 @@
+# ps5-native-app-boilerplate / ProsperoLight - VideoOut trace state regression
+# Copyright (C) 2026 LedyBacer and contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Protect the trace lifetime contract around PS5 VideoOut submission."""
 from pathlib import Path
