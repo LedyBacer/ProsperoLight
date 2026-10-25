@@ -65,3 +65,25 @@ else
     echo "Video reorder deadline patch does not match pinned Moonlight source" >&2
     exit 1
 fi
+
+# Versioned, allocation-free counters for delayed RTP/FEC decisions.
+patch="$root/tools/pyrowave/patches/moonlight/0007-video-reorder-telemetry.patch"
+if git -C "$common" apply --check "$patch" 2>/dev/null; then
+    git -C "$common" apply "$patch"
+elif git -C "$common" apply --reverse --check "$patch" 2>/dev/null; then
+    : # already applied
+else
+    echo "Video reorder metrics patch does not match pinned Moonlight source" >&2
+    exit 1
+fi
+
+# Debounce duplicate IDR triggers after a genuinely unrecoverable frame.
+patch="$root/tools/pyrowave/patches/moonlight/0008-coalesce-idr-recovery.patch"
+if git -C "$common" apply --check "$patch" 2>/dev/null; then
+    git -C "$common" apply "$patch"
+elif git -C "$common" apply --reverse --check "$patch" 2>/dev/null; then
+    : # already applied
+else
+    echo "Video recovery coalescing patch does not match pinned Moonlight source" >&2
+    exit 1
+fi
