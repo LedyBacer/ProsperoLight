@@ -16,8 +16,10 @@ fi
 patch="$root/tools/pyrowave/patches/moonlight/0002-video-delivery-counters.patch"
 if git -C "$common" apply --check "$patch" 2>/dev/null; then
     git -C "$common" apply "$patch"
-elif grep -Fq 'LI_VIDEO_DELIVERY_STATS_VERSION' "$common/src/Limelight.h"; then
-    git -C "$common" apply --reverse --check "$patch"
+elif grep -Fq 'LI_VIDEO_DELIVERY_STATS_VERSION' "$common/src/Limelight.h" &&
+     grep -Fq 'VD_ADD(DEQUEUED_AUS' "$common/src/VideoDepacketizer.c" &&
+     grep -Fq 'notifyVideoDatagramReceived' "$common/src/VideoStream.c"; then
+    : # Already applied; downstream dependency patches modify reverse-apply context.
 else
     git -C "$common" apply --check "$patch"
 fi
@@ -37,8 +39,10 @@ fi
 patch="$root/tools/pyrowave/patches/moonlight/0004-video-reorder-window.patch"
 if git -C "$common" apply --check "$patch" 2>/dev/null; then
     git -C "$common" apply "$patch"
-elif git -C "$common" apply --reverse --check "$patch" 2>/dev/null; then
-    : # already applied
+elif grep -Fq 'VIDEO_REORDER_WAIT_US' "$common/src/VideoStream.c" &&
+     grep -Fq 'static bool reorderHold' "$common/src/VideoStream.c" &&
+     grep -Fq 'reorderRelease(false)' "$common/src/VideoStream.c"; then
+    : # Already applied; later telemetry changes invalidate original reverse context.
 else
     echo "Video reorder patch does not match pinned Moonlight source" >&2
     exit 1
