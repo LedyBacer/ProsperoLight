@@ -57,6 +57,15 @@ class AnalysisTests(unittest.TestCase):
         report['network_rtt_ms'] = 51
         self.assertEqual(network_audio_metrics(report)['network_rtt_ms_observed'], 51)
 
+    def test_fixed_pacing_catchup_counters_are_optional(self):
+        performance = {'video_pacing_burst': {'version': 1, 'catchups': 19,
+                       'wait_saved_us': 31000}}
+        values = network_audio_metrics(performance)
+        self.assertEqual(values['video_pacing_burst_catchups'], 19)
+        self.assertEqual(values['video_pacing_burst_wait_saved_us'], 31000)
+        performance['video_pacing_burst']['version'] = 2
+        self.assertNotIn('video_pacing_burst_catchups', network_audio_metrics(performance))
+
     def test_reorder_window_counters_are_optional_and_versioned(self):
         payload = {'video_reorder': {'available': True, 'version': 1,
                    'late_packets_accepted': 5, 'late_packets_rejected': 1,
