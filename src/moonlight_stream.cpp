@@ -34,6 +34,10 @@
 #include "stream_profile.hpp"
 #include "frame_cadence.hpp"
 #include "frame_pacing.hpp"
+#include "playout_budget.hpp"
+#ifndef PROSPEROLIGHT_UNIFIED_PLAYOUT_EXPERIMENT
+#define PROSPEROLIGHT_UNIFIED_PLAYOUT_EXPERIMENT 0
+#endif
 #include "frame_phase_clock.hpp"
 #include "audio_jitter_policy.hpp"
 #include "audio_pcm_policy.hpp"
@@ -601,6 +605,7 @@ typedef struct stream_submission
 {
     uint64_t arrival_us; // local monotonic clock when the decode worker took it
     uint64_t enqueue_us; // moonlight-common-c clock
+    uint64_t receive_us; // first RTP packet in same common-c clock
     uint64_t pts_us;
     int32_t frame;
     moonlight::FrameTrace::Sample *trace;
@@ -614,7 +619,7 @@ typedef struct stream_ready_frame
     size_t buffer_size;
     uint32_t pitch, height;
     int32_t frame;
-    uint64_t arrival_us, enqueue_us, ready_us, pts_us;
+    uint64_t arrival_us, enqueue_us, ready_us, pts_us, receive_us;
     moonlight::FrameTrace::Sample *trace;
     native_agc_metrics_t hud;
 } stream_ready_frame_t;
@@ -730,6 +735,8 @@ typedef struct native_renderer_state
     moonlight::DropAttribution drops;
     moonlight::ArrivalRate arrival;
     moonlight::VideoArrivalJitter network_jitter;
+    moonlight::VideoPlayoutBudget playout_budget;
+    moonlight::PresentFeedback present_feedback;
     std::atomic<uint32_t> network_jitter_budget_us{0};
     moonlight::CadencePhaseClock phase_clock;
     bool phase_clock_enabled{};
@@ -2127,6 +2134,7 @@ static int32_t settle_decoder_call(native_renderer_state_t *state, int offered,
         ready.frame = submission.frame;
         ready.arrival_us = submission.arrival_us;
         ready.enqueue_us = submission.enqueue_us;
+        ready.receive_us = submission.receive_us;
         ready.ready_us = completed_us;
         ready.pts_us = submission.pts_us;
         ready.trace = submission.trace;
@@ -3019,6 +3027,7 @@ static int decode_access_unit(native_renderer_state_t *state, PDECODE_UNIT decod
                                SUBMISSION_QUEUE_CAPACITY];
         submission.arrival_us = arrival_us;
         submission.enqueue_us = network_enqueue_us;
+        submission.receive_us = decode_unit->receiveTimeUs;
         submission.pts_us =
             state->source_clock.update(decode_unit->rtpTimestamp, decode_unit->presentationTimeUs);
         submission.frame = decode_unit->frameNumber;
@@ -3331,7 +3340,17 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
     pthread_mutex_unlock(&state->lock);
     const uint64_t queue_age_us = started > item.ready_us ? started - item.ready_us : 0;
     const uint32_t network_budget = state->network_jitter_budget_us.load(std::memory_order_relaxed);
+    // Reassembly already consumed a part of this frame's jitter tolerance.
+    // Shadow-evaluate the bounded shared budget now; enable only in an
+    // explicit A/B build until PS5 replay validates the trade-off.
+    const auto playout = state->playout_budget.observe(
+        network_budget, item.receive_us, item.enqueue_us, state->stream_fps);
+#if PROSPEROLIGHT_UNIFIED_PLAYOUT_EXPERIMENT
+    stream_pacer.set_network_jitter_budget_us(playout.remaining_us);
+#else
     stream_pacer.set_network_jitter_budget_us(network_budget);
+    (void)playout;
+#endif
     // Developer-only A/B: the phase estimator samples the NETWORK timestamp
     // and source PTS, not decode/GPU readiness. It cannot add a second reserve
     // on top of FramePacing or affect VRR's separate source timeline.
