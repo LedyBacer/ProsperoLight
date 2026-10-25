@@ -1,0 +1,188 @@
+diff --git a/src/Limelight.h b/src/Limelight.h
+--- a/src/Limelight.h
++++ b/src/Limelight.h
+@@ -948,7 +948,22 @@
+ } LI_VIDEO_DELIVERY_STATS;
+ bool LiGetVideoDeliveryStats(LI_VIDEO_DELIVERY_STATS* stats);
+ 
++// Diagnostic accounting only. Measurements never control RTP recovery.
++#define LI_VIDEO_REORDER_STATS_VERSION 1
++typedef struct _LI_VIDEO_REORDER_STATS {
++    uint64_t late_packets_accepted;
++    uint64_t late_packets_rejected;
++    uint64_t reorder_wait_total_us; // sum of time held per datagram
++    uint64_t reorder_wait_max_us;
++    uint64_t reorder_timeouts;
++    uint64_t fec_recovered_after_reorder; // parity-recovered data shards
++    uint64_t rescued_frames; // completed while future FEC packets were held
++    uint64_t held_packets;
++    uint64_t capacity_flushes;
++} LI_VIDEO_REORDER_STATS;
++bool LiGetVideoReorderStats(LI_VIDEO_REORDER_STATS* stats);
+ 
++
+ // Returns the number of queued audio frames ready for delivery. Only relevant
+ // if CAPABILITY_DIRECT_SUBMIT is not set for the audio renderer. For most uses,
+ // LiGetPendingAudioDuration() is probably a better option than this function.
+
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -1,4 +1,5 @@
+ #include "Limelight-internal.h"
++#include <stdatomic.h>
+ 
+ #define FIRST_FRAME_MAX 1500
+ #define FIRST_FRAME_TIMEOUT_SEC 10
+@@ -52,10 +53,60 @@
+ static unsigned reorderCount;
+ static size_t reorderBytes;
+ static int reorderEntryOffset;
++
++enum { RV_LATE_ACCEPTED, RV_LATE_REJECTED, RV_WAIT_TOTAL, RV_WAIT_MAX,
++       RV_TIMEOUTS, RV_FEC_RECOVERED, RV_RESCUED, RV_HELD, RV_CAPACITY, RV_COUNT };
++static _Atomic uint64_t reorderCounters[RV_COUNT];
++static uint32_t reorderRescueFrame;
++static uint32_t reorderRescueFecFailures;
++static uint32_t reorderLastTimeoutFrame;
++static uint8_t reorderLastTimeoutBlock;
++#define REORDER_INC(key) atomic_fetch_add_explicit(&reorderCounters[RV_##key], 1, memory_order_relaxed)
++#define REORDER_ADD(key, n) atomic_fetch_add_explicit(&reorderCounters[RV_##key], (n), memory_order_relaxed)
++
++static void reorderObserveWait(uint64_t waitUs) {
++    REORDER_ADD(WAIT_TOTAL, waitUs);
++    uint64_t maximum = atomic_load_explicit(&reorderCounters[RV_WAIT_MAX], memory_order_relaxed);
++    while (waitUs > maximum &&
++           !atomic_compare_exchange_weak_explicit(&reorderCounters[RV_WAIT_MAX],
++                                                  &maximum, waitUs,
++                                                  memory_order_relaxed, memory_order_relaxed)) {
++    }
++}
++
++bool LiGetVideoReorderStats(LI_VIDEO_REORDER_STATS* stats) {
++    if (stats == NULL) return false;
++    stats->late_packets_accepted = atomic_load_explicit(&reorderCounters[RV_LATE_ACCEPTED], memory_order_relaxed);
++    stats->late_packets_rejected = atomic_load_explicit(&reorderCounters[RV_LATE_REJECTED], memory_order_relaxed);
++    stats->reorder_wait_total_us = atomic_load_explicit(&reorderCounters[RV_WAIT_TOTAL], memory_order_relaxed);
++    stats->reorder_wait_max_us = atomic_load_explicit(&reorderCounters[RV_WAIT_MAX], memory_order_relaxed);
++    stats->reorder_timeouts = atomic_load_explicit(&reorderCounters[RV_TIMEOUTS], memory_order_relaxed);
++    stats->fec_recovered_after_reorder = atomic_load_explicit(&reorderCounters[RV_FEC_RECOVERED], memory_order_relaxed);
++    stats->rescued_frames = atomic_load_explicit(&reorderCounters[RV_RESCUED], memory_order_relaxed);
++    stats->held_packets = atomic_load_explicit(&reorderCounters[RV_HELD], memory_order_relaxed);
++    stats->capacity_flushes = atomic_load_explicit(&reorderCounters[RV_CAPACITY], memory_order_relaxed);
++    return true;
++}
++
++static void reorderFrameAdvanced(uint32_t previousFrame) {
++    if (rtpQueue.currentFrameNumber != previousFrame && reorderRescueFrame == previousFrame) {
++        if (rtpQueue.stats.packetCountFecFailed == reorderRescueFecFailures) {
++            REORDER_INC(RESCUED);
++        }
++        reorderRescueFrame = 0;
++    }
++}
++static bool reorderDispatch(char* memory, int length) {
++    uint32_t beforeFrame = rtpQueue.currentFrameNumber;
++    uint32_t beforeFec = rtpQueue.stats.packetCountFecRecovered;
+-static void reorderDispatch(char* memory, int length) {
+     int status = RtpvAddPacket(&rtpQueue, (PRTP_PACKET)memory, length,
+                               (PRTPV_QUEUE_ENTRY)(memory + reorderEntryOffset));
++    if (rtpQueue.stats.packetCountFecRecovered > beforeFec) {
++        REORDER_ADD(FEC_RECOVERED, rtpQueue.stats.packetCountFecRecovered - beforeFec);
++    }
++    reorderFrameAdvanced(beforeFrame);
+     if (status != RTPF_RET_QUEUED) free(memory);
++    return status == RTPF_RET_QUEUED;
+ }
+ 
+ static bool reorderIsFuture(uint32_t frame, uint8_t block) {
+@@ -83,11 +134,25 @@
+                         now - rtpQueue.bufferFirstRecvTimeUs < VIDEO_REORDER_WAIT_US);
+         if (!stale && !expected && !force && waiting) break;
+ 
++        // Count one timeout per expired active block rather than per held packet.
++        if (!stale && !expected && !force && !waiting && reorderHasActiveBlock() &&
++            (reorderLastTimeoutFrame != rtpQueue.currentFrameNumber ||
++             reorderLastTimeoutBlock != rtpQueue.multiFecCurrentBlockNumber)) {
++            REORDER_INC(TIMEOUTS);
++            reorderLastTimeoutFrame = rtpQueue.currentFrameNumber;
++            reorderLastTimeoutBlock = rtpQueue.multiFecCurrentBlockNumber;
++        }
+         reorderHead = entry->next;
+         reorderCount--;
+         reorderBytes -= (size_t)entry->length;
++        reorderObserveWait(now >= entry->receivedUs ? now - entry->receivedUs : 0);
++        if (stale) {
++            REORDER_INC(LATE_REJECTED);
++            free(entry->memory);
++        }
++        else if (!reorderDispatch(entry->memory, entry->length)) {
++            REORDER_INC(LATE_REJECTED);
++        }
+-        if (stale) free(entry->memory);
+-        else reorderDispatch(entry->memory, entry->length);
+         free(entry);
+         now = PltGetMicroseconds();
+     }
+@@ -118,6 +183,7 @@
+     *link = entry;
+     reorderCount++;
+     reorderBytes += (size_t)length;
++    REORDER_INC(HELD);
+     return true;
+ }
+ 
+@@ -208,6 +274,12 @@
+     reorderHead = NULL;
+     reorderCount = 0;
+     reorderBytes = 0;
++    reorderRescueFrame = 0;
++    reorderLastTimeoutFrame = UINT32_MAX;
++    reorderLastTimeoutBlock = UINT8_MAX;
++    for (unsigned k = 0; k < RV_COUNT; ++k) {
++        atomic_store_explicit(&reorderCounters[k], 0, memory_order_relaxed);
++    }
+ 
+     usePartialFrameTimeout = (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) != 0 &&
+                             setSocketNonBlocking(rtpSocket, true) == 0;
+@@ -408,6 +480,7 @@
+             !(NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE)) {
+             PNV_VIDEO_PACKET nv = (PNV_VIDEO_PACKET)(buffer + headerSize);
+             uint32_t frame = LE32(nv->frameIndex);
++            if (isBefore32(frame, rtpQueue.currentFrameNumber)) REORDER_INC(LATE_REJECTED);
+             uint8_t block = rtpQueue.multiFecCapable ?
+                 (uint8_t)((nv->multiFecBlocks >> 4) & 3) : 0;
+             if (reorderIsFuture(frame, block) && reorderHasActiveBlock()) {
+@@ -417,14 +490,28 @@
+                     continue;
+                 }
+                 // Allocation or capacity limit: flush in frame/block order.
++                REORDER_INC(CAPACITY);
+                 reorderRelease(true);
+             }
+         }
++        // Preserve zero-copy/rejected-buffer reuse on clean LAN. A late
++        // packet is an active frame packet received while future ones wait.
++        bool wasReordering = reorderHead != NULL &&
++                             !(NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE);
++        uint32_t frameBefore = rtpQueue.currentFrameNumber;
++        uint32_t fecBefore = rtpQueue.stats.packetCountFecRecovered;
++        int status = RtpvAddPacket(&rtpQueue, packet, err,
++                                  (PRTPV_QUEUE_ENTRY)&buffer[decryptedSize]);
++        if (wasReordering && status == RTPF_RET_QUEUED) {
++            REORDER_INC(LATE_ACCEPTED);
++            reorderRescueFrame = frameBefore;
++            reorderRescueFecFailures = rtpQueue.stats.packetCountFecFailed;
++        }
++        if (wasReordering && rtpQueue.stats.packetCountFecRecovered > fecBefore) {
++            REORDER_ADD(FEC_RECOVERED, rtpQueue.stats.packetCountFecRecovered - fecBefore);
+-        // Preserve the original zero-copy and rejected-buffer reuse fast path.
+-        if (RtpvAddPacket(&rtpQueue, packet, err,
+-                          (PRTPV_QUEUE_ENTRY)&buffer[decryptedSize]) == RTPF_RET_QUEUED) {
+-            buffer = NULL;
+         }
++        reorderFrameAdvanced(frameBefore);
++        if (status == RTPF_RET_QUEUED) buffer = NULL;
+         reorderRelease(false);
+     }
+ 
