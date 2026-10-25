@@ -1056,6 +1056,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
 #ifdef LI_VIDEO_REORDER_STATS_VERSION
     LI_VIDEO_REORDER_STATS reorder_stats{};
     const bool reorder_stats_valid = LiGetVideoReorderStats(&reorder_stats);
+    // clang-format off
     ok = ok && report_append(report, sizeof(report), &length,
                              "\"video_reorder\":{\"available\":%s,\"version\":1,"
                              "\"late_packets_accepted\":%llu,\"late_packets_rejected\":%llu,"
@@ -1072,6 +1073,7 @@ static void save_performance_summary(const native_renderer_state_t &state,
                              (unsigned long long)reorder_stats.rescued_frames,
                              (unsigned long long)reorder_stats.held_packets,
                              (unsigned long long)reorder_stats.capacity_flushes);
+    // clang-format on
 #endif
     ok = ok &&
          report_append(
