@@ -736,6 +736,7 @@ typedef struct native_renderer_state
     moonlight::ArrivalRate arrival;
     moonlight::VideoArrivalJitter network_jitter;
     moonlight::VideoPlayoutBudget playout_budget;
+    moonlight::SourceDueClock source_due;
     moonlight::PresentFeedback present_feedback;
     std::atomic<uint32_t> network_jitter_budget_us{0};
     moonlight::CadencePhaseClock phase_clock;
@@ -1410,6 +1411,17 @@ static void save_performance_summary(const native_renderer_state_t &state,
                        (unsigned long long)state.present_feedback.stats.observed_flip_interval_max_us,
                        (unsigned long long)state.present_feedback.stats.flip_counter_advances,
                        (unsigned long long)state.present_feedback.stats.repeated_flip_counters);
+    // clang-format on
+    // clang-format off
+    ok = ok && report_append(
+        report, sizeof(report), &length,
+        "\"video_source_due_shadow\":{\"version\":1,\"active\":false,"
+        "\"samples\":%llu,\"late\":%llu,\"reanchors\":%llu,"
+        "\"cushion_us\":%u,\"jitter_us\":%u},\n",
+        (unsigned long long)state.source_due.stats.samples,
+        (unsigned long long)state.source_due.stats.late,
+        (unsigned long long)state.source_due.stats.reanchors,
+        state.source_due.stats.cushion_us, state.source_due.stats.jitter_us);
     // clang-format on
     ok = ok && report_append(report, sizeof(report), &length, "\"timings_us\":{\n");
     if (!ok)
@@ -3381,6 +3393,10 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
     // explicit A/B build until PS5 replay validates the trade-off.
     const auto playout = state->playout_budget.observe(
         network_budget, item.receive_us, item.enqueue_us, state->stream_fps);
+    // Shadow comparison only. The host RTP clock is relative and gets mapped
+    // to local monotonic time without replacing the tested FramePacing path.
+    (void)state->source_due.observe(
+        item.pts_us, item.ready_us, UINT32_C(1000000) / std::max(1u, state->stream_fps));
 #if PROSPEROLIGHT_UNIFIED_PLAYOUT_EXPERIMENT
     stream_pacer.set_network_jitter_budget_us(playout.remaining_us);
 #else
