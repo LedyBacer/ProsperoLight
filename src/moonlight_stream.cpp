@@ -4464,16 +4464,17 @@ static void ps5_audio_sample(char *sample_data, int sample_length)
         int16_t preceding[AUDIO_MAX_CHANNELS]{};
         if (audio_state.ring_count)
         {
-            const uint32_t last = (audio_state.ring_tail + AUDIO_RING_FRAMES - 1) % AUDIO_RING_FRAMES;
+            const uint32_t last =
+                (audio_state.ring_tail + AUDIO_RING_FRAMES - 1) % AUDIO_RING_FRAMES;
             memcpy(preceding, &audio_state.ring[last * audio_state.output_channels],
                    audio_state.channels * sizeof(int16_t));
         }
         else
             memcpy(preceding, audio_state.last_output_sample,
                    audio_state.channels * sizeof(int16_t));
-        if (moonlight::audio_rejoin_after_skip(audio_state.backlog_gap_pending,
-                                                audio_state.decoded, static_cast<uint32_t>(decoded),
-                                                audio_state.channels, preceding, AUDIO_CROSSFADE_FRAMES))
+        if (moonlight::audio_rejoin_after_skip(audio_state.backlog_gap_pending, audio_state.decoded,
+                                               static_cast<uint32_t>(decoded), audio_state.channels,
+                                               preceding, AUDIO_CROSSFADE_FRAMES))
             ++audio_state.crossfades;
     }
     audio_ring_push(&audio_state, audio_state.decoded, (uint32_t)decoded);

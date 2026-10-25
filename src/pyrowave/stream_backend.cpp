@@ -334,11 +334,10 @@ void wait_prepared_frame(void *context)
                                    deadline, "catchup");
                 const uint64_t sampled_mono = now_us();
                 const uint64_t sampled_li = LiGetMicroseconds();
+                const uint64_t readiness_us =
+                    wait.readiness ? wait.readiness->percentile_us() : 1000;
                 receive_deadline.publish(wait.frame->rtp_timestamp, deadline, sampled_mono,
-                                         sampled_li, wait.readiness
-                                                         ? wait.readiness->percentile_us()
-                                                         : 1000,
-                                         true);
+                                         sampled_li, readiness_us, true);
             }
         }
         if (current >= deadline)
