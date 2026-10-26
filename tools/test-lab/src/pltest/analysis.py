@@ -43,6 +43,7 @@ def network_audio_metrics(performance):
             'audio_last_output_call_us', 'audio_first_packet_call_us',
             'audio_startup_silence_grains', 'audio_active_silence_grains',
             'audio_first_underrun_us', 'audio_last_underrun_us',
+            'audio_reprime_events', 'audio_short_read_missing_frames',
             'video_first_present_observed_us', 'rtp_audio_packets',
             'rtp_audio_fec_recovered', 'rtp_audio_fec_failed',
             'rtp_audio_out_of_sequence')

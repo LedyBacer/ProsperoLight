@@ -1,0 +1,124 @@
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -56,6 +56,7 @@
+ static unsigned reorderCount;
+ static size_t reorderBytes;
+ static int reorderEntryOffset;
++static uint64_t reorderFirstHeldUs;
+ 
+ enum { RV_LATE_ACCEPTED, RV_LATE_REJECTED, RV_LATE_DATA, RV_LATE_PARITY,
+        RV_WAIT_TOTAL, RV_WAIT_MAX, RV_TIMEOUTS, RV_FEC_RECOVERED, RV_RESCUED,
+@@ -124,6 +125,25 @@
+ static bool reorderHasActiveBlock(void) {
+     return rtpQueue.pendingFecBlockList.count != 0 ||
+            rtpQueue.completedFecBlockList.count != 0;
++}
++
++/* Even an empty queue still expects currentFrameNumber/block. A future
++ * packet must not retire an entirely unseen frame or block merely because
++ * it won the UDP race. Bound small holes to the same existing 40 ms budget;
++ * a large discontinuity (resume/restart) keeps Common-C's resync fast path. */
++static bool reorderShouldHold(uint32_t frame, uint8_t block) {
++    if (!reorderIsFuture(frame, block)) return false;
++    return reorderHasActiveBlock() || (uint32_t)(frame - rtpQueue.currentFrameNumber) <= 3;
++}
++
++static uint64_t reorderDeadlineUs(void) {
++    if (reorderHead == NULL) return 0;
++    uint64_t deadline = reorderFirstHeldUs + VIDEO_REORDER_WAIT_US;
++    if (reorderHasActiveBlock() && rtpQueue.bufferFirstRecvTimeUs != 0) {
++        uint64_t active = rtpQueue.bufferFirstRecvTimeUs + VIDEO_REORDER_WAIT_US;
++        if (active < deadline) deadline = active;
++    }
++    return deadline;
+ }
+ 
+ /* A deferred packet must first pass the same inexpensive admission gates as
+@@ -151,14 +171,11 @@
+                      (entry->frame == rtpQueue.currentFrameNumber &&
+                       entry->block < rtpQueue.multiFecCurrentBlockNumber);
+         bool expected = !reorderIsFuture(entry->frame, entry->block);
+-        bool waiting = reorderHasActiveBlock() &&
+-                       now - entry->receivedUs < VIDEO_REORDER_WAIT_US &&
+-                       (rtpQueue.bufferFirstRecvTimeUs == 0 ||
+-                        now - rtpQueue.bufferFirstRecvTimeUs < VIDEO_REORDER_WAIT_US);
++        bool waiting = now < reorderDeadlineUs();
+         if (!stale && !expected && !force && waiting) break;
+ 
+         // Count one timeout per expired active block rather than per held packet.
+-        if (!stale && !expected && !force && !waiting && reorderHasActiveBlock() &&
++        if (!stale && !expected && !force && !waiting &&
+             (reorderLastTimeoutFrame != rtpQueue.currentFrameNumber ||
+              reorderLastTimeoutBlock != rtpQueue.multiFecCurrentBlockNumber)) {
+             REORDER_INC(TIMEOUTS);
+@@ -166,7 +183,7 @@
+             reorderLastTimeoutBlock = rtpQueue.multiFecCurrentBlockNumber;
+         }
+         reorderHead = entry->next;
+-        if (reorderHead == NULL) reorderTail = NULL;
++        if (reorderHead == NULL) { reorderTail = NULL; reorderFirstHeldUs = 0; }
+         reorderCount--;
+         reorderBytes -= (size_t)entry->length;
+         reorderObserveWait(now >= entry->receivedUs ? now - entry->receivedUs : 0);
+@@ -198,6 +215,7 @@
+     entry->block = block;
+     entry->parity = parity;
+     entry->receivedUs = PltGetMicroseconds();
++    if (reorderCount == 0) reorderFirstHeldUs = entry->receivedUs;
+     entry->next = NULL;
+     /* Almost all held packets arrive in increasing frame/block order. Avoid
+      * walking the entire list for each append in a large FEC burst. Preserve
+@@ -236,6 +254,7 @@
+     reorderTail = NULL;
+     reorderCount = 0;
+     reorderBytes = 0;
++    reorderFirstHeldUs = 0;
+ }
+ 
+ 
+@@ -313,6 +332,7 @@
+     reorderTail = NULL;
+     reorderCount = 0;
+     reorderBytes = 0;
++    reorderFirstHeldUs = 0;
+     reorderRescueFrame = 0;
+     reorderLastTimeoutFrame = UINT32_MAX;
+     reorderLastTimeoutBlock = UINT8_MAX;
+@@ -368,12 +388,10 @@
+             pfd.fd = rtpSocket;
+             pfd.events = POLLIN;
+             int timeoutMs = RTP_QUEUE_DELAY; // Existing Moonlight 10ms budget.
+-            if (rtpQueue.bufferFirstRecvTimeUs != 0) {
++            uint64_t reorderDeadline = reorderDeadlineUs();
++            if (reorderDeadline != 0) {
+                 uint64_t nowUs = PltGetMicroseconds();
+-                uint64_t elapsedUs = nowUs >= rtpQueue.bufferFirstRecvTimeUs ?
+-                    nowUs - rtpQueue.bufferFirstRecvTimeUs : 0;
+-                uint64_t remainingUs = elapsedUs >= VIDEO_REORDER_WAIT_US ?
+-                    0 : VIDEO_REORDER_WAIT_US - elapsedUs;
++                uint64_t remainingUs = nowUs >= reorderDeadline ? 0 : reorderDeadline - nowUs;
+                 int deadlineMs = (int)((remainingUs + 999) / 1000);
+                 if (deadlineMs < timeoutMs) timeoutMs = deadlineMs;
+             }
+@@ -531,7 +549,7 @@
+             }
+             uint8_t block = rtpQueue.multiFecCapable ?
+                 (uint8_t)((nv->multiFecBlocks >> 4) & 3) : 0;
+-            if (reorderIsFuture(frame, block) && reorderHasActiveBlock() &&
++            if (reorderShouldHold(frame, block) &&
+                 reorderStagingEligible(packet->sequenceNumber, rtpQueue.nextContiguousSequenceNumber,
+                                        (packet->header & FLAG_EXTENSION) != 0,
+                                        fec_info, nv->multiFecBlocks, rtpQueue.multiFecCapable)) {
+--- a/src/RtpAudioQueue.c
++++ b/src/RtpAudioQueue.c
+@@ -544,7 +544,9 @@
+     // At this point, we know we've got a second FEC block queued up waiting on the first one to complete.
+     // If we've never seen OOS data from this host, we'll assume the first one is lost and skip forward.
+     // If we have seen OOS data, we'll wait for a little while longer to see if OOS packets arrive before giving up.
+-    if (!queue->receivedOosData || PltGetMicroseconds() - queue->blockHead->queueTimeUs > (uint64_t)(AudioPacketDuration * RTPA_DATA_SHARDS) + (RTPQ_OOS_WAIT_TIME_MS * 1000)) {
++    // AudioPacketDuration and RTPQ_OOS_WAIT_TIME_MS are both milliseconds.
++    // Convert the whole block horizon, not just the extra reorder allowance.
++    if (!queue->receivedOosData || PltGetMicroseconds() - queue->blockHead->queueTimeUs > (uint64_t)(AudioPacketDuration * RTPA_DATA_SHARDS + RTPQ_OOS_WAIT_TIME_MS) * 1000) {
+         LC_ASSERT(!isBefore16(queue->nextRtpSequenceNumber, queue->blockHead->fecHeader.baseSequenceNumber));
+ 
+         queue->stats.packetCountFecFailed++;

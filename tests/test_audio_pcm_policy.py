@@ -26,6 +26,29 @@ int main() {
     auto recovered = audio_grain_decision(1920, 512, 1440, 480, true);
     assert(recovered.take == 512 && recovered.silence == 0 && !recovered.priming);
     assert(!recovered.near_miss);
+    AudioContinuityPolicy continuity;
+    assert(continuity.decide(0,512,960,240).priming);
+    assert(!continuity.decide(1440,512,960,240).priming);
+    // A single late packet used to force 20-80 ms of manufactured silence.
+    auto brief = continuity.decide(480,512,960,240);
+    assert(brief.underrun && brief.take == 480 && brief.silence == 32);
+    assert(!brief.priming && continuity.reprimes() == 0);
+    auto resumed = continuity.decide(720,512,960,240);
+    assert(resumed.take == 512 && !resumed.priming); // no whole-target wait
+    assert(continuity.concealed_frames() == 32);
+    // A real drought stays bounded: keep AudioOut clock running, then re-prime.
+    for (unsigned i = 0; i < 4; ++i)
+        continuity.decide(0,512,960,240);
+    assert(continuity.reprimes() == 1);
+    assert(continuity.decide(720,512,960,240).take == 0);
+    assert(continuity.decide(1440,512,960,240).take == 512);
+    // Refill re-seeds depth history; no spurious hollow state after drought.
+    assert(!continuity.decide(480,512,960,240).priming);
+    // A large target which was never banked still authorizes recovery.
+    AudioContinuityPolicy hollow;
+    assert(!hollow.decide(960,512,960,240).priming);
+    assert(hollow.decide(480,512,3840,240).priming);
+    assert(hollow.reprimes() == 1);
     auto nearly = audio_grain_decision(550, 512, 960, 480, false);
     assert(nearly.near_miss && !nearly.underrun);
 

@@ -512,6 +512,7 @@ typedef struct ps5_audio_state
     uint64_t ring_frame_sum, ring_observations;
     moonlight::AudioPrebufferPolicy prebuffer_policy;
     moonlight::AudioRingDriftPolicy drift_policy;
+    moonlight::AudioContinuityPolicy continuity_policy;
     int16_t last_output_sample[AUDIO_MAX_CHANNELS];
     bool crossfade_pending;
     bool backlog_gap_pending;
@@ -1359,7 +1360,8 @@ static void save_performance_summary(const native_renderer_state_t &state,
                        "\"audio_first_underrun_us\":%llu,\"audio_last_underrun_us\":%llu,"
                        "\"audio_crossfades\":%u,\"audio_drift_shed_frames\":%llu,"
                        "\"audio_ring_ewma_frames\":%u,\"audio_near_miss_events\":%u,"
-                       "\"audio_failed_shrink_probes\":%u,\n",
+                       "\"audio_failed_shrink_probes\":%u,"
+                       "\"audio_reprime_events\":%u,\"audio_short_read_missing_frames\":%llu,\n",
                        AUDIO_RING_FRAMES, (unsigned long long)audio_state.first_pcm_output_us,
                        audio_state.silence_grains, audio_state.short_grains,
                        audio_state.startup_silence_grains, audio_state.active_silence_grains,
@@ -1368,7 +1370,9 @@ static void save_performance_summary(const native_renderer_state_t &state,
                        (unsigned long long)audio_state.drift_shed_frames,
                        audio_state.drift_policy.mean_frames(),
                        audio_state.prebuffer_policy.near_miss_events(),
-                       audio_state.prebuffer_policy.failed_shrinks());
+                       audio_state.prebuffer_policy.failed_shrinks(),
+                       audio_state.continuity_policy.reprimes(),
+                       (unsigned long long)audio_state.continuity_policy.concealed_frames());
     const auto &phase = state.phase_clock.stats;
     ok = ok &&
          report_append(report, sizeof(report), &length,
@@ -4110,9 +4114,9 @@ static void *ps5_audio_output_worker(void *)
                 state->drift_shed_frames += shed;
             }
         }
-        const auto decision = moonlight::audio_grain_decision(
+        const auto decision = state->continuity_policy.decide(
             state->ring_count, AUDIO_GRAIN_FRAMES, state->prebuffer_policy.target_frames(),
-            static_cast<uint32_t>(std::max(1, state->samples_per_frame)), prebuffering);
+            static_cast<uint32_t>(std::max(1, state->samples_per_frame)));
         if (decision.underrun)
         {
             ++state->underruns;
@@ -4131,6 +4135,8 @@ static void *ps5_audio_output_worker(void *)
         else if (decision.take)
             state->prebuffer_policy.on_healthy_grain();
         if (decision.priming && !prebuffering)
+            recovery_started_us = now_us;
+        if (decision.underrun && !recovery_started_us)
             recovery_started_us = now_us;
         prebuffering = decision.priming;
         memset(output, 0, sizeof(output));
@@ -4180,7 +4186,7 @@ static void *ps5_audio_output_worker(void *)
                 output[(AUDIO_GRAIN_FRAMES - 1) * state->output_channels + channel];
         if (decision.take && !state->first_pcm_output_us)
             state->first_pcm_output_us = now_us;
-        if (decision.take && recovery_started_us)
+        if (decision.take && !decision.underrun && recovery_started_us)
         {
             const uint64_t wait_us = now_us - recovery_started_us;
             if (state->first_pcm_output_us == now_us)
@@ -4250,6 +4256,7 @@ static int ps5_audio_init(int audio_configuration, const POPUS_MULTISTREAM_CONFI
     (void)flags;
     memset(&audio_state, 0, sizeof(audio_state));
     audio_state.prebuffer_policy = moonlight::AudioPrebufferPolicy{};
+    audio_state.continuity_policy = moonlight::AudioContinuityPolicy{};
     audio_state.handle = -1;
     audio_state.open_result = -1;
     audio_state.drain_result = -1;

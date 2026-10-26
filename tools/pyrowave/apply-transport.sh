@@ -161,3 +161,29 @@ else
     echo "Video reorder admission patch does not match pinned Moonlight source" >&2
     exit 1
 fi
+
+# Retain small entirely unseen frame/block gaps and fix the audio FEC clock
+# conversion. Keep the same bounded storage, clean-LAN and PyroWave paths.
+patch="$root/tools/pyrowave/patches/moonlight/0014-reorder-boundary-and-audio-clock.patch"
+if git -C "$common" apply --check "$patch" 2>/dev/null; then
+    git -C "$common" apply "$patch"
+elif grep -Fq 'static bool reorderShouldHold(' "$common/src/VideoStream.c" &&
+     grep -Fq 'AudioPacketDuration * RTPA_DATA_SHARDS + RTPQ_OOS_WAIT_TIME_MS' "$common/src/RtpAudioQueue.c"; then
+    : # Already applied.
+else
+    echo "Video boundary/audio clock patch does not match pinned Moonlight source" >&2
+    exit 1
+fi
+
+# Do not inherit a retired queue epoch; preserve small missing audio blocks
+# through bounded reordering, then conceal their PCM time rather than skip it.
+patch="$root/tools/pyrowave/patches/moonlight/0015-reorder-progress-and-audio-gaps.patch"
+if git -C "$common" apply --check "$patch" 2>/dev/null; then
+    git -C "$common" apply "$patch"
+elif grep -Fq 'reorderHead->receivedUs + VIDEO_REORDER_WAIT_US' "$common/src/VideoStream.c" &&
+     grep -Fq 'static bool audioGapExpired(' "$common/src/RtpAudioQueue.c"; then
+    : # Already applied.
+else
+    echo "Reorder progress/audio gap patch does not match pinned Moonlight source" >&2
+    exit 1
+fi

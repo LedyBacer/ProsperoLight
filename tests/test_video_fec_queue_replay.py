@@ -113,7 +113,7 @@ static void feed_packet(char* memory) {
     const uint32_t frame = nv->frameIndex;
     const uint8_t block = rtpQueue.multiFecCapable ?
         (uint8_t)((nv->multiFecBlocks >> 4) & 3) : 0;
-    if (reorderIsFuture(frame, block) && reorderHasActiveBlock() &&
+    if (reorderShouldHold(frame, block) &&
         reorderStagingEligible(rtp->sequenceNumber,
                                rtpQueue.nextContiguousSequenceNumber,
                                (rtp->header & FLAG_EXTENSION) != 0,
@@ -192,6 +192,39 @@ int main(void) {
     for (unsigned i = 1; i < DATA; ++i) feed_packet(successor[i]);
     assert(rtpQueue.currentFrameNumber == 6);
     assert(displayedCount == 5 * DATA);
+
+    // A complete future frame arrives before ANY packet of the expected one.
+    // Old staging dispatched it immediately because the active queue was empty.
+    char* missingStart[DATA + PARITY];
+    char* earlyFuture[DATA + PARITY];
+    makeFecFrame(missingStart, 6, 1036, 0);
+    makeFecFrame(earlyFuture, 7, 1042, 0);
+    for (unsigned i = 0; i < DATA; ++i) feed_packet(earlyFuture[i]);
+    assert(rtpQueue.currentFrameNumber == 6 && reorderCount == DATA);
+    testNow += 19000;
+    for (unsigned i = 0; i < DATA; ++i) feed_packet(missingStart[i]);
+    assert(rtpQueue.currentFrameNumber == 8 && reorderCount == 0);
+    assert(displayedCount == 7 * DATA);
+    for (unsigned i = DATA; i < DATA + PARITY; ++i) {
+        free(missingStart[i]); free(earlyFuture[i]);
+    }
+
+    // Entirely lost frame: holding cannot reset its own deadline on arrivals.
+    char* holeSuccessor[DATA + PARITY];
+    makeFecFrame(holeSuccessor, 9, 1054, 0);
+    for (unsigned i = 0; i < DATA; ++i) {
+        testNow += 1000;
+        feed_packet(holeSuccessor[i]);
+    }
+    assert(rtpQueue.currentFrameNumber == 8 && reorderCount == DATA);
+    testNow = reorderDeadlineUs() - 1;
+    reorderRelease(false);
+    assert(rtpQueue.currentFrameNumber == 8);
+    ++testNow;
+    reorderRelease(false);
+    assert(rtpQueue.currentFrameNumber == 10 && reorderCount == 0);
+    assert(displayedCount == 8 * DATA);
+    free(holeSuccessor[4]); free(holeSuccessor[5]);
 
     free(frameOne[5]);
     free(frameTwo[4]);

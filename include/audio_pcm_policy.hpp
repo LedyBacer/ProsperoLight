@@ -38,6 +38,71 @@ inline AudioGrainDecision audio_grain_decision(uint32_t depth, uint32_t grain, u
     return answer;
 }
 
+// Adapted conceptually from Punktfunk JitterPolicy's consecutive-short-read
+// hysteresis and hollow-ring detection (MIT/Apache-2.0, see reference document).
+// One late packet must not manufacture a complete target's worth of silence.
+// Count consumed PCM frames, not scheduler time: AudioOut may occasionally stall.
+class AudioContinuityPolicy
+{
+  public:
+    AudioGrainDecision decide(uint32_t depth, uint32_t grain, uint32_t target, uint32_t packet)
+    {
+        auto out = audio_grain_decision(depth, grain, target, packet, priming_);
+        if (!grain)
+            return out;
+        if (priming_)
+        {
+            if (!out.take)
+                return out;
+            depth_q8_ = uint64_t(depth) << 8;
+            priming_ = false;
+            short_run_frames_ = short_run_grains_ = 0;
+        }
+        else
+        {
+            const int64_t error = (int64_t(depth) << 8) - int64_t(depth_q8_);
+            // One-second EWMA at 48 kHz, weighted by the actual device grain.
+            depth_q8_ = uint64_t(std::max<int64_t>(
+                0, int64_t(depth_q8_) + error * std::min<uint32_t>(grain, 48000) / 48000));
+        }
+        if (out.underrun)
+        {
+            ++short_reads_;
+            concealed_frames_ += out.silence;
+            short_run_frames_ = std::min<uint64_t>(UINT32_MAX, uint64_t(short_run_frames_) + grain);
+            ++short_run_grains_;
+            const bool hollow = (depth_q8_ >> 8) + 480 < target;
+            if (hollow || (short_run_frames_ >= 1920 && short_run_grains_ >= 2))
+            {
+                priming_ = true;
+                ++reprimes_;
+            }
+        }
+        else
+            short_run_frames_ = short_run_grains_ = 0;
+        out.priming = priming_;
+        return out;
+    }
+
+    uint64_t concealed_frames() const
+    {
+        return concealed_frames_;
+    }
+    uint32_t reprimes() const
+    {
+        return reprimes_;
+    }
+    uint32_t short_reads() const
+    {
+        return short_reads_;
+    }
+
+  private:
+    uint64_t depth_q8_{}, concealed_frames_{};
+    uint32_t short_run_frames_{}, short_run_grains_{}, reprimes_{}, short_reads_{};
+    bool priming_{true};
+};
+
 // Fade to the next grain after a ring trim, or after synthetic silence. This
 // is a saturating interleaved-S16 operation; it does not mix channel indices.
 inline void audio_crossfade_from_sample(int16_t *grain, uint32_t frames, uint32_t channels,
@@ -61,9 +126,8 @@ inline void audio_crossfade_from_sample(int16_t *grain, uint32_t frames, uint32_
 // The Opus callback may skip stale PCM while the AudioOut ring still has
 // earlier samples buffered. Blend the *next enqueued* packet at that exact
 // discontinuity, not the next hardware grain (which may be tens of ms earlier).
-inline bool audio_rejoin_after_skip(bool &pending, int16_t *pcm, uint32_t frames,
-                                    uint32_t channels, const int16_t *preceding,
-                                    uint32_t fade_frames)
+inline bool audio_rejoin_after_skip(bool &pending, int16_t *pcm, uint32_t frames, uint32_t channels,
+                                    const int16_t *preceding, uint32_t fade_frames)
 {
     if (!pending || !pcm || !frames || !channels || !preceding)
         return false;

@@ -125,11 +125,32 @@ int main(void) {
     assert(stats.reorder_wait_max_us == VIDEO_REORDER_WAIT_US);
     assert(stats.reorder_timeouts == 1 && stats.fec_recovered_after_reorder == 1);
 
+    // A non-empty staging list may survive successful frame progress. Its
+    // original epoch must not expire the next active frame's fresh budget.
+    reset(100);
+    assert(reorderHold(packet(101,0,0), sizeof(FakePacket),101,0,false));
+    testNow += 20000;
+    assert(reorderHold(packet(103,0,0), sizeof(FakePacket),103,0,false));
+    rtpQueue.currentFrameNumber = 102;
+    rtpQueue.bufferFirstRecvTimeUs = testNow;
+    testNow += 20001;
+    reorderRelease(false);
+    assert(reorderCount == 1 && dispatchCount == 0);
+    testNow += 20000;
+    reorderRelease(false);
+    assert(reorderCount == 0 && dispatchFrames[0] == 103);
+
     reset(UINT32_MAX - 1);
     assert(reorderHold(packet(1, 0, 0), sizeof(FakePacket), 1, 0, false));
     assert(reorderHold(packet(UINT32_MAX, 0, 0), sizeof(FakePacket), UINT32_MAX, 0, false));
     assert(reorderHold(packet(0, 0, 0), sizeof(FakePacket), 0, 0, false));
     rtpQueue.pendingFecBlockList.count = 0;
+    assert(reorderShouldHold(UINT32_MAX, 0));
+    assert(!reorderShouldHold(20, 0)); // large discontinuity resynchronizes
+    assert(!reorderShouldHold(UINT32_MAX - 1, 0)); // expected has no wait
+    reorderRelease(false);
+    assert(dispatchCount == 0); // unseen frame is still eligible to arrive
+    testNow += VIDEO_REORDER_WAIT_US;
     reorderRelease(false);
     assert(dispatchCount == 3);
     assert(dispatchFrames[0] == UINT32_MAX && dispatchFrames[1] == 0 && dispatchFrames[2] == 1);

@@ -1,0 +1,130 @@
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -56,7 +56,6 @@
+ static unsigned reorderCount;
+ static size_t reorderBytes;
+ static int reorderEntryOffset;
+-static uint64_t reorderFirstHeldUs;
+ 
+ enum { RV_LATE_ACCEPTED, RV_LATE_REJECTED, RV_LATE_DATA, RV_LATE_PARITY,
+        RV_WAIT_TOTAL, RV_WAIT_MAX, RV_TIMEOUTS, RV_FEC_RECOVERED, RV_RESCUED,
+@@ -136,9 +135,11 @@
+     return reorderHasActiveBlock() || (uint32_t)(frame - rtpQueue.currentFrameNumber) <= 3;
+ }
+ 
++/* Age the oldest logical pending packet, not a queue-wide epoch which
++ * can survive many successfully delivered frames under sustained jitter. */
+ static uint64_t reorderDeadlineUs(void) {
+     if (reorderHead == NULL) return 0;
+-    uint64_t deadline = reorderFirstHeldUs + VIDEO_REORDER_WAIT_US;
++    uint64_t deadline = reorderHead->receivedUs + VIDEO_REORDER_WAIT_US;
+     if (reorderHasActiveBlock() && rtpQueue.bufferFirstRecvTimeUs != 0) {
+         uint64_t active = rtpQueue.bufferFirstRecvTimeUs + VIDEO_REORDER_WAIT_US;
+         if (active < deadline) deadline = active;
+@@ -183,7 +184,7 @@
+             reorderLastTimeoutBlock = rtpQueue.multiFecCurrentBlockNumber;
+         }
+         reorderHead = entry->next;
+-        if (reorderHead == NULL) { reorderTail = NULL; reorderFirstHeldUs = 0; }
++        if (reorderHead == NULL) reorderTail = NULL;
+         reorderCount--;
+         reorderBytes -= (size_t)entry->length;
+         reorderObserveWait(now >= entry->receivedUs ? now - entry->receivedUs : 0);
+@@ -215,7 +216,6 @@
+     entry->block = block;
+     entry->parity = parity;
+     entry->receivedUs = PltGetMicroseconds();
+-    if (reorderCount == 0) reorderFirstHeldUs = entry->receivedUs;
+     entry->next = NULL;
+     /* Almost all held packets arrive in increasing frame/block order. Avoid
+      * walking the entire list for each append in a large FEC burst. Preserve
+@@ -254,7 +254,6 @@
+     reorderTail = NULL;
+     reorderCount = 0;
+     reorderBytes = 0;
+-    reorderFirstHeldUs = 0;
+ }
+ 
+ 
+@@ -332,7 +331,6 @@
+     reorderTail = NULL;
+     reorderCount = 0;
+     reorderBytes = 0;
+-    reorderFirstHeldUs = 0;
+     reorderRescueFrame = 0;
+     reorderLastTimeoutFrame = UINT32_MAX;
+     reorderLastTimeoutBlock = UINT8_MAX;
+--- a/src/RtpAudioQueue.c
++++ b/src/RtpAudioQueue.c
+@@ -506,12 +506,31 @@
+     return true;
+ }
+ 
++/* A whole not-yet-seen FEC block can lose the UDP race too. Preserve its
++ * sequence slot on a known reordered link; otherwise skipping it deletes
++ * PCM time without producing PLC and repeatedly drains the output ring. */
++static uint64_t audioReorderHorizonUs(void) {
++    return (uint64_t)(AudioPacketDuration * RTPA_DATA_SHARDS + RTPQ_OOS_WAIT_TIME_MS) * 1000;
++}
++
++static bool audioHasBoundedGap(PRTP_AUDIO_QUEUE queue) {
++    return queue->blockHead != NULL && queue->receivedOosData &&
++        isBefore16(queue->nextRtpSequenceNumber, queue->blockHead->fecHeader.baseSequenceNumber) &&
++        (uint16_t)(queue->blockHead->fecHeader.baseSequenceNumber - queue->nextRtpSequenceNumber) <=
++            RTPA_DATA_SHARDS * 3;
++}
++
++static bool audioGapExpired(PRTP_AUDIO_QUEUE queue) {
++    return audioHasBoundedGap(queue) &&
++        PltGetMicroseconds() - queue->blockHead->queueTimeUs > audioReorderHorizonUs();
++}
++
+ static bool queueHasPacketReady(PRTP_AUDIO_QUEUE queue) {
+     validateFecBlockState(queue);
+-    return queue->blockHead != NULL &&
++    return audioGapExpired(queue) || (queue->blockHead != NULL &&
+             ((queue->blockHead->marks[queue->blockHead->nextDataPacketIndex] == 0 &&
+               queue->blockHead->fecHeader.baseSequenceNumber + queue->blockHead->nextDataPacketIndex == queue->nextRtpSequenceNumber)
+-            || queue->blockHead->allowDiscontinuity);
++            || queue->blockHead->allowDiscontinuity));
+ }
+ 
+ static void handleMissingPackets(PRTP_AUDIO_QUEUE queue) {
+@@ -528,6 +547,7 @@
+     // remaining packets from this block arrive, they will trigger the OOS detection and kick us out of fast
+     // audio recovery mode.
+     if (isBefore16(queue->nextRtpSequenceNumber, queue->blockHead->fecHeader.baseSequenceNumber)) {
++        if (audioHasBoundedGap(queue)) return; // late block or bounded PLC, never delete PCM time
+         queue->nextRtpSequenceNumber = queue->blockHead->fecHeader.baseSequenceNumber;
+         queue->oldestRtpBaseSequenceNumber = queue->blockHead->fecHeader.baseSequenceNumber;
+         return;
+@@ -546,7 +566,7 @@
+     // If we have seen OOS data, we'll wait for a little while longer to see if OOS packets arrive before giving up.
+     // AudioPacketDuration and RTPQ_OOS_WAIT_TIME_MS are both milliseconds.
+     // Convert the whole block horizon, not just the extra reorder allowance.
+-    if (!queue->receivedOosData || PltGetMicroseconds() - queue->blockHead->queueTimeUs > (uint64_t)(AudioPacketDuration * RTPA_DATA_SHARDS + RTPQ_OOS_WAIT_TIME_MS) * 1000) {
++    if (!queue->receivedOosData || PltGetMicroseconds() - queue->blockHead->queueTimeUs > audioReorderHorizonUs()) {
+         LC_ASSERT(!isBefore16(queue->nextRtpSequenceNumber, queue->blockHead->fecHeader.baseSequenceNumber));
+ 
+         queue->stats.packetCountFecFailed++;
+@@ -664,6 +684,20 @@
+ PRTP_PACKET RtpaGetQueuedPacket(PRTP_AUDIO_QUEUE queue, uint16_t customHeaderLength, uint16_t* length) {
+     validateFecBlockState(queue);
+ 
++    if (audioGapExpired(queue)) {
++        PRTP_PACKET lostPacket = malloc(customHeaderLength);
++        if (lostPacket == NULL) return NULL;
++        *length = 0; // same PLC contract as a missing shard, one negotiated packet
++        if (queue->nextRtpSequenceNumber % RTPA_DATA_SHARDS == 0)
++            queue->stats.packetCountFecFailed++;
++        queue->nextRtpSequenceNumber++;
++        // Retire only whole concealed blocks. A late predecessor must not
++        // recreate PCM which has already been played/concealed.
++        queue->oldestRtpBaseSequenceNumber =
++            (uint16_t)(queue->nextRtpSequenceNumber / RTPA_DATA_SHARDS * RTPA_DATA_SHARDS);
++        return lostPacket;
++    }
++
+     // If we're returning audio data even with discontinuities, we'll fill in blank entries
+     // for packets that were lost and could not be recovered.
+     if (queue->blockHead != NULL && queue->blockHead->allowDiscontinuity) {
