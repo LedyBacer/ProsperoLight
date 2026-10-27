@@ -1,3 +1,4 @@
+# ps5-native-app-boilerplate - fixed-LAN ready selection and ownership replay.
 # Copyright (C) 2026 LedyBacer and contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Real queue/policy replay: recover a stale startup phase without a FIFO tax."""
