@@ -232,7 +232,8 @@ int main()
            std::string::npos);
     assert(original.find("\"rtp_video_fec_recovered\":7,\"rtp_video_fec_failed\":2,") !=
            std::string::npos);
-    assert(original.find("\"audio_prebuffer_target_frames\":960,") != std::string::npos);
+    // The declared clean-link floor is now 10 ms at 48 kHz.
+    assert(original.find("\"audio_prebuffer_target_frames\":480,") != std::string::npos);
     assert(!original.empty());
     write_failure = true;
     save_performance_summary(state, input, &options, -1);

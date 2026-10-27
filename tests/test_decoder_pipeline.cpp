@@ -416,6 +416,9 @@ static native_renderer_state_t *make_state(unsigned depth, Model decoder_model,
     auto *state = new native_renderer_state_t{};
     state->mode = &video_modes[0];
     state->stream_fps = 120;
+    // This fixture bypasses stream setup: explicitly select its unpaced
+    // one-picture policy, as production setup does before workers start.
+    state->clean_ready_capacity = state->mailbox.capacity;
     state->input_memory = inputs;
     state->frame_memory = frames;
     state->input_size = state->frame_size = 64;
@@ -750,13 +753,47 @@ static void every_connection_of_a_process_is_accepted()
     assert(moonlight_video_callbacks.setup == moonlight_renderer_setup);
 }
 
-static void paced_ready_queue_retains_surface_ownership()
+static void adaptive_ready_queue_releases_every_displaced_surface()
 {
     DECODE_UNIT unit{};
     unit.fullLength = sizeof(access_unit);
     unit.bufferList = &fragment;
     auto *state = make_state(1, Model::SameCall, 1);
-    state->mailbox.capacity = 2;
+    state->lan_ready_selection = true;
+    for (int frame = 1; frame <= 3; ++frame)
+        assert(decode(state, &unit, frame, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(state->not_displayed == 2 && state->frames.count(Pool::Ready) == 1);
+    assert(state->mailbox.item.frame == 3 && !state->mailbox.second);
+    // Drive the actual arrival estimator, not just its published atomic:
+    // decode_access_unit refreshes that atomic before every publication.
+    for (unsigned i = 0; i < 40; ++i)
+        state->network_jitter.observe(i + 1, 90000 + i * 1500,
+                                      1000000 + i * 16666 + (i % 2 ? 12000 : 0));
+    assert(state->network_jitter.budget_us() > 0);
+    for (int frame = 4; frame <= 5; ++frame)
+        assert(decode(state, &unit, frame, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(state->not_displayed == 3 && state->frames.count(Pool::Ready) == 2);
+    assert(state->mailbox.item.frame == 4 && state->mailbox.following.frame == 5);
+    state->network_jitter.reset();
+    state->network_jitter_budget_us.store(0);
+    assert(decode(state, &unit, 6, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(state->not_displayed == 5 && state->frames.count(Pool::Ready) == 1);
+    stream_ready_frame_t ready{};
+    assert(state->mailbox.take(&ready) && ready.frame == 6);
+    state->frames.release(ready.slot);
+    assert(!state->mailbox.full && state->frames.count(Pool::Free) == FRAME_SLOT_COUNT);
+    renderer_sync_destroy(state);
+    delete state;
+}
+
+static void buffered_ready_queue_retains_surface_ownership()
+{
+    DECODE_UNIT unit{};
+    unit.fullLength = sizeof(access_unit);
+    unit.bufferList = &fragment;
+    auto *state = make_state(1, Model::SameCall, 1);
+    // Buffered paced mode (jitter/VRR/fractional cadence) retains two.
+    state->clean_ready_capacity = state->mailbox.capacity = 2;
     for (int frame = 1; frame <= 3; ++frame)
         assert(decode(state, &unit, frame, FRAME_TYPE_PFRAME) == DR_OK);
     assert(state->not_displayed == 1 && state->frames.count(Pool::Ready) == 2);
@@ -1362,7 +1399,8 @@ int main()
     a_started_drain_runs_to_completion(Model::Queued);
     a_started_drain_runs_to_completion(Model::SameCall);
     classic_depth_one();
-    paced_ready_queue_retains_surface_ownership();
+    buffered_ready_queue_retains_surface_ownership();
+    adaptive_ready_queue_releases_every_displaced_surface();
     errors_reset_and_bounded_backlog();
     fallback_to_depth_one();
     presentation_hands_slots_back();
