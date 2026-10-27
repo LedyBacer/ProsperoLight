@@ -21,6 +21,18 @@ class NetemCalibrationTest(unittest.TestCase):
         cls.module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.module)
 
+    def test_independent_loss_profile_preserves_historical_profile(self):
+        new=self.module.netem.SCENARIOS['wifi-loss-independent']
+        old=self.module.netem.SCENARIOS['wifi-congested']
+        self.assertEqual(old['loss_correlation_percent'],20)
+        self.assertNotIn('loss_correlation_percent',new)
+        self.assertEqual(new['loss_percent'],1.0)
+        self.assertEqual(new['delay_ms'],old['delay_ms'])
+        self.assertEqual(new['jitter_ms'],old['jitter_ms'])
+        self.assertEqual(self.module.netem.tc_args('wifi-loss-independent'),
+            ['delay','20ms','15ms','distribution','normal','loss','1.0%',
+             'reorder','0.2%'])
+
     def test_refuses_non_impairment_and_tiny_sample(self):
         with self.assertRaises(ValueError):
             self.module.calibrate("lan", 12000)

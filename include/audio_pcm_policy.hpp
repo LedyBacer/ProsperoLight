@@ -25,7 +25,10 @@ inline AudioGrainDecision audio_grain_decision(uint32_t depth, uint32_t grain, u
 {
     AudioGrainDecision answer{};
     answer.priming = priming;
-    if (priming && depth < std::max(target, grain))
+    // Packetization may be 5 or 10 ms. One packet alone can leave less
+    // than one grain before its successor, even on a clean LAN. Bank one
+    // packet plus a grain at startup/re-prime; do not impose this on short reads.
+    if (priming && depth < std::max(target, grain + packet))
     {
         answer.silence = grain;
         return answer;

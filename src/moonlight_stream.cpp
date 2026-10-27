@@ -90,8 +90,8 @@
 #define CONTROLLER_KEEPALIVE_US UINT64_C(1000000)
 #define CONNECTION_SETUP_TIMEOUT_US UINT64_C(20000000)
 #define FIRST_VIDEO_FRAME_TIMEOUT_US UINT64_C(10000000)
-#define AUDIO_GRAIN_FRAMES 512u
-#define AUDIO_PREBUFFER_FRAMES 960u // 20 ms; enough for a normal two-packet Wi-Fi burst.
+#define AUDIO_GRAIN_FRAMES 256u
+#define AUDIO_PREBUFFER_FRAMES 480u // Clean-link floor; priming also covers a packet plus a grain.
 #define AUDIO_STEREO_CHANNELS 2u
 #define AUDIO_51_CHANNELS 6u
 #define AUDIO_MAX_CHANNELS 8u
@@ -758,6 +758,8 @@ typedef struct native_renderer_state
     pthread_cond_t wake;
     moonlight::SlotPool<FRAME_SLOT_COUNT> frames;
     moonlight::ReadyMailbox<stream_ready_frame_t> mailbox;
+    unsigned clean_ready_capacity{2};
+    bool lan_ready_selection{};
     moonlight::SourceTimestamp source_clock;
     bool stop_presenting;
 
@@ -2080,32 +2082,34 @@ static void snapshot_hud_metrics(const native_renderer_state_t *state, int pendi
     hud->decoder_cpu_mask = state->decoder_cpu_mask;
 }
 
-// Unpaced replaces the pending picture; paced modes retain two ready
-// pictures. Capacity overflow retires the oldest surface without blocking decode.
+// Clean matching-rate LAN uses newest-wins; observed jitter retains two
+// ready pictures. Every displaced decoded surface has exactly one release.
 static void publish_ready_frame(native_renderer_state_t *state, const stream_ready_frame_t &ready)
 {
     stream_ready_frame_t displaced{};
-
     pthread_mutex_lock(&state->lock);
+    const auto retire = [&](const stream_ready_frame_t &old, const char *reason)
+    {
+        state->frames.release(old.slot);
+        if (old.trace)
+            old.trace->outcome = 2;
+        ++state->not_displayed;
+        if (state->pacing_decisions)
+            state->pacing_decisions->record(old.frame, old.pts_us, monotonic_us(), 0, reason);
+    };
+    const unsigned capacity = state->lan_ready_selection && state->network_jitter_budget_us.load(
+                                                                std::memory_order_relaxed)
+                                  ? 2
+                                  : state->clean_ready_capacity;
+    if (state->mailbox.limit(capacity, &displaced))
+        retire(displaced, "drop-lan-reserve");
     state->frames.state[static_cast<size_t>(ready.slot)] =
         moonlight::SlotPool<FRAME_SLOT_COUNT>::Ready;
     state->frames.last_output = ready.slot;
-    const bool replaced = state->mailbox.publish(ready, &displaced);
-    if (replaced)
-    {
-        state->frames.release(displaced.slot);
-        if (state->pacing_decisions)
-            state->pacing_decisions->record(displaced.frame, displaced.pts_us, monotonic_us(), 0,
-                                            "drop-capacity");
-    }
+    if (state->mailbox.publish(ready, &displaced))
+        retire(displaced, "drop-capacity");
     pthread_cond_signal(&state->wake);
     pthread_mutex_unlock(&state->lock);
-    if (replaced)
-    {
-        ++state->not_displayed;
-        if (displaced.trace)
-            displaced.trace->outcome = 2;
-    }
 }
 
 static void report_decoder_call(const native_renderer_state_t *state, const char *phase,
@@ -3406,24 +3410,16 @@ static bool wait_presentation_deadline(native_renderer_state_t *state,
     pthread_mutex_unlock(&state->lock);
     const uint64_t queue_age_us = started > item.ready_us ? started - item.ready_us : 0;
     const uint32_t network_budget = state->network_jitter_budget_us.load(std::memory_order_relaxed);
-    // Reassembly already consumed a part of this frame's jitter tolerance.
-    // Shadow-evaluate the bounded shared budget now; enable only in an
-    // explicit A/B build until PS5 replay validates the trade-off.
-    // clang-format off
-    const auto playout = state->playout_budget.observe(
-        network_budget, item.receive_us, item.enqueue_us, state->stream_fps);
-    // Shadow comparison only: use callback ingress in the CLOCK_MONOTONIC
-    // domain (Common-C enqueue timestamps are process-relative), then score
-    // downstream decode readiness separately from ingress jitter.
-    (void)state->source_due.observe(
-        item.pts_us, item.arrival_us, item.ready_us,
-        UINT32_C(1000000) / std::max(1u, state->stream_fps));
-    // clang-format on
+    // Production does not run shadow timing controllers on every LAN frame.
+    // Keep experimental accounting entirely inside its compile-time gate.
 #if PROSPEROLIGHT_UNIFIED_PLAYOUT_EXPERIMENT
+    const auto playout = state->playout_budget.observe(network_budget, item.receive_us,
+                                                       item.enqueue_us, state->stream_fps);
+    (void)state->source_due.observe(item.pts_us, item.arrival_us, item.ready_us,
+                                    UINT32_C(1000000) / std::max(1u, state->stream_fps));
     stream_pacer.set_network_jitter_budget_us(playout.remaining_us);
 #else
     stream_pacer.set_network_jitter_budget_us(network_budget);
-    (void)playout;
 #endif
     // Developer-only A/B: the phase estimator samples the NETWORK timestamp
     // and source PTS, not decode/GPU readiness. It cannot add a second reserve
@@ -3819,6 +3815,46 @@ static void *video_present_thread(void *context)
                 current.trace->outcome = 2;
             ++state->not_displayed;
             state->mailbox.take(&current);
+        }
+        if (state->lan_ready_selection &&
+            !state->network_jitter_budget_us.load(std::memory_order_relaxed))
+        {
+            uint32_t width = 0, height = 0, refresh = 0;
+            native_agc_output_status(&width, &height, &refresh);
+            const uint64_t select_until = moonlight::lan_selection_deadline(
+                monotonic_us(), current.ready_us, state->last_present_us, refresh,
+                state->present_call_timing.percentile(99) + 1000);
+            while (!state->stop_presenting &&
+                   !state->network_jitter_budget_us.load(std::memory_order_relaxed))
+            {
+                if (state->mailbox.full && state->mailbox.item.pts_us > current.pts_us)
+                {
+                    decisions.record(current.frame, current.pts_us, monotonic_us(), 0,
+                                     "drop-lan-stale");
+                    state->frames.release(current.slot);
+                    if (current.trace)
+                        current.trace->outcome = 2;
+                    ++state->not_displayed;
+                    state->mailbox.take(&current);
+                    if (current.ready_us >= state->last_present_us)
+                        break;
+                }
+                const uint64_t now = monotonic_us();
+                if (now >= select_until)
+                    break;
+                timespec timeout{};
+                clock_gettime(CLOCK_REALTIME, &timeout);
+                timeout.tv_nsec += std::min<uint64_t>(select_until - now, 1000) * 1000;
+                timeout.tv_sec += timeout.tv_nsec / 1000000000;
+                timeout.tv_nsec %= 1000000000;
+                pthread_cond_timedwait(&state->wake, &state->lock, &timeout);
+            }
+        }
+        if (state->stop_presenting)
+        {
+            state->frames.release(current.slot);
+            pthread_mutex_unlock(&state->lock);
+            return nullptr;
         }
         state->frames.state[static_cast<size_t>(current.slot)] = Pool::Presenting;
         pthread_mutex_unlock(&state->lock);
@@ -6039,7 +6075,16 @@ configure_stream:
     }
 #endif
     stream_pacer.reset(renderer.stream_fps);
-    renderer.mailbox.capacity = stream_presentation_mode ? 2u : 1u;
+    {
+        uint32_t width = 0, height = 0, refresh = 0;
+        native_agc_output_status(&width, &height, &refresh);
+        renderer.clean_ready_capacity =
+            moonlight::ready_capacity(stream_presentation_mode, renderer.stream_fps, refresh,
+                                      native_agc_vrr_active() || renderer.phase_clock_enabled, 0);
+        renderer.lan_ready_selection =
+            stream_presentation_mode == 1 && renderer.clean_ready_capacity == 1;
+        renderer.mailbox.capacity = renderer.clean_ready_capacity;
+    }
     LOGI("Moonlight pacing: mode=%u requested_fps=%u ready_capacity=%u source_clock=1",
          stream_presentation_mode, renderer.stream_fps, renderer.mailbox.capacity);
     // Keep every stream thread off the decoder's CPUs. New threads inherit the

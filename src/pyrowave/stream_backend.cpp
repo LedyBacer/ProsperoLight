@@ -61,9 +61,6 @@ struct Session
     std::unique_ptr<PyroWaveVideoBackend> backend;
     std::atomic<uint64_t> incoming{0}, decoded{0}, shown{0}, stale{0}, partial{0}, rejected{0},
         losses{0}, bytes{0};
-    // Written by network callback under mutex; consumed by presentation worker.
-    moonlight::VideoArrivalJitter network_jitter;
-    std::atomic<uint32_t> network_jitter_budget_us{0};
     size_t high_water{};
 };
 std::unique_ptr<Session> session;
@@ -283,8 +280,6 @@ void wait_prepared_frame(void *context)
     // VRR has ONE admission clock for fresh pictures and repeats. Applying
     // the fixed/source pacer as well can postpone a prepared picture after a
     // repeat and create an additional 30-50 ms transition gap.
-    wait.pacer->set_network_jitter_budget_us(
-        s.network_jitter_budget_us.load(std::memory_order_relaxed));
     const uint64_t pacing_deadline =
         ps5_vrr_output_active()
             ? (wait.repeat ? wait.minimum_deadline
@@ -298,14 +293,7 @@ void wait_prepared_frame(void *context)
                   wait.readiness
                       ? std::clamp<uint64_t>(wait.readiness->percentile_us() / 4, 250, 2000)
                       : 1000);
-    uint64_t deadline = std::max(pacing_deadline, wait.minimum_deadline);
-    // A prepared fixed-VSync picture should not consume its entire WAN
-    // reserve once a genuine newer picture is already queued. Mirror native
-    // H.264/HEVC's successor catch-up without changing VRR/repeat/fractional
-    // cadence or the two-frame mailbox capacity.
-    const bool backlog_catchup = !wait.repeat && wait.frame && selected_vsync &&
-                                 !fractional_fixed && !ps5_vrr_output_active() &&
-                                 s.network_jitter_budget_us.load(std::memory_order_relaxed) != 0;
+    const uint64_t deadline = std::max(pacing_deadline, wait.minimum_deadline);
     if (!wait.repeat && wait.frame && wait.readiness)
     {
         // Convert the PS5 CLOCK_MONOTONIC target to LiGetMicroseconds time
@@ -322,24 +310,6 @@ void wait_prepared_frame(void *context)
     while (s.running)
     {
         const uint64_t current = now_us();
-        if (backlog_catchup && !s.queue.empty())
-        {
-            const uint64_t shortened = std::max(
-                wait.minimum_deadline,
-                wait.pacer->catch_up_deadline(wait.ready_us, current, deadline, wait.refresh));
-            if (shortened < deadline)
-            {
-                deadline = shortened;
-                s.decisions.record(wait.frame->number, wait.frame->presentation_us, current,
-                                   deadline, "catchup");
-                const uint64_t sampled_mono = now_us();
-                const uint64_t sampled_li = LiGetMicroseconds();
-                const uint64_t readiness_us =
-                    wait.readiness ? wait.readiness->percentile_us() : 1000;
-                receive_deadline.publish(wait.frame->rtp_timestamp, deadline, sampled_mono,
-                                         sampled_li, readiness_us, true);
-            }
-        }
         if (current >= deadline)
             break;
         const uint64_t remaining = deadline - current;
@@ -875,15 +845,6 @@ void *worker(void *)
             error_callback(-1);
     }
     log_line("PyroWave scanout repeats total=%llu", (unsigned long long)repeated);
-    {
-        std::lock_guard<std::mutex> lock(s.mutex);
-        log_line("PyroWave completed-frame arrival variation: budget_increases=%u "
-                 "peak_budget_us=%u p98_us=%u samples=%u missing_frames=%llu "
-                 "discontinuities=%u (not UDP packet jitter)",
-                 s.network_jitter.bursts(), s.network_jitter.peak_us(), s.network_jitter.p98_us(),
-                 s.network_jitter.samples(), (unsigned long long)s.network_jitter.missing_frames(),
-                 s.network_jitter.discontinuities());
-    }
     return nullptr;
 }
 int setup(int format, int width, int height, int fps, void *, int flags)
@@ -1002,10 +963,6 @@ int submit(PDECODE_UNIT unit)
         std::lock_guard<std::mutex> lock(session->mutex);
         if (!session->running)
             return DR_OK;
-        session->network_jitter.observe(static_cast<uint32_t>(frame.number), frame.rtp_timestamp,
-                                        frame.enqueue_us ? frame.enqueue_us : frame.queued_us);
-        session->network_jitter_budget_us.store(session->network_jitter.budget_us(),
-                                                std::memory_order_relaxed);
         if (session->queue.size() == 2)
         {
             session->decisions.record(session->queue.front().number,

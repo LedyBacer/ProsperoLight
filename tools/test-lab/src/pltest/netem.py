@@ -25,6 +25,9 @@ SCENARIOS = {
     'wifi-light': {'delay_ms': 5, 'jitter_ms': 3, 'loss_percent': 0.1},
     'wifi-congested': {'delay_ms': 20, 'jitter_ms': 15, 'loss_percent': 1.0,
                        'loss_correlation_percent': 20, 'reorder_percent': 0.2},
+    # Independent Bernoulli loss; historical correlated profile retained above.
+    'wifi-loss-independent': {'delay_ms': 20, 'jitter_ms': 15, 'loss_percent': 1.0,
+                              'reorder_percent': 0.2},
     'wan-50': {'delay_ms': 25, 'jitter_ms': 10, 'loss_percent': 0.3},
     'wan-100': {'delay_ms': 50, 'jitter_ms': 25, 'loss_percent': 1.0},
     'wan-burst': {'delay_ms': 40, 'jitter_ms': 30, 'loss_percent': 2.0,

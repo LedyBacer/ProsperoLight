@@ -19,6 +19,26 @@ class AudioPcmPolicyTests(unittest.TestCase):
 
 int main() {
     using namespace moonlight;
+    // Exercise the production policy at the restored device grain with both
+    // negotiated packet sizes. Preserve every sample through a clean LAN
+    // with up to 0.5 ms delivery jitter and rational hardware-clock pacing.
+    for (uint32_t packet : {240u,480u}) {
+        AudioContinuityPolicy lan;
+        uint32_t depth=0, next=0;
+        uint64_t received=0, consumed=0;
+        bool started=false;
+        for (uint32_t now=0; now<48000*5; now+=256) {
+            while (uint64_t(next)*packet+(next%4)*8 <= now) {
+                depth+=packet;received+=packet;++next;
+            }
+            auto d=lan.decide(depth,256,480,packet);
+            if (d.take) started=true;
+            if (started) assert(!d.underrun && !d.priming);
+            depth-=d.take;consumed+=d.take;
+            assert(received==consumed+depth);
+        }
+        assert(started && lan.reprimes()==0 && lan.concealed_frames()==0);
+    }
     auto first = audio_grain_decision(0, 512, 960, 480, true);
     assert(first.take == 0 && first.silence == 512 && first.priming);
     auto partial = audio_grain_decision(300, 512, 960, 480, false);
@@ -85,13 +105,13 @@ int main() {
     pre.on_healthy_grain();
     pre.on_near_miss(1100000);
     pre.on_near_miss(1200000);
-    assert(pre.target_frames() == 960); // not two contiguous near misses
+    assert(pre.target_frames() == 480); // not two contiguous near misses
     pre.on_near_miss(1300000);
-    assert(pre.target_frames() == 1440);
+    assert(pre.target_frames() == 960);
     pre.on_near_miss(1400000);
     pre.on_near_miss(1500000);
     pre.on_near_miss(1600000);
-    assert(pre.target_frames() == 1440); // cooldown suppresses ratchet
+    assert(pre.target_frames() == 960); // cooldown suppresses ratchet
     assert(pre.near_miss_events() == 7);
 
     AudioRingDriftPolicy drift;

@@ -16,7 +16,7 @@ namespace moonlight
 class AudioPrebufferPolicy
 {
   public:
-    static constexpr uint32_t kMinimumFrames = 960;
+    static constexpr uint32_t kMinimumFrames = 480; // 10 ms on a clean link; grow on evidence
     static constexpr uint32_t kMaximumFrames = 3840;
     static constexpr uint32_t kStepFrames = 480;
 
@@ -168,19 +168,23 @@ class AudioRingDriftPolicy
         {
             // EWMA with a one-second time constant, update once per output
             // grain. Integral fixed point; no allocation or float in AudioOut.
-            const uint64_t weight =
-                std::min<uint64_t>(256, (now_us - previous_us_) * 256 / 1000000);
+            const uint64_t elapsed = std::min<uint64_t>(1000000, now_us - previous_us_);
             const int64_t error = (int64_t(depth) << 8) - int64_t(average_q8_);
             average_q8_ = uint64_t(
-                std::max<int64_t>(0, int64_t(average_q8_) + error * int64_t(weight) / 256));
+                std::max<int64_t>(0, int64_t(average_q8_) + error * int64_t(elapsed) / 1000000));
         }
         previous_us_ = now_us;
-        if (average_q8_ > (uint64_t(target + kHeadroomFrames) << 8) &&
-            depth > target + kHeadroomFrames + kShedFrames)
+        // Qualify standing excess from the average, not every instantaneous
+        // grain. Delivery jitter can briefly dip below the trim threshold
+        // without removing a persistent latency surplus.
+        if (average_q8_ > (uint64_t(target + kHeadroomFrames) << 8))
         {
             if (!over_since_us_)
                 over_since_us_ = now_us;
-            if (now_us >= over_since_us_ + UINT64_C(2000000))
+            // A brief low grain defers trimming; it does not erase the
+            // standing-excess history. Never consume the safe target reserve.
+            if (now_us >= over_since_us_ + UINT64_C(2000000) &&
+                depth > target + kHeadroomFrames + kShedFrames)
             {
                 over_since_us_ = now_us;
                 average_q8_ -= uint64_t(kShedFrames) << 8;

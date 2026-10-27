@@ -113,7 +113,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("-    LbqInitializeLinkedBlockingQueue(&packetQueue, 30);", patch)
         self.assertIn("+    LbqInitializeLinkedBlockingQueue(&packetQueue, 100);", patch)
         stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")
-        self.assertIn("#define AUDIO_GRAIN_FRAMES 512u", stream)
+        self.assertIn("#define AUDIO_GRAIN_FRAMES 256u", stream)
 
     def test_audio_output_cannot_block_opus_receive_callback(self):
         stream = (ROOT / "src/moonlight_stream.cpp").read_text(encoding="utf-8")

@@ -13,8 +13,8 @@ import unittest
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1] / 'src/moonlight_stream.cpp'
-GRAIN = 512
-PREBUFFER = 960
+GRAIN = 256
+PREBUFFER = 480
 RING = 8640
 PACKET = 480
 OUTPUT_INTERVAL_US = GRAIN * 1_000_000 // 48_000
@@ -22,7 +22,7 @@ OUTPUT_INTERVAL_US = GRAIN * 1_000_000 // 48_000
 
 def run_pcm_replay(*, seed, duration_ms=25000, latency_ms=0, jitter_ms=0,
                    burst_ms=0, loss_every=0):
-    """Packets arrive at 10ms intervals; the worker consumes 512/48k grains."""
+    """Packets arrive at 10ms intervals; the worker consumes 256/48k grains."""
     rng = random.Random(seed)
     incoming = []
     for index in range(duration_ms // 10):
@@ -51,7 +51,7 @@ def run_pcm_replay(*, seed, duration_ms=25000, latency_ms=0, jitter_ms=0,
             cursor += 1
             mean_ring_sum += ring
             observations += 1
-        required = PREBUFFER if prebuffering else GRAIN
+        required = max(PREBUFFER, GRAIN + PACKET) if prebuffering else GRAIN
         if prebuffering and ring < required:
             silence_grains += 1
             if wait_start is None:
@@ -97,8 +97,8 @@ def run_pcm_replay(*, seed, duration_ms=25000, latency_ms=0, jitter_ms=0,
 class AudioArrivalReplay(unittest.TestCase):
     def test_model_thresholds_match_ps5_worker(self):
         source = SOURCE.read_text(encoding='utf-8')
-        for bound in ('#define AUDIO_GRAIN_FRAMES 512u',
-                      '#define AUDIO_PREBUFFER_FRAMES 960u',
+        for bound in ('#define AUDIO_GRAIN_FRAMES 256u',
+                      '#define AUDIO_PREBUFFER_FRAMES 480u',
                       '#define AUDIO_RING_FRAMES 8640u'):
             self.assertIn(bound, source)
 

@@ -9,13 +9,11 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 class FramePacingPolicy(unittest.TestCase):
-    def test_pyrowave_fixed_paced_rechecks_successors(self):
+    def test_pyrowave_keeps_independent_lan_pacer(self):
         source = (ROOT / 'src/pyrowave/stream_backend.cpp').read_text(encoding='utf-8')
-        self.assertIn('const bool backlog_catchup = !wait.repeat && wait.frame && selected_vsync', source)
-        self.assertIn('!fractional_fixed && !ps5_vrr_output_active()', source)
-        self.assertIn('if (backlog_catchup && !s.queue.empty())', source)
-        self.assertIn('wait.pacer->catch_up_deadline(wait.ready_us, current, deadline, wait.refresh)',
-                      source)
+        self.assertNotIn('network_jitter_budget_us', source)
+        self.assertNotIn('catch_up_deadline', source)
+        self.assertIn('wait.pacer->target(', source)
 
     def test_replay(self):
         with tempfile.TemporaryDirectory() as directory:

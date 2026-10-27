@@ -16,15 +16,15 @@ class AudioJitterPolicyTest(unittest.TestCase):
 #include <cassert>
 int main() {
     moonlight::AudioPrebufferPolicy policy;
-    assert(policy.target_frames() == 960);
+    assert(policy.target_frames() == 480);
     policy.on_underrun(1000000);
-    assert(policy.target_frames() == 960);  // isolated failure
+    assert(policy.target_frames() == 480);  // isolated failure
     policy.on_underrun(1500000);
-    assert(policy.target_frames() == 1440);
+    assert(policy.target_frames() == 960);
     for (unsigned i = 0; i < 8; ++i)
         policy.on_underrun(2000000 + i * 500000);
     assert(policy.target_frames() == 3840); // bounded at 80 ms
-    assert(policy.peak_frames() == 3840 && policy.increases() == 6);
+    assert(policy.peak_frames() == 3840 && policy.increases() == 7);
     policy.on_output(46000000);
     assert(policy.target_frames() == 3840); // 45 s quiet not reached
     policy.on_output(51000000);
@@ -56,6 +56,37 @@ int main() {
                             '-I', str(ROOT / 'include'), str(src), '-o', str(binary)], check=True)
             subprocess.run([str(binary)], check=True)
 
+    def test_persistent_excess_survives_short_depth_dips(self):
+        source = r'''
+#include "audio_jitter_policy.hpp"
+#include <cassert>
+int main() {
+    moonlight::AudioRingDriftPolicy drift;
+    unsigned removed = 0;
+    for (unsigned i=0; i<1000; ++i) {
+        // A 49 ms standing queue with periodic healthy 20 ms troughs.
+        // The old instantaneous gate reset every 21 ms and never trimmed.
+        unsigned depth = i%4 == 0 ? 960 : 2600;
+        unsigned trim = drift.observe(1000000 + uint64_t(i)*5333,depth,480);
+        if (depth==960) assert(trim==0); // no trim at the low point
+        removed += trim;
+    }
+    assert(removed >= 240 && removed <= 480);
+    assert(drift.sheds() >= 1);
+    // A quiet shallow LAN does not authorize a trim.
+    moonlight::AudioRingDriftPolicy lan;
+    for (unsigned i=0; i<1000; ++i)
+        assert(lan.observe(1000000+uint64_t(i)*5333,480+i%240,480)==0);
+}
+'''
+        with tempfile.TemporaryDirectory() as folder:
+            path=pathlib.Path(folder)
+            (path/'drift.cpp').write_text(source)
+            subprocess.run(['c++','-std=c++17','-Wall','-Wextra','-Werror',
+                            '-I',str(ROOT/'include'),str(path/'drift.cpp'),
+                            '-o',str(path/'drift')],check=True)
+            subprocess.run([str(path/'drift')],check=True)
+
     def test_long_recovery_releases_wan_buffer_without_new_underruns(self):
         # Earlier 100-second PS5 replays cannot observe the full 45-second
         # quiet period plus several 30-second cautious shrink probes.
@@ -65,23 +96,23 @@ int main() {
 #include <cstdint>
 int main() {
     moonlight::AudioPrebufferPolicy policy;
-    // Six recurring WAN disruptions establish the bounded 80 ms protection.
-    for (uint64_t t = 1000000; t <= 13000000; t += 2000000)
+    // Seven recurring WAN disruptions establish the bounded 80 ms protection.
+    for (uint64_t t = 1000000; t <= 15000000; t += 2000000)
         policy.on_underrun(t);
     assert(policy.target_frames() == 3840);
     assert(policy.peak_frames() == 3840);
     // Simulate six minutes of healthy AudioOut grains at 48 kHz/512 samples.
     // No new underrun is fabricated by decoder or source-clock jitter.
-    for (uint64_t t = 14000000; t <= 374000000; t += 10667)
+    for (uint64_t t = 16000000; t <= 374000000; t += 10667)
         policy.on_output(t);
-    assert(policy.target_frames() == 960);
-    assert(policy.decreases() == 6);
+    assert(policy.target_frames() == 480);
+    assert(policy.decreases() == 7);
     assert(policy.failed_shrinks() == 0);
     // One isolated scheduler miss after recovery must not grow the buffer.
     policy.on_underrun(380000000);
-    assert(policy.target_frames() == 960);
+    assert(policy.target_frames() == 480);
     policy.on_underrun(381000000);
-    assert(policy.target_frames() == 1440);
+    assert(policy.target_frames() == 960);
     return 0;
 }
 '''

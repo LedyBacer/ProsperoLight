@@ -90,10 +90,13 @@ def calibrate(scenario, count):
         direction = {"scenario": scenario, "packet_delta": count,
                      "drops_at_start": netem.owned_drop_count(before)}
         verdict = netem.loss_counter_verdict(direction, after)
+        discrepancy = abs(trial["missing"] - direction.get("drop_delta", -count))
+        counters_match = discrepancy <= max(3, count // 2000)
         return {"scenario": scenario, "configured": netem.SCENARIOS[scenario],
                 "synthetic_udp": trial, "qdisc": direction,
                 "loss_counter_verdict": verdict,
-                "qualified": verdict == "PLAUSIBLE" and trial["missing"] > 0,
+                "udp_qdisc_consistent": counters_match,
+                "qualified": verdict == "PLAUSIBLE" and trial["missing"] > 0 and counters_match,
                 "scope": "isolated_loopback_only"}
     finally:
         if created:
@@ -105,7 +108,7 @@ def calibrate(scenario, count):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", choices=sorted(netem.SCENARIOS),
-                        default="wifi-congested")
+                        default="wifi-loss-independent")
     parser.add_argument("--count", type=int, default=12000)
     parser.add_argument("--worker", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()

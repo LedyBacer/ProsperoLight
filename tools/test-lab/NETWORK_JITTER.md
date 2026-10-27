@@ -315,3 +315,19 @@ audio backlog without whole-queue flush; reduced audible underruns and video
 stutter on impaired links; predictable recovery without growing end-to-end
 latency over a multi-minute session. Physical input-to-photon latency still
 requires external measurement.
+
+### Independent loss qualification (LAN final hardening)
+
+Keep `wifi-congested` unchanged for historical jitter comparisons: its correlated
+1% setting has repeatedly produced near-zero measured drops. Use the additional
+`wifi-loss-independent` profile for delay20±15ms, independent1% loss and0.2%
+reorder. Run `netem_calibrate.py --scenario wifi-loss-independent` in its isolated
+namespace first. Qualification requires the unique UDP deficit to match qdisc
+drops within a bounded counting tolerance; unrelated receiver/socket loss must
+not certify the model. This does not replace proving the actual PS5 video route.
+
+A short LAN A/B must retain the same host capture device/topology, display mode,
+scene, seed and version across the two runs. A host reboot or device renumbering
+invalidates strict attribution of small FPS/timing changes. Preserve host rAF and
+RTSP send-counter series separately from PS5 decoder throughput. Zero reorder
+waiting with unchanged target deadlines is different evidence from a slower host.
