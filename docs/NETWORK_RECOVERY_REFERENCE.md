@@ -333,3 +333,23 @@ regression, not evidence that the new audio policy caused it: PyroWave backend
 source remains identical to main and no same-session main comparison was run.
 Do not claim absence of a PyroWave regression or a physical latency result from
 these runs. Receipts and every collected artifact were hash-checked locally.
+
+### Paired PyroWave cadence experiment — 2026-10-28
+
+A same-session 1080p120 PyroWave comparison held Windows at 1080p180 so the
+browser could satisfy the unchanged 120 FPS source readiness gate. Both runs
+used 10 seconds warmup plus 30 seconds measurement and completed PASS/VALID.
+The previous application source (0e4ab34, eboot bbd9cd12…) presented 119.892 FPS
+with ready-to-submit p95/p99 0.465/0.843 ms. The experimental classification by
+negotiated FPS (eboot 65de8bfd…) presented 119.647 FPS but p95/p99 worsened to
+5.691/6.220 ms. Its claimed latency fix was therefore rejected and the two local
+code/test changes were reverted. No experimental PyroWave change is retained.
+
+Runs: control `e53bce41-99a8-447c-b1f7-9c1cbbcb7106`, rejected experiment
+`33bed4b8-f63d-457c-a8a5-3afa503e3314`. Indexed artifacts and receipts were
+size/hash verified. This shows that the retained implementation can reproduce
+sub-millisecond p99 in this source environment; it does not establish immunity
+to every delivery phase or fix the separately recorded audio-startup limitation.
+Earlier attempts stopped before launch on readiness or installation-cache
+checks and are excluded from the comparison. No main/current equivalence claim
+is made from this previous-candidate/experimental pair.
