@@ -253,3 +253,83 @@ Run receipts: main `8cc7cd6b-f1e9-418b-b4d7-ee56483cd249`, final LAN
 `bbd7db7b-7892-49bd-b4f6-c1e2a0f26516`. Indexed evidence remains local; no private
 artifacts or pairing credentials are published. Final recovery restores the
 production image, latest saved settings/pairing, display, worker and routing state.
+
+
+### Startup audio drought recovery — 2026-10-28 (host-tested only)
+
+Production does not classify Ethernet versus Wi-Fi. Audio reserve follows PCM
+availability; native video arrival jitter has its own bounded queue policy.
+Stable delivery retains the 480-frame/10-ms audio floor regardless of interface
+or RTT. An unstable Ethernet path can require the same reserve as Wi-Fi.
+
+Within five seconds of first PCM output, a short read accompanied by a delivery
+drought longer than two negotiated packets (or a device grain) now authorizes
+fast recovery. The worker raises reserve to the observed drought plus a packet
+and grain, rounded up to 10-ms steps, with a conservative 30-ms minimum and the
+existing 80-ms ceiling. If this raises the target, the next grains bank real PCM
+until the reserve is met. Valid PCM in the triggering grain is consumed once;
+AudioOut keeps ticking, including deliberate silence during rebuffering. No
+callback blocking, packet discard, RTT-based reserve, interface detection, or
+DualSense change is introduced. Outside the startup window the existing slow
+hysteresis and continuity policy remain; normal quiet-period shrink also applies
+to a startup increase. A lone early delivery drought may therefore trade a
+bounded rebuffer pause for fewer subsequent short reads. These thresholds are a
+conservative software policy, not a hardware-proven optimum.
+
+Deterministic four-second replays with repeated 35-ms droughts compare the old
+and new recovery at identical packet/sample clocks. Short reads decrease from
+5 to 2 for 5-ms packets and from 5 to 3 for 10-ms packets. Concealed short-read
+PCM decreases from 896 to 128/384 frames respectively. These counts exclude
+intentional priming silence, which is separately bounded in the regression test.
+Including rebuffer silence, missing/synthetic PCM totals fall from 2176 to 1664
+frames for 5-ms packets and remain 2176 frames for 10-ms packets. Thus the latter
+replay consolidates dropouts rather than proving lower aggregate silence.
+Clean 5/10-ms packet replays retain all PCM, zero short reads and the 10-ms floor.
+Tests also cover timestamp reversal, missing timestamps, the five-second cutoff,
+reserve saturation, idempotent re-prime and subsequent quiet-period release.
+No PS5 run was performed for this change; improvement in audible startup quality
+and the balance between rebuffer pause and dropouts remain hardware-unverified.
+
+### Final startup-audio and PyroWave check — 2026-10-28
+
+The PS5 build `test-lab-audio-startup` has eboot SHA256
+`bbd9cd1255948e3daa3371ddffba383299b806bc7110f3945f2a93fc5f029199`;
+its source digest was verified against the local tested source. A first LAN
+attempt stopped in stimulus preparation (`RAF_BELOW_TARGET`) without starting
+a stream. After the interactive desktop was made available, three short runs
+completed. Each used the same 1080p scrolling source and tone; native used H.264
+NVENC 60 FPS, the source was held at 120 Hz, and PyroWave used a 120 FPS stream.
+
+| Run | Verdict | Host FPS | PS5 FPS | Age or ready-to-submit p99 |
+| --- | --- | ---: | ---: | ---: |
+| Native LAN, 10s warmup + 20s measured | PASS / VALID | 59.86 | 59.79 | 17.62 ms frame age |
+| Native jitter/loss, 10s + 30s | PASS / INCONCLUSIVE (network loss) | 59.98 | 59.46 | 48.08 ms frame age |
+| PyroWave LAN, 10s + 30s | PASS / VALID | 117.62 | 116.91 | 7.97 ms ready-to-submit |
+
+For jitter, netem applied 20 ± 15 ms, independent 1% loss and 0.2% reorder;
+407 drops were counted over 38,308 offered packets (1.06%), and the verified
+video UDP counter advanced by 21,847 packets. The largest measured display
+progress gap was 100.06 ms, with no one-second stall and no capacity flush.
+The prior impaired run used a different random seed, so comparisons below are
+individual observations rather than a controlled causal estimate.
+
+All three audio short reads in the new impaired run occurred before measurement;
+there were none during its 30-second measurement. Across the entire session,
+short-read concealment was 384 frames (8 ms) and there were nine active silent
+256-frame grains (48 ms), about 56 ms together. The preceding run had five short
+reads, 864 concealed frames (18 ms), and six active silent grains (32 ms), about
+50 ms together. Rebuffer wait rose from 42.78 to 64.08 ms. First PCM output was
+2.79 ms after the first packet callback, versus 2.00 ms previously; the 535 ms
+from starting AudioOut to first PCM includes time before the first packet and is
+not the buffer delay. Thus fewer short reads did not demonstrate less total
+silence or satisfy the earlier two-short-read target. Hardware listening and
+physical audio latency were not measured.
+
+The new PyroWave run has no network packet losses or flip errors, but two stale
+frames, and its ready-to-submit p99 was 7.97 ms compared with 0.80 ms in the
+previous candidate's separate run. Host FPS was similar (117.62 versus 117.60),
+but frame phase and timing differed. This is an unresolved possible latency
+regression, not evidence that the new audio policy caused it: PyroWave backend
+source remains identical to main and no same-session main comparison was run.
+Do not claim absence of a PyroWave regression or a physical latency result from
+these runs. Receipts and every collected artifact were hash-checked locally.

@@ -4150,7 +4150,7 @@ static void *ps5_audio_output_worker(void *)
                 state->drift_shed_frames += shed;
             }
         }
-        const auto decision = state->continuity_policy.decide(
+        auto decision = state->continuity_policy.decide(
             state->ring_count, AUDIO_GRAIN_FRAMES, state->prebuffer_policy.target_frames(),
             static_cast<uint32_t>(std::max(1, state->samples_per_frame)));
         if (decision.underrun)
@@ -4160,6 +4160,16 @@ static void *ps5_audio_output_worker(void *)
                 state->first_underrun_us = now_us;
             state->last_underrun_us = now_us;
             state->prebuffer_policy.on_underrun(now_us);
+            if (state->prebuffer_policy.on_startup_drought(
+                    now_us, state->first_pcm_output_us, state->last_pcm_enqueue_us,
+                    static_cast<uint32_t>(std::max(1, state->samples_per_frame)),
+                    AUDIO_GRAIN_FRAMES))
+            {
+                // Consume this grain's valid prefix once, then bank real PCM
+                // to the evidence-based reserve while AudioOut keeps ticking.
+                state->continuity_policy.request_reprime();
+                decision.priming = true;
+            }
         }
         else if (decision.near_miss && state->last_pcm_enqueue_us &&
                  now_us >= state->last_pcm_enqueue_us &&

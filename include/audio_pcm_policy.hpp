@@ -87,6 +87,15 @@ class AudioContinuityPolicy
         return out;
     }
 
+    void request_reprime()
+    {
+        if (!priming_)
+        {
+            priming_ = true;
+            ++reprimes_;
+        }
+    }
+
     uint64_t concealed_frames() const
     {
         return concealed_frames_;
