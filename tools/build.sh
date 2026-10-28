@@ -78,9 +78,10 @@ print(title_id)
 PY
 )
 
-# Loader/container constants validated on firmware 6.02 and 12.70. These are
-# deliberately separate from the public application version in param.json.
-module_sdk=0x02000009
+# SDK 4.x enables native multi-zone adaptive trigger modes in libScePad.
+# This application SDK must match the clean-room libc module's SDK and is
+# separate from the public version in param.json.
+module_sdk=0x04000000
 companion_sdk=0x08050001
 fself_magic=0x1D3D154F
 

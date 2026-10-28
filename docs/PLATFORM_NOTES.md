@@ -8,14 +8,17 @@ environment.
 
 - The application is a native PS5 ELF of type `0xFE10` inside a development
   FSELF.
-- FSELF magic `0x1D3D154F` and SDK pair
-  `0x02000009 / 0x08050001` are the template defaults.
+- The application uses FSELF magic `0x1D3D154F` and SDK pair
+  `0x04000000 / 0x08050001`. Native multi-zone adaptive trigger effects require
+  an application SDK of at least 4.x. The clean-room compatibility shim also
+  declares SDK 4.x to satisfy the loader's version checks; the public application
+  version is independent.
 - The supported title layout includes `sce_module/libc.prx`. The generated
   clean-room shim supplies the loader-visible compatibility contract and
   contains no Sony implementation code.
-- The byte-identical generated shim is hardware-verified on firmware 6.02 and
-  12.70 with ShadowMountPlus. Other firmware and loader combinations remain
-  unverified.
+- The SDK 4.x shim has passed application startup on firmware 12.20 with
+  ShadowMount+ 1.7beta3. Other firmware and loader combinations for this SDK
+  declaration remain unverified.
 - The shim is not a C library. Application imports bind to platform modules
   selected by the linker.
 - The root skeleton keeps `main` alive and relies on the host application

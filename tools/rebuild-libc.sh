@@ -10,8 +10,8 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 work="$root/build/runtime-shim"
 native="$root/tooling/native"
-expected_raw="8ee6e124993e1af26420cb455890fd002f5d6c7e78883c860ce45734e7d002bb"
-expected_signed="e6ff45d16adf687855cc3b33b0c8a4132b6504360b221e0a34c7e99fb3ba0036"
+expected_raw="db857be710957014a8528ff8b08c0406f70ecd99e291f799f43c6ff82fa84d6c"
+expected_signed="48427d4447d9b8cfa344d0f191ea8cc29ee9a25a60628180e50d161b0ca9b575"
 manifest="$root/runtime/libc.prx.sha256"
 
 grep -Fxq "$expected_signed *libc.prx" "$manifest" || {

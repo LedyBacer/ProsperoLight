@@ -7,7 +7,7 @@ runtime implementation, proprietary SDK binary, or game file.
 The release artifact has SHA-256:
 
 ```text
-e6ff45d16adf687855cc3b33b0c8a4132b6504360b221e0a34c7e99fb3ba0036
+48427d4447d9b8cfa344d0f191ea8cc29ee9a25a60628180e50d161b0ca9b575
 ```
 
 Generate it from the repository root:

@@ -1,9 +1,9 @@
 # Clean-room runtime module
 
 This repository generates `runtime/libc.prx`, the project-authored loader
-companion used by the default template and Hello World example. The exact
-recorded binary has been hardware-validated on PS5 firmware 6.02 and 12.70
-with ShadowMountPlus.
+companion used by the native application. Its SDK 4.x module declaration has
+passed ProsperoLight startup on PS5 firmware 12.20 with ShadowMount+ 1.7beta3.
+Other firmware and loader combinations for this declaration remain unverified.
 
 It is not copied from a game, application, console firmware, Sony SDK, or
 another developer's runtime module.
@@ -83,10 +83,10 @@ symbol and relocation tables. It does not indicate copied libc code.
 
 ```text
 Raw ELF size:     1,335,962 bytes
-Raw ELF SHA-256:  8ee6e124993e1af26420cb455890fd002f5d6c7e78883c860ce45734e7d002bb
+Raw ELF SHA-256:  db857be710957014a8528ff8b08c0406f70ecd99e291f799f43c6ff82fa84d6c
 
 Generated FSELF size:    1,284,674 bytes
-Generated FSELF SHA-256: e6ff45d16adf687855cc3b33b0c8a4132b6504360b221e0a34c7e99fb3ba0036
+Generated FSELF SHA-256: 48427d4447d9b8cfa344d0f191ea8cc29ee9a25a60628180e50d161b0ca9b575
 ```
 
 The expected FSELF digest is tracked in

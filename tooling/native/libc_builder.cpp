@@ -543,7 +543,7 @@ void build_module_param(Bytes &file)
     write_u32(file, at + 8, 0x3C13F4BF);
     write_u32(file, at + 0x0C, 3);
     write_u32(file, at + 0x10, 0x08050001);
-    write_u32(file, at + 0x14, 0x02000009);
+    write_u32(file, at + 0x14, 0x04000000);
     write_u32(file, at + 0x18, 1);
 }
 
