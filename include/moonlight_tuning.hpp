@@ -21,6 +21,13 @@
 #ifndef INPUT_POLL_US
 #define INPUT_POLL_US 2000
 #endif
+// Developer candidate, gated until native recovery/latency evidence exists.
+// Zero preserves the validated production path. Suggested comparison: 80 ms.
+#ifndef PROSPEROLIGHT_NATIVE_MAX_QUEUE_MS
+#define PROSPEROLIGHT_NATIVE_MAX_QUEUE_MS 0
+#endif
+static_assert(PROSPEROLIGHT_NATIVE_MAX_QUEUE_MS == 0 || (PROSPEROLIGHT_NATIVE_MAX_QUEUE_MS >= 20 &&
+                                                         PROSPEROLIGHT_NATIVE_MAX_QUEUE_MS <= 250));
 
 static_assert(VIDEO_SLICES_PER_FRAME >= 1 && VIDEO_SLICES_PER_FRAME <= 8);
 static_assert(DECODER_PIPELINE_DEPTH >= 1 && DECODER_PIPELINE_DEPTH <= 3);

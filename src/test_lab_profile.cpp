@@ -316,20 +316,35 @@ bool parse_profile(std::string_view json, std::string_view expected_id, TestProf
     if (auto capture = field(root, "capture"))
     {
         if (!known(*capture, {"detailed_frame_trace", "host_logs", "gpu_metrics",
-                              "decoder_capacity_probe", "decoder_capacity_probe_first"}))
+                              "decoder_capacity_probe", "decoder_capacity_probe_first",
+                              "native_queue_limit_ms", "experimental_phase_clock"}))
             return false;
         for (const auto &[key, val] : capture->fields)
         {
+            if (key == "native_queue_limit_ms")
+            {
+                if (val.kind != Value::number ||
+                    (val.integer && (val.integer < 20 || val.integer > 250)) || !p.codec ||
+                    *p.codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE)
+                    return false;
+                p.native_queue_limit_ms = val.integer;
+                continue;
+            }
             if (val.kind != Value::boolean)
                 return false;
             if (key == "decoder_capacity_probe")
                 p.decoder_capacity_probe = val.flag;
             if (key == "decoder_capacity_probe_first")
                 p.decoder_capacity_probe_first = val.flag;
+            if (key == "experimental_phase_clock")
+                p.experimental_phase_clock = val.flag;
         }
         if (p.decoder_capacity_probe_first && !p.decoder_capacity_probe)
             return false;
         if (p.decoder_capacity_probe && (!p.codec || *p.codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE))
+            return false;
+        if (p.experimental_phase_clock &&
+            (!p.codec || *p.codec == MOONLIGHT_VIDEO_CODEC_PYROWAVE || !p.pacing || *p.pacing != 1))
             return false;
     }
     if (auto env = field(root, "environment"))

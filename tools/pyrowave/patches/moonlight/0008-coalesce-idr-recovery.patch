@@ -1,0 +1,94 @@
+diff --git a/src/VideoDepacketizer.c b/src/VideoDepacketizer.c
+--- a/src/VideoDepacketizer.c
++++ b/src/VideoDepacketizer.c
+@@ -34,6 +34,28 @@
+ }
+ 
+ 
++// Coalesce only redundant keyframe requests; keep the existing RFI/IDR
++// state machine and decoder lifecycle entirely unchanged. An absent IDR can
++// be requested again after this short interval if stream loss continues.
++#define IDR_REQUEST_COOLDOWN_US UINT64_C(100000)
++static _Atomic uint64_t lastIdrRequestUs;
++static void requestIdrCoalesced(void) {
++    uint64_t now = PltGetMicroseconds();
++    uint64_t previous = atomic_load_explicit(&lastIdrRequestUs, memory_order_relaxed);
++    for (;;) {
++        if (previous != 0 && now >= previous &&
++            now - previous < IDR_REQUEST_COOLDOWN_US) {
++            return;
++        }
++        if (atomic_compare_exchange_weak_explicit(&lastIdrRequestUs, &previous,
++                                                  now, memory_order_relaxed,
++                                                  memory_order_relaxed)) {
++            LiRequestIdrFrame();
++            return;
++        }
++    }
++}
++
+ // Uncomment to test 3 byte Annex B start sequences with GFE
+ //#define FORCE_3_BYTE_START_SEQUENCES
+ 
+@@ -95,6 +117,7 @@
+ 
+ // Init
+ void initializeVideoDepacketizer(int pktSize) {
++    atomic_store_explicit(&lastIdrRequestUs, 0, memory_order_relaxed);
+     for (unsigned i = 0; i < VD_COUNT; ++i) atomic_store_explicit(&delivery[i], 0, memory_order_relaxed);
+     atomic_store_explicit(&deliveryEndUs, 0, memory_order_relaxed);
+     atomic_store_explicit(&deliveryStartUs, PltGetMicroseconds(), memory_order_relaxed);
+@@ -165,7 +188,7 @@
+ 
+         // Request an IDR frame
+         waitingForIdrFrame = true;
++        requestIdrCoalesced();
+-        LiRequestIdrFrame();
+     }
+ 
+     cleanupFrameState();
+@@ -583,7 +606,7 @@
+                     freeDecodeUnitList(LbqFlushQueueItems(&decodeUnitQueue), VD_OVERFLOW_DISCARDED_AUS);
+ 
+                     // Request an IDR frame to recover
++                    requestIdrCoalesced();
+-                    LiRequestIdrFrame();
+                     return;
+                 }
+                 else if (offer != LBQ_SUCCESS) {
+@@ -798,7 +821,7 @@
+     dropStatePending = true;
+ 
+     // Request the IDR frame
++    requestIdrCoalesced();
+-    LiRequestIdrFrame();
+ }
+ 
+ // Return 1 if packet is the first one in the frame
+@@ -860,7 +883,7 @@
+         nextFrameNumber = frameIndex + 1;
+         dropFrameState();
+         if (waitingForIdrFrame) {
++            requestIdrCoalesced();
+-            LiRequestIdrFrame();
+         }
+         else {
+             connectionDetectedFrameLoss(startFrameNumber, frameIndex);
+@@ -1135,7 +1158,7 @@
+                 nextFrameNumber = frameIndex + 1;
+                 dropFrameState();
+                 if (waitingForIdrFrame) {
++                    requestIdrCoalesced();
+-                    LiRequestIdrFrame();
+                 }
+                 else {
+                     connectionDetectedFrameLoss(startFrameNumber, frameIndex);
+@@ -1168,7 +1191,7 @@
+                 // detection of the recovery of the network. Requesting an IDR frame while
+                 // the network is unstable will just contribute to congestion collapse.
+                 if (waitingForNextSuccessfulFrame) {
++                    requestIdrCoalesced();
+-                    LiRequestIdrFrame();
+                 }
+             }
+             else {

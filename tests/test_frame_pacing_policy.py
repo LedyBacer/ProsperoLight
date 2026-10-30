@@ -9,6 +9,12 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 class FramePacingPolicy(unittest.TestCase):
+    def test_pyrowave_keeps_independent_lan_pacer(self):
+        source = (ROOT / 'src/pyrowave/stream_backend.cpp').read_text(encoding='utf-8')
+        self.assertNotIn('network_jitter_budget_us', source)
+        self.assertNotIn('catch_up_deadline', source)
+        self.assertIn('wait.pacer->target(', source)
+
     def test_replay(self):
         with tempfile.TemporaryDirectory() as directory:
             source = pathlib.Path(directory) / 'pacing.cpp'
@@ -71,6 +77,195 @@ int main() {
         assert(target>=previous+2000000 && target<=previous+2010000);
         assert(p.stats.resets);
     }
+    // Nonary/Punktfunk-inspired burst_pacer catch-up: a decoded successor that
+    // arrives during an existing WAN reserve can shorten that wait, but may
+    // never evade the source-period floor for fixed VSync.
+    moonlight::FramePacing burst_pacer;
+    burst_pacer.reset(60);
+    burst_pacer.set_network_jitter_budget_us(30000);
+    burst_pacer.submitted(1000000,1000000,0);
+    auto burst_target=burst_pacer.target(2,33333,1016666,6000,1000000);
+    const auto original_burst_target=burst_target+20000;
+    const auto caught_up=burst_pacer.catch_up_deadline(1016666,1016666,original_burst_target,6000);
+    assert(caught_up>=1016666 && caught_up>=1000000+16666*98/100);
+    assert(caught_up<original_burst_target);
+    assert(burst_pacer.stats.backlog_catchups==1);
+    assert(burst_pacer.stats.backlog_saved_us==original_burst_target-caught_up);
+    // A second observation of the same successor must not double-account.
+    assert(burst_pacer.catch_up_deadline(1016666,1016666,caught_up,6000)==caught_up);
+    assert(burst_pacer.stats.backlog_catchups==1);
+    // When the source cadence is not a divisor of the fixed display grid
+    // (90 FPS on 60 Hz), its fractional presentation policy must be retained.
+    assert(burst_pacer.catch_up_deadline(1016666,1016666,original_burst_target,9000)==original_burst_target);
+    burst_pacer.set_network_jitter_budget_us(0);
+    assert(burst_pacer.catch_up_deadline(1016666,1016666,original_burst_target,6000)==original_burst_target);
+    moonlight::FramePacing initial;
+    initial.reset(60);
+    initial.set_network_jitter_budget_us(30000);
+    assert(initial.catch_up_deadline(1016666,1016666,original_burst_target,6000)==original_burst_target);
+    // A scheduler that wakes after the floor has passed must not invent
+    // saved waiting or report that the stream missed a target in the past.
+    const uint64_t resumed_now=1019500;
+    const uint64_t still_future=original_burst_target+1000;
+    burst_pacer.set_network_jitter_budget_us(30000);
+    const auto previous_catchups=burst_pacer.stats.backlog_catchups;
+    const auto previous_saved=burst_pacer.stats.backlog_saved_us;
+    assert(burst_pacer.catch_up_deadline(1016666,resumed_now,still_future,6000)
+           ==resumed_now);
+    assert(burst_pacer.stats.backlog_saved_us==previous_saved+still_future-resumed_now);
+    assert(burst_pacer.stats.backlog_catchups==previous_catchups+1);
+    const auto after_catchups=burst_pacer.stats.backlog_catchups;
+    const auto after_saved=burst_pacer.stats.backlog_saved_us;
+    assert(burst_pacer.catch_up_deadline(1016666,still_future+1000,still_future,6000)
+           ==still_future);
+    assert(burst_pacer.stats.backlog_catchups==after_catchups);
+    assert(burst_pacer.stats.backlog_saved_us==after_saved);
+
+    // Deterministic scheduler replay. Packet bursts become ready pictures,
+    // an early successor arrives during the old playout reserve, and each
+    // synthetic wake advances monotonically. 59.94 and 119.88 Hz represent
+    // the real nominal PS5 output modes (in hundredths of a hertz).
+    for(unsigned refresh : {5994u,11988u}) {
+        for(bool impaired : {false,true}) {
+            moonlight::FramePacing replay;
+            replay.reset(60);
+            uint64_t last_submit=0,previous_arrival=0;
+            uint64_t accelerated=0;
+            const uint64_t refresh_period=UINT64_C(100000000)/refresh;
+            const uint64_t matched=refresh==11988?2*refresh_period:refresh_period;
+            const uint64_t floor=matched*98/100;
+            for(int frame=1;frame<=180;++frame) {
+                const uint64_t pts=uint64_t(frame)*1000000/60;
+                const uint64_t jitter=impaired && frame%11==0?22000:0;
+                const uint64_t arrival=std::max(UINT64_C(1000000)+pts+jitter,previous_arrival+1);
+                previous_arrival=arrival;
+                replay.set_network_jitter_budget_us(impaired && frame>24?25000:0);
+                const uint64_t base=replay.target(frame,pts,arrival,refresh,last_submit);
+                const uint64_t old_deadline=impaired && frame>24
+                    ?std::max(base,arrival+12000):base;
+                const uint64_t successor_at=arrival+4000;
+                uint64_t deadline=old_deadline;
+                // Model the present-thread's existing 1ms polling.
+                for(uint64_t now=arrival;now<deadline;now+=1000) {
+                    if(now>=successor_at) {
+                        const uint64_t changed=replay.catch_up_deadline(
+                            arrival,now,deadline,refresh);
+                        assert(changed>=now && changed>=arrival);
+                        if(changed<deadline) ++accelerated;
+                        deadline=changed;
+                    }
+                }
+                const uint64_t submit=std::max(arrival,deadline);
+                if(last_submit)
+                    assert(submit>=last_submit+floor);
+                replay.submitted(deadline,submit,submit-arrival);
+                last_submit=submit;
+            }
+            if(impaired) {
+                assert(accelerated>0);
+                assert(replay.stats.backlog_catchups==accelerated);
+                assert(replay.stats.backlog_saved_us>0);
+            } else {
+                assert(accelerated==0);
+                assert(replay.stats.backlog_catchups==0);
+                assert(replay.stats.backlog_saved_us==0);
+            }
+        }
+    }
+    // Slow decode/GPU preparation on an otherwise stable LAN must NOT
+    // authorize a 30 ms playout reserve (ready time is not network evidence).
+    moonlight::VideoArrivalJitter stable_network;
+    moonlight::FramePacing slow_decoder;
+    slow_decoder.reset(60);
+    for(int frame=1;frame<=180;++frame) {
+        const auto source=uint64_t(frame)*1000000/60;
+        const auto arrival=1000000+source;
+        stable_network.observe(frame,frame*1500,arrival);
+        slow_decoder.set_network_jitter_budget_us(stable_network.budget_us());
+        const auto ready=arrival+(frame%7==0?25000:1000);
+        const auto target=slow_decoder.target(frame,source,ready);
+        slow_decoder.submitted(target,target,target-ready);
+        assert(slow_decoder.stats.reserve_us<=10000);
+    }
+    assert(stable_network.budget_us()==0 && stable_network.bursts()==0);
+    // Repeated *arrival* bursts, close together, earn bounded extra reserve.
+    // Arrival is monotonic, even when a delayed burst is followed by catchup.
+    moonlight::VideoArrivalJitter impaired_network;
+    moonlight::FramePacing unstable;
+    unstable.reset(60);
+    uint64_t peak_reserve=0;
+    for(int frame=1; frame<=160; ++frame) {
+        const uint64_t pts=uint64_t(frame)*1000000/60;
+        const uint64_t jitter=frame%7==0?25000:0;
+        static uint64_t last_arrival=0;
+        const uint64_t arrival=std::max(1000000+pts+jitter,last_arrival+1);
+        last_arrival=arrival;
+        impaired_network.observe(frame,frame*1500,arrival);
+        unstable.set_network_jitter_budget_us(impaired_network.budget_us());
+        const uint64_t ready=arrival+1000;
+        const auto target=unstable.target(frame,pts,ready);
+        assert(target>=ready && target<=ready+30000);
+        unstable.submitted(target,target,target-ready);
+        peak_reserve=std::max(peak_reserve,unstable.stats.reserve_us);
+    }
+    assert(peak_reserve>10000 && peak_reserve<=30000);
+    assert(impaired_network.peak_us()>10000 && impaired_network.bursts()>0);
+    // A missing video frame must not erase protection learned during recent
+    // jitter. The estimator must rejoin consecutive pairs without treating
+    // their larger source clock delta as new measured jitter.
+    moonlight::VideoArrivalJitter lost_frame_network;
+    uint64_t lost_last=0;
+    for(int f=1;f<=100;++f) {
+        const uint64_t pts=uint64_t(f)*1000000/60;
+        const uint64_t jitter=f%7==0?25000:0;
+        const uint64_t arrival=std::max(1000000+pts+jitter,lost_last+1);
+        lost_last=arrival;
+        lost_frame_network.observe(f,f*1500,arrival);
+    }
+    const auto before_gap=lost_frame_network.budget_us();
+    assert(before_gap>10000);
+    lost_frame_network.observe(104,104*1500,lost_last+66667);
+    assert(lost_frame_network.budget_us()==before_gap);
+    assert(lost_frame_network.missing_frames()==3);
+    assert(lost_frame_network.discontinuities()>0);
+    lost_frame_network.observe(200,200*1500,lost_last+10000000);
+    assert(lost_frame_network.budget_us()==0); // expired evidence after long idle
+    // Matching 60-on-60 fixed refresh normally submits immediately, but a
+    // confirmed WAN burst is allowed a bounded reserve on that path too.
+    moonlight::FramePacing fixed_wan;
+    fixed_wan.reset(60);
+    moonlight::VideoArrivalJitter fixed_arrivals;
+    uint64_t fixed_last=0, fixed_arrival=0;
+    bool fixed_extended=false;
+    for(int frame=1;frame<=150;++frame) {
+        const uint64_t source=uint64_t(frame)*1000000/60;
+        const uint64_t spike=frame%7==0?25000:0;
+        fixed_arrival=std::max(1000000+source+spike,fixed_arrival+1);
+        fixed_arrivals.observe(frame,frame*1500,fixed_arrival);
+        fixed_wan.set_network_jitter_budget_us(fixed_arrivals.budget_us());
+        const uint64_t ready=fixed_arrival+1000;
+        const auto target=fixed_wan.target(frame,source,ready,6000,fixed_last);
+        assert(target>=ready && target<=ready+50000);
+        if(fixed_arrivals.budget_us() && target>ready+1000)
+            fixed_extended=true;
+        fixed_wan.submitted(target,target,target-ready);
+        fixed_last=target;
+    }
+    assert(fixed_extended);
+    // The enlarged budget expires when the last burst has passed. RTP
+    // discontinuity must drop it immediately, including rollover-safe deltas.
+    uint64_t last_good=1000000+160*16667+30000;
+    for(int frame=161;frame<=460;++frame) {
+        last_good+=16667;
+        impaired_network.observe(frame,frame*1500,last_good);
+    }
+    assert(impaired_network.budget_us()==0);
+    impaired_network.observe(999,1500,9000000);
+    assert(impaired_network.budget_us()==0);
+    moonlight::VideoArrivalJitter rollover;
+    rollover.observe(1,0xfffffff0u,1000000);
+    rollover.observe(2,1484u,1016666);
+    assert(rollover.bursts()==0 && rollover.budget_us()==0);
     // Capture jitter alternates long and short PTS deltas for twenty minutes.
     // The source is still 60 FPS; cadence must not drift into a 40 FPS cap.
     moonlight::FramePacing jittered;

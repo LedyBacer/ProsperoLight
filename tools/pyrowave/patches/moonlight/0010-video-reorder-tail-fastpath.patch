@@ -1,0 +1,61 @@
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -52,5 +52,6 @@
+ } VIDEO_REORDER_HELD;
+ static VIDEO_REORDER_HELD* reorderHead;
++static VIDEO_REORDER_HELD* reorderTail;
+ static unsigned reorderCount;
+ static size_t reorderBytes;
+ static int reorderEntryOffset;
+@@ -154,4 +155,5 @@
+         }
+         reorderHead = entry->next;
++        if (reorderHead == NULL) reorderTail = NULL;
+         reorderCount--;
+         reorderBytes -= (size_t)entry->length;
+@@ -188,13 +190,23 @@
+     entry->block = block;
+     entry->receivedUs = PltGetMicroseconds();
+     entry->next = NULL;
+-    /* Release older frames and earlier multi-FEC blocks before newer ones.
+-     * Within the same block preserve arrival order; RtpvAddPacket handles OOS. */
+-    link = &reorderHead;
+-    while (*link != NULL &&
+-           (isBefore32((*link)->frame, frame) ||
+-            ((*link)->frame == frame && (*link)->block <= block)))
+-        link = &(*link)->next;
+-    entry->next = *link;
+-    *link = entry;
++    /* Almost all held packets arrive in increasing frame/block order. Avoid
++     * walking the entire list for each append in a large FEC burst. Preserve
++     * the ordered insertion fallback for real out-of-order block arrivals. */
++    if (reorderTail != NULL &&
++        (isBefore32(reorderTail->frame, frame) ||
++         (reorderTail->frame == frame && reorderTail->block <= block))) {
++        reorderTail->next = entry;
++        reorderTail = entry;
++    }
++    else {
++        link = &reorderHead;
++        while (*link != NULL &&
++               (isBefore32((*link)->frame, frame) ||
++                ((*link)->frame == frame && (*link)->block <= block)))
++            link = &(*link)->next;
++        entry->next = *link;
++        *link = entry;
++        if (entry->next == NULL) reorderTail = entry;
++    }
+     reorderCount++;
+@@ -218,4 +231,5 @@
+     }
+     reorderHead = NULL;
++    reorderTail = NULL;
+     reorderCount = 0;
+     reorderBytes = 0;
+@@ -270,4 +284,5 @@
+     buffer = NULL;
+     reorderEntryOffset = decryptedSize;
+     reorderHead = NULL;
++    reorderTail = NULL;
+     reorderCount = 0;

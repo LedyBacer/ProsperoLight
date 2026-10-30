@@ -170,6 +170,36 @@ resolveHash(new ArrayBuffer(32));pending.then(()=>{
 
 @unittest.skipUnless(importlib.util.find_spec('aiohttp'), 'optional worker dependency aiohttp unavailable')
 class FakeWorkerSession(unittest.IsolatedAsyncioTestCase):
+    async def test_start_waits_for_current_ready_without_weakening_gate(self):
+        import asyncio
+        import time
+        from pltest.host.worker import Worker
+        worker = Worker('a' * 32, '.')
+        worker.settings = {'fps': 60}
+        worker.monitor = dict(x=0, y=0, width=1920, height=1080, refresh_hz=60)
+        worker.latest_page = dict(visibility='visible', focused=True, fullscreen=True,
+                                 raf_fps=60, dpr=1, screen_x=0, screen_y=0,
+                                 outer_width=1920, outer_height=1080,
+                                 screen_width=1920, screen_height=1080)
+        worker.last_page_heartbeat = time.monotonic() - 10
+        with patch('pltest.host.worker.display.probe', return_value={'interactive': True}):
+            with self.assertRaisesRegex(RuntimeError, 'READY_EXPIRED'):
+                await worker.await_current_ready(timeout=0)
+            self.assertEqual(worker.events[-1]['detail']['reasons'], ['PAGE_HEARTBEAT_STALE'])
+            async def fresh():
+                await asyncio.sleep(.01)
+                worker.last_page_heartbeat = time.monotonic()
+            task = asyncio.create_task(fresh())
+            await worker.await_current_ready(timeout=.2)
+            await task
+            for field, value in (('focused', False), ('fullscreen', False), ('raf_fps', 40),
+                                 ('screen_width', 1280)):
+                prior = worker.latest_page[field]
+                worker.latest_page[field] = value
+                with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, 'READY_EXPIRED'):
+                    await worker.await_current_ready(timeout=0)
+                worker.latest_page[field] = prior
+
     async def test_final_report_uses_actual_refresh_and_explains_invalidity(self):
         from pltest.host.worker import Worker
         from types import SimpleNamespace

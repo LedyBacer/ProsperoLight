@@ -416,6 +416,9 @@ static native_renderer_state_t *make_state(unsigned depth, Model decoder_model,
     auto *state = new native_renderer_state_t{};
     state->mode = &video_modes[0];
     state->stream_fps = 120;
+    // This fixture bypasses stream setup: explicitly select its unpaced
+    // one-picture policy, as production setup does before workers start.
+    state->clean_ready_capacity = state->mailbox.capacity;
     state->input_memory = inputs;
     state->frame_memory = frames;
     state->input_size = state->frame_size = 64;
@@ -750,13 +753,47 @@ static void every_connection_of_a_process_is_accepted()
     assert(moonlight_video_callbacks.setup == moonlight_renderer_setup);
 }
 
-static void paced_ready_queue_retains_surface_ownership()
+static void adaptive_ready_queue_releases_every_displaced_surface()
 {
     DECODE_UNIT unit{};
     unit.fullLength = sizeof(access_unit);
     unit.bufferList = &fragment;
     auto *state = make_state(1, Model::SameCall, 1);
-    state->mailbox.capacity = 2;
+    state->lan_ready_selection = true;
+    for (int frame = 1; frame <= 3; ++frame)
+        assert(decode(state, &unit, frame, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(state->not_displayed == 2 && state->frames.count(Pool::Ready) == 1);
+    assert(state->mailbox.item.frame == 3 && !state->mailbox.second);
+    // Drive the actual arrival estimator, not just its published atomic:
+    // decode_access_unit refreshes that atomic before every publication.
+    for (unsigned i = 0; i < 40; ++i)
+        state->network_jitter.observe(i + 1, 90000 + i * 1500,
+                                      1000000 + i * 16666 + (i % 2 ? 12000 : 0));
+    assert(state->network_jitter.budget_us() > 0);
+    for (int frame = 4; frame <= 5; ++frame)
+        assert(decode(state, &unit, frame, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(state->not_displayed == 3 && state->frames.count(Pool::Ready) == 2);
+    assert(state->mailbox.item.frame == 4 && state->mailbox.following.frame == 5);
+    state->network_jitter.reset();
+    state->network_jitter_budget_us.store(0);
+    assert(decode(state, &unit, 6, FRAME_TYPE_PFRAME) == DR_OK);
+    assert(state->not_displayed == 5 && state->frames.count(Pool::Ready) == 1);
+    stream_ready_frame_t ready{};
+    assert(state->mailbox.take(&ready) && ready.frame == 6);
+    state->frames.release(ready.slot);
+    assert(!state->mailbox.full && state->frames.count(Pool::Free) == FRAME_SLOT_COUNT);
+    renderer_sync_destroy(state);
+    delete state;
+}
+
+static void buffered_ready_queue_retains_surface_ownership()
+{
+    DECODE_UNIT unit{};
+    unit.fullLength = sizeof(access_unit);
+    unit.bufferList = &fragment;
+    auto *state = make_state(1, Model::SameCall, 1);
+    // Buffered paced mode (jitter/VRR/fractional cadence) retains two.
+    state->clean_ready_capacity = state->mailbox.capacity = 2;
     for (int frame = 1; frame <= 3; ++frame)
         assert(decode(state, &unit, frame, FRAME_TYPE_PFRAME) == DR_OK);
     assert(state->not_displayed == 1 && state->frames.count(Pool::Ready) == 2);
@@ -1288,8 +1325,68 @@ static void qsv_stale_parameter_deadline_regressions()
     dispose_owner(state);
 }
 
+static void native_overload_requires_fresh_reference_chain()
+{
+    using namespace moonlight::video;
+    auto *state = uninitialized_owner();
+    auto sp = fixture::h264(1920, 1080, 1, 42, true, 2);
+    auto pp = id_nal(true, 0), pic = id_nal(false, 0);
+    LENTRY sps{}, pps{}, picture{};
+    sps.bufferType = BUFFER_TYPE_SPS;
+    pps.bufferType = BUFFER_TYPE_PPS;
+    picture.bufferType = BUFFER_TYPE_PICDATA;
+    sps.data = (char *)sp.data();
+    sps.length = sp.size();
+    pps.data = (char *)pp.data();
+    pps.length = pp.size();
+    picture.data = (char *)pic.data();
+    picture.length = pic.size();
+    sps.next = &pps;
+    pps.next = &picture;
+    DECODE_UNIT unit{};
+    unit.bufferList = &sps;
+    unit.fullLength = sp.size() + pp.size() + pic.size();
+    state->overload_limit_us = 80000;
+    assert(decode(state, &unit, 1, FRAME_TYPE_IDR) == DR_OK && state->decoded == 1);
+    const auto original_creates = creates;
+    for (unsigned episode = 0; episode < 3; ++episode)
+    {
+        pending_frames = 3;
+        unit.enqueueTimeUs = PltGetMicroseconds() - 90000;
+        const auto calls = decodes;
+        const auto status = decode(state, &unit, 2 + episode * 3, FRAME_TYPE_PFRAME);
+        assert(decodes == calls); // No stale AU reaches native Decode.
+        if (episode == 2)
+        {
+            assert(status == DR_OK && !state->running);
+            assert(state->lifecycle.reason == Error::Throughput && state->last_result == -35);
+            assert(state->overload.resyncs == 2 && state->overload.stops == 1);
+            break;
+        }
+        assert(status == DR_NEED_IDR && state->await_keyframe && state->decoder_needs_reset);
+        assert(state->transition_wait_since && state->parameters_requested);
+        pending_frames = 0;
+        unit.enqueueTimeUs = PltGetMicroseconds();
+        unit.bufferList = &picture;
+        unit.fullLength = pic.size();
+        assert(decode(state, &unit, 3 + episode * 3, FRAME_TYPE_PFRAME) == DR_OK);
+        assert(decodes == calls && state->await_keyframe); // Dependent P discarded.
+        // An IDR missing fresh SPS/PPS is insufficient after reset, too.
+        assert(decode(state, &unit, 3 + episode * 3, FRAME_TYPE_IDR) == DR_OK);
+        assert(decodes == calls && state->await_keyframe);
+        unit.bufferList = &sps;
+        unit.fullLength = sp.size() + pp.size() + pic.size();
+        assert(decode(state, &unit, 4 + episode * 3, FRAME_TYPE_IDR) == DR_OK);
+        assert(decodes == calls + 1 && !state->decoder_needs_reset && !state->await_keyframe);
+        assert(creates == original_creates); // No extra pool or recreation.
+    }
+    pending_frames = 0;
+    dispose_owner(state);
+}
+
 int main()
 {
+    native_overload_requires_fresh_reference_chain();
     stream_aware_owner();
     pending_parameters_and_placement();
     first_access_unit_and_cancellation();
@@ -1302,7 +1399,8 @@ int main()
     a_started_drain_runs_to_completion(Model::Queued);
     a_started_drain_runs_to_completion(Model::SameCall);
     classic_depth_one();
-    paced_ready_queue_retains_surface_ownership();
+    buffered_ready_queue_retains_surface_ownership();
+    adaptive_ready_queue_releases_every_displaced_surface();
     errors_reset_and_bounded_backlog();
     fallback_to_depth_one();
     presentation_hands_slots_back();

@@ -1,0 +1,94 @@
+diff --git a/src/VideoDepacketizer.c b/src/VideoDepacketizer.c
+--- a/src/VideoDepacketizer.c
++++ b/src/VideoDepacketizer.c
+@@ -39,20 +39,41 @@
+ // be requested again after this short interval if stream loss continues.
+ #define IDR_REQUEST_COOLDOWN_US UINT64_C(100000)
+ static _Atomic uint64_t lastIdrRequestUs;
+-static _Atomic bool deferredIdrRequest;
++/* A monotonically increasing request token makes stale poll cancellation
++ * unable to erase a newer request racing from the decoder callback. */
++static _Atomic uint64_t idrRequestEpoch;
++static _Atomic uint64_t deferredIdrEpoch;
++
++static void deferIdrRequest(uint64_t epoch) {
++    uint64_t pending = atomic_load_explicit(&deferredIdrEpoch, memory_order_relaxed);
++    while (pending < epoch &&
++           !atomic_compare_exchange_weak_explicit(&deferredIdrEpoch, &pending, epoch,
++                                                  memory_order_release, memory_order_relaxed)) {
++    }
++}
++
++static void clearDeferredIdrThrough(uint64_t epoch) {
++    uint64_t pending = atomic_load_explicit(&deferredIdrEpoch, memory_order_acquire);
++    while (pending != 0 && pending <= epoch &&
++           !atomic_compare_exchange_weak_explicit(&deferredIdrEpoch, &pending, 0,
++                                                  memory_order_acq_rel, memory_order_acquire)) {
++    }
++}
++
+ static void requestIdrCoalesced(void) {
++    uint64_t epoch = atomic_fetch_add_explicit(&idrRequestEpoch, 1, memory_order_relaxed) + 1;
+     uint64_t now = PltGetMicroseconds();
+     uint64_t previous = atomic_load_explicit(&lastIdrRequestUs, memory_order_relaxed);
+     for (;;) {
+         if (previous != 0 && now >= previous &&
+             now - previous < IDR_REQUEST_COOLDOWN_US) {
+-            atomic_store_explicit(&deferredIdrRequest, true, memory_order_relaxed);
++            deferIdrRequest(epoch);
+             return;
+         }
+         if (atomic_compare_exchange_weak_explicit(&lastIdrRequestUs, &previous,
+                                                   now, memory_order_relaxed,
+                                                   memory_order_relaxed)) {
+-            (void)atomic_exchange_explicit(&deferredIdrRequest, false, memory_order_relaxed);
++            clearDeferredIdrThrough(epoch);
+             LiRequestIdrFrame();
+             return;
+         }
+@@ -69,16 +90,23 @@
+ static unsigned int nextFrameNumber;
+ static unsigned int startFrameNumber;
+ static bool waitingForNextSuccessfulFrame;
+-static bool waitingForIdrFrame;
++/* requestDecoderRefresh() may set this from the decoder owner while the
++ * VideoStream receive loop checks it in PlVideoRecoveryPoll(). */
++static _Atomic bool waitingForIdrFrame;
+ static bool waitingForRefInvalFrame;
+ 
+ /* Called from video receive on packet and timeout paths. The pending bit is
+  * also read in recovery callbacks; no new thread or timer is created. */
+ void PlVideoRecoveryPoll(void) {
+-    if (!atomic_load_explicit(&deferredIdrRequest, memory_order_relaxed))
++    uint64_t pending = atomic_load_explicit(&deferredIdrEpoch, memory_order_acquire);
++    if (!pending)
+         return;
+-    if (!waitingForIdrFrame && !waitingForNextSuccessfulFrame) {
+-        atomic_store_explicit(&deferredIdrRequest, false, memory_order_relaxed);
++    if (!atomic_load_explicit(&waitingForIdrFrame, memory_order_acquire) &&
++        !waitingForNextSuccessfulFrame) {
++        /* Only cancel the generation observed above. A concurrent refresh
++         * may have installed a newer pending request since that observation. */
++        (void)atomic_compare_exchange_strong_explicit(&deferredIdrEpoch, &pending, 0,
++                                                      memory_order_acq_rel, memory_order_acquire);
+         return;
+     }
+     uint64_t previous = atomic_load_explicit(&lastIdrRequestUs, memory_order_relaxed);
+@@ -106,6 +134,6 @@
+ static uint64_t firstPacketReceiveTimeUs;
+ static uint64_t firstPacketPresentationTime;
+ static uint32_t firstPacketRtpTimestamp;
+-static bool dropStatePending;
++static _Atomic bool dropStatePending;
+ static bool idrFrameProcessed;
+ static uint16_t pyrowaveCriticalPackets;
+@@ -136,7 +164,8 @@
+ // Init
+ void initializeVideoDepacketizer(int pktSize) {
+     atomic_store_explicit(&lastIdrRequestUs, 0, memory_order_relaxed);
+-    atomic_store_explicit(&deferredIdrRequest, false, memory_order_relaxed);
++    atomic_store_explicit(&idrRequestEpoch, 0, memory_order_relaxed);
++    atomic_store_explicit(&deferredIdrEpoch, 0, memory_order_relaxed);
+     for (unsigned i = 0; i < VD_COUNT; ++i) atomic_store_explicit(&delivery[i], 0, memory_order_relaxed);
+     atomic_store_explicit(&deliveryEndUs, 0, memory_order_relaxed);
+     atomic_store_explicit(&deliveryStartUs, PltGetMicroseconds(), memory_order_relaxed);

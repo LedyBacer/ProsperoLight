@@ -1,0 +1,101 @@
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -48,6 +48,7 @@
+     int length;
+     uint32_t frame;
+     uint8_t block;
++    bool parity;
+     uint64_t receivedUs;
+ } VIDEO_REORDER_HELD;
+ static VIDEO_REORDER_HELD* reorderHead;
+@@ -56,8 +57,9 @@
+ static size_t reorderBytes;
+ static int reorderEntryOffset;
+ 
+-enum { RV_LATE_ACCEPTED, RV_LATE_REJECTED, RV_WAIT_TOTAL, RV_WAIT_MAX,
+-       RV_TIMEOUTS, RV_FEC_RECOVERED, RV_RESCUED, RV_HELD, RV_CAPACITY, RV_COUNT };
++enum { RV_LATE_ACCEPTED, RV_LATE_REJECTED, RV_LATE_DATA, RV_LATE_PARITY,
++       RV_WAIT_TOTAL, RV_WAIT_MAX, RV_TIMEOUTS, RV_FEC_RECOVERED, RV_RESCUED,
++       RV_HELD, RV_CAPACITY, RV_COUNT };
+ static _Atomic uint64_t reorderCounters[RV_COUNT];
+ static uint32_t reorderRescueFrame;
+ static uint32_t reorderRescueFecFailures;
+@@ -87,6 +89,8 @@
+     stats->rescued_frames = atomic_load_explicit(&reorderCounters[RV_RESCUED], memory_order_relaxed);
+     stats->held_packets = atomic_load_explicit(&reorderCounters[RV_HELD], memory_order_relaxed);
+     stats->capacity_flushes = atomic_load_explicit(&reorderCounters[RV_CAPACITY], memory_order_relaxed);
++    stats->late_data_rejected = atomic_load_explicit(&reorderCounters[RV_LATE_DATA], memory_order_relaxed);
++    stats->late_parity_rejected = atomic_load_explicit(&reorderCounters[RV_LATE_PARITY], memory_order_relaxed);
+     return true;
+ }
+ 
+@@ -151,6 +155,8 @@
+         reorderObserveWait(now >= entry->receivedUs ? now - entry->receivedUs : 0);
+         if (stale) {
+             REORDER_INC(LATE_REJECTED);
++            if (entry->parity) REORDER_INC(LATE_PARITY);
++            else REORDER_INC(LATE_DATA);
+             free(entry->memory);
+         }
+         else if (!reorderDispatch(entry->memory, entry->length)) {
+@@ -161,7 +167,7 @@
+     }
+ }
+ 
+-static bool reorderHold(char* memory, int length, uint32_t frame, uint8_t block) {
++static bool reorderHold(char* memory, int length, uint32_t frame, uint8_t block, bool parity) {
+     VIDEO_REORDER_HELD* entry;
+     VIDEO_REORDER_HELD** link;
+     if (reorderCount >= VIDEO_REORDER_MAX_PACKETS ||
+@@ -173,6 +179,7 @@
+     entry->length = length;
+     entry->frame = frame;
+     entry->block = block;
++    entry->parity = parity;
+     entry->receivedUs = PltGetMicroseconds();
+     entry->next = NULL;
+     /* Almost all held packets arrive in increasing frame/block order. Avoid
+@@ -496,11 +503,19 @@
+             !(NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE)) {
+             PNV_VIDEO_PACKET nv = (PNV_VIDEO_PACKET)(buffer + headerSize);
+             uint32_t frame = LE32(nv->frameIndex);
+-            if (isBefore32(frame, rtpQueue.currentFrameNumber)) REORDER_INC(LATE_REJECTED);
++            uint32_t fec_info = LE32(nv->fecInfo);
++            uint32_t data_shards = (fec_info & 0xFFC00000) >> 22;
++            uint32_t fec_index = (fec_info & 0x3FF000) >> 12;
++            bool parity = data_shards != 0 && fec_index >= data_shards;
++            if (isBefore32(frame, rtpQueue.currentFrameNumber)) {
++                REORDER_INC(LATE_REJECTED);
++                if (parity) REORDER_INC(LATE_PARITY);
++                else REORDER_INC(LATE_DATA);
++            }
+             uint8_t block = rtpQueue.multiFecCapable ?
+                 (uint8_t)((nv->multiFecBlocks >> 4) & 3) : 0;
+             if (reorderIsFuture(frame, block) && reorderHasActiveBlock()) {
+-                if (reorderHold(buffer, err, frame, block)) {
++                if (reorderHold(buffer, err, frame, block, parity)) {
+                     buffer = NULL;
+                     reorderRelease(false);
+                     continue;
+diff --git a/src/Limelight.h b/src/Limelight.h
+--- a/src/Limelight.h
++++ b/src/Limelight.h
+@@ -949,7 +949,7 @@
+ bool LiGetVideoDeliveryStats(LI_VIDEO_DELIVERY_STATS* stats);
+ 
+ // Diagnostic accounting only. Measurements never control RTP recovery.
+-#define LI_VIDEO_REORDER_STATS_VERSION 1
++#define LI_VIDEO_REORDER_STATS_VERSION 2
+ typedef struct _LI_VIDEO_REORDER_STATS {
+     uint64_t late_packets_accepted;
+     uint64_t late_packets_rejected;
+@@ -960,6 +960,8 @@
+     uint64_t rescued_frames; // completed while future FEC packets were held
+     uint64_t held_packets;
+     uint64_t capacity_flushes;
++    uint64_t late_data_rejected;   // stale video data packet, not an RTP loss count
++    uint64_t late_parity_rejected; // late, no-longer-needed FEC parity
+ } LI_VIDEO_REORDER_STATS;
+ bool LiGetVideoReorderStats(LI_VIDEO_REORDER_STATS* stats);
+ 

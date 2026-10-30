@@ -1,0 +1,52 @@
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -249,7 +249,37 @@
+             }
+         }
+ 
++        if (!usePartialFrameTimeout && reorderHead != NULL) {
++            // The ordinary 100ms socket receive timeout is too coarse for
++            // a 40ms FEC reorder deadline. Poll only while packets are held:
++            // stable LAN streams retain their original recvfrom() fast path.
++            struct pollfd pfd = { 0 };
++            pfd.fd = rtpSocket;
++            pfd.events = POLLIN;
++            int timeoutMs = RTP_QUEUE_DELAY; // Existing Moonlight 10ms budget.
++            if (rtpQueue.bufferFirstRecvTimeUs != 0) {
++                uint64_t nowUs = PltGetMicroseconds();
++                uint64_t elapsedUs = nowUs >= rtpQueue.bufferFirstRecvTimeUs ?
++                    nowUs - rtpQueue.bufferFirstRecvTimeUs : 0;
++                uint64_t remainingUs = elapsedUs >= VIDEO_REORDER_WAIT_US ?
++                    0 : VIDEO_REORDER_WAIT_US - elapsedUs;
++                int deadlineMs = (int)((remainingUs + 999) / 1000);
++                if (deadlineMs < timeoutMs) timeoutMs = deadlineMs;
++            }
++            int ready = pollSockets(&pfd, 1, timeoutMs);
++            if (ready == 0) {
++                err = 0;
++            }
++            else if (ready < 0) {
++                err = ready;
++            }
++            else {
++                err = recvUdpSocket(rtpSocket,
++                                    encrypted ? encryptedBuffer : buffer,
++                                    receiveSize, false);
++            }
++        }
++        else if (usePartialFrameTimeout) {
+-        if (usePartialFrameTimeout) {
+             int timeoutMs = UDP_RECV_POLL_TIMEOUT_MS;
+             uint64_t deadlineUs = RtpvGetPendingFrameDeadlineUs(&rtpQueue);
+             if (deadlineUs != 0) {
+@@ -290,7 +320,8 @@
+             if (!receivedDataFromPeer) {
+                 // If we wait many seconds without ever receiving a video packet,
+                 // assume something is broken and terminate the connection.
++                // During a reorder wait the poll can wake after 10ms, not 100ms.
++                waitingForVideoMs += reorderHead != NULL ? RTP_QUEUE_DELAY : UDP_RECV_POLL_TIMEOUT_MS;
+-                waitingForVideoMs += UDP_RECV_POLL_TIMEOUT_MS;
+                 if (waitingForVideoMs >= FIRST_FRAME_TIMEOUT_SEC * 1000) {
+                     Limelog("Terminating connection due to lack of video traffic\n");
+                     ListenerCallbacks.connectionTerminated(ML_ERROR_NO_VIDEO_TRAFFIC);

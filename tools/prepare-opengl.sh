@@ -57,6 +57,7 @@ fi
 
 manifest=$(sha256sum "$prefix/manifest.sha256" | cut -d' ' -f1)
 profile=$(grep -E '#define PS5_OPENGL_NATIVE_(WIDTH|HEIGHT|FPS)' \
-    "$prefix/include/ps5_opengl_display.h" | awk '{print $3}' | paste -sd' ')
+    "$prefix/include/ps5_opengl_display.h" | awk '{print $3}' | paste -sd' ' || true)
+[[ -n $profile ]] || profile='not exported by this SDK'
 printf 'OpenGL SDK: %s\nOpenGL SDK manifest: %s\nOpenGL display profile (w h fps): %s\n' \
     "$prefix" "$manifest" "$profile"

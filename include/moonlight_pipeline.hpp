@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -163,6 +164,34 @@ template <size_t N> struct SlotPool
     }
 };
 
+// A fixed-refresh LAN with matching source/output rates needs only one
+// pending picture. Jitter, VRR and fractional cadence retain two-picture room.
+inline unsigned ready_capacity(unsigned mode, unsigned fps, uint32_t refresh_x100, bool variable,
+                               uint32_t jitter_us)
+{
+    if (!mode)
+        return 1;
+    const uint64_t rate = uint64_t(fps) * 100;
+    const uint64_t error = rate > refresh_x100 ? rate - refresh_x100 : refresh_x100 - rate;
+    return mode == 1 && !variable && !jitter_us && fps && refresh_x100 && error <= rate / 100 ? 1
+                                                                                              : 2;
+}
+
+// A frame already ready before the previous observed flip missed its earliest
+// slot. Give a fresh successor a bounded chance before the NEXT vblank rather
+// than perpetually replaying a startup backlog one frame behind. This is an
+// admission deadline, not permission to replace an already submitted flip.
+inline uint64_t lan_selection_deadline(uint64_t now, uint64_t ready, uint64_t last_flip,
+                                       uint32_t refresh_x100, uint64_t preparation_us)
+{
+    if (!ready || !last_flip || last_flip > now || ready >= last_flip || !refresh_x100)
+        return now;
+    const uint64_t period = UINT64_C(100000000) / refresh_x100;
+    const uint64_t lead = std::min(period / 4, std::max<uint64_t>(1000, preparation_us));
+    const uint64_t due = last_flip + period - lead;
+    return std::max(now, due);
+}
+
 // One-slot "newest wins" handoff from decoding to presentation.
 template <typename T> struct ReadyMailbox
 {
@@ -170,6 +199,23 @@ template <typename T> struct ReadyMailbox
     T item{}, following{};
     unsigned capacity = 1;
     bool second{};
+
+    // Shrinking retires one old surface explicitly; ownership remains with
+    // the caller until it releases that surface. Never hide two retirements
+    // behind publish()'s single displaced result.
+    bool limit(unsigned requested, T *displaced)
+    {
+        capacity = requested > 1 ? 2 : 1;
+        if (capacity == 1 && second)
+        {
+            if (displaced)
+                *displaced = item;
+            item = following;
+            second = false;
+            return true;
+        }
+        return false;
+    }
 
     bool publish(const T &next, T *displaced)
     {

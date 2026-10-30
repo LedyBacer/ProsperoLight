@@ -23,6 +23,10 @@ struct TestProfile
     // Developer-only deterministic lifecycle exercise; never a saved preference.
     bool decoder_capacity_probe = false;
     bool decoder_capacity_probe_first = false;
+    // Session-only experiment control; absent retains the build's gate.
+    std::optional<unsigned> native_queue_limit_ms;
+    // Explicit A/B control for native, fixed-refresh phase-cadence experiments.
+    bool experimental_phase_clock = false;
     unsigned startup_seconds = 30, ready_seconds = 30, hard_seconds = 120;
     unsigned warmup_seconds = 0, measure_seconds = 30, cooldown_seconds = 0;
 };

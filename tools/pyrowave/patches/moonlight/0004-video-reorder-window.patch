@@ -1,0 +1,180 @@
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -33,7 +33,109 @@
+ // can smooth over transient pauses in network traffic
+ // and subsequent packet/frame bursts that follow.
+ #define RTP_RECV_PACKETS_BUFFERED 2048
++/* Defer next-frame/block packets briefly while the active FEC block can still
++ * complete. This is intentionally before RtpvAddPacket(): its multi-FEC state,
++ * recovered-shard ownership, and decoder recovery rules remain unchanged.
++ * All allocations and traversal happen on the single video receive thread. */
++#define VIDEO_REORDER_WAIT_US UINT64_C(40000)
++#define VIDEO_REORDER_MAX_PACKETS 2048u
++#define VIDEO_REORDER_MAX_BYTES (4u * 1024u * 1024u)
++typedef struct _VIDEO_REORDER_HELD {
++    struct _VIDEO_REORDER_HELD* next;
++    char* memory;
++    int length;
++    uint32_t frame;
++    uint8_t block;
++    uint64_t receivedUs;
++} VIDEO_REORDER_HELD;
++static VIDEO_REORDER_HELD* reorderHead;
++static unsigned reorderCount;
++static size_t reorderBytes;
++static int reorderEntryOffset;
++static void reorderDispatch(char* memory, int length) {
++    int status = RtpvAddPacket(&rtpQueue, (PRTP_PACKET)memory, length,
++                              (PRTPV_QUEUE_ENTRY)(memory + reorderEntryOffset));
++    if (status != RTPF_RET_QUEUED) free(memory);
++}
+ 
++static bool reorderIsFuture(uint32_t frame, uint8_t block) {
++    return isBefore32(rtpQueue.currentFrameNumber, frame) ||
++           (frame == rtpQueue.currentFrameNumber &&
++            block > rtpQueue.multiFecCurrentBlockNumber);
++}
++
++static bool reorderHasActiveBlock(void) {
++    return rtpQueue.pendingFecBlockList.count != 0 ||
++           rtpQueue.completedFecBlockList.count != 0;
++}
++
++static void reorderRelease(bool force) {
++    uint64_t now = PltGetMicroseconds();
++    while (reorderHead != NULL) {
++        VIDEO_REORDER_HELD* entry = reorderHead;
++        bool stale = isBefore32(entry->frame, rtpQueue.currentFrameNumber) ||
++                     (entry->frame == rtpQueue.currentFrameNumber &&
++                      entry->block < rtpQueue.multiFecCurrentBlockNumber);
++        bool expected = !reorderIsFuture(entry->frame, entry->block);
++        bool waiting = reorderHasActiveBlock() &&
++                       now - entry->receivedUs < VIDEO_REORDER_WAIT_US &&
++                       (rtpQueue.bufferFirstRecvTimeUs == 0 ||
++                        now - rtpQueue.bufferFirstRecvTimeUs < VIDEO_REORDER_WAIT_US);
++        if (!stale && !expected && !force && waiting) break;
++
++        reorderHead = entry->next;
++        reorderCount--;
++        reorderBytes -= (size_t)entry->length;
++        if (stale) free(entry->memory);
++        else reorderDispatch(entry->memory, entry->length);
++        free(entry);
++        now = PltGetMicroseconds();
++    }
++}
++
++static bool reorderHold(char* memory, int length, uint32_t frame, uint8_t block) {
++    VIDEO_REORDER_HELD* entry;
++    VIDEO_REORDER_HELD** link;
++    if (reorderCount >= VIDEO_REORDER_MAX_PACKETS ||
++        reorderBytes + (size_t)length > VIDEO_REORDER_MAX_BYTES)
++        return false;
++    entry = (VIDEO_REORDER_HELD*)malloc(sizeof(*entry));
++    if (entry == NULL) return false;
++    entry->memory = memory;
++    entry->length = length;
++    entry->frame = frame;
++    entry->block = block;
++    entry->receivedUs = PltGetMicroseconds();
++    entry->next = NULL;
++    /* Release older frames and earlier multi-FEC blocks before newer ones.
++     * Within the same block preserve arrival order; RtpvAddPacket handles OOS. */
++    link = &reorderHead;
++    while (*link != NULL &&
++           (isBefore32((*link)->frame, frame) ||
++            ((*link)->frame == frame && (*link)->block <= block)))
++        link = &(*link)->next;
++    entry->next = *link;
++    *link = entry;
++    reorderCount++;
++    reorderBytes += (size_t)length;
++    return true;
++}
++
++static void reorderCleanup(void) {
++    VIDEO_REORDER_HELD* entry = reorderHead;
++    while (entry != NULL) {
++        VIDEO_REORDER_HELD* next = entry->next;
++        free(entry->memory);
++        free(entry);
++        entry = next;
++    }
++    reorderHead = NULL;
++    reorderCount = 0;
++    reorderBytes = 0;
++}
++
++
++
+ // PyroWave frames are intra-coded at hundreds of Mbps; a 1080p120 or 4K60 frame
+ // alone can approach 2048 packets. Keep several frames of headroom.
+ #define RTP_RECV_PACKETS_BUFFERED_PYROWAVE 8192
+@@ -91,7 +193,6 @@
+     int bufferSize, receiveSize, decryptedSize, minSize;
+     char* buffer;
+     char* encryptedBuffer;
+-    int queueStatus;
+     bool useSelect;
+     int waitingForVideoMs;
+     bool encrypted;
+@@ -103,6 +204,10 @@
+     receiveSize = decryptedSize + ((EncryptionFeaturesEnabled & SS_ENC_VIDEO) ? sizeof(ENC_VIDEO_HEADER) : 0);
+     bufferSize = decryptedSize + sizeof(RTPV_QUEUE_ENTRY);
+     buffer = NULL;
++    reorderEntryOffset = decryptedSize;
++    reorderHead = NULL;
++    reorderCount = 0;
++    reorderBytes = 0;
+ 
+     usePartialFrameTimeout = (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) != 0 &&
+                             setSocketNonBlocking(rtpSocket, true) == 0;
+@@ -193,7 +298,8 @@
+                 }
+             }
+ 
++            // Release expired future blocks even when no further UDP arrives.
++            reorderRelease(false);
+-            // Receive timed out; try again
+             continue;
+         }
+ 
+@@ -266,14 +372,32 @@
+         packet->timestamp = BE32(packet->timestamp);
+         packet->ssrc = BE32(packet->ssrc);
+ 
++        int headerSize = sizeof(*packet) + ((packet->header & FLAG_EXTENSION) ? 4 : 0);
++        if (err >= headerSize + (int)sizeof(NV_VIDEO_PACKET) &&
++            !(NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE)) {
++            PNV_VIDEO_PACKET nv = (PNV_VIDEO_PACKET)(buffer + headerSize);
++            uint32_t frame = LE32(nv->frameIndex);
++            uint8_t block = rtpQueue.multiFecCapable ?
++                (uint8_t)((nv->multiFecBlocks >> 4) & 3) : 0;
++            if (reorderIsFuture(frame, block) && reorderHasActiveBlock()) {
++                if (reorderHold(buffer, err, frame, block)) {
++                    buffer = NULL;
++                    reorderRelease(false);
++                    continue;
++                }
++                // Allocation or capacity limit: flush in frame/block order.
++                reorderRelease(true);
++            }
+-        queueStatus = RtpvAddPacket(&rtpQueue, packet, err, (PRTPV_QUEUE_ENTRY)&buffer[decryptedSize]);
+-
+-        if (queueStatus == RTPF_RET_QUEUED) {
+-            // The queue owns the buffer
+-            buffer = NULL;
+         }
++        // Preserve the original zero-copy and rejected-buffer reuse fast path.
++        if (RtpvAddPacket(&rtpQueue, packet, err,
++                          (PRTPV_QUEUE_ENTRY)&buffer[decryptedSize]) == RTPF_RET_QUEUED) {
++            buffer = NULL;
++        }
++        reorderRelease(false);
+     }
+ 
++    reorderCleanup();
+     if (buffer != NULL) {
+         free(buffer);
+     }

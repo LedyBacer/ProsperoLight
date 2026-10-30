@@ -1,0 +1,38 @@
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -126,5 +126,22 @@ static bool reorderHasActiveBlock(void) {
+     return rtpQueue.pendingFecBlockList.count != 0 ||
+            rtpQueue.completedFecBlockList.count != 0;
+ }
++
++/* A deferred packet must first pass the same inexpensive admission gates as
++ * the real RTP/FEC queue. Otherwise stale sequence numbers or inconsistent
++ * FEC headers can occupy the entire bounded hold window before rejection.
++ * Leave all actual FEC decoding and duplicate detection to RtpvAddPacket(). */
++static bool reorderStagingEligible(uint16_t sequence, uint16_t nextSequence,
++                                   bool hasExtension, uint32_t fecInfo,
++                                   uint8_t multiFecBlocks, bool multiFecCapable) {
++    if (!hasExtension || isBefore16(sequence, nextSequence)) return false;
++    uint32_t data = (fecInfo & 0xFFC00000) >> 22;
++    uint32_t percentage = (fecInfo & 0xFF0) >> 4;
++    uint32_t index = (fecInfo & 0x3FF000) >> 12;
++    uint32_t parity = (data * percentage + 99) / 100;
++    if (!data || index >= data + parity) return false;
++    return !multiFecCapable ||
++           ((multiFecBlocks >> 4) & 3) <= ((multiFecBlocks >> 6) & 3);
++}
+ 
+ static void reorderRelease(bool force) {
+@@ -514,7 +534,10 @@ static void VideoReceiveThreadProc(void* context) {
+             }
+             uint8_t block = rtpQueue.multiFecCapable ?
+                 (uint8_t)((nv->multiFecBlocks >> 4) & 3) : 0;
+-            if (reorderIsFuture(frame, block) && reorderHasActiveBlock()) {
++            if (reorderIsFuture(frame, block) && reorderHasActiveBlock() &&
++                reorderStagingEligible(packet->sequenceNumber, rtpQueue.nextContiguousSequenceNumber,
++                                       (packet->header & FLAG_EXTENSION) != 0,
++                                       fec_info, nv->multiFecBlocks, rtpQueue.multiFecCapable)) {
+                 if (reorderHold(buffer, err, frame, block, parity)) {
+                     buffer = NULL;
+                     reorderRelease(false);

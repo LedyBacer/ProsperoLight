@@ -18,10 +18,11 @@ UPDATE_DEV_OFFER ?= 0
 UPDATE_AUTO_ACCEPT ?= 0
 VIDEO_OUTPUT_SELF_TEST_FPS ?= 0
 STOP_ACTIVE_APP_SELF_TEST ?= 0
-# Tested one-flip overlap is on; dependency and audio experiments remain off.
+# Tested presentation overlap and issue #68 audio jitter defaults are enabled;
+# other dependency and diagnostic experiments remain off.
 FEC_SIMD ?= 0
 OPUS_SIMD ?= 0
-AUDIO_MAX_BACKLOG_MS ?= 0
+AUDIO_MAX_BACKLOG_MS ?= 100
 PRESENT_OVERLAP ?= 1
 FLIP_POLL_US ?= 500
 PERFORMANCE_DETAIL ?= 0
@@ -48,6 +49,9 @@ INPUT_POLL_US ?= 2000
 # queued frames, and reference-frame invalidation instead of keyframes.
 GPU_TIMESTAMPS ?= 0
 CATCHUP_QUEUE_FRAMES ?= 0
+NATIVE_MAX_QUEUE_MS ?= 0
+# A/B only: subtract already-spent RTP assembly time from extra playout reserve.
+UNIFIED_PLAYOUT_EXPERIMENT ?= 0
 REFERENCE_FRAME_INVALIDATION ?= 0
 # Milliseconds the display is left alone after a stream above 60 Hz or in HDR.
 HFR_SETTLE_MS ?= 100
@@ -86,6 +90,8 @@ APP_DEFINITIONS += DECODER_CPU_PRIORITY=$(DECODER_CPU_PRIORITY)
 APP_DEFINITIONS += INPUT_POLL_US=$(INPUT_POLL_US)
 APP_DEFINITIONS += PROSPEROLIGHT_GPU_TIMESTAMPS=$(GPU_TIMESTAMPS)
 APP_DEFINITIONS += PROSPEROLIGHT_CATCHUP_QUEUE_FRAMES=$(CATCHUP_QUEUE_FRAMES)
+APP_DEFINITIONS += PROSPEROLIGHT_NATIVE_MAX_QUEUE_MS=$(NATIVE_MAX_QUEUE_MS)
+APP_DEFINITIONS += PROSPEROLIGHT_UNIFIED_PLAYOUT_EXPERIMENT=$(UNIFIED_PLAYOUT_EXPERIMENT)
 APP_DEFINITIONS += PROSPEROLIGHT_REFERENCE_FRAME_INVALIDATION=$(REFERENCE_FRAME_INVALIDATION)
 APP_INCLUDE_PATHS ?= third_party/ps5-homebrew-ui third_party/update-check .deps/ps5-opengl/current/include include src src/gamestream platform/ps5 third_party/moonlight-common-c/src third_party/moonlight-common-c/enet/include third_party/moonlight-common-c/nanors third_party/moonlight-common-c/nanors/deps third_party/moonlight-common-c/nanors/deps/obl third_party/mbedtls/include third_party/opus/include
 APP_STATIC_ARCHIVES ?= .deps/ps5-opengl/libps5opengl-group.a build/stream-deps/libmoonlight-common-c.a build/stream-deps/libopus.a build/stream-deps/libmbedtls.a build/stream-deps/libmbedx509.a build/stream-deps/libmbedcrypto.a

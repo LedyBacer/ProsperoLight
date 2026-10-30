@@ -18,10 +18,34 @@ static bool diagnostic_logs = true;
 static std::vector<std::string> kernel_records;
 extern "C"
 {
+    const RTP_VIDEO_STATS *LiGetRTPVideoStats(void)
+    {
+        static const RTP_VIDEO_STATS stats{1000, 100, 7, 2, 3, 0, 0};
+        return &stats;
+    }
 #ifdef LI_VIDEO_DELIVERY_STATS_VERSION
     bool LiGetVideoDeliveryStats(LI_VIDEO_DELIVERY_STATS *)
     {
         return false;
+    }
+#endif
+#ifdef LI_VIDEO_REORDER_STATS_VERSION
+    bool LiGetVideoReorderStats(LI_VIDEO_REORDER_STATS *stats)
+    {
+        if (!stats)
+            return false;
+        stats->late_packets_accepted = 3;
+        stats->late_packets_rejected = 1;
+        stats->reorder_wait_total_us = 20000;
+        stats->reorder_wait_max_us = 12000;
+        stats->reorder_timeouts = 1;
+        stats->fec_recovered_after_reorder = 2;
+        stats->rescued_frames = 1;
+        stats->held_packets = 5;
+        stats->capacity_flushes = 0;
+        stats->late_data_rejected = 1;
+        stats->late_parity_rejected = 2;
+        return true;
     }
 #endif
     int prosperolight_logs_enabled(void)
@@ -143,6 +167,31 @@ int main()
     input.add(2000);
     controller_summary = {3, 2, 1, 4, 5, 6};
     save_performance_summary(state, input, &options, 0);
+    assert(saved_report.find("\"native_overload\":{\"enabled\":false,\"queue_limit_us\":0,") !=
+           std::string::npos);
+    assert(saved_report.find("\"audio_pcm_hard_cap_frames\":8640,") != std::string::npos);
+    assert(saved_report.find(
+               "\"audio_startup_silence_grains\":0,\"audio_active_silence_grains\":0,") !=
+           std::string::npos);
+    assert(saved_report.find("\"video_phase_clock\":{\"enabled\":false,") != std::string::npos);
+    assert(saved_report.find("\"video_pacing_burst\":{\"version\":1,\"catchups\":0,") !=
+           std::string::npos);
+    assert(saved_report.find("\"video_playout_budget\":{\"version\":1,\"active\":false,") !=
+           std::string::npos);
+    assert(saved_report.find("\"video_present_feedback\":{\"version\":1,\"submitted\":0,") !=
+           std::string::npos);
+    assert(saved_report.find("\"video_source_due_shadow\":{\"version\":2,\"active\":false,") !=
+           std::string::npos);
+    assert(saved_report.find("\"post_callback_delay_max_us\":0},") != std::string::npos);
+#ifdef LI_VIDEO_REORDER_STATS_VERSION
+    assert(saved_report.find("\"video_reorder\":{\"available\":true,\"version\":2,") !=
+           std::string::npos);
+    assert(saved_report.find("\"late_packets_accepted\":3,\"late_packets_rejected\":1,"
+                             "\"late_data_rejected\":1,\"late_parity_rejected\":2,") !=
+           std::string::npos);
+    assert(saved_report.find("\"rescued_frames\":1,\"held_packets\":5,\"capacity_flushes\":0}") !=
+           std::string::npos);
+#endif
     assert(saved_report.find("\"requested_slices_per_frame\":8,") != std::string::npos);
     const std::string original = saved_report;
     // The same summary reaches klog in bounded parts that concatenate back.
@@ -179,6 +228,12 @@ int main()
     assert(original.find("\"input_poll_us\":" + std::to_string(INPUT_POLL_US)) !=
            std::string::npos);
     assert(original.find("\"udp_packets\":0") != std::string::npos);
+    assert(original.find("\"rtp_video_stats_valid\":1,\"rtp_video_packets\":1000,") !=
+           std::string::npos);
+    assert(original.find("\"rtp_video_fec_recovered\":7,\"rtp_video_fec_failed\":2,") !=
+           std::string::npos);
+    // The declared clean-link floor is now 10 ms at 48 kHz.
+    assert(original.find("\"audio_prebuffer_target_frames\":480,") != std::string::npos);
     assert(!original.empty());
     write_failure = true;
     save_performance_summary(state, input, &options, -1);

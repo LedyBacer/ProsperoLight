@@ -20,6 +20,209 @@ CLOCKS = {
 }
 
 
+def network_audio_metrics(performance):
+    """Optional measured counters; never infer RTT from a netem scenario name."""
+    keys = ('video_network_jitter_peak_us', 'video_network_jitter_bursts',
+            'video_arrival_p98_us', 'video_arrival_samples',
+            'video_arrival_missing_frames', 'video_arrival_discontinuities',
+            'rtp_video_packets', 'rtp_video_fec_packets',
+            'rtp_video_fec_recovered', 'rtp_video_fec_failed',
+            'rtp_video_out_of_sequence', 'rtp_video_invalid',
+            'rtp_video_fec_invalid',
+            'audio_pending_ms_high_water', 'audio_ring_frames_high_water',
+            'audio_catchup_frames', 'audio_ring_overruns', 'audio_underruns',
+            'audio_underrun_wait_total_us', 'audio_underrun_wait_max_us',
+            'audio_startup_prebuffer_wait_us', 'audio_ring_mean_frames',
+            'audio_output_errors', 'audio_prebuffer_target_frames',
+            'audio_prebuffer_peak_frames', 'audio_prebuffer_increases',
+            'audio_prebuffer_decreases', 'audio_first_output_call_us',
+            'audio_pcm_hard_cap_frames', 'audio_first_pcm_output_us',
+            'audio_silence_grains', 'audio_short_grains', 'audio_crossfades',
+            'audio_drift_shed_frames', 'audio_ring_ewma_frames',
+            'audio_near_miss_events', 'audio_failed_shrink_probes',
+            'audio_last_output_call_us', 'audio_first_packet_call_us',
+            'audio_startup_silence_grains', 'audio_active_silence_grains',
+            'audio_first_underrun_us', 'audio_last_underrun_us',
+            'audio_reprime_events', 'audio_short_read_missing_frames',
+            'video_first_present_observed_us', 'rtp_audio_packets',
+            'rtp_audio_fec_recovered', 'rtp_audio_fec_failed',
+            'rtp_audio_out_of_sequence')
+    data = {key: performance[key] for key in keys
+            if type(performance.get(key)) is int and performance[key] >= 0}
+    # Optional native RTP reorder counters. A missing versioned object is
+    # unavailable evidence, never a zero-loss claim.
+    # These counters describe fixed-VSync presentation waiting, not RTP
+    # recovery or physical scanout latency. Absence is not a zero measurement.
+    burst = performance.get('video_pacing_burst')
+    if isinstance(burst, dict) and burst.get('version') == 1:
+        for key in ('catchups', 'wait_saved_us'):
+            value = burst.get(key)
+            if type(value) is int and value >= 0:
+                data['video_pacing_burst_' + key] = value
+    reorder = performance.get('video_reorder')
+    reorder_fields = ('late_packets_accepted', 'late_packets_rejected',
+                      'reorder_wait_total_us', 'reorder_wait_max_us',
+                      'reorder_timeouts', 'fec_recovered_after_reorder',
+                      'rescued_frames', 'held_packets', 'capacity_flushes')
+    if (isinstance(reorder, dict) and reorder.get('available') is True and
+            type(reorder.get('version')) is int and reorder['version'] in (1, 2)):
+        if reorder['version'] == 2:
+            reorder_fields += ('late_data_rejected', 'late_parity_rejected')
+        for key in reorder_fields:
+            value = reorder.get(key)
+            if type(value) is int and value >= 0:
+                data['video_reorder_' + key] = value
+    if type(performance.get('network_rtt_valid')) is int and \
+            performance['network_rtt_valid'] == 1 and \
+            type(performance.get('network_rtt_ms')) is int and performance['network_rtt_ms'] >= 0:
+        data['network_rtt_ms_observed'] = performance['network_rtt_ms']
+        if type(performance.get('network_rtt_variance_ms')) is int and \
+                performance['network_rtt_variance_ms'] >= 0:
+            data['network_rtt_variance_ms_observed'] = performance['network_rtt_variance_ms']
+    return data
+
+
+def passive_link_quality(performance):
+    """Nonary-inspired passive tail/recovery assessment, never a bandwidth probe.
+
+    Whole-session FEC counters cannot locate a burst and completed-frame
+    arrival variation includes host encoding. This is diagnostic only: the
+    client must not reduce bitrate from these signals automatically.
+    """
+    result = {'classification': 'UNKNOWN', 'confidence': 'insufficient',
+              'bitrate_adaptation': 'disabled',
+              'semantics': 'passive observations; no UDP capacity probe, no packet-time p99, '
+                           'no direct estimate of available Mbps'}
+    valid = (performance.get('rtp_video_stats_valid') == 1 and
+             type(performance.get('rtp_video_packets')) is int and
+             performance['rtp_video_packets'] >= 100 and
+             type(performance.get('video_arrival_samples')) is int and
+             performance['video_arrival_samples'] >= 24 and
+             type(performance.get('video_arrival_p98_us')) is int)
+    if not valid:
+        return result
+    recovered = performance.get('rtp_video_fec_recovered')
+    failed = performance.get('rtp_video_fec_failed')
+    oos = performance.get('rtp_video_out_of_sequence')
+    if any(type(x) is not int or x < 0 for x in (recovered, failed, oos)):
+        return result
+    tail = performance['video_arrival_p98_us']
+    rtt_variance = (performance.get('network_rtt_variance_ms')
+                    if performance.get('network_rtt_valid') == 1 else None)
+    unstable = tail >= 12000 or (type(rtt_variance) is int and rtt_variance >= 20)
+    if failed:
+        label = 'FEC_RECOVERY_FAILURES_WITH_VARIATION' if unstable else 'FEC_RECOVERY_FAILURES'
+    elif unstable:
+        label = 'ELEVATED_DELIVERY_VARIATION'
+    elif recovered or oos:
+        label = 'RECOVERY_OR_REORDER_OBSERVED'
+    else:
+        label = 'NO_IMPAIRMENT_OBSERVED'
+    return dict(result, classification=label, confidence='limited',
+                observations={'completed_frame_arrival_p98_us': tail,
+                              'fec_recovered': recovered, 'fec_failed': failed,
+                              'out_of_sequence': oos,
+                              'rtt_variance_ms': rtt_variance})
+
+
+def av_startup_observation(performance):
+    """Relative local callback timing only, not decoded source A/V sync."""
+    # A zero-filled hardware grain does not mean the source's first PCM played.
+    audio = performance.get('audio_first_pcm_output_us')
+    clock_point = 'first_real_pcm_output' if type(audio) is int and audio > 0 else 'first_audioout_call'
+    if clock_point == 'first_audioout_call':
+        audio = performance.get('audio_first_output_call_us')
+    video = performance.get('video_first_present_observed_us')
+    result = {'available': False, 'semantics': 'PS5 first PCM AudioOut call (legacy: first output call) minus '
+              'video first-presentation observation; different physical output delays, '
+              'unknown source timestamp alignment; NOT lip-sync error',
+              'audio_clock_point': clock_point}
+    if (type(audio) is int and type(video) is int and audio > 0 and video > 0):
+        return dict(result, available=True, offset_us=audio-video)
+    return result
+
+
+def native_overload_metrics(performance):
+    """Keep opt-in native queue resets separate from delivery impairment."""
+    source = performance.get('native_overload')
+    if not isinstance(source, dict) or type(source.get('enabled')) is not bool:
+        return {'available': False}
+    keys = ('queue_limit_us', 'resyncs', 'stops', 'attempts', 'peak_queue_age_us',
+            'last_action_age_us')
+    values = {key: source[key] for key in keys
+              if type(source.get(key)) is int and source[key] >= 0}
+    return {'available': True, 'enabled': source['enabled'], **values}
+
+
+def phase_clock_metrics(performance):
+    """Experimental network/source phase clock; not an A/V clock or scanout."""
+    source = performance.get('video_phase_clock')
+    if not isinstance(source, dict) or type(source.get('enabled')) is not bool:
+        return {'available': False}
+    keys = ('samples', 'reanchors', 'late', 'mad_us', 'tail_us',
+            'cushion_us', 'hold_us')
+    values = {key: source[key] for key in keys
+              if type(source.get(key)) is int and source[key] >= 0}
+    for key in ('skew_us', 'min_slack_us'):
+        if type(source.get(key)) is int:
+            values[key] = source[key]
+    return {'available': True, 'enabled': source['enabled'],
+            'semantics': 'source-PTS to network-enqueue phase only; not HDMI or audio sync',
+            **values}
+
+
+def cadence_lane_metrics(rows, source_fps):
+    """Adjacent frame interval *variation* within each independent clock domain.
+
+    We never subtract clocks across callback/network/PS5 epochs, and never
+    label an interval error input latency or glass-to-glass latency.
+    """
+    if type(source_fps) is not int or source_fps <= 0:
+        return {'available': False}
+    nominal = 1000000.0 / source_fps
+    lanes = {'source_pts': 'pts_us', 'network_enqueue': 'enqueue_us',
+             'decoder_ready': 'ready_us', 'present_submit': 'submit_us'}
+
+    def clock_stamp(row, lane, field):
+        # Trace schema 2 stores ready_us as callback-to-ready DURATION.
+        # Only callback_us + ready_us yields a PS5-clock timestamp.
+        if lane == 'decoder_ready':
+            callback = row.get('callback_us', 0)
+            elapsed = row.get('ready_us', 0)
+            return callback + elapsed if callback > 0 and elapsed > 0 else 0
+        return row.get(field, 0)
+    samples = {key: [] for key in lanes}
+    previous = None
+    for row in rows:
+        if row.get('outcome') != 1:
+            previous = None
+            continue
+        if previous and row.get('frame') == previous.get('frame', -2) + 1:
+            source_delta = row.get('pts_us', 0) - previous.get('pts_us', 0)
+            if nominal * 0.5 <= source_delta <= nominal * 1.5:
+                for key, field in lanes.items():
+                    current_stamp = clock_stamp(row, key, field)
+                    previous_stamp = clock_stamp(previous, key, field)
+                    if current_stamp > 0 and previous_stamp > 0 and current_stamp >= previous_stamp:
+                        samples[key].append(abs((current_stamp - previous_stamp) - nominal))
+        previous = row
+    metrics = {}
+    for key, values in samples.items():
+        if values:
+            ordered = sorted(values)
+            metrics[key] = {
+                'samples': len(values),
+                'mean_abs_interval_error_us': round(sum(values) / len(values)),
+                'p95_abs_interval_error_us': round(ordered[math.ceil(len(ordered) * .95) - 1]),
+                'max_abs_interval_error_us': round(ordered[-1]),
+            }
+        else:
+            metrics[key] = {'samples': 0}
+    return {'available': any(samples.values()), 'nominal_interval_us': round(nominal),
+            'semantics': 'within-clock adjacent frame interval error, not cross-clock latency',
+            'lanes': metrics}
+
+
 def read_bounded(path):
     path = Path(path)
     if path.is_symlink() or path.stat().st_size > MAX_BYTES:
@@ -132,6 +335,20 @@ def _analyze_run(profile, report, directory):
         return result
     try:
         performance = json.loads(read_bounded(artifact_dir / 'performance-last.json'))
+        result['network_audio_metrics'] = network_audio_metrics(performance)
+        result['passive_link_quality'] = passive_link_quality(performance)
+        result['av_startup_observation'] = av_startup_observation(performance)
+        result['native_overload'] = native_overload_metrics(performance)
+        result['video_phase_clock'] = phase_clock_metrics(performance)
+        if profile.get('capture', {}).get('experimental_phase_clock') and not (
+                result['video_phase_clock'].get('available') and
+                result['video_phase_clock'].get('enabled')):
+            issues.append('EXPERIMENTAL_PHASE_CLOCK_NOT_ACTIVE')
+        if (profile.get('suite') == 'network-jitter' and
+                result['native_overload'].get('enabled')):
+            # Network-only A/B cannot attribute this additional IDR/reset
+            # policy to delivery jitter, even when the stream looks smoother.
+            issues.append('NETWORK_TEST_NATIVE_OVERLOAD_CONFOUNDED')
         from .session_evidence import native_effective_settings
         from .decoder_lifecycle import decoder_lifecycle
         lifecycle = decoder_lifecycle(performance)
@@ -178,6 +395,7 @@ def _analyze_run(profile, report, directory):
             issues.append('EFFECTIVE_FIELD_MISMATCH:output_pacing')
         data = read_bounded(artifact_dir / name)
         rows, omitted = parse_trace(data)
+        result['cadence_lanes'] = cadence_lane_metrics(rows, profile['client']['fps'])
         if omitted: issues.append('TRACE_TRUNCATED')
         if not performance.get('performance_detail'): issues.append('DETAILED_TIMING_DISABLED')
         faults = performance.get('decode_errors', 0) + performance.get('drain_faults', 0)
