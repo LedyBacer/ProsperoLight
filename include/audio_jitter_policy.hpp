@@ -79,34 +79,6 @@ class AudioPrebufferPolicy
         last_relax_us_ = 0;
     }
 
-    // Fast learning is confined to the first five seconds of audible output.
-    // Require an actual delivery drought, not just a short read caused by an
-    // AudioOut scheduling hiccup. No interface type or RTT enters this policy.
-    bool on_startup_drought(uint64_t now_us, uint64_t first_output_us, uint64_t last_enqueue_us,
-                            uint32_t packet, uint32_t grain)
-    {
-        if (!first_output_us || !last_enqueue_us || !packet || !grain || now_us < first_output_us ||
-            now_us - first_output_us > UINT64_C(5000000) || now_us < last_enqueue_us)
-            return false;
-        const uint64_t gap_us = now_us - last_enqueue_us;
-        if (gap_us <= uint64_t(std::max<uint64_t>(grain, packet * uint64_t(2))) * 1000000 / 48000)
-            return false;
-        // Cover the observed drought plus a packet and device grain. Clamp
-        // before multiplying, including when the sender stops altogether.
-        const uint64_t gap_frames = std::min<uint64_t>(gap_us, 80000) * 48000 / 1000000;
-        const uint64_t required = std::max<uint64_t>(1440, gap_frames + packet + grain);
-        const uint32_t reserve = static_cast<uint32_t>(std::min<uint64_t>(
-            kMaximumFrames, ((required + kStepFrames - 1) / kStepFrames) * kStepFrames));
-        if (reserve <= target_frames_)
-            return false;
-        target_frames_ = reserve;
-        peak_frames_ = std::max(peak_frames_, reserve);
-        ++increases_;
-        recent_underrun_us_ = now_us;
-        last_relax_us_ = 0;
-        return true;
-    }
-
     void on_near_miss(uint64_t now_us)
     {
         ++near_miss_events_;

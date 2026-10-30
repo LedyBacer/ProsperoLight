@@ -353,3 +353,24 @@ to every delivery phase or fix the separately recorded audio-startup limitation.
 Earlier attempts stopped before launch on readiness or installation-cache
 checks and are excluded from the comparison. No main/current equivalence claim
 is made from this previous-candidate/experimental pair.
+
+### Final scope decision — 2026-10-30
+
+The additional fast startup-drought rebuffer heuristic from 0e4ab34 is removed:
+its hardware observation did not demonstrate lower aggregate synthetic silence
+(56 versus 50 ms in runs with different random impairment seeds). This is a
+conservative scope decision, not a statistically established regression claim.
+Audio policy, PCM continuity and the application worker are restored exactly to
+the hardware-tested b2dbfc2 implementation. All retained production application
+source therefore matches b2dbfc2; subsequent changes are evidence documentation.
+No new hardware result is claimed for this removal. Existing LAN/loss evidence
+for that implementation remains applicable, with its recorded limitations.
+
+The original startup-audio observation (five warmup short reads, zero during
+measurement) remains a documented quality limitation. The earlier aspirational
+at-most-two whole-session target is not satisfied and is explicitly deferred;
+closing this implementation scope does not mean declaring that target passed.
+A future audio change should compare identical recorded arrival traces or
+repeated seeded hardware runs and gate on aggregate concealment, maximum pause,
+reserve depth and audible quality together. The discarded PyroWave cadence
+experiment is also absent. Merge still requires explicit maintainer approval.
