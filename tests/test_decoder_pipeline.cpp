@@ -1288,6 +1288,38 @@ static void qsv_stale_parameter_deadline_regressions()
     dispose_owner(state);
 }
 
+static void keyframe_retry_during_mandatory_wait()
+{
+    using namespace moonlight::video;
+    auto *state = uninitialized_owner();
+    const auto since = state->lifecycle.waiting_since;
+    const unsigned before = policy_idr_requests;
+    // No usable keyframe yet: ask the host again once a second, not every poll.
+    assert(decoder_deadline(state, since + KEYFRAME_RETRY_US - 1));
+    assert(policy_idr_requests == before);
+    assert(decoder_deadline(state, since + KEYFRAME_RETRY_US));
+    assert(policy_idr_requests == before + 1);
+    assert(decoder_deadline(state, since + KEYFRAME_RETRY_US + KEYFRAME_RETRY_US / 2));
+    assert(policy_idr_requests == before + 1);
+    assert(decoder_deadline(state, since + 2 * KEYFRAME_RETRY_US));
+    assert(policy_idr_requests == before + 2 && state->keyframe_retries == 2);
+    // A later mandatory wait counts from its own start.
+    state->transition_wait_since = since + 5 * KEYFRAME_RETRY_US;
+    assert(decoder_deadline(state, state->transition_wait_since + KEYFRAME_RETRY_US / 2));
+    assert(policy_idr_requests == before + 2);
+    assert(decoder_deadline(state, state->transition_wait_since + KEYFRAME_RETRY_US));
+    assert(policy_idr_requests == before + 3);
+    // An optional policy refresh made its own request and keeps its bound.
+    state->policy_keyframe_wait = true;
+    assert(decoder_deadline(state, state->transition_wait_since + 3 * KEYFRAME_RETRY_US));
+    assert(policy_idr_requests == before + 3);
+    // Retries never extend the deadline.
+    state->policy_keyframe_wait = false;
+    assert(!decoder_deadline(state, since + Lifecycle::startup_timeout_us));
+    assert(state->lifecycle.state == State::Failed && state->last_result == -32);
+    dispose_owner(state);
+}
+
 int main()
 {
     stream_aware_owner();
@@ -1295,6 +1327,7 @@ int main()
     first_access_unit_and_cancellation();
     parameter_activation_regressions();
     qsv_stale_parameter_deadline_regressions();
+    keyframe_retry_during_mandatory_wait();
     fragment.data = reinterpret_cast<char *>(access_unit);
     fragment.length = sizeof(access_unit);
     pipelined_then_drained(Model::Queued);

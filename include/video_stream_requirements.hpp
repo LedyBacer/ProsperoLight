@@ -41,7 +41,9 @@ class Bits
 
   public:
     bool ok{true};
-    Bits(const uint8_t *p, size_t n)
+    // A prefix is the first bytes of a longer NAL: an escape byte at its end
+    // is followed by data out of view, not dangling.
+    Bits(const uint8_t *p, size_t n, bool prefix = false)
     {
         if (!p || n == 0 || n > data.size())
         {
@@ -53,6 +55,8 @@ class Bits
         {
             if (zeros >= 2 && p[i] == 3)
             {
+                if (prefix && i + 1 == n)
+                    break;
                 if (i + 1 == n || p[i + 1] > 3)
                 {
                     ok = false;
