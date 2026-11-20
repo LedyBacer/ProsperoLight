@@ -40,7 +40,7 @@ inline bool parameter_ids(Codec codec, const uint8_t *p, size_t n, bool picture,
             *found = true;
         if (idr)
             *idr = codec == Codec::H264 ? type == 5 : type == 19 || type == 20;
-        Bits b(p + start + header, std::min<size_t>(128, limit - start - header));
+        Bits b(p + start + header, std::min<size_t>(128, limit - start - header), true);
         if (picture)
         {
             if (codec == Codec::H264)
